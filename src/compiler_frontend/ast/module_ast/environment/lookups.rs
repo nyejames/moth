@@ -26,7 +26,8 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -51,7 +52,7 @@ pub(crate) struct AstModuleLookups {
     // WHY: body emission and type resolution share one indexed declaration source.
     pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
     pub(crate) imported_functions_by_local_path:
-        FxHashMap<InternedPath, crate::compiler_frontend::ast::AstImportedFunctionContract>,
+        FxHashMap<PathId, crate::compiler_frontend::ast::AstImportedFunctionContract>,
     pub(crate) imported_struct_definitions:
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
     pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,
@@ -65,15 +66,15 @@ pub(crate) struct AstModuleLookups {
 
     // Resolved nominal-type side tables.
     // WHY: these are populated as declarations are processed and are then frozen for body emission.
-    pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
+    pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<PathId, Vec<Declaration>>>,
     pub(crate) resolved_function_signatures_by_path:
-        Rc<FxHashMap<InternedPath, ResolvedFunctionSignature>>,
+        Rc<FxHashMap<PathId, ResolvedFunctionSignature>>,
     // Owned directly: this map is only borrowed (never cloned as an `Rc`) during emission, so
     // AST finalization can move it straight into the `AstBuildResult` generic-template side
     // result without an `Rc::try_unwrap` dance.
-    pub(crate) generic_function_templates_by_path: FxHashMap<InternedPath, GenericFunctionTemplate>,
-    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
+    pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
+    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<PathId, ResolvedTypeAlias>>,
+    pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
 
     // Semantic declaration classification.
     // WHY: expression dispatch must distinguish functions, nominal types, constants, and values
@@ -81,17 +82,17 @@ pub(crate) struct AstModuleLookups {
     pub(crate) declaration_semantics: Rc<DeclarationSemanticTable>,
 
     // Generic declaration kinds.
-    pub(crate) generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
+    pub(crate) generic_declarations_by_path: Rc<FxHashMap<PathId, GenericDeclarationKind>>,
 
     // Canonical TypeId for each nominal struct/choice registered in type_environment.
     // WHY: parsed type resolution and downstream consumers need fast path-to-TypeId lookup.
-    pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
+    pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<PathId, TypeId>>,
     /// Canonical paths of source-authored nominal declarations.
     ///
     /// Synthetic namespace structs and compiler-owned builtin shells also appear in the broad
     /// nominal lookup table. Generated materialisation uses this set to assign artefact-private
     /// identity only to source declarations that can be concrete type arguments.
-    pub(crate) source_nominal_paths: Rc<FxHashSet<InternedPath>>,
+    pub(crate) source_nominal_paths: Rc<FxHashSet<PathId>>,
 
     // Receiver method catalog built from visible declarations and dependencies.
     pub(crate) receiver_methods: Rc<ReceiverMethodCatalog>,

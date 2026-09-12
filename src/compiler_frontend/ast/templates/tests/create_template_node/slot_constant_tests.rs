@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -26,6 +26,7 @@ fn create_expression_for_test(
     value_mode: &ValueMode,
     consume_closing_parenthesis: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<crate::compiler_frontend::ast::expressions::expression::Expression, ExpressionParseError>
 {
     let mut type_environment = TypeEnvironment::new();
@@ -39,12 +40,14 @@ fn create_expression_for_test(
         value_mode,
         consume_closing_parenthesis,
         string_table,
+        path_fork,
     )
 }
 
 #[test]
 fn slot_wrappers_remain_compile_time_templates_until_filled() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[: before [$slot] after]",
@@ -53,7 +56,7 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
     );
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("wrapper template should parse");
 
     assert!(matches!(
@@ -81,8 +84,9 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
 #[test]
 fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strings() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
     let mut wrapper_tokens = template_tokens_from_source(
         "[:<link rel=\"icon\" href=\"[$slot(\"favicon\")]\"><style>[$slot(\"css\")]</style>]",
@@ -90,16 +94,13 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
         &mut span_builder,
     );
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned());
-    let wrapper = Template::new(
-        &mut wrapper_tokens,
-        &wrapper_context,
-        vec![],
-        &mut string_table,
-    )
+    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("wrapper template should parse");
 
     let declarations = vec![Declaration {
-        id: scope.append(string_table.intern("header")),
+        id: path_fork
+            .try_intern_child(scope, string_table.intern("header"))
+            .expect("test path fits"),
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -109,7 +110,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
         template_tokens_from_source("[header]", &mut string_table, &mut span_builder);
     let context = constant_template_context(&token_stream.src_path, &declarations)
         .with_template_ir_store(wrapper_context.template_ir_store.clone());
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template using wrapper constant should parse");
 
     let folded = fold_template_in_context(&template, &context, &mut string_table);
@@ -124,6 +125,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
 #[test]
 fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[value: before [$slot] after]",
@@ -132,7 +134,7 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
     );
     let context = runtime_template_context(&token_stream.src_path, &mut string_table);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("runtime wrapper template should parse");
 
     assert!(matches!(
@@ -160,13 +162,16 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
 #[test]
 fn constant_context_template_head_with_constant_references_folds_to_string_slice() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let const_before = string_table.intern("const_before");
     let const_after = string_table.intern("const_after");
     let declarations = vec![
         Declaration {
-            id: scope.append(const_before),
+            id: path_fork
+                .try_intern_child(scope, const_before)
+                .expect("test path fits"),
             value: Expression::string_slice(
                 string_table.intern("Hello "),
                 None,
@@ -176,7 +181,9 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
             config_qualifier: None,
         },
         Declaration {
-            id: scope.append(const_after),
+            id: path_fork
+                .try_intern_child(scope, const_after)
+                .expect("test path fits"),
             value: Expression::string_slice(
                 string_table.intern("World!"),
                 None,
@@ -192,7 +199,10 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
         ScopeContext::new_for_tests(
             ContextKind::Constant,
             scope.to_owned(),
-            Rc::new(TopLevelDeclarationTable::new(declarations.clone())),
+            Rc::new(TopLevelDeclarationTable::new(
+                declarations.clone(),
+                &path_fork,
+            )),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
             0,
@@ -214,6 +224,7 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
         &ValueMode::ImmutableOwned,
         false,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("constant template references should fold");
 
@@ -227,6 +238,7 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
 #[test]
 fn non_constant_context_template_head_keeps_runtime_template() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[value]", &mut string_table, &mut span_builder);
@@ -240,6 +252,7 @@ fn non_constant_context_template_head_keeps_runtime_template() {
         &ValueMode::ImmutableOwned,
         false,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("runtime template expression should parse");
 
@@ -255,12 +268,13 @@ fn non_constant_context_template_head_keeps_runtime_template() {
 
 fn assert_slot_is_tir_only_and_const(source: &str, slot_name: &str) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template with slot should parse");
 
     assert!(

@@ -31,9 +31,10 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
     parse_function_signature_syntax,
 };
-use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -101,16 +102,18 @@ impl FunctionSignature {
         token_stream: &mut FileTokens,
         warnings: &mut Vec<CompilerDiagnostic>,
         string_table: &mut StringTable,
-        function_path: &InternedPath,
+        function_path: &PathId,
         parent_context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
+        path_fork: &mut PathInternerFork,
     ) -> SignatureResult<Self> {
         let mut span_builder = ExtendedSpanBuilder::new();
         let signature_syntax = parse_function_signature_syntax(
             token_stream,
             warnings,
             string_table,
-            function_path,
+            *function_path,
+            path_fork,
             &mut span_builder,
         )?;
 
@@ -124,6 +127,7 @@ impl FunctionSignature {
             type_interner,
             string_table,
             SignatureTypeFallbackPolicy::StrictCapacity,
+            path_fork,
         )
     }
 
@@ -166,7 +170,6 @@ impl FunctionSignature {
 ///
 /// WHAT: converts parsed signature members and return slots into AST declarations and return metadata.
 /// WHY: signature syntax is resolved before body parsing so arity and channel information is available
-///      to callers without re-parsing the token stream.
 pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     syntax: &FunctionSignatureSyntax,
     path_syntax: &FilePathSyntax,
@@ -174,6 +177,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
+    path_fork: &mut PathInternerFork,
 ) -> SignatureResult<FunctionSignature> {
     let mut parameters = Vec::with_capacity(syntax.parameters.len());
     for parameter in &syntax.parameters {
@@ -184,6 +188,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
             type_interner,
             string_table,
             fallback_policy,
+            path_fork,
         )?;
 
         if declaration.value.type_id == builtin_type_ids::STRING {
@@ -213,7 +218,6 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
         returns,
     })
 }
-
 pub(crate) fn signature_member_to_declaration(
     member: &SignatureMemberSyntax,
     path_syntax: &FilePathSyntax,
@@ -221,6 +225,7 @@ pub(crate) fn signature_member_to_declaration(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
+    path_fork: &mut PathInternerFork,
 ) -> SignatureResult<Declaration> {
     let resolved = resolve_signature_type_annotation(
         member.type_annotation.clone(),
@@ -271,6 +276,7 @@ pub(crate) fn signature_member_to_declaration(
             expression_context,
             type_interner,
             string_table,
+            path_fork,
         )
         .map_err(|error| signature_member_error_with_span(error, member))?
     };
@@ -404,13 +410,18 @@ fn parse_signature_default_expression(
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> SignatureResult<Expression> {
     let mut parameter_context = expression_context.to_owned();
     parameter_context.expected_result_type_ids = vec![type_id];
 
     let mut expected_type = parse_expectation_for_type_id(type_id, type_interner.environment());
-    let mut cast_target_context =
-        cast_target_context_for_type_id(type_id, type_interner.environment(), string_table);
+    let mut cast_target_context = cast_target_context_for_type_id(
+        type_id,
+        type_interner.environment(),
+        string_table,
+        &*path_fork,
+    );
     let mut expression_stream = token_stream_with_eof(
         &member.default_tokens,
         path_syntax,
@@ -427,6 +438,7 @@ fn parse_signature_default_expression(
             cast_target_context: &mut cast_target_context,
             value_mode: &member.value_mode,
             string_table,
+            path_fork,
         },
         ExpressionTrailingPolicy {
             consume_closing_parenthesis: false,

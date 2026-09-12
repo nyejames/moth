@@ -18,7 +18,7 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::collect_symbol_references;
@@ -34,6 +34,7 @@ const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 pub(crate) fn prepare_moth_template_file(
     mut file_tokens: FileTokens,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
     let file_id = file_tokens.file_id;
@@ -41,7 +42,7 @@ pub(crate) fn prepare_moth_template_file(
     let token_stats = file_tokens.token_stats;
     let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
     let context = MothTemplatePrepareContext::new(file_tokens, file_id, string_table);
-    let content_header = context.content_header(string_table);
+    let content_header = context.content_header(string_table, path_fork)?;
     let config_owned_path_syntax_ids = match &content_header.kind {
         HeaderKind::Constant { declaration }
             if find_config_qualifier_marker(
@@ -68,9 +69,9 @@ pub(crate) fn prepare_moth_template_file(
         path_syntax.table(),
         config_owned_path_syntax_ids,
         context.file_id,
+        path_fork,
         string_table,
     );
-
     // Content sources can reference other content sources, so the synthetic constant's template
     // body takes the same token-level content ordering facts as authored shells.
     collect_content_source_ordering_hints(
@@ -78,6 +79,7 @@ pub(crate) fn prepare_moth_template_file(
         &structural_file_references,
         path_syntax.table(),
         string_table,
+        path_fork,
     )?;
 
     Ok(FileFrontendPrepareOutput {
@@ -105,7 +107,7 @@ pub(crate) fn prepare_moth_template_file(
 /// Keeping these fields together makes the generated token construction explicit without
 /// threading the same path and interned names through every helper.
 struct MothTemplatePrepareContext {
-    source_file: InternedPath,
+    source_file: PathId,
     file_id: SourceId,
     canonical_os_path: Option<PathBuf>,
     body_tokens: Vec<Token>,
@@ -134,19 +136,21 @@ impl MothTemplatePrepareContext {
     fn content_header(
         &self,
         string_table: &mut StringTable,
-    ) -> crate::compiler_frontend::headers::types::Header {
+        path_fork: &mut PathInternerFork,
+    ) -> Result<crate::compiler_frontend::headers::types::Header, CompilerError> {
         let initializer_tokens = self.template_initializer_tokens();
         let initializer_references = collect_symbol_references(&initializer_tokens, self.file_id);
 
         synthetic_content_header(
             SyntheticContentHeaderInput {
-                source_file: self.source_file.clone(),
+                source_file: self.source_file,
                 file_id: self.file_id,
                 canonical_os_path: self.canonical_os_path.clone(),
                 initializer_tokens,
                 initializer_references,
             },
             string_table,
+            path_fork,
         )
     }
 

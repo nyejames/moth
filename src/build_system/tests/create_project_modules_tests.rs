@@ -71,6 +71,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 #[path = "create_project_modules_benchmark_tests.rs"]
 mod create_project_modules_benchmark_tests;
 #[path = "create_project_modules_config_tests.rs"]
@@ -139,6 +140,7 @@ fn configured_resolver_with_source_file_kinds(
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
     let mut index_string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root.clone(),
         super::source_tree_index::SourceTreeProjectContext {
@@ -330,7 +332,11 @@ fn prepared_entry_file_path(
                 *role,
                 FileRole::ActiveModuleRoot | FileRole::ActiveApiOnlyModuleRoot
             ) {
-                Some(source_file.to_path_buf(&prepared.string_table))
+                Some(
+                    prepared
+                        .path_fork
+                        .render_native(*source_file, &prepared.string_table, &mut Vec::new()),
+                )
             } else {
                 None
             }
@@ -359,7 +365,17 @@ fn module_prepared_source_names(
     let mut logical_paths = module_symbols
         .module_file_paths
         .iter()
-        .map(|source_file| source_file.to_portable_string(string_table))
+        .map(|source_file| {
+            module
+                .prepared
+                .semantic
+                .path_fork
+                .render_portable(
+                    *source_file,
+                    &module.prepared.semantic.string_table,
+                    &mut Vec::new(),
+                )
+        })
         .collect::<Vec<_>>();
     logical_paths.sort();
 
@@ -407,6 +423,7 @@ fn parse_project_config_for_test(
 ) -> Result<(), CompilerMessages> {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
@@ -433,6 +450,7 @@ fn parse_project_config_for_test_with_html_keys(
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
             .frontend_surface();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
@@ -457,6 +475,7 @@ fn parse_project_config_for_test_with_packages(
     frontend_surface: &crate::builder_surface::BuilderSurface,
 ) -> Result<(), CompilerMessages> {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
@@ -496,6 +515,7 @@ fn discover_modules_for_test_with_resource_inputs(
     CompilerMessages,
 > {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
@@ -556,7 +576,11 @@ fn discover_modules_for_test_with_resource_inputs(
             &mut project_module_graph,
             style_directives,
             &mut external_imports,
-            DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+            DirectoryDependencyResolution::project(
+                &module_namespace_set,
+                &source_tree_index,
+                &path_fork,
+            ),
             &mut resource_inputs,
             false,
             &mut selected_source_texts,
@@ -607,6 +631,7 @@ fn discover_modules_for_test_with_providers(
     external_import_providers: &ExternalImportProviderRegistry,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
@@ -666,7 +691,11 @@ fn discover_modules_for_test_with_providers(
             &mut project_module_graph,
             style_directives,
             &mut external_imports,
-            DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+            DirectoryDependencyResolution::project(
+                &module_namespace_set,
+                &source_tree_index,
+                &path_fork,
+            ),
             &mut resource_inputs,
             false,
             &mut selected_source_texts,
@@ -696,19 +725,19 @@ fn discover_modules_for_test_with_providers(
         }
     }
 }
-
-/// Build the Stage 0 namespace resolution context for one project and run a closure against it.
-///
-/// WHAT: discovers the indexed Stage 0 namespace inputs and hands their resolver to `body`.
-/// WHY: focused tests can assert the tagged resolution result, which integration output hides.
 fn with_namespace_resolution(
     config: &Config,
     resolver: &ProjectPathResolver,
     source_packages: &crate::builder_surface::SourcePackageRegistry,
     package_prefix: Option<&str>,
-    body: impl FnOnce(&DirectoryDependencyResolution, &mut StringTable),
+    body: impl FnOnce(
+        &DirectoryDependencyResolution,
+        &mut StringTable,
+        &[(String, PathId)],
+    ),
 ) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
@@ -743,6 +772,17 @@ fn with_namespace_resolution(
         source_package_boundary_indexes,
         &external_packages,
     );
+    let provider_paths = ["child", "helper", "project"]
+        .into_iter()
+        .map(|segment| {
+            (
+                segment.to_owned(),
+                path_fork
+                    .try_intern_child(PathId::ROOT, string_table.intern(segment))
+                    .expect("test path fits"),
+            )
+        })
+        .collect::<Vec<_>>();
     let resolution = if let Some(package_prefix) = package_prefix {
         let package_source_tree_index = module_namespace_set
             .source_package_boundaries()
@@ -753,19 +793,28 @@ fn with_namespace_resolution(
             &module_namespace_set,
             package_prefix,
             package_source_tree_index,
+            &path_fork,
         )
     } else {
-        DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index)
+        DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index, &path_fork)
     };
-    body(&resolution, &mut string_table);
+    body(&resolution, &mut string_table, &provider_paths);
 }
 
 /// Build a retained provider-root dependency for one shell.
-fn provider_root(path_segments: &[&str], string_table: &mut StringTable) -> RetainedDependencyPath {
-    let mut path = crate::compiler_frontend::symbols::interned_path::InternedPath::new();
-    for segment in path_segments {
-        path.push_str(segment, string_table);
-    }
+fn provider_root(
+    path_segments: &[&str],
+    provider_paths: &[(String, PathId)],
+) -> RetainedDependencyPath {
+    let key = path_segments
+        .first()
+        .copied()
+        .expect("provider path should have one segment");
+    let path = provider_paths
+        .iter()
+        .find(|(segment, _)| segment == key)
+        .map(|(_, path)| *path)
+        .expect("provider path should be pre-interned");
     RetainedDependencyPath {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         path,
@@ -785,6 +834,7 @@ fn collect_synthetic_inputs_for_test(
     style_directives: &StyleDirectiveRegistry,
 ) -> (SourceDatabaseBuilder, Vec<PreparedSourceInput>, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut external_packages = ExternalPackageRegistry::new();
     let external_import_providers =
         crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
@@ -809,6 +859,7 @@ fn collect_synthetic_inputs_for_test(
         &mut external_imports,
         &source_file_kinds,
         &mut resource_inputs,
+        &mut path_fork,
         &mut string_table,
     )
     .expect("synthetic source discovery should succeed");
@@ -836,7 +887,7 @@ fn synthetic_prepared_identity_snapshot(
     let mut snapshot = source_files
         .iter()
         .map(|identity| {
-            let logical_path = source_files.legacy_logical_path(identity.id);
+            let logical_path = identity.logical_path;
             let file_id = identity.id;
             for header in prepared
                 .semantic
@@ -1014,6 +1065,7 @@ fn discover_modules_and_graph_for_test(
     StringTable,
 ) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
@@ -1075,7 +1127,11 @@ fn discover_modules_and_graph_for_test(
             &mut project_module_graph,
             style_directives,
             &mut external_imports,
-            DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+            DirectoryDependencyResolution::project(
+                &module_namespace_set,
+                &source_tree_index,
+                &path_fork,
+            ),
             &mut resource_inputs,
             false,
             &mut selected_source_texts,
@@ -1470,6 +1526,7 @@ fn empty_module() -> Module {
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -1530,8 +1587,8 @@ fn direct_selection_resolves_cross_module_child_facade() {
         &resolver,
         &crate::builder_surface::SourcePackageRegistry::default(),
         None,
-        |resolution, string_table| {
-            let provider = provider_root(&["child"], string_table);
+        |resolution, string_table, provider_paths| {
+            let provider = provider_root(&["child"], provider_paths);
             let resolved = resolution
                 .resolve_dependency(&provider, &declaring_source, string_table)
                 .expect("a direct-selection child-module facade should resolve");
@@ -1589,8 +1646,8 @@ fn direct_selection_resolves_source_package_facade() {
         &resolver,
         &source_packages,
         None,
-        |resolution, string_table| {
-            let provider = provider_root(&["helper"], string_table);
+        |resolution, string_table, provider_paths| {
+            let provider = provider_root(&["helper"], provider_paths);
             let resolved = resolution
                 .resolve_dependency(&provider, &declaring_source, string_table)
                 .expect("a direct-selection source-package facade should resolve");

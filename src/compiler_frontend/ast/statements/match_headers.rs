@@ -36,6 +36,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Parsed pattern header shared by full match arms and single-predicate value `if`.
 ///
@@ -81,6 +82,7 @@ pub(crate) fn parse_scrutinee_until_is(
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<Expression> {
     let mut scrutinee_type = ExpectedType::Infer;
     let mut cast_target_context = CastTargetContext::None;
@@ -92,6 +94,7 @@ pub(crate) fn parse_scrutinee_until_is(
         cast_target_context: &mut cast_target_context,
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
+        path_fork,
     });
     create_expression_until(input, &[TokenKind::Is])
 }
@@ -110,6 +113,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     pattern_span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
     let mut arm_scope = match_context.clone();
 
@@ -123,8 +127,9 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         .into());
     }
 
-    let binding_name_str = string_table.resolve(capture_name).to_owned();
-    let binding_path = arm_scope.scope.join_str(&binding_name_str, string_table);
+    let binding_path = path_fork
+        .try_intern_child(arm_scope.scope, capture_name)
+        .expect("path table exhausted while creating match capture scope");
 
     let capture_data_type = diagnostic_type_spelling(inner_type_id, type_interner.environment());
     let declaration = Declaration {
@@ -141,7 +146,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     };
 
     let declaration_span = declaration.value.span;
-    arm_scope.add_var(declaration, declaration_span);
+    arm_scope.add_var(declaration, declaration_span, path_fork);
 
     let pattern = MatchPattern::OptionPresentCapture {
         name: capture_name,
@@ -165,6 +170,7 @@ pub(crate) fn parse_match_arm_header(
     type_interner: &mut AstTypeInterner<'_>,
     guard_end_tokens: &[TokenKind],
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<ParsedMatchArmHeader> {
     let ParsedMatchPatternHeader {
         pattern,
@@ -177,6 +183,7 @@ pub(crate) fn parse_match_arm_header(
         match_context,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     reject_invalid_pattern_suffix(token_stream)?;
@@ -187,6 +194,7 @@ pub(crate) fn parse_match_arm_header(
         type_interner,
         guard_end_tokens,
         string_table,
+        path_fork,
     )?;
 
     Ok(ParsedMatchArmHeader {
@@ -211,6 +219,7 @@ pub(crate) fn parse_single_predicate_match_pattern(
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<ParsedSinglePredicatePattern> {
     let parsed = parse_match_pattern_header(
         scrutinee,
@@ -218,6 +227,7 @@ pub(crate) fn parse_single_predicate_match_pattern(
         match_context,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     // Colon starts the block body of a single-predicate value match. Full match
@@ -231,17 +241,13 @@ pub(crate) fn parse_single_predicate_match_pattern(
         arm_scope: parsed.arm_scope,
     })
 }
-
-/// Parse an optional `if <condition>` guard before the caller-owned separator.
-///
-/// WHY: guard parsing is self-contained (token check, expression parse, validation)
-/// and extracting it keeps arm body parsers focused on their own body grammar.
 fn parse_match_guard(
     token_stream: &mut FileTokens,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     guard_end_tokens: &[TokenKind],
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<Option<Expression>> {
     if token_stream.current_token_kind() != &TokenKind::If {
         return Ok(None);
@@ -251,7 +257,8 @@ fn parse_match_guard(
     token_stream.skip_newlines();
 
     let mut guard_type = ExpectedType::Infer;
-    let guard_context = match_context.new_child_control_flow(ContextKind::Condition, string_table);
+    let guard_context =
+        match_context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
     let mut cast_target_context = CastTargetContext::None;
     let input = ExpressionParseInput::until(ExpressionParseResources {
         token_stream,
@@ -261,6 +268,7 @@ fn parse_match_guard(
         cast_target_context: &mut cast_target_context,
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
+        path_fork,
     });
     let guard_expression = create_expression_until(input, guard_end_tokens)?;
     let type_environment = type_interner.environment();
@@ -275,6 +283,7 @@ fn parse_match_pattern_header(
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<ParsedMatchPatternHeader> {
     // Choice scrutinees resolve symbols to variants; all other scrutinees stay literal-only.
     let type_environment = type_interner.environment();
@@ -300,6 +309,7 @@ fn parse_match_pattern_header(
             &nominal_path,
             &variants,
             string_table,
+            path_fork,
         )?;
         let matched_choice_variant = Some(parsed.variant);
         let pattern_span = parsed.span;
@@ -308,6 +318,7 @@ fn parse_match_pattern_header(
             parsed,
             type_environment,
             string_table,
+            path_fork,
         )?;
         (pattern, matched_choice_variant, pattern_span, arm_scope)
     } else {
@@ -348,6 +359,7 @@ fn parse_match_pattern_header(
                     *parsed_pattern_span,
                     type_interner,
                     string_table,
+                    path_fork,
                 )?
             } else {
                 (match_context.clone(), pattern)
@@ -441,6 +453,7 @@ fn build_arm_scope_with_choice_captures(
     parsed_pattern: ParsedChoicePattern,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
     let mut arm_scope = match_context.clone();
     let mut captures = Vec::with_capacity(parsed_pattern.captures.len());
@@ -459,11 +472,12 @@ fn build_arm_scope_with_choice_captures(
             .into());
         }
 
-        let binding_name_str = string_table.resolve(binding_name).to_owned();
-        let binding_path = arm_scope.scope.join_str(&binding_name_str, string_table);
+        let binding_path = path_fork
+            .try_intern_child(arm_scope.scope, binding_name)
+            .expect("path table exhausted while creating choice capture scope");
 
         let declaration = Declaration {
-            id: binding_path.clone(),
+            id: binding_path,
             value: Expression::new(
                 ExpressionKind::NoValue,
                 capture.binding_span,
@@ -476,7 +490,7 @@ fn build_arm_scope_with_choice_captures(
         };
 
         let declaration_span = declaration.value.span;
-        arm_scope.add_var(declaration, declaration_span);
+        arm_scope.add_var(declaration, declaration_span, path_fork);
         captures.push(ChoicePayloadCapture {
             field_index: capture.field_index,
             type_id: capture.type_id,

@@ -12,6 +12,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::FrozenIdentityContext;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
 
@@ -44,6 +46,39 @@ pub(crate) struct DiagnosticPrimaryPosition<'a> {
     pub(crate) end: LinePosition,
     pub(crate) line: &'a str,
 }
+/// Source of complete-path identities used by diagnostic renderers.
+///
+/// Mutable frontend diagnostics use a module-local fork; diagnostics retained past a merge use
+/// the frozen path table attached to their identity context. A renderer must never reconstruct a
+/// path through the legacy `InternedPath` value.
+#[derive(Clone, Copy)]
+pub(crate) enum DiagnosticPathContext<'a> {
+    Fork(&'a PathInternerFork),
+    Table(&'a PathTable),
+}
+
+impl<'a> DiagnosticPathContext<'a> {
+    fn render(
+        self,
+        path: PathId,
+        string_table: &dyn StringTableResolver,
+        scratch: &mut Vec<StringId>,
+    ) -> String {
+        let components = match self {
+            Self::Fork(fork) => fork.resolve_components(path, scratch),
+            Self::Table(table) => table.resolve_components(path, scratch),
+        };
+        let mut rendered = String::new();
+        for (index, component) in components.iter().enumerate() {
+            if index > 0 {
+                rendered.push('/');
+            }
+            rendered.push_str(string_table.resolve(*component));
+        }
+        rendered
+    }
+}
+
 
 /// Render-boundary data needed to turn diagnostic facts into user-facing text.
 ///
@@ -58,6 +93,7 @@ pub(crate) struct DiagnosticRenderContext<'a> {
     pub(crate) type_environment: Option<&'a TypeEnvironment>,
     pub(crate) source_database: Option<&'a SourceDatabase>,
     pub(crate) frozen_identity: Option<&'a FrozenIdentityContext>,
+    pub(crate) path_context: Option<DiagnosticPathContext<'a>>,
 }
 
 impl<'a> DiagnosticRenderContext<'a> {
@@ -67,6 +103,7 @@ impl<'a> DiagnosticRenderContext<'a> {
             type_environment: None,
             source_database: None,
             frozen_identity: None,
+            path_context: None,
         }
     }
 
@@ -76,6 +113,7 @@ impl<'a> DiagnosticRenderContext<'a> {
     ) -> Self {
         self.string_table = frozen_identity.strings();
         self.frozen_identity = Some(frozen_identity);
+        self.path_context = Some(DiagnosticPathContext::Table(frozen_identity.paths()));
         self
     }
 
@@ -102,7 +140,59 @@ impl<'a> DiagnosticRenderContext<'a> {
         source_database: Option<&'a SourceDatabase>,
     ) -> Self {
         self.source_database = source_database;
+        if self.path_context.is_none() {
+            self.path_context = source_database.map(|database| {
+                DiagnosticPathContext::Table(database.paths())
+            });
+        }
         self
+    }
+
+    pub(crate) fn with_path_fork(
+        mut self,
+        path_fork: &'a PathInternerFork,
+    ) -> Self {
+        self.path_context = Some(DiagnosticPathContext::Fork(path_fork));
+        self
+    }
+
+    pub(crate) fn with_path_table(mut self, path_table: &'a PathTable) -> Self {
+        self.path_context = Some(DiagnosticPathContext::Table(path_table));
+        self
+    }
+
+    pub(crate) fn with_optional_path_table(
+        mut self,
+        path_table: Option<&'a PathTable>,
+    ) -> Self {
+        if let Some(path_table) = path_table {
+            self.path_context = Some(DiagnosticPathContext::Table(path_table));
+        }
+        self
+    }
+
+
+    /// Render a complete logical path through the explicitly attached identity table.
+    pub(crate) fn render_path(self, path: PathId) -> String {
+        let mut scratch = Vec::new();
+        self.render_path_with_scratch(path, &mut scratch)
+    }
+
+    pub(crate) fn render_path_with_scratch(
+        self,
+        path: PathId,
+        scratch: &mut Vec<StringId>,
+    ) -> String {
+        self.path_context
+            .expect("diagnostic path rendering requires an attached path table")
+            .render(path, self.string_table, scratch)
+    }
+
+    pub(crate) fn path_table(self) -> Option<&'a PathTable> {
+        match self.path_context {
+            Some(DiagnosticPathContext::Table(table)) => Some(table),
+            Some(DiagnosticPathContext::Fork(_)) | None => None,
+        }
     }
 
     /// Resolve a diagnostic's primary span through an attached source identity owner.
@@ -434,16 +524,21 @@ pub(crate) fn diagnostic_type_name(
     type_id: TypeId,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    match context.type_environment {
-        Some(type_environment) if type_environment.get(type_id).is_some() => {
-            crate::compiler_frontend::datatypes::display::display_type_with_resolver(
-                type_id,
-                type_environment,
-                context.string_table,
-            )
-        }
-        _ => format!("TypeId({})", type_id.0),
+    let Some(type_environment) = context.type_environment else {
+        return format!("TypeId({})", type_id.0);
+    };
+    let Some(path_table) = context.path_table() else {
+        return format!("TypeId({})", type_id.0);
+    };
+    if type_environment.get(type_id).is_none() {
+        return format!("TypeId({})", type_id.0);
     }
+    crate::compiler_frontend::datatypes::display::display_type_with_resolver(
+        type_id,
+        type_environment,
+        context.string_table,
+        path_table,
+    )
 }
 
 pub(crate) fn type_mismatch_context_name(

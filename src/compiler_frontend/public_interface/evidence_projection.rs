@@ -27,7 +27,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::{
     OriginDeclarationId, OriginTraitId, OriginTypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -50,10 +50,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(super) struct EvidenceProjectionContext<'a> {
     pub(super) trait_environment: &'a TraitEnvironment,
     pub(super) trait_evidence_environment: &'a TraitEvidenceEnvironment,
-    pub(super) public_source_nominal_type_origins: &'a FxHashMap<InternedPath, OriginTypeId>,
-    pub(super) public_source_trait_origins: &'a FxHashMap<InternedPath, OriginTraitId>,
+    pub(super) public_source_nominal_type_origins: &'a FxHashMap<PathId, OriginTypeId>,
+    pub(super) public_source_trait_origins: &'a FxHashMap<PathId, OriginTraitId>,
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) string_table: &'a StringTable,
+    pub(super) path_fork: &'a PathInternerFork,
     pub(super) projection_context: &'a CanonicalTypeProjectionContext<'a>,
 }
 
@@ -445,10 +446,10 @@ fn project_one_evidence_record(
         // Use the exact validated evidence method path to obtain its defining method name.
         // Matching only the public nominal declaration for the exact target origin and its
         // attached method with that defining name proves a same-named method on a different
-        // receiver cannot satisfy the requirement.
-        let method_name = requirement_evidence
-            .method_path
-            .name_str(context.string_table)
+        let method_name = context
+            .path_fork
+            .component(requirement_evidence.method_path)
+            .map(|component| context.string_table.resolve(component))
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "public-interface draft evidence projection: the evidence requirement '{}' \

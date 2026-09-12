@@ -7,22 +7,29 @@ use super::{
 use crate::compiler_frontend::paths::dependency_resolution::exact_case_mismatch_for_components;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 fn classify_one(spelling: &str) -> PreparedFileReferenceClass {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut table = PathSyntaxTable::new();
     table.push(
         if spelling.is_empty() {
-            InternedPath::new()
+            PathId::ROOT
         } else {
-            InternedPath::from_single_str(spelling, &mut strings)
+            path_fork.try_intern_portable_path(spelling, &mut strings).expect("test path fits")
         },
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let classified =
-        classify_prepared_file_references(&table, [], SourceId::COMPILATION_ROOT, &strings);
+        classify_prepared_file_references(
+            &table,
+            [],
+            SourceId::COMPILATION_ROOT,
+            &path_fork,
+            &strings,
+        );
     classified.references()[0].class
 }
 
@@ -70,19 +77,26 @@ fn extensionless_paths_are_left_for_ast() {
 #[test]
 fn dependency_clause_rows_are_not_reclassified_as_file_values() {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut table = PathSyntaxTable::new();
     let authored_span = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
     let clause = table.push(
-        InternedPath::from_single_str("core/math", &mut strings),
+        path_fork.try_intern_portable_path("core/math", &mut strings).expect("test path fits"),
         authored_span,
     );
     let value = table.push(
-        InternedPath::from_single_str("assets/logo.svg", &mut strings),
+        path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits"),
         authored_span,
     );
 
     let classified =
-        classify_prepared_file_references(&table, [clause], SourceId::COMPILATION_ROOT, &strings);
+        classify_prepared_file_references(
+            &table,
+            [clause],
+            SourceId::COMPILATION_ROOT,
+            &path_fork,
+            &strings,
+        );
     let references = classified.references();
     assert_eq!(references.len(), 1);
     assert_eq!(references[0].path_syntax, value);
@@ -95,18 +109,26 @@ fn dependency_clause_rows_are_not_reclassified_as_file_values() {
 #[test]
 fn quoted_url_strings_are_not_path_rows() {
     let strings = StringTable::new();
+    let path_fork = PathInternerFork::empty();
     let table = PathSyntaxTable::new();
     let classified =
-        classify_prepared_file_references(&table, [], SourceId::COMPILATION_ROOT, &strings);
+        classify_prepared_file_references(
+            &table,
+            [],
+            SourceId::COMPILATION_ROOT,
+            &path_fork,
+            &strings,
+        );
     assert!(classified.references().is_empty());
 }
 
 #[test]
 fn resolved_references_are_lookupable_by_file_and_path_handle() {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
-        InternedPath::from_single_str("assets/logo.svg", &mut strings),
+        path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits"),
         SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();
@@ -131,9 +153,10 @@ fn resolved_references_are_lookupable_by_file_and_path_handle() {
 #[test]
 fn resolved_reference_duplicate_composite_keys_are_rejected() {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
-        InternedPath::from_single_str("assets/logo.svg", &mut strings),
+        path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits"),
         SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();
@@ -155,9 +178,10 @@ fn resolved_reference_duplicate_composite_keys_are_rejected() {
 #[test]
 fn resolved_reference_validation_rejects_class_outcome_mismatch() {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
-        InternedPath::from_single_str("assets/logo.svg", &mut strings),
+        path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits"),
         SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();

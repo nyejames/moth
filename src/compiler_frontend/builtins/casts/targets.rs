@@ -15,8 +15,8 @@
 use crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-
 /// The set of builtin types that may be a cast source or target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum BuiltinCastTarget {
@@ -103,6 +103,7 @@ pub(crate) fn builtin_cast_target_for_type(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Option<BuiltinCastTarget> {
     let builtins = type_environment.builtins();
 
@@ -124,7 +125,10 @@ pub(crate) fn builtin_cast_target_for_type(
 
     let path = type_environment.nominal_path(type_id)?;
 
-    if path.name_str(string_table) == Some(ERROR_TYPE_NAME) {
+    if path_fork
+        .component(*path)
+        .is_some_and(|name| string_table.resolve(name) == ERROR_TYPE_NAME)
+    {
         return Some(BuiltinCastTarget::Error);
     }
 
@@ -139,13 +143,15 @@ pub(crate) fn builtin_cast_target_for_type(
 ///      builtin type rather than in the optional itself.
 /// WHY: optional receiving contexts cast to the inner builtin type and let the
 ///      existing optional wrapping path finish the job. Detecting that here keeps
-///      AST construction free of bespoke optional-detection logic.
 pub(crate) fn cast_target_for_receiving_type(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Option<CastTargetResolution> {
-    if let Some(target) = builtin_cast_target_for_type(type_id, type_environment, string_table) {
+    if let Some(target) =
+        builtin_cast_target_for_type(type_id, type_environment, string_table, path_fork)
+    {
         return Some(CastTargetResolution {
             target,
             requires_optional_wrap_after_cast: false,
@@ -153,7 +159,7 @@ pub(crate) fn cast_target_for_receiving_type(
     }
 
     let inner = type_environment.option_inner_type(type_id)?;
-    let target = builtin_cast_target_for_type(inner, type_environment, string_table)?;
+    let target = builtin_cast_target_for_type(inner, type_environment, string_table, path_fork)?;
 
     Some(CastTargetResolution {
         target,

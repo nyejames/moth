@@ -33,7 +33,7 @@ use crate::compiler_frontend::numeric_text::parse::{
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
@@ -443,14 +443,31 @@ fn parse_ordinary_quoted_literal(
     value: &str,
 ) -> Result<OrdinaryCommandLiteral, BuildInputValueError> {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str(COMMAND_INPUT_TOKENIZER_PATH, &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path(COMMAND_INPUT_TOKENIZER_PATH, &mut string_table)
+        .map_err(|error| {
+            BuildInputValueError::Infrastructure(Box::new(match error {
+                crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
+                    CompilerError::compiler_error(
+                        "path table exhausted while interning a command-input tokenizer path",
+                    )
+                }
+                crate::compiler_frontend::symbols::path_interner::PathInternError::NonUtf8(_) => {
+                    CompilerError::compiler_error(
+                        "command-input tokenizer path should be valid UTF-8",
+                    )
+                }
+            }))
+        })?;
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         value,
-        &path,
+        path,
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
+        &mut path_fork,
         SourceId::COMPILATION_ROOT,
         &mut span_builder,
     )

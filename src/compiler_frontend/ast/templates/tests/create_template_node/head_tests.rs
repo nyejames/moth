@@ -63,6 +63,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 fn synthetic_source_span(start: u32, end: u32) -> SourceSpan {
     let mut span_builder = ExtendedSpanBuilder::new();
     SourceSpan::new(
@@ -74,6 +75,7 @@ fn synthetic_source_span(start: u32, end: u32) -> SourceSpan {
 
 fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
@@ -88,7 +90,9 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
         span: None,
     };
     let declaration = Declaration {
-        id: scope.append(stale_name),
+        id: path_fork
+            .try_intern_child(scope, stale_name)
+            .expect("stale declaration path should intern"),
         value: Expression::template(stale_template, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -98,7 +102,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
         ScopeContext::new_for_tests(
             ContextKind::Template,
             scope.clone(),
-            Rc::new(TopLevelDeclarationTable::new(vec![declaration])),
+            Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
             0,
@@ -107,7 +111,8 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
         &style_directives,
     );
 
-    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let error =
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("stale directive argument authority must fail during expression parsing");
     let TemplateError::Infrastructure(error) = error else {
         panic!("stale directive argument authority must remain an infrastructure failure");
@@ -119,7 +124,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
 }
 
 fn imported_const_template_context(
-    scope: &InternedPath,
+    scope: &PathId,
     declaration: Declaration,
     visible_name: StringId,
 ) -> ScopeContext {
@@ -158,7 +163,7 @@ fn imported_const_template_context(
 fn const_required_option_capture_template_with_direct_tir(
     scrutinee: Expression,
     capture_name: StringId,
-    capture_path: InternedPath,
+    capture_path: PathId,
     inner_type_id: TypeId,
     context: &ScopeContext,
     string_table: &mut StringTable,
@@ -251,25 +256,28 @@ fn parse_template_error(
     source: &str,
 ) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.clone());
 
     expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("template source should fail"),
     )
 }
 
 fn parse_runtime_template(source: &str) -> (Template, ScopeContext, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.clone());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template =
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template source should parse");
 
     (template, context, string_table)
@@ -279,6 +287,7 @@ fn parse_control_flow_template_after_body_parse(
     source: &str,
 ) -> (Template, ScopeContext, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
@@ -304,6 +313,7 @@ fn parse_control_flow_template_after_body_parse(
             construction_context: &mut construction_context,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
         },
     )
     .expect("template head should parse");
@@ -320,6 +330,7 @@ fn parse_control_flow_template_after_body_parse(
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             control_context: TemplateBodyControlContext::normal(),
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
             default_style: None,
         },
     )
@@ -346,6 +357,7 @@ fn parse_control_flow_template_after_composition(
     source: &str,
 ) -> (Template, ScopeContext, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
@@ -362,6 +374,7 @@ fn parse_control_flow_template_after_composition(
         Vec::new(),
         &mut string_table,
         NestedTemplateParseOptions::runtime_capable(),
+        &mut path_fork,
     )
     .expect("control-flow template should parse through composition")
     .template;
@@ -373,6 +386,7 @@ fn parse_control_flow_template_after_composition_error(
     source: &str,
 ) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
@@ -390,6 +404,7 @@ fn parse_control_flow_template_after_composition_error(
             Vec::new(),
             &mut string_table,
             NestedTemplateParseOptions::runtime_capable(),
+            &mut path_fork,
         )
         .expect_err("control-flow template should fail during composition"),
     )
@@ -399,6 +414,7 @@ fn parse_runtime_template_without_validation(
     source: &str,
 ) -> (Template, ScopeContext, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
@@ -424,6 +440,7 @@ fn parse_runtime_template_without_validation(
             construction_context: &mut construction_context,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
         },
     )
     .expect("template head should parse");
@@ -440,6 +457,7 @@ fn parse_runtime_template_without_validation(
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             control_context: TemplateBodyControlContext::normal(),
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
             default_style: None,
         },
     )
@@ -498,24 +516,26 @@ fn prepare_const_required_view_directly(
 /// value production passes to folding.
 fn const_required_construction(source: &str) -> PreparedTemplateConstruction {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.clone());
 
-    Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
+    Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("const-required template should parse")
 }
 
 fn parse_const_required_template(source: &str) -> (Template, ScopeContext, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.clone());
 
     let template =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect("const-required template should parse")
             .template;
 
@@ -526,13 +546,14 @@ fn parse_const_required_template_error(
     source: &str,
 ) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.clone());
 
     expect_template_diagnostic(
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("const-required template source should fail"),
     )
 }

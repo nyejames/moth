@@ -20,7 +20,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
@@ -35,17 +35,10 @@ fn stream_positioned_at_open_bracket(
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> FileTokens {
-    let source_path = InternedPath::from_single_str("test.moth", string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("test.moth", string_table).expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut token_stream = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        string_table,
-        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
-        span_builder,
-    )
+    let mut token_stream = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, span_builder)
     .expect("tokenization should succeed");
 
     let open_index = token_stream
@@ -82,8 +75,9 @@ fn duplicate_member_spans(
     (spans[0], spans[1])
 }
 
-fn owner_path(string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str("test.moth", string_table)
+fn owner_path(string_table: &mut StringTable) -> PathId {
+    let mut path_fork = PathInternerFork::empty();
+    path_fork.try_intern_portable_path("test.moth", string_table).expect("test path fits")
 }
 
 /// Asserts `error` is the shared-parser duplicate-member diagnostic for `expected_name`:
@@ -164,6 +158,7 @@ fn assert_shared_duplicate_diagnostic(
 #[test]
 fn duplicate_function_parameters_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = stream_positioned_at_open_bracket(
         "fn | value Int, value Int | -> Int :",
@@ -178,7 +173,8 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
         &mut token_stream,
         &mut warnings,
         &mut string_table,
-        &function_path,
+        function_path,
+        &mut path_fork,
         &mut span_builder,
     )
     .expect_err("duplicate function parameters must be rejected by the shared parser");
@@ -195,6 +191,7 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
 #[test]
 fn duplicate_struct_fields_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = stream_positioned_at_open_bracket(
         "| value Int, value Int |",
@@ -210,7 +207,8 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
         &mut string_table,
         &mut warnings,
         SignatureMemberContext::StructField,
-        &struct_path,
+        struct_path,
+        &mut path_fork,
         &mut span_builder,
     )
     .expect_err("duplicate struct fields must be rejected by the shared parser");
@@ -227,6 +225,7 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
 #[test]
 fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = stream_positioned_at_open_bracket(
         "| message String, message Int |",
@@ -242,7 +241,8 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
         &mut string_table,
         &mut warnings,
         SignatureMemberContext::ChoicePayloadField,
-        &choice_path,
+        choice_path,
+        &mut path_fork,
         &mut span_builder,
     )
     .expect_err("duplicate choice payload fields must be rejected by the shared parser");
@@ -259,6 +259,7 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
 #[test]
 fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = stream_positioned_at_open_bracket(
         "| This, value Int, value Int | -> Int ;",
@@ -273,7 +274,8 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
         &mut token_stream,
         &mut warnings,
         &mut string_table,
-        &method_path,
+        method_path,
+        &mut path_fork,
         &mut span_builder,
     )
     .expect_err("duplicate trait-requirement parameters must be rejected by the shared parser");
@@ -290,6 +292,7 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
 #[test]
 fn distinct_members_parse_successfully_through_shared_parser() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = stream_positioned_at_open_bracket(
         "| first Int, second String |",
@@ -304,18 +307,27 @@ fn distinct_members_parse_successfully_through_shared_parser() {
         &mut string_table,
         &mut warnings,
         SignatureMemberContext::StructField,
-        &struct_path,
+        struct_path,
+        &mut path_fork,
         &mut span_builder,
     )
     .expect("distinct member names must parse successfully");
 
     assert_eq!(fields.len(), 2, "both distinct members must be retained");
     assert_eq!(
-        string_table.resolve(fields[0].id.name().expect("first field has a name")),
+        string_table.resolve(
+            path_fork
+                .component(fields[0].id)
+                .expect("first field has a name"),
+        ),
         "first",
     );
     assert_eq!(
-        string_table.resolve(fields[1].id.name().expect("second field has a name")),
+        string_table.resolve(
+            path_fork
+                .component(fields[1].id)
+                .expect("second field has a name"),
+        ),
         "second",
     );
 }

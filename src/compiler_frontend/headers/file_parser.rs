@@ -38,14 +38,11 @@ use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_b
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use rustc_hash::FxHashSet;
 
-/// Stage-local result for file-local header-item orchestration.
-///
-/// The boundary carries a plain `CompilerDiagnostic` diagnosis or a typed
-/// infrastructure failure through `HeaderParseFailure`.
 type FileParserResult<T> = Result<T, HeaderParseFailure>;
 
 fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
@@ -440,8 +437,13 @@ fn legacy_dependency_clause_diagnostic(
     let replacement = if context.is_config_file {
         None
     } else {
-        legacy_dependency_replacement(token_stream, context.string_table, start.path_index)?
-            .map(|replacement| context.string_table.intern(&replacement))
+        legacy_dependency_replacement(
+            token_stream,
+            context.string_table,
+            context.path_fork,
+            start.path_index,
+        )?
+        .map(|replacement| context.string_table.intern(&replacement))
     };
     Ok(CompilerDiagnostic::legacy_dependency_clause(
         replacement,
@@ -470,30 +472,31 @@ fn legacy_dependency_clause_end(tokens: &[Token], path_index: usize) -> Option<u
 fn legacy_dependency_replacement(
     token_stream: &FileTokens,
     string_table: &StringTable,
+    path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     path_index: usize,
 ) -> Result<Option<String>, HeaderParseFailure> {
     let tokens = &token_stream.tokens;
     let Some(path_token) = tokens.get(path_index) else {
         return Ok(None);
     };
-    let TokenKind::Path(path_id) = path_token.kind else {
+    let TokenKind::Path(path_syntax_id) = path_token.kind else {
         return Ok(None);
     };
     let path = token_stream
         .path_syntax_table()?
         .try_path_for_token(
-            path_id,
+            path_syntax_id,
             SourceSpan::new(token_stream.file_id, path_token.span),
         )?
-        .root
-        .to_owned();
-    if path.is_empty() {
+        .root;
+    if path == PathId::ROOT {
         // Exact `@/` is represented by the empty canonical path, and so is the bare introducer
         // `@`. The retained row cannot tell the two spellings apart, so it suggests neither.
         return Ok(None);
     }
-    if path
-        .as_components()
+    let mut components = Vec::new();
+    path_fork.resolve_components(path, &mut components);
+    if components
         .iter()
         .any(|component| !can_serialize_path_component_bare(string_table.resolve(*component)))
     {
@@ -501,7 +504,7 @@ fn legacy_dependency_replacement(
         // normalized spelling that would turn a valid quoted path into invalid unquoted syntax.
         return Ok(None);
     }
-    let path = path.to_portable_string(string_table);
+    let path = path_fork.render_portable(path, string_table, &mut components);
     let mut replacement = format!("@{path}");
     let mut index = path_index + 1;
 
@@ -643,17 +646,26 @@ fn handle_symbol_item_with_export_mode(
         return Ok(());
     }
 
-    let source_file = token_stream.src_path.to_owned();
+    let source_file = token_stream.src_path;
     let mut build_context = HeaderBuildContext {
         warnings: &mut state.warnings,
-        source_file: &source_file,
+        source_file,
         file_dependency_clauses: &state.file_dependency_clauses,
         dependency_selections: &state.dependency_selections,
         string_table: context.string_table,
+        path_fork: context.path_fork,
         file_role: context.file_role,
     };
+    let declaration_path = build_context
+        .path_fork
+        .try_intern_child(source_file, name_id)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "path table exhausted while interning declaration path",
+            ))
+        })?;
     let header = create_header(
-        token_stream.src_path.append(name_id),
+        declaration_path,
         token_stream,
         &current_token,
         export_mode,
@@ -662,21 +674,8 @@ fn handle_symbol_item_with_export_mode(
     )?;
 
     if export_mode.is_public()
-        && matches!(
-            &header.kind,
-            HeaderKind::StartFunction
-                | HeaderKind::TraitConformance { .. }
-                | HeaderKind::TraitIncompatibility { .. }
-        )
-    {
-        return Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(Some(current_span)),
-        ));
-    }
-
-    if export_mode.is_public()
         && let HeaderKind::Function { signature, .. } = &header.kind
-        && is_receiver_method_candidate(signature, context.string_table)
+        && is_receiver_method_candidate(signature, context.string_table, context.path_fork)
     {
         return Err(diagnostic_failure(
             CompilerDiagnostic::invalid_receiver_declaration(
@@ -783,6 +782,7 @@ fn finish_file_output(
         &state.file_dependency_clauses,
         &state.dependency_selections,
         context.string_table,
+        &*context.path_fork,
     ) {
         return Err(FileFrontendPrepareFailure::Diagnosed(
             state.into_error(diagnostic),
@@ -811,7 +811,7 @@ fn finish_file_output(
             .into_non_entry_output(token_stream, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
-    attach_structural_file_facts(&mut output, context.string_table)
+    attach_structural_file_facts(&mut output, context.string_table, context.path_fork)
         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     Ok(output)
 }
@@ -828,10 +828,10 @@ fn finish_file_output(
 fn attach_structural_file_facts(
     output: &mut FileFrontendPrepareOutput,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
-    let is_config_file = output
-        .source_file
-        .name()
+    let is_config_file = path_fork
+        .component(output.source_file)
         .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
     let mut consumed_path_syntax_ids = Vec::new();
     consumed_path_syntax_ids.extend(
@@ -905,6 +905,7 @@ fn attach_structural_file_facts(
         output.path_syntax.table(),
         consumed_path_syntax_ids,
         output.file_id,
+        path_fork,
         string_table,
     );
 
@@ -913,6 +914,7 @@ fn attach_structural_file_facts(
         &output.structural_file_references,
         output.path_syntax.table(),
         string_table,
+        path_fork,
     )
 }
 
@@ -927,11 +929,13 @@ fn dependency_generic_parameter_collision(
     dependency_clauses: &[RetainedDependencyClause],
     dependency_selections: &[DependencySelection],
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Option<CompilerDiagnostic> {
     let forbidden_names = dependency_generic_parameter_forbidden_names(
         dependency_clauses,
         dependency_selections,
         string_table,
+        path_fork,
     );
 
     for header in headers {
@@ -968,6 +972,7 @@ fn dependency_generic_parameter_forbidden_names(
     dependency_clauses: &[RetainedDependencyClause],
     dependency_selections: &[DependencySelection],
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> FxHashSet<StringId> {
     let mut forbidden_names = FxHashSet::default();
 
@@ -976,7 +981,9 @@ fn dependency_generic_parameter_forbidden_names(
             .selections(dependency_selections)
             .expect("validated file dependency selection range");
         if selections.is_empty() {
-            if let Some(local_name) = clause.effective_namespace_local_name(string_table) {
+            if let Some(local_name) =
+                clause.effective_namespace_local_name(string_table, path_fork)
+            {
                 forbidden_names.insert(local_name);
             }
         } else {

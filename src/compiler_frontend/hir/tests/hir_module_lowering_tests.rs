@@ -39,11 +39,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn add_test_module_constant(ast: &mut Ast, declaration: Declaration) {
-    let type_environment = ast.type_environment.clone();
-    ast.const_values
-        .insert_test_declaration(declaration, &type_environment);
-}
+fn add_test_module_constant(ast: &mut Ast, declaration: Declaration) { let mut path_fork = super::PathInternerFork::empty(); let type_environment = ast.type_environment.clone();
+ast.const_values
+    .insert_test_declaration(declaration, &type_environment); }
 
 use crate::compiler_frontend::hir::hir_builder::{
     build_ast_with_registered_types, expressions_to_owned_render_node,
@@ -52,98 +50,63 @@ use crate::compiler_frontend::hir::hir_builder::{
 };
 use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
 use crate::compiler_frontend::tests::type_id_fixture_support::no_value_expr;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
-fn registers_declarations_and_resolves_start_function() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn registers_declarations_and_resolves_start_function() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let struct_name = super::symbol("MyStruct", &mut string_table);
-    let field_name = struct_name.append(string_table.intern("field"));
+let struct_name = super::symbol("MyStruct", &mut path_fork, &mut string_table);
+let field_name = path_fork.try_intern_child(struct_name, string_table.intern("field")).expect("test path fits");
 
-    let struct_node = node(
-        NodeKind::StructDefinition(
-            struct_name,
-            vec![make_test_variable(
-                field_name,
-                no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
-            )],
-        ),
-        None,
-    );
+let struct_node = node(
+    NodeKind::StructDefinition(
+        struct_name,
+        vec![make_test_variable(
+            field_name,
+            no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
+        )],
+    ),
+    None,
+);
 
-    let start_function = function_node(
-        start_name.clone(),
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name.clone(),
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    assert_eq!(module.structs.len(), 1);
-    assert_eq!(module.functions.len(), 1);
-    assert_eq!(
-        module
-            .side_table
-            .function_name_path(
-                module
-                    .start_function
-                    .expect("normal test module should have start"),
-            )
-            .cloned(),
-        Some(start_name)
-    );
-}
-
-#[test]
-fn api_only_root_roles_lower_without_implicit_start() {
-    for root_role in [
-        ModuleRootRole::Support,
-        ModuleRootRole::ProjectPackageFacade,
-    ] {
-        let mut string_table = StringTable::new();
-        let entry_path = super::symbol("api.moth", &mut string_table);
-        let declaration_path = super::symbol("exported_value", &mut string_table);
-        let declaration = function_node(
-            declaration_path,
-            FunctionSignature {
-                parameters: vec![],
-                returns: vec![],
-            },
-            vec![],
-            None,
-        );
-        let mut ast = build_ast_with_registered_types(vec![declaration], entry_path);
-        ast.root_role = root_role;
-
-        let (module, _type_environment) =
-            lower_ast(ast, &mut string_table).expect("API-only HIR lowering should succeed");
-
-        assert_eq!(module.start_function, None);
-        assert_eq!(module.functions.len(), 1);
-        assert!(
+assert_eq!(module.structs.len(), 1);
+assert_eq!(module.functions.len(), 1);
+assert_eq!(
+    module
+        .side_table
+        .function_name_path(
             module
-                .function_origins
-                .values()
-                .all(|origin| !matches!(origin, HirFunctionOrigin::EntryStart)),
-            "API-only roots must not contain an EntryStart origin"
-        );
-    }
-}
+                .start_function
+                .expect("normal test module should have start"),
+        ),
+    Some(start_name),
+); }
 
 #[test]
-fn lowers_module_constants_into_hir_const_pool() {
+fn api_only_root_roles_lower_without_implicit_start() { let mut path_fork = super::PathInternerFork::empty(); for root_role in [
+    ModuleRootRole::Support,
+    ModuleRootRole::ProjectPackageFacade,
+] {
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-
-    let start_function = function_node(
-        start_name,
+    let entry_path = super::symbol("api.moth", &mut path_fork, &mut string_table);
+    let declaration_path = super::symbol("exported_value", &mut path_fork, &mut string_table);
+    let declaration = function_node(
+        declaration_path,
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -151,413 +114,431 @@ fn lowers_module_constants_into_hir_const_pool() {
         vec![],
         None,
     );
-
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let const_name = super::symbol("SITE_NAME", &mut string_table);
-    add_test_module_constant(
-        &mut ast,
-        make_test_variable(
-            const_name,
-            Expression::string_slice(string_table.intern("Moth"), None, ValueMode::ImmutableOwned),
-        ),
-    );
+    let mut ast = build_ast_with_registered_types(vec![declaration], entry_path);
+    ast.root_role = root_role;
 
     let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-    assert_eq!(module.module_constants.len(), 1);
+        lower_ast(ast, &mut string_table, &mut path_fork).expect("API-only HIR lowering should succeed");
 
-    let constant = &module.module_constants[0];
-    assert_eq!(constant.name, "SITE_NAME");
-    assert!(matches!(
-        constant.value,
-        HirConstValue::String(ref value) if value == "Moth"
-    ));
-}
+    assert_eq!(module.start_function, None);
+    assert_eq!(module.functions.len(), 1);
+    assert!(
+        module
+            .function_origins
+            .values()
+            .all(|origin| !matches!(origin, HirFunctionOrigin::EntryStart)),
+        "API-only roots must not contain an EntryStart origin"
+    );
+} }
 
 #[test]
-fn excludes_real_slot_insert_helpers_from_hir_but_keeps_wrapper_constants_visible() {
-    let source = r#"
+fn lowers_module_constants_into_hir_const_pool() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
+
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let const_name = super::symbol("SITE_NAME", &mut path_fork, &mut string_table);
+add_test_module_constant(
+    &mut ast,
+    make_test_variable(
+        const_name,
+        Expression::string_slice(string_table.intern("Moth"), None, ValueMode::ImmutableOwned),
+    ),
+);
+
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+assert_eq!(module.module_constants.len(), 1);
+
+let constant = &module.module_constants[0];
+assert_eq!(constant.name, "SITE_NAME");
+assert!(matches!(
+    constant.value,
+    HirConstValue::String(ref value) if value == "Moth"
+)); }
+
+#[test]
+fn excludes_real_slot_insert_helpers_from_hir_but_keeps_wrapper_constants_visible() { let mut path_fork = super::PathInternerFork::empty(); let source = r#"
 layout #= [:<h1>[$slot("title")]</h1><p>[$slot]</p>]
 stored_title #= [$insert("title"): Stored title]
 rendered #= [layout: [stored_title] Body]
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
-    let helper = ast
-        .const_values
-        .iter_module_constant_views()
-        .find(|row| row.path.name_str(&string_table) == Some("stored_title"))
-        .expect("slot-insert helper should be retained in the AST store");
-    let helper_name = helper.path.to_string(&string_table);
-    let helper_metadata = helper.metadata;
-    assert_eq!(
-        helper_metadata.value_kind,
-        ConstValueKind::SlotInsertTemplate
-    );
-    assert!(!helper_metadata.hir_visible);
+let (ast, mut parsed_path_fork, string_table) = parse_single_file_ast(source);
+let helper = ast
+    .const_values
+    .iter_module_constant_views()
+    .find(|row| {
+        parsed_path_fork.render_portable(*row.path, &string_table, &mut Vec::new()) == "stored_title"
+    })
+    .expect("slot-insert helper should be retained in the AST store");
+let helper_name =
+    parsed_path_fork.render_portable(*helper.path, &string_table, &mut Vec::new());
+let helper_metadata = helper.metadata;
+assert_eq!(
+    helper_metadata.value_kind,
+    ConstValueKind::SlotInsertTemplate
+);
+assert!(!helper_metadata.hir_visible);
 
-    let mut string_table = string_table;
-    let (module, _) = lower_ast(ast, &mut string_table)
-        .expect("real slot-insert helper should be excluded before HIR lowering");
-    assert!(
-        module
-            .module_constants
-            .iter()
-            .all(|constant| constant.name != helper_name
-                && !constant.name.ends_with("/stored_title")),
-        "helper-only constants must not enter the HIR constant pool"
-    );
-    assert!(
-        module
-            .module_constants
-            .iter()
-            .any(|constant| constant.name.ends_with("/layout") || constant.name == "layout"),
-        "wrapper constants must remain visible to HIR"
-    );
-}
+let mut string_table = string_table;
+let (module, _) = lower_ast(ast, &mut string_table, &mut parsed_path_fork)
+    .expect("real slot-insert helper should be excluded before HIR lowering");
+assert!(
+    module
+        .module_constants
+        .iter()
+        .all(|constant| constant.name != helper_name
+            && !constant.name.ends_with("/stored_title")),
+    "helper-only constants must not enter the HIR constant pool"
+);
+assert!(
+    module
+        .module_constants
+        .iter()
+        .any(|constant| constant.name.ends_with("/layout") || constant.name == "layout"),
+    "wrapper constants must remain visible to HIR"
+); }
 
 #[test]
-fn start_function_can_reference_module_constant() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let third_const = super::symbol("third_const", &mut string_table);
+fn start_function_can_reference_module_constant() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let third_const = super::symbol("third_const", &mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(
-            NodeKind::ExpressionStatement(reference_expr_with_type_id(
-                third_const.clone(),
-                builtin_type_ids::INT,
-                None,
-                ValueMode::ImmutableReference,
-            )),
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![node(
+        NodeKind::ExpressionStatement(reference_expr_with_type_id(
+            third_const.clone(),
+            builtin_type_ids::INT,
             None,
-        )],
-        None,
-    );
-
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    add_test_module_constant(
-        &mut ast,
-        make_test_variable(
-            third_const,
-            Expression::int(3, None, ValueMode::ImmutableOwned),
-        ),
-    );
-
-    let (module, _type_environment) = lower_ast(ast, &mut string_table)
-        .expect("start function should lower when referencing a module constant");
-
-    let start_fn = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let entry_block = &module.blocks[start_fn.entry.0 as usize];
-
-    assert!(
-        entry_block.statements.iter().any(|statement| matches!(
-            statement.kind,
-            HirStatementKind::Expr(ref value)
-                if matches!(value.kind, HirExpressionKind::Int(3))
+            ValueMode::ImmutableReference,
         )),
-        "expected constant reference to lower into a usable expression in start body"
-    );
-}
+        None,
+    )],
+    None,
+);
+
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+add_test_module_constant(
+    &mut ast,
+    make_test_variable(
+        third_const,
+        Expression::int(3, None, ValueMode::ImmutableOwned),
+    ),
+);
+
+let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
+    .expect("start function should lower when referencing a module constant");
+
+let start_fn = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let entry_block = &module.blocks[start_fn.entry.0 as usize];
+
+assert!(
+    entry_block.statements.iter().any(|statement| matches!(
+        statement.kind,
+        HirStatementKind::Expr(ref value)
+            if matches!(value.kind, HirExpressionKind::Int(3))
+    )),
+    "expected constant reference to lower into a usable expression in start body"
+); }
 
 #[test]
-fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
-        TemplateType::String,
-        None,
-        ValueMode::ImmutableOwned,
-    );
+let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
+    TemplateType::String,
+    None,
+    ValueMode::ImmutableOwned,
+);
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    add_test_module_constant(
-        &mut ast,
-        make_test_variable(
-            super::symbol("WRAPPER", &mut string_table),
-            template_constant,
-        ),
-    );
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+add_test_module_constant(
+    &mut ast,
+    make_test_variable(
+        super::symbol("WRAPPER", &mut path_fork, &mut string_table),
+        template_constant,
+    ),
+);
 
-    let error =
-        lower_ast(ast, &mut string_table).expect_err("template constants should fail in HIR");
-    let error = error
-        .infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert!(error.msg.contains(
-        "Template constant reached HIR module-constant lowering before AST materialized it.",
-    ));
-}
+let error =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect_err("template constants should fail in HIR");
+let error = error
+    .infrastructure_error()
+    .expect("HIR lowering failure should be wrapped for rendering");
+assert!(error.msg.contains(
+    "Template constant reached HIR module-constant lowering before AST materialized it.",
+)); }
 
 #[test]
-fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lowering() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lowering() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
-        TemplateType::String,
-        None,
-        ValueMode::ImmutableOwned,
-    );
+let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
+    TemplateType::String,
+    None,
+    ValueMode::ImmutableOwned,
+);
 
-    let page_const_name = super::symbol("PAGE", &mut string_table);
-    let body_field = page_const_name.append(string_table.intern("body"));
+let page_const_name = super::symbol("PAGE", &mut path_fork, &mut string_table);
+let body_field = path_fork.try_intern_child(page_const_name, string_table.intern("body")).expect("test path fits");
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    add_test_module_constant(
-        &mut ast,
-        make_test_variable(
-            page_const_name,
-            Expression::struct_instance(
-                super::symbol("Page", &mut string_table),
-                vec![make_test_variable(body_field, template_constant)],
-                None,
-                ValueMode::ImmutableOwned,
-                true,
-                None,
-                builtin_type_ids::NONE,
-            ),
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+add_test_module_constant(
+    &mut ast,
+    make_test_variable(
+        page_const_name,
+        Expression::struct_instance(
+            super::symbol("Page", &mut path_fork, &mut string_table),
+            vec![make_test_variable(body_field, template_constant)],
+            None,
+            ValueMode::ImmutableOwned,
+            true,
+            None,
+            builtin_type_ids::NONE,
         ),
-    );
+    ),
+);
 
-    let error =
-        lower_ast(ast, &mut string_table).expect_err("nested template constants should fail");
-    let error = error
-        .infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert!(error.msg.contains(
-        "Template constant reached HIR module-constant lowering before AST materialized it.",
-    ));
-}
+let error =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect_err("nested template constants should fail");
+let error = error
+    .infrastructure_error()
+    .expect("HIR lowering failure should be wrapped for rendering");
+assert!(error.msg.contains(
+    "Template constant reached HIR module-constant lowering before AST materialized it.",
+)); }
 
 #[test]
-fn template_folded_piece_bearing_module_constant_lowers_into_pool_pieces() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn template_folded_piece_bearing_module_constant_lowers_into_pool_pieces() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    // The fold fixture supplies the pieces a wrapper-template finalization would fold, while
-    // the row keeps the wrapper footprint the production store writes for such constants.
-    let mut resources = ModuleResourceTable::new();
-    let logo = fixture_resource_id(&mut resources, "assets/logo.svg");
-    let prefix = string_table.intern("docs/");
-    let suffix = string_table.intern(".svg");
+// The fold fixture supplies the pieces a wrapper-template finalization would fold, while
+// the row keeps the wrapper footprint the production store writes for such constants.
+let mut resources = ModuleResourceTable::new();
+let logo = fixture_resource_id(&mut resources, "assets/logo.svg");
+let prefix = string_table.intern("docs/");
+let suffix = string_table.intern(".svg");
 
-    let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
-        TemplateType::String,
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let folded = ConstStringValue::Pieces(vec![
-        ConstStringPiece::Text(prefix),
-        ConstStringPiece::Resource(logo),
-        ConstStringPiece::Text(suffix),
-    ]);
+let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
+    TemplateType::String,
+    None,
+    ValueMode::ImmutableOwned,
+);
+let folded = ConstStringValue::Pieces(vec![
+    ConstStringPiece::Text(prefix),
+    ConstStringPiece::Resource(logo),
+    ConstStringPiece::Text(suffix),
+]);
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let type_environment = ast.type_environment.clone();
-    ast.const_values.insert_test_template_fold(
-        make_test_variable(
-            super::symbol("DOCS_URL", &mut string_table),
-            template_constant,
-        ),
-        folded,
-        &type_environment,
-    );
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let type_environment = ast.type_environment.clone();
+ast.const_values.insert_test_template_fold(
+    make_test_variable(
+        super::symbol("DOCS_URL", &mut path_fork, &mut string_table),
+        template_constant,
+    ),
+    folded,
+    &type_environment,
+);
 
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("folded template constant should lower");
-    assert_eq!(module.module_constants.len(), 1);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("folded template constant should lower");
+assert_eq!(module.module_constants.len(), 1);
 
-    // The template-fold arm stores the folded structural value exactly like the plain string
-    // arm, so a folded wrapper constant reaches the pool with its authored piece sequence.
-    let pieces = match &module.module_constants[0].value {
-        HirConstValue::StructuralString { pieces } => pieces,
-        other => panic!("expected a structural string constant, got {other:?}"),
-    };
-    match pieces.as_slice() {
-        [
-            ConstStringPiece::Text(before),
-            ConstStringPiece::Resource(stored),
-            ConstStringPiece::Text(after),
-        ] => {
-            assert_eq!(string_table.resolve(*before), "docs/");
-            assert_eq!(string_table.resolve(*after), ".svg");
-            assert_eq!(*stored, logo);
-        }
-        other => panic!("expected [Text, Resource, Text] pieces in authored order, got {other:?}"),
+// The template-fold arm stores the folded structural value exactly like the plain string
+// arm, so a folded wrapper constant reaches the pool with its authored piece sequence.
+let pieces = match &module.module_constants[0].value {
+    HirConstValue::StructuralString { pieces } => pieces,
+    other => panic!("expected a structural string constant, got {other:?}"),
+};
+match pieces.as_slice() {
+    [
+        ConstStringPiece::Text(before),
+        ConstStringPiece::Resource(stored),
+        ConstStringPiece::Text(after),
+    ] => {
+        assert_eq!(string_table.resolve(*before), "docs/");
+        assert_eq!(string_table.resolve(*after), ".svg");
+        assert_eq!(*stored, logo);
     }
-}
+    other => panic!("expected [Text, Resource, Text] pieces in authored order, got {other:?}"),
+} }
 
 #[test]
-fn lowers_struct_module_constant_into_record_with_ordered_fields() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let struct_name = super::symbol("Point", &mut string_table);
-    let x_field = struct_name.append(string_table.intern("x"));
-    let y_field = struct_name.append(string_table.intern("y"));
+fn lowers_struct_module_constant_into_record_with_ordered_fields() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let struct_name = super::symbol("Point", &mut path_fork, &mut string_table);
+let x_field = path_fork.try_intern_child(struct_name, string_table.intern("x")).expect("test path fits");
+let y_field = path_fork.try_intern_child(struct_name, string_table.intern("y")).expect("test path fits");
 
-    let struct_node = node(
-        NodeKind::StructDefinition(
-            struct_name,
+let struct_node = node(
+    NodeKind::StructDefinition(
+        struct_name,
+        vec![
+            make_test_variable(
+                x_field.clone(),
+                no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
+            ),
+            make_test_variable(
+                y_field.clone(),
+                no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
+            ),
+        ],
+    ),
+    None,
+);
+
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
+
+let mut ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
+let const_name = super::symbol("POINT", &mut path_fork, &mut string_table);
+
+add_test_module_constant(
+    &mut ast,
+    make_test_variable(
+        const_name,
+        Expression::struct_instance(
+            super::symbol("Point", &mut path_fork, &mut string_table),
             vec![
                 make_test_variable(
-                    x_field.clone(),
-                    no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
+                    x_field,
+                    Expression::int(5, None, ValueMode::ImmutableOwned),
                 ),
                 make_test_variable(
-                    y_field.clone(),
-                    no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
+                    y_field,
+                    Expression::int(99, None, ValueMode::ImmutableOwned),
                 ),
             ],
+            None,
+            ValueMode::ImmutableOwned,
+            true,
+            None,
+            builtin_type_ids::NONE,
         ),
-        None,
-    );
+    ),
+);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+assert_eq!(module.module_constants.len(), 1);
 
-    let mut ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
-    let const_name = super::symbol("POINT", &mut string_table);
-
-    add_test_module_constant(
-        &mut ast,
-        make_test_variable(
-            const_name,
-            Expression::struct_instance(
-                super::symbol("Point", &mut string_table),
-                vec![
-                    make_test_variable(
-                        x_field,
-                        Expression::int(5, None, ValueMode::ImmutableOwned),
-                    ),
-                    make_test_variable(
-                        y_field,
-                        Expression::int(99, None, ValueMode::ImmutableOwned),
-                    ),
-                ],
-                None,
-                ValueMode::ImmutableOwned,
-                true,
-                None,
-                builtin_type_ids::NONE,
-            ),
-        ),
-    );
-
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-    assert_eq!(module.module_constants.len(), 1);
-
-    let constant = &module.module_constants[0];
-    match &constant.value {
-        HirConstValue::Record(fields) => {
-            assert_eq!(fields.len(), 2);
-            let first_field_name = fields[0]
-                .name
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(fields[0].name.as_str());
-            assert_eq!(first_field_name, "x");
-            assert!(matches!(fields[0].value, HirConstValue::Int(5)));
-            let second_field_name = fields[1]
-                .name
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(fields[1].name.as_str());
-            assert_eq!(second_field_name, "y");
-            assert!(matches!(fields[1].value, HirConstValue::Int(99)));
-        }
-        other => panic!("expected record constant, got {other:?}"),
+let constant = &module.module_constants[0];
+match &constant.value {
+    HirConstValue::Record(fields) => {
+        assert_eq!(fields.len(), 2);
+        let first_field_name = fields[0]
+            .name
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(fields[0].name.as_str());
+        assert_eq!(first_field_name, "x");
+        assert!(matches!(fields[0].value, HirConstValue::Int(5)));
+        let second_field_name = fields[1]
+            .name
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(fields[1].name.as_str());
+        assert_eq!(second_field_name, "y");
+        assert!(matches!(fields[1].value, HirConstValue::Int(99)));
     }
-}
+    other => panic!("expected record constant, got {other:?}"),
+} }
 
 #[test]
-fn extracts_ast_doc_fragments_into_module_metadata() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let first_doc = string_table.intern("First doc");
-    let second_doc = string_table.intern("Second doc");
+fn extracts_ast_doc_fragments_into_module_metadata() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let first_doc = string_table.intern("First doc");
+let second_doc = string_table.intern("Second doc");
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    ast.doc_fragments = vec![
-        AstDocFragment {
-            kind: AstDocFragmentKind::Doc,
-            value: first_doc,
-            span: None,
-        },
-        AstDocFragment {
-            kind: AstDocFragmentKind::Doc,
-            value: second_doc,
-            span: None,
-        },
-    ];
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+ast.doc_fragments = vec![
+    AstDocFragment {
+        kind: AstDocFragmentKind::Doc,
+        value: first_doc,
+        span: None,
+    },
+    AstDocFragment {
+        kind: AstDocFragmentKind::Doc,
+        value: second_doc,
+        span: None,
+    },
+];
 
-    let lowering =
-        lower_ast_with_metadata(ast, &mut string_table).expect("HIR lowering should succeed");
-    let doc_fragments = &lowering.metadata.doc_fragments;
-    assert_eq!(doc_fragments.len(), 2);
-    assert!(matches!(doc_fragments[0].kind, ModuleDocFragmentKind::Doc));
-    assert!(matches!(doc_fragments[1].kind, ModuleDocFragmentKind::Doc));
-    assert_eq!(doc_fragments[0].rendered_text, "First doc");
-    assert_eq!(doc_fragments[1].rendered_text, "Second doc");
-    assert_eq!(doc_fragments[0].span, None);
-    assert_eq!(doc_fragments[1].span, None);
-}
+let lowering =
+    lower_ast_with_metadata(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+let doc_fragments = &lowering.metadata.doc_fragments;
+assert_eq!(doc_fragments.len(), 2);
+assert!(matches!(doc_fragments[0].kind, ModuleDocFragmentKind::Doc));
+assert!(matches!(doc_fragments[1].kind, ModuleDocFragmentKind::Doc));
+assert_eq!(doc_fragments[0].rendered_text, "First doc");
+assert_eq!(doc_fragments[1].rendered_text, "Second doc");
+assert_eq!(doc_fragments[0].span, None);
+assert_eq!(doc_fragments[1].span, None); }
 
 /// Mint one real resource handle through the issuing module resource table.
 ///
@@ -582,245 +563,241 @@ fn fixture_resource_id(resources: &mut ModuleResourceTable, relative: &str) -> R
 fn structural_constant(
     ast: &mut Ast,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     name: &str,
     pieces: Vec<ConstStringPiece>,
 ) {
-    let const_name = super::symbol(name, string_table);
-    add_test_module_constant(
-        ast,
-        make_test_variable(const_name, Expression::structural_string(pieces, None)),
-    );
-}
+    let const_name = super::symbol(name, path_fork, string_table);
+add_test_module_constant(
+    ast,
+    make_test_variable(const_name, Expression::structural_string(pieces, None)),
+); }
 
 #[test]
-fn piece_bearing_module_constant_reaches_hir_const_pool_in_authored_order() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn piece_bearing_module_constant_reaches_hir_const_pool_in_authored_order() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let mut resources = ModuleResourceTable::new();
-    let logo = fixture_resource_id(&mut resources, "assets/logo.svg");
-    let prefix = string_table.intern("docs/");
-    let suffix = string_table.intern(".svg");
-    structural_constant(
-        &mut ast,
-        &mut string_table,
-        "LOGO",
-        vec![
-            ConstStringPiece::Text(prefix),
-            ConstStringPiece::Resource(logo),
-            ConstStringPiece::Text(suffix),
-        ],
-    );
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let mut resources = ModuleResourceTable::new();
+let logo = fixture_resource_id(&mut resources, "assets/logo.svg");
+let prefix = string_table.intern("docs/");
+let suffix = string_table.intern(".svg");
+structural_constant(
+    &mut ast,
+    &mut string_table,
+    &mut path_fork,
+    "LOGO",
+    vec![
+        ConstStringPiece::Text(prefix),
+        ConstStringPiece::Resource(logo),
+        ConstStringPiece::Text(suffix),
+    ],
+);
 
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("piece-bearing constant should lower");
-    assert_eq!(module.module_constants.len(), 1);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("piece-bearing constant should lower");
+assert_eq!(module.module_constants.len(), 1);
 
-    let pieces = match &module.module_constants[0].value {
-        HirConstValue::StructuralString { pieces } => pieces,
-        other => panic!("expected a structural string constant, got {other:?}"),
-    };
-    // Authored order and the text-coalescing boundary around the resource piece both survive:
-    // the runs beside the resource are separate interned pieces, never fused through it.
-    match pieces.as_slice() {
-        [
-            ConstStringPiece::Text(before),
-            ConstStringPiece::Resource(stored),
-            ConstStringPiece::Text(after),
-        ] => {
-            assert!(*before == prefix);
-            assert!(*after == suffix);
-            assert!(*stored == logo);
-        }
-        other => panic!("expected [Text, Resource, Text] pieces in authored order, got {other:?}"),
+let pieces = match &module.module_constants[0].value {
+    HirConstValue::StructuralString { pieces } => pieces,
+    other => panic!("expected a structural string constant, got {other:?}"),
+};
+// Authored order and the text-coalescing boundary around the resource piece both survive:
+// the runs beside the resource are separate interned pieces, never fused through it.
+match pieces.as_slice() {
+    [
+        ConstStringPiece::Text(before),
+        ConstStringPiece::Resource(stored),
+        ConstStringPiece::Text(after),
+    ] => {
+        assert!(*before == prefix);
+        assert!(*after == suffix);
+        assert!(*stored == logo);
     }
-}
+    other => panic!("expected [Text, Resource, Text] pieces in authored order, got {other:?}"),
+} }
 
 #[test]
-fn site_root_module_constant_survives_hir_lowering() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn site_root_module_constant_survives_hir_lowering() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let prefix = string_table.intern("docs_url = ");
-    let suffix = string_table.intern("docs/");
-    structural_constant(
-        &mut ast,
-        &mut string_table,
-        "DOCS_URL",
-        vec![
-            ConstStringPiece::Text(prefix),
-            ConstStringPiece::SiteRoot,
-            ConstStringPiece::Text(suffix),
-        ],
-    );
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let prefix = string_table.intern("docs_url = ");
+let suffix = string_table.intern("docs/");
+structural_constant(
+    &mut ast,
+    &mut string_table,
+    &mut path_fork,
+    "DOCS_URL",
+    vec![
+        ConstStringPiece::Text(prefix),
+        ConstStringPiece::SiteRoot,
+        ConstStringPiece::Text(suffix),
+    ],
+);
 
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("site-root constant should lower");
-    assert_eq!(module.module_constants.len(), 1);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("site-root constant should lower");
+assert_eq!(module.module_constants.len(), 1);
 
-    let pieces = match &module.module_constants[0].value {
-        HirConstValue::StructuralString { pieces } => pieces,
-        other => panic!("expected a structural string constant, got {other:?}"),
-    };
-    // The site-root mark carries no resource identity, and the text runs beside it stay
-    // separate pieces rather than merging across it.
-    match pieces.as_slice() {
-        [
-            ConstStringPiece::Text(before),
-            ConstStringPiece::SiteRoot,
-            ConstStringPiece::Text(after),
-        ] => {
-            assert!(*before == prefix);
-            assert!(*after == suffix);
-        }
-        other => panic!("expected [Text, SiteRoot, Text] pieces in authored order, got {other:?}"),
+let pieces = match &module.module_constants[0].value {
+    HirConstValue::StructuralString { pieces } => pieces,
+    other => panic!("expected a structural string constant, got {other:?}"),
+};
+// The site-root mark carries no resource identity, and the text runs beside it stay
+// separate pieces rather than merging across it.
+match pieces.as_slice() {
+    [
+        ConstStringPiece::Text(before),
+        ConstStringPiece::SiteRoot,
+        ConstStringPiece::Text(after),
+    ] => {
+        assert!(*before == prefix);
+        assert!(*after == suffix);
     }
-}
+    other => panic!("expected [Text, SiteRoot, Text] pieces in authored order, got {other:?}"),
+} }
 
 #[test]
-fn structural_module_constant_reference_lowers_into_structural_expression() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let logo_const = super::symbol("LOGO", &mut string_table);
+fn structural_module_constant_reference_lowers_into_structural_expression() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let logo_const = super::symbol("LOGO", &mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(
-            NodeKind::ExpressionStatement(reference_expr_with_type_id(
-                logo_const.clone(),
-                builtin_type_ids::STRING,
-                None,
-                ValueMode::ImmutableReference,
-            )),
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![node(
+        NodeKind::ExpressionStatement(reference_expr_with_type_id(
+            logo_const.clone(),
+            builtin_type_ids::STRING,
             None,
-        )],
-        None,
-    );
-
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let mut resources = ModuleResourceTable::new();
-    let logo = fixture_resource_id(&mut resources, "assets/logo.svg");
-    let prefix = string_table.intern("docs/");
-    structural_constant(
-        &mut ast,
-        &mut string_table,
-        "LOGO",
-        vec![
-            ConstStringPiece::Resource(logo),
-            ConstStringPiece::Text(prefix),
-        ],
-    );
-
-    let (module, _type_environment) = lower_ast(ast, &mut string_table)
-        .expect("start body referencing a structural constant should lower");
-
-    // The const-store expression lane (module-constant reference lowering) must preserve
-    // pieces, not just the constant pool value.
-    let start_fn = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let entry_block = &module.blocks[start_fn.entry.0 as usize];
-
-    assert!(
-        entry_block.statements.iter().any(|statement| matches!(
-            &statement.kind,
-            HirStatementKind::Expr(value)
-                if matches!(
-                    &value.kind,
-                    HirExpressionKind::StructuralString { pieces }
-                        if pieces.as_slice() == [
-                            ConstStringPiece::Resource(logo),
-                            ConstStringPiece::Text(prefix),
-                        ]
-                )
+            ValueMode::ImmutableReference,
         )),
-        "expected the constant reference to lower into a structural string expression \
-         with the authored pieces"
-    );
-}
+        None,
+    )],
+    None,
+);
+
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let mut resources = ModuleResourceTable::new();
+let logo = fixture_resource_id(&mut resources, "assets/logo.svg");
+let prefix = string_table.intern("docs/");
+structural_constant(
+    &mut ast,
+    &mut string_table,
+    &mut path_fork,
+    "LOGO",
+    vec![
+        ConstStringPiece::Resource(logo),
+        ConstStringPiece::Text(prefix),
+    ],
+);
+
+let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
+    .expect("start body referencing a structural constant should lower");
+
+// The const-store expression lane (module-constant reference lowering) must preserve
+// pieces, not just the constant pool value.
+let start_fn = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let entry_block = &module.blocks[start_fn.entry.0 as usize];
+
+assert!(
+    entry_block.statements.iter().any(|statement| matches!(
+        &statement.kind,
+        HirStatementKind::Expr(value)
+            if matches!(
+                &value.kind,
+                HirExpressionKind::StructuralString { pieces }
+                    if pieces.as_slice() == [
+                        ConstStringPiece::Resource(logo),
+                        ConstStringPiece::Text(prefix),
+                    ]
+            )
+    )),
+    "expected the constant reference to lower into a structural string expression \
+     with the authored pieces"
+); }
 
 #[test]
-fn remaps_structural_module_constant_piece_text_after_table_merge() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn remaps_structural_module_constant_piece_text_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let prefix = string_table.intern("docs/");
-    structural_constant(
-        &mut ast,
-        &mut string_table,
-        "LOGO",
-        vec![ConstStringPiece::Text(prefix), ConstStringPiece::SiteRoot],
-    );
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let prefix = string_table.intern("docs/");
+structural_constant(
+    &mut ast,
+    &mut string_table,
+    &mut path_fork,
+    "LOGO",
+    vec![ConstStringPiece::Text(prefix), ConstStringPiece::SiteRoot],
+);
 
-    let (mut module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("structural constant should lower");
+let (mut module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("structural constant should lower");
 
-    // Merge the module-local table into a fresh global table whose IDs differ, as module
-    // compilation does before executable output.
-    let mut target_table = StringTable::new();
-    target_table.intern("existing");
-    let remap = target_table.merge_from(&string_table);
-    assert!(
-        !remap.is_identity(),
-        "fixture merge must move the piece handles"
-    );
+// Merge the module-local table into a fresh global table whose IDs differ, as module
+// compilation does before executable output.
+let mut target_table = StringTable::new();
+target_table.intern("existing");
+let remap = target_table.merge_from(&string_table);
+assert!(
+    !remap.is_identity(),
+    "fixture merge must move the piece handles"
+);
 
-    module.remap_string_ids(&remap);
+module.remap_string_ids(&remap);
 
-    let pieces = match &module.module_constants[0].value {
-        HirConstValue::StructuralString { pieces } => pieces,
-        other => panic!("expected a structural string constant, got {other:?}"),
-    };
-    match pieces.as_slice() {
-        [ConstStringPiece::Text(text), ConstStringPiece::SiteRoot] => {
-            assert!(
-                *text != prefix,
-                "piece text handle should re-bind to the merged table"
-            );
-            assert_eq!(target_table.resolve(*text), "docs/");
-            assert_eq!(string_table.resolve(prefix), "docs/");
-        }
-        other => panic!("expected [Text, SiteRoot] pieces after remap, got {other:?}"),
+let pieces = match &module.module_constants[0].value {
+    HirConstValue::StructuralString { pieces } => pieces,
+    other => panic!("expected a structural string constant, got {other:?}"),
+};
+match pieces.as_slice() {
+    [ConstStringPiece::Text(text), ConstStringPiece::SiteRoot] => {
+        assert!(
+            *text != prefix,
+            "piece text handle should re-bind to the merged table"
+        );
+        assert_eq!(target_table.resolve(*text), "docs/");
+        assert_eq!(string_table.resolve(prefix), "docs/");
     }
-}
+    other => panic!("expected [Text, SiteRoot] pieces after remap, got {other:?}"),
+} }
 
 /// Merges the fixture source table into a fresh table whose ID space cannot align with it.
 ///
@@ -888,221 +865,205 @@ fn nested_structural_piece_lists<'value>(
 /// result, then checks that the handle itself moved.
 /// WHY: handle inequality alone cannot catch a remap that binds to the wrong string, which is
 /// the failure the nested remap tests hunt.
-fn assert_remapped_piece_text(
-    pieces: &[ConstStringPiece],
-    originals: &[StringId],
-    source_table: &StringTable,
-    target_table: &StringTable,
-) {
-    assert_eq!(
-        pieces.len(),
-        originals.len(),
-        "expected one text piece per authored run, got {pieces:?}"
-    );
+fn assert_remapped_piece_text(pieces: &[ConstStringPiece],
+originals: &[StringId],
+source_table: &StringTable,
+target_table: &StringTable,) { let mut path_fork = super::PathInternerFork::empty(); assert_eq!(
+    pieces.len(),
+    originals.len(),
+    "expected one text piece per authored run, got {pieces:?}"
+);
 
-    for (piece, original) in pieces.iter().zip(originals) {
-        let ConstStringPiece::Text(remapped) = piece else {
-            panic!("expected a text piece, got {piece:?}");
-        };
-
-        let authored = source_table.resolve(*original);
-        assert_eq!(
-            target_table.resolve(*remapped),
-            authored,
-            "remapped piece must resolve to its authored text in the merged table"
-        );
-        assert_ne!(
-            remapped, original,
-            "piece handle should re-bind to the merged table"
-        );
-    }
-}
-
-#[test]
-fn remaps_structural_pieces_inside_record_fields_after_table_merge() {
-    let mut string_table = StringTable::new();
-    let before = string_table.intern("docs/");
-    let after = string_table.intern("page.html");
-
-    let mut value = HirConstValue::Record(vec![HirConstField {
-        name: "path".to_string(),
-        value: HirConstValue::StructuralString {
-            pieces: vec![
-                ConstStringPiece::Text(before),
-                ConstStringPiece::Text(after),
-            ],
-        },
-    }]);
-
-    let (target_table, remap) = non_identity_merge_remap(&string_table);
-    value.remap_string_ids(&remap);
-
-    let mut piece_lists = Vec::new();
-    nested_structural_piece_lists(&value, &mut piece_lists);
-    assert_eq!(
-        piece_lists.len(),
-        1,
-        "the record field holds one piece list"
-    );
-    assert_remapped_piece_text(
-        piece_lists[0],
-        &[before, after],
-        &string_table,
-        &target_table,
-    );
-}
-
-#[test]
-fn remaps_structural_pieces_inside_choice_fields_after_table_merge() {
-    let mut string_table = StringTable::new();
-    let host = string_table.intern("https://");
-    let page = string_table.intern("example.moth");
-
-    let mut value = HirConstValue::Choice {
-        tag: 0,
-        fields: vec![HirConstField {
-            name: "url".to_string(),
-            value: HirConstValue::StructuralString {
-                pieces: vec![ConstStringPiece::Text(host), ConstStringPiece::Text(page)],
-            },
-        }],
+for (piece, original) in pieces.iter().zip(originals) {
+    let ConstStringPiece::Text(remapped) = piece else {
+        panic!("expected a text piece, got {piece:?}");
     };
 
-    let (target_table, remap) = non_identity_merge_remap(&string_table);
-    value.remap_string_ids(&remap);
-
-    let mut piece_lists = Vec::new();
-    nested_structural_piece_lists(&value, &mut piece_lists);
+    let authored = source_table.resolve(*original);
     assert_eq!(
-        piece_lists.len(),
-        1,
-        "the choice field holds one piece list"
+        target_table.resolve(*remapped),
+        authored,
+        "remapped piece must resolve to its authored text in the merged table"
     );
-    assert_remapped_piece_text(piece_lists[0], &[host, page], &string_table, &target_table);
-}
+    assert_ne!(
+        remapped, original,
+        "piece handle should re-bind to the merged table"
+    );
+} }
 
 #[test]
-fn remaps_structural_pieces_inside_collection_elements_after_table_merge() {
-    let mut string_table = StringTable::new();
-    let before = string_table.intern("before/");
-    let after = string_table.intern("after");
+fn remaps_structural_pieces_inside_record_fields_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let before = string_table.intern("docs/");
+let after = string_table.intern("page.html");
 
-    let mut value = HirConstValue::Collection(vec![HirConstValue::StructuralString {
+let mut value = HirConstValue::Record(vec![HirConstField {
+    name: "path".to_string(),
+    value: HirConstValue::StructuralString {
         pieces: vec![
             ConstStringPiece::Text(before),
             ConstStringPiece::Text(after),
         ],
-    }]);
+    },
+}]);
 
-    let (target_table, remap) = non_identity_merge_remap(&string_table);
-    value.remap_string_ids(&remap);
+let (target_table, remap) = non_identity_merge_remap(&string_table);
+value.remap_string_ids(&remap);
 
-    let mut piece_lists = Vec::new();
-    nested_structural_piece_lists(&value, &mut piece_lists);
-    assert_eq!(
-        piece_lists.len(),
-        1,
-        "the collection element holds one piece list"
-    );
-    assert_remapped_piece_text(
-        piece_lists[0],
-        &[before, after],
-        &string_table,
-        &target_table,
-    );
-}
-
-#[test]
-fn remaps_structural_pieces_inside_range_bounds_after_table_merge() {
-    let mut string_table = StringTable::new();
-    let start_text = string_table.intern("start/");
-    let end_text = string_table.intern("end");
-
-    let mut value = HirConstValue::Range(
-        Box::new(HirConstValue::StructuralString {
-            pieces: vec![ConstStringPiece::Text(start_text)],
-        }),
-        Box::new(HirConstValue::StructuralString {
-            pieces: vec![ConstStringPiece::Text(end_text)],
-        }),
-    );
-
-    let (target_table, remap) = non_identity_merge_remap(&string_table);
-    value.remap_string_ids(&remap);
-
-    let mut piece_lists = Vec::new();
-    nested_structural_piece_lists(&value, &mut piece_lists);
-    assert_eq!(piece_lists.len(), 2, "both bounds hold their piece lists");
-    assert_remapped_piece_text(piece_lists[0], &[start_text], &string_table, &target_table);
-    assert_remapped_piece_text(piece_lists[1], &[end_text], &string_table, &target_table);
-}
+let mut piece_lists = Vec::new();
+nested_structural_piece_lists(&value, &mut piece_lists);
+assert_eq!(
+    piece_lists.len(),
+    1,
+    "the record field holds one piece list"
+);
+assert_remapped_piece_text(
+    piece_lists[0],
+    &[before, after],
+    &string_table,
+    &target_table,
+); }
 
 #[test]
-fn remaps_structural_pieces_inside_option_some_after_table_merge() {
-    let mut string_table = StringTable::new();
-    let before = string_table.intern("wrap/");
-    let after = string_table.intern("inner");
+fn remaps_structural_pieces_inside_choice_fields_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let host = string_table.intern("https://");
+let page = string_table.intern("example.moth");
 
-    let mut value = HirConstValue::OptionSome(Box::new(HirConstValue::StructuralString {
-        pieces: vec![
-            ConstStringPiece::Text(before),
-            ConstStringPiece::Text(after),
-        ],
-    }));
-
-    let (target_table, remap) = non_identity_merge_remap(&string_table);
-    value.remap_string_ids(&remap);
-
-    let mut piece_lists = Vec::new();
-    nested_structural_piece_lists(&value, &mut piece_lists);
-    assert_eq!(
-        piece_lists.len(),
-        1,
-        "the Some payload holds one piece list"
-    );
-    assert_remapped_piece_text(
-        piece_lists[0],
-        &[before, after],
-        &string_table,
-        &target_table,
-    );
-}
-
-#[test]
-fn remaps_structural_pieces_nested_two_container_levels_deep_after_table_merge() {
-    let mut string_table = StringTable::new();
-    let leaf_text = string_table.intern("leaf/");
-    let tail_text = string_table.intern("tail");
-
-    // Collection element -> record field -> structural string: a walker that stops one
-    // container short leaves this piece list un-remapped and the text assertion fails.
-    let mut value = HirConstValue::Collection(vec![HirConstValue::Record(vec![HirConstField {
-        name: "path".to_string(),
+let mut value = HirConstValue::Choice {
+    tag: 0,
+    fields: vec![HirConstField {
+        name: "url".to_string(),
         value: HirConstValue::StructuralString {
-            pieces: vec![
-                ConstStringPiece::Text(leaf_text),
-                ConstStringPiece::Text(tail_text),
-            ],
+            pieces: vec![ConstStringPiece::Text(host), ConstStringPiece::Text(page)],
         },
-    }])]);
+    }],
+};
 
-    let (target_table, remap) = non_identity_merge_remap(&string_table);
-    value.remap_string_ids(&remap);
+let (target_table, remap) = non_identity_merge_remap(&string_table);
+value.remap_string_ids(&remap);
 
-    let mut piece_lists = Vec::new();
-    nested_structural_piece_lists(&value, &mut piece_lists);
-    assert_eq!(
-        piece_lists.len(),
-        1,
-        "the two-level nest holds one piece list"
-    );
-    assert_remapped_piece_text(
-        piece_lists[0],
-        &[leaf_text, tail_text],
-        &string_table,
-        &target_table,
-    );
-}
+let mut piece_lists = Vec::new();
+nested_structural_piece_lists(&value, &mut piece_lists);
+assert_eq!(
+    piece_lists.len(),
+    1,
+    "the choice field holds one piece list"
+);
+assert_remapped_piece_text(piece_lists[0], &[host, page], &string_table, &target_table); }
+
+#[test]
+fn remaps_structural_pieces_inside_collection_elements_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let before = string_table.intern("before/");
+let after = string_table.intern("after");
+
+let mut value = HirConstValue::Collection(vec![HirConstValue::StructuralString {
+    pieces: vec![
+        ConstStringPiece::Text(before),
+        ConstStringPiece::Text(after),
+    ],
+}]);
+
+let (target_table, remap) = non_identity_merge_remap(&string_table);
+value.remap_string_ids(&remap);
+
+let mut piece_lists = Vec::new();
+nested_structural_piece_lists(&value, &mut piece_lists);
+assert_eq!(
+    piece_lists.len(),
+    1,
+    "the collection element holds one piece list"
+);
+assert_remapped_piece_text(
+    piece_lists[0],
+    &[before, after],
+    &string_table,
+    &target_table,
+); }
+
+#[test]
+fn remaps_structural_pieces_inside_range_bounds_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let start_text = string_table.intern("start/");
+let end_text = string_table.intern("end");
+
+let mut value = HirConstValue::Range(
+    Box::new(HirConstValue::StructuralString {
+        pieces: vec![ConstStringPiece::Text(start_text)],
+    }),
+    Box::new(HirConstValue::StructuralString {
+        pieces: vec![ConstStringPiece::Text(end_text)],
+    }),
+);
+
+let (target_table, remap) = non_identity_merge_remap(&string_table);
+value.remap_string_ids(&remap);
+
+let mut piece_lists = Vec::new();
+nested_structural_piece_lists(&value, &mut piece_lists);
+assert_eq!(piece_lists.len(), 2, "both bounds hold their piece lists");
+assert_remapped_piece_text(piece_lists[0], &[start_text], &string_table, &target_table);
+assert_remapped_piece_text(piece_lists[1], &[end_text], &string_table, &target_table); }
+
+#[test]
+fn remaps_structural_pieces_inside_option_some_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let before = string_table.intern("wrap/");
+let after = string_table.intern("inner");
+
+let mut value = HirConstValue::OptionSome(Box::new(HirConstValue::StructuralString {
+    pieces: vec![
+        ConstStringPiece::Text(before),
+        ConstStringPiece::Text(after),
+    ],
+}));
+
+let (target_table, remap) = non_identity_merge_remap(&string_table);
+value.remap_string_ids(&remap);
+
+let mut piece_lists = Vec::new();
+nested_structural_piece_lists(&value, &mut piece_lists);
+assert_eq!(
+    piece_lists.len(),
+    1,
+    "the Some payload holds one piece list"
+);
+assert_remapped_piece_text(
+    piece_lists[0],
+    &[before, after],
+    &string_table,
+    &target_table,
+); }
+
+#[test]
+fn remaps_structural_pieces_nested_two_container_levels_deep_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let leaf_text = string_table.intern("leaf/");
+let tail_text = string_table.intern("tail");
+
+// Collection element -> record field -> structural string: a walker that stops one
+// container short leaves this piece list un-remapped and the text assertion fails.
+let mut value = HirConstValue::Collection(vec![HirConstValue::Record(vec![HirConstField {
+    name: "path".to_string(),
+    value: HirConstValue::StructuralString {
+        pieces: vec![
+            ConstStringPiece::Text(leaf_text),
+            ConstStringPiece::Text(tail_text),
+        ],
+    },
+}])]);
+
+let (target_table, remap) = non_identity_merge_remap(&string_table);
+value.remap_string_ids(&remap);
+
+let mut piece_lists = Vec::new();
+nested_structural_piece_lists(&value, &mut piece_lists);
+assert_eq!(
+    piece_lists.len(),
+    1,
+    "the two-level nest holds one piece list"
+);
+assert_remapped_piece_text(
+    piece_lists[0],
+    &[leaf_text, tail_text],
+    &string_table,
+    &target_table,
+); }
 
 /// Finds the first structural-string piece list inside one lowered statement.
 ///
@@ -1132,172 +1093,170 @@ fn structural_pieces_in_statement(statement: &HirStatement) -> Option<&[ConstStr
 }
 
 #[test]
-fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_table() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_table() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    // The decoy occupies row 0 of the table, so a handoff origin minted against the wrong table
-    // returns an index that resolves to the decoy instead of silently aliasing the real origin.
-    let mut resources = ModuleResourceTable::new();
-    let _decoy = fixture_resource(&mut resources, "assets/decoy.png");
-    let (logo, logo_origin) = fixture_resource(&mut resources, "assets/logo.svg");
+// The decoy occupies row 0 of the table, so a handoff origin minted against the wrong table
+// returns an index that resolves to the decoy instead of silently aliasing the real origin.
+let mut resources = ModuleResourceTable::new();
+let _decoy = fixture_resource(&mut resources, "assets/decoy.png");
+let (logo, logo_origin) = fixture_resource(&mut resources, "assets/logo.svg");
 
-    let prefix = string_table.intern("docs/");
-    let suffix = string_table.intern(".svg");
-    let structural = Expression::structural_string(
-        vec![
-            ConstStringPiece::Text(prefix),
-            ConstStringPiece::Resource(logo),
-            ConstStringPiece::Text(suffix),
-        ],
+let prefix = string_table.intern("docs/");
+let suffix = string_table.intern(".svg");
+let structural = Expression::structural_string(
+    vec![
+        ConstStringPiece::Text(prefix),
+        ConstStringPiece::Resource(logo),
+        ConstStringPiece::Text(suffix),
+    ],
+    None,
+);
+// WHAT: the fixture mapper is the production handoff materialization mirrored, so the node
+//       crossing into HIR is the exact piece-bearing `Text` payload the handoff carries.
+let text_node =
+    expressions_to_owned_render_node_with_resources(&[structural], &string_table, &resources);
+
+let handoff = OwnedRuntimeTemplateHandoff {
+    body: OwnedRuntimeTemplateBody::Render(text_node),
+    span: None,
+};
+
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![node(
+        NodeKind::ExpressionStatement(Expression::runtime_template_handoff(
+            handoff,
+            ValueMode::ImmutableOwned,
+        )),
         None,
-    );
-    // WHAT: the fixture mapper is the production handoff materialization mirrored, so the node
-    //       crossing into HIR is the exact piece-bearing `Text` payload the handoff carries.
-    let text_node =
-        expressions_to_owned_render_node_with_resources(&[structural], &string_table, &resources);
+    )],
+    None,
+);
 
-    let handoff = OwnedRuntimeTemplateHandoff {
-        body: OwnedRuntimeTemplateBody::Render(text_node),
-        span: None,
-    };
+let ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let table = Rc::new(RefCell::new(resources));
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(
-            NodeKind::ExpressionStatement(Expression::runtime_template_handoff(
-                handoff,
-                ValueMode::ImmutableOwned,
-            )),
-            None,
-        )],
-        None,
-    );
+// Lower through the real module entry point with the issuing table installed, exactly as
+// module compilation does, so `intern_handoff_resource_origin` runs against this table.
+let module = lower_module(
+    ast,
+    &mut string_table,
+    &mut path_fork,
+    HirFunctionOriginLookup::default(),
+    Some(Rc::clone(&table)),
+)
+.expect("piece-bearing template handoff should lower through the module resource table")
+.hir_module;
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let table = Rc::new(RefCell::new(resources));
+let start_function_id = module
+    .start_function
+    .expect("normal test module should have start");
+let entry_block =
+    &module.blocks[module.functions[start_function_id.0 as usize].entry.0 as usize];
 
-    // Lower through the real module entry point with the issuing table installed, exactly as
-    // module compilation does, so `intern_handoff_resource_origin` runs against this table.
-    let module = lower_module(
-        ast,
-        &mut string_table,
-        HirFunctionOriginLookup::default(),
-        Some(Rc::clone(&table)),
-    )
-    .expect("piece-bearing template handoff should lower through the module resource table")
-    .hir_module;
+let pieces = entry_block
+    .statements
+    .iter()
+    .find_map(structural_pieces_in_statement)
+    .expect("template handoff should append one structural string chunk");
 
-    let start_function_id = module
-        .start_function
-        .expect("normal test module should have start");
-    let entry_block =
-        &module.blocks[module.functions[start_function_id.0 as usize].entry.0 as usize];
+match pieces {
+    [
+        ConstStringPiece::Text(before),
+        ConstStringPiece::Resource(resource_piece),
+        ConstStringPiece::Text(after),
+    ] => {
+        // Authored order survived: three pieces, with the runs beside the anchor separate
+        // and the text re-bound through the module's own string table.
+        assert_eq!(string_table.resolve(*before), "docs/");
+        assert_eq!(string_table.resolve(*after), ".svg");
 
-    let pieces = entry_block
-        .statements
-        .iter()
-        .find_map(structural_pieces_in_statement)
-        .expect("template handoff should append one structural string chunk");
-
-    match pieces {
-        [
-            ConstStringPiece::Text(before),
-            ConstStringPiece::Resource(resource_piece),
-            ConstStringPiece::Text(after),
-        ] => {
-            // Authored order survived: three pieces, with the runs beside the anchor separate
-            // and the text re-bound through the module's own string table.
-            assert_eq!(string_table.resolve(*before), "docs/");
-            assert_eq!(string_table.resolve(*after), ".svg");
-
-            // The piece handle must resolve through the installed table back to the very origin
-            // the fixture minted: a wrong-table or wrong-asset regression fails exactly here.
-            let stored_origin = table
-                .borrow()
-                .try_origin(*resource_piece)
-                .expect("handoff resource piece must resolve through the module resource table")
-                .origin
-                .clone();
-            assert_eq!(stored_origin, logo_origin);
-        }
-        other => panic!("expected [Text, Resource, Text] pieces in authored order, got {other:?}"),
+        // The piece handle must resolve through the installed table back to the very origin
+        // the fixture minted: a wrong-table or wrong-asset regression fails exactly here.
+        let stored_origin = table
+            .borrow()
+            .try_origin(*resource_piece)
+            .expect("handoff resource piece must resolve through the module resource table")
+            .origin
+            .clone();
+        assert_eq!(stored_origin, logo_origin);
     }
-}
+    other => panic!("expected [Text, Resource, Text] pieces in authored order, got {other:?}"),
+} }
 
 #[test]
-fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_table() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_table() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let prefix = string_table.intern("docs_url = ");
-    let suffix = string_table.intern("docs/");
-    let structural = Expression::structural_string(
-        vec![
-            ConstStringPiece::Text(prefix),
-            ConstStringPiece::SiteRoot,
-            ConstStringPiece::Text(suffix),
-        ],
+let prefix = string_table.intern("docs_url = ");
+let suffix = string_table.intern("docs/");
+let structural = Expression::structural_string(
+    vec![
+        ConstStringPiece::Text(prefix),
+        ConstStringPiece::SiteRoot,
+        ConstStringPiece::Text(suffix),
+    ],
+    None,
+);
+let text_node = expressions_to_owned_render_node(&[structural], &string_table);
+
+let handoff = OwnedRuntimeTemplateHandoff {
+    body: OwnedRuntimeTemplateBody::Render(text_node),
+    span: None,
+};
+
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![node(
+        NodeKind::ExpressionStatement(Expression::runtime_template_handoff(
+            handoff,
+            ValueMode::ImmutableOwned,
+        )),
         None,
-    );
-    let text_node = expressions_to_owned_render_node(&[structural], &string_table);
+    )],
+    None,
+);
+let ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let table = Rc::new(RefCell::new(ModuleResourceTable::new()));
+let module = lower_module(
+    ast,
+    &mut string_table,
+    &mut path_fork,
+    HirFunctionOriginLookup::default(),
+    Some(Rc::clone(&table)),
+)
+.expect("site-root template handoff should lower through the module resource table")
+.hir_module;
 
-    let handoff = OwnedRuntimeTemplateHandoff {
-        body: OwnedRuntimeTemplateBody::Render(text_node),
-        span: None,
-    };
+let start_function_id = module
+    .start_function
+    .expect("normal test module should have start");
+let entry_block =
+    &module.blocks[module.functions[start_function_id.0 as usize].entry.0 as usize];
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(
-            NodeKind::ExpressionStatement(Expression::runtime_template_handoff(
-                handoff,
-                ValueMode::ImmutableOwned,
-            )),
-            None,
-        )],
-        None,
-    );
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let table = Rc::new(RefCell::new(ModuleResourceTable::new()));
-    let module = lower_module(
-        ast,
-        &mut string_table,
-        HirFunctionOriginLookup::default(),
-        Some(Rc::clone(&table)),
-    )
-    .expect("site-root template handoff should lower through the module resource table")
-    .hir_module;
+let pieces = entry_block
+    .statements
+    .iter()
+    .find_map(structural_pieces_in_statement)
+    .expect("template handoff should append one structural string chunk");
 
-    let start_function_id = module
-        .start_function
-        .expect("normal test module should have start");
-    let entry_block =
-        &module.blocks[module.functions[start_function_id.0 as usize].entry.0 as usize];
-
-    let pieces = entry_block
-        .statements
-        .iter()
-        .find_map(structural_pieces_in_statement)
-        .expect("template handoff should append one structural string chunk");
-
-    match pieces {
-        [
-            ConstStringPiece::Text(before),
-            ConstStringPiece::SiteRoot,
-            ConstStringPiece::Text(after),
-        ] => {
-            assert_eq!(string_table.resolve(*before), "docs_url = ");
-            assert_eq!(string_table.resolve(*after), "docs/");
-        }
-        other => panic!("expected [Text, SiteRoot, Text] pieces in authored order, got {other:?}"),
+match pieces {
+    [
+        ConstStringPiece::Text(before),
+        ConstStringPiece::SiteRoot,
+        ConstStringPiece::Text(after),
+    ] => {
+        assert_eq!(string_table.resolve(*before), "docs_url = ");
+        assert_eq!(string_table.resolve(*after), "docs/");
     }
-}
+    other => panic!("expected [Text, SiteRoot, Text] pieces in authored order, got {other:?}"),
+} }

@@ -14,7 +14,7 @@ use crate::compiler_frontend::headers::binding_environment::NamespaceRecordSourc
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::FxHashMap;
 
@@ -24,16 +24,16 @@ use rustc_hash::FxHashMap;
 /// Enums make the resolution path explicit in type names and match arms.
 pub(crate) enum VisibleNameBinding {
     SameFileDeclaration {
-        declaration_path: InternedPath,
+        declaration_path: PathId,
     },
     SourceDependency {
-        canonical_path: InternedPath,
+        canonical_path: PathId,
     },
     TypeAlias {
-        canonical_path: InternedPath,
+        canonical_path: PathId,
     },
     Trait {
-        canonical_path: InternedPath,
+        canonical_path: PathId,
     },
     ExternalImport {
         symbol_id: ExternalSymbolId,
@@ -145,7 +145,7 @@ impl VisibleNameRegistry {
     pub(crate) fn remove_same_file_declaration(
         &mut self,
         local_name: StringId,
-        declaration_path: &InternedPath,
+        declaration_path: &PathId,
     ) {
         let should_remove = self.names.get(&local_name).is_some_and(|entry| {
             matches!(

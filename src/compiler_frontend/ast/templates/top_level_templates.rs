@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use rustc_hash::FxHashMap;
@@ -87,7 +87,7 @@ pub struct AstDocFragment {
 /// to render entry fragments.
 pub(crate) fn collect_const_top_level_fragments(
     top_level_const_fragments: &[TopLevelConstFragment],
-    const_templates_by_path: &FxHashMap<InternedPath, FoldedConstTemplateResult>,
+    const_templates_by_path: &FxHashMap<PathId, FoldedConstTemplateResult>,
 ) -> Result<Vec<AstConstTopLevelFragment>, CompilerError> {
     let mut result = Vec::with_capacity(top_level_const_fragments.len());
 

@@ -19,6 +19,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidReturnShapeReason,
     TypeMismatchContext,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
@@ -33,13 +34,13 @@ fn is_return_terminator(token: &TokenKind) -> bool {
 // --------------------------
 //  Return statement parsing
 // --------------------------
-
 pub(crate) fn parse_return_statement(
     token_stream: &mut FileTokens,
     ast: &mut Vec<AstNode>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     if context.expected_result_type_ids.is_empty()
         && context.expected_error_type.is_none()
@@ -89,6 +90,7 @@ pub(crate) fn parse_return_statement(
             &ValueMode::ImmutableOwned,
             false,
             string_table,
+            path_fork,
         )?;
 
         let returned_error = coerce_expression_to_explicit_type_boundary(
@@ -130,6 +132,7 @@ pub(crate) fn parse_return_statement(
             &context.expected_result_type_ids,
             ValueReceiverKind::Return,
             string_table,
+            path_fork,
         ) {
             Some(Ok(expr)) => expr,
             Some(Err(error)) => return Err(error),
@@ -203,6 +206,7 @@ pub(crate) fn parse_return_statement(
             "return values",
             false,
             string_table,
+            path_fork,
         )?;
 
         if token_stream.current_token_kind() == &TokenKind::Comma {

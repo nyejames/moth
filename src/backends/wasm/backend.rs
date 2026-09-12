@@ -15,6 +15,7 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashSet;
 
@@ -24,6 +25,7 @@ pub(crate) fn lower_hir_to_wasm_lir(
     request: &WasmBackendRequest,
     string_table: &StringTable,
     type_environment: &TypeEnvironment,
+    path_table: &PathTable,
 ) -> Result<WasmLirBackendResult, CompilerMessages> {
     // WHAT: fail fast on builder/backend contract issues.
     // WHY: avoid partial lowering and keep diagnostics deterministic.
@@ -37,6 +39,7 @@ pub(crate) fn lower_hir_to_wasm_lir(
         borrow_facts,
         request,
         string_table,
+        path_table,
         type_environment,
     )?;
     // WHAT: collect optional debug text with zero impact on lowering semantics.
@@ -55,6 +58,7 @@ pub(crate) fn lower_hir_to_wasm_module(
     request: &WasmBackendRequest,
     string_table: &StringTable,
     type_environment: &TypeEnvironment,
+    path_table: &PathTable,
 ) -> Result<WasmLirBackendResult, CompilerMessages> {
     // WHAT: preserve the LIR lowering entry and layer byte emission on top.
     // WHY: this keeps debug and diagnostics workflows stable while emission matures.
@@ -64,6 +68,7 @@ pub(crate) fn lower_hir_to_wasm_module(
         request,
         string_table,
         type_environment,
+        path_table,
     )?;
     if !request.emit_options.emit_wasm_module {
         return Ok(result);

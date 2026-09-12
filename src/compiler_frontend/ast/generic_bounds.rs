@@ -15,7 +15,8 @@ use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, NamespaceRecord, NamespaceTypeMember, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -34,7 +35,7 @@ pub(crate) struct GenericBoundEvidenceContext<'a> {
     pub(crate) visible_source_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub(crate) visible_type_alias_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub(crate) visible_namespace_records: Option<&'a FxHashMap<StringId, NamespaceRecord>>,
-    pub(crate) resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAlias>>,
+    pub(crate) resolved_type_aliases: Option<&'a FxHashMap<PathId, ResolvedTypeAlias>>,
 }
 
 impl<'a> GenericBoundEvidenceContext<'a> {
@@ -43,7 +44,7 @@ impl<'a> GenericBoundEvidenceContext<'a> {
         trait_environment: &'a TraitEnvironment,
         trait_evidence_environment: &'a TraitEvidenceEnvironment,
         visibility: &'a FileVisibility,
-        resolved_type_aliases: &'a FxHashMap<InternedPath, ResolvedTypeAlias>,
+        resolved_type_aliases: &'a FxHashMap<PathId, ResolvedTypeAlias>,
     ) -> Self {
         Self {
             type_environment,
@@ -277,10 +278,7 @@ fn validate_single_bound(
         .get(trait_id)
         .map(|definition| definition.name)
         .unwrap_or(parameter_name);
-    let instance_name = context
-        .type_environment
-        .nominal_path(instance_type_id)
-        .and_then(|path| path.name());
+    let instance_name = None;
 
     Err(CompilerDiagnostic::invalid_generic_instantiation(
         instance_name,
@@ -299,7 +297,7 @@ pub(crate) fn evidence_target_is_visible(
     visible_source_names: Option<&FxHashMap<StringId, SourceDeclarationTarget>>,
     visible_type_alias_names: Option<&FxHashMap<StringId, SourceDeclarationTarget>>,
     visible_namespace_records: Option<&FxHashMap<StringId, NamespaceRecord>>,
-    resolved_type_aliases: Option<&FxHashMap<InternedPath, ResolvedTypeAlias>>,
+    resolved_type_aliases: Option<&FxHashMap<PathId, ResolvedTypeAlias>>,
 ) -> bool {
     if matches!(
         type_environment.get(type_id),
@@ -345,7 +343,7 @@ fn source_target_resolves_to_type(
     target: &SourceDeclarationTarget,
     type_id: TypeId,
     type_environment: &TypeEnvironment,
-    resolved_type_aliases: Option<&FxHashMap<InternedPath, ResolvedTypeAlias>>,
+    resolved_type_aliases: Option<&FxHashMap<PathId, ResolvedTypeAlias>>,
 ) -> bool {
     if let SourceDeclarationTarget::Imported { origin, .. } = target
         && let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Type(origin) =

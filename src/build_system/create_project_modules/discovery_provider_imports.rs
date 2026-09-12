@@ -1,16 +1,19 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
 // -------------------------
 //  Provider-backed import resolution
 // -------------------------
 
 pub(super) struct ProviderBackedImportRequest<'a> {
     pub(super) consumer_canonical_path: &'a Path,
-    pub(super) import_path: &'a InternedPath,
+    pub(super) import_path: PathId,
     pub(super) source_span: Option<SourceSpan>,
-    pub(super) prefix_path: &'a InternedPath,
+    pub(super) prefix_path: PathId,
     pub(super) raw_prefix: &'a str,
     pub(super) provider: &'a std::sync::Arc<dyn ExternalImportProvider>,
     pub(super) project_path_resolver: &'a ProjectPathResolver,
+    pub(super) path_fork: &'a PathInternerFork,
     pub(super) directory_dependency_resolution: Option<DirectoryDependencyResolution<'a>>,
 }
 
@@ -55,6 +58,7 @@ fn resolve_provider_target_via_filesystem(
 ) -> Result<PathBuf, SourceDiscoveryError> {
     let canonical_source_path = resolve_provider_prefix_to_canonical_path(
         request.prefix_path,
+        request.path_fork,
         request.consumer_canonical_path,
         request.project_path_resolver,
         string_table,
@@ -112,7 +116,9 @@ fn invoke_provider_and_record_resolution(
         .map_err(SourceDiscoveryError::from)?;
 
     let provider_request = ExternalImportRequest {
-        import_path: request.import_path.to_portable_string(string_table),
+        import_path: request
+            .path_fork
+            .render_portable(request.import_path, string_table, &mut Vec::new()),
         logical_source_path,
         canonical_source_path: canonical_source_path.clone(),
         source_span: request.source_span,
@@ -152,13 +158,18 @@ fn invoke_provider_and_record_resolution(
 /// WHAT: reuses the normal base/boundary/case rules from `ProjectPathResolver` but skips the
 /// extension candidate selection used by isolated compiler-source resolution.
 fn resolve_provider_prefix_to_canonical_path(
-    prefix_path: &InternedPath,
+    prefix_path: PathId,
+    path_fork: &PathInternerFork,
     declaring_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<PathBuf, SourceDiscoveryError> {
     let (base_kind, filesystem_base) = if let Some(package_root) =
-        project_path_resolver.source_package_root_for_dependency(prefix_path, string_table)
+        project_path_resolver.source_package_root_for_dependency(
+            prefix_path,
+            path_fork,
+            string_table,
+        )
     {
         (
             crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase::SourcePackageRoot,
@@ -177,7 +188,8 @@ fn resolve_provider_prefix_to_canonical_path(
         )
     };
 
-    let normalized = join_and_normalize_path(&filesystem_base, prefix_path, string_table);
+    let normalized =
+        join_and_normalize_path(&filesystem_base, prefix_path, path_fork, string_table);
 
     let canonical = fs::canonicalize(&normalized)
         .map_err(|error| {
@@ -196,6 +208,7 @@ fn resolve_provider_prefix_to_canonical_path(
         &base_kind,
         &filesystem_base,
         prefix_path,
+        path_fork,
     )
     .map_err(SourceDiscoveryError::from)?;
 
@@ -233,7 +246,7 @@ fn source_file_logical_path(
 fn check_provider_dependency_module_boundary(
     declaring_file: &Path,
     target_file: &Path,
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
     source_span: Option<SourceSpan>,
     project_path_resolver: &ProjectPathResolver,
 ) -> Result<(), SourceDiscoveryError> {
@@ -293,14 +306,14 @@ pub(super) fn unsupported_builder_package_error(
 }
 
 pub(super) fn unsupported_external_extension_error(
-    import_path: &InternedPath,
+    import_path: PathId,
     extension: &str,
     source_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let extension_id = string_table.intern(extension);
     CompilerDiagnostic::unsupported_external_extension(
-        import_path.clone(),
+        import_path,
         extension_id,
         source_span,
     )

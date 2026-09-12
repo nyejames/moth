@@ -24,6 +24,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::try_for_each_terminator_target;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
@@ -32,6 +33,7 @@ pub(super) struct BorrowChecker<'a> {
     pub(super) module: &'a HirModule,
     pub(super) external_package_registry: &'a ExternalPackageRegistry,
     pub(super) string_table: &'a StringTable,
+    pub(super) path_fork: &'a PathInternerFork,
     pub(super) diagnostics: BorrowDiagnostics<'a>,
     // Fast ID lookups used throughout analysis.
     pub(super) block_index_by_id: FxHashMap<BlockId, usize>,
@@ -44,6 +46,7 @@ impl<'a> BorrowChecker<'a> {
     pub(super) fn new(
         module: &'a HirModule,
         external_package_registry: &'a ExternalPackageRegistry,
+        path_fork: &'a PathInternerFork,
         string_table: &'a StringTable,
     ) -> Self {
         let block_index_by_id = module
@@ -58,12 +61,12 @@ impl<'a> BorrowChecker<'a> {
             .iter()
             .map(|region| (region.id(), region.parent()))
             .collect::<FxHashMap<_, _>>();
-
         Self {
             module,
             external_package_registry,
             string_table,
-            diagnostics: BorrowDiagnostics::new(module, string_table),
+            path_fork,
+            diagnostics: BorrowDiagnostics::new(module, path_fork, string_table),
             block_index_by_id,
             region_parent_by_id,
             public_call_summaries: FxHashMap::default(),
@@ -126,7 +129,7 @@ impl<'a> BorrowChecker<'a> {
             imported_call_summaries: &self.module.imported_call_summaries,
             module_private_call_summaries: &self.module.module_private_call_summaries,
             generated_call_summaries: &self.module.generated_call_summaries,
-            diagnostics: BorrowDiagnostics::new(self.module, self.string_table),
+            diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
         };
 
         let mut in_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();

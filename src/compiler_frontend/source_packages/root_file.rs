@@ -6,7 +6,7 @@
 //!      the only special filenames the compiler recognises. Legacy `#*.moth` root-like
 //!      filenames are rejected during Stage 0 discovery.
 
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::{CONFIG_FILE_NAME, LANGUAGE_SOURCE_SUFFIX};
 use std::collections::BTreeMap;
@@ -120,12 +120,13 @@ pub(crate) fn dependency_component_is_support_root_file(component: &str) -> bool
         || (component.starts_with('+') && !component.contains('.') && component.len() > 1)
 }
 
-/// Whether a dependency provider root's source component is the canonical project config file.
 pub(crate) fn dependency_path_references_config_file(
-    path: &InternedPath,
+    path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> bool {
-    dependency_source_component(path, string_table).is_some_and(dependency_component_is_config_file)
+    dependency_source_component(path, path_fork, string_table)
+        .is_some_and(dependency_component_is_config_file)
 }
 
 /// Whether a dependency provider root's source component is a support-root file.
@@ -133,19 +134,20 @@ pub(crate) fn dependency_path_references_config_file(
 /// WHAT: checks the provider root's final component to detect attempts to dependency a support root
 /// file by its filename rather than through the support package directory.
 pub(crate) fn dependency_path_references_support_root_file(
-    path: &InternedPath,
+    path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> bool {
-    dependency_source_component(path, string_table)
+    dependency_source_component(path, path_fork, string_table)
         .is_some_and(dependency_component_is_support_root_file)
 }
 
 fn dependency_source_component<'a>(
-    path: &'a InternedPath,
+    path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &'a StringTable,
 ) -> Option<&'a str> {
-    path.len()
-        .checked_sub(1)
-        .and_then(|index| path.as_components().get(index))
-        .map(|component| string_table.resolve(*component))
+    path_fork
+        .component(path)
+        .map(|component| string_table.resolve(component))
 }

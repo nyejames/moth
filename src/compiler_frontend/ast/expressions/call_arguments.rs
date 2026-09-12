@@ -30,6 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -72,6 +73,7 @@ pub(crate) fn parse_call_arguments_typed_with_expectations(
     string_table: &mut StringTable,
     expectations: &[ParameterExpectation],
     argument_syntax: CallArgumentSyntax,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     parse_call_arguments_inner(
         token_stream,
@@ -81,6 +83,7 @@ pub(crate) fn parse_call_arguments_typed_with_expectations(
         CallArgumentSyntaxContext::Ordinary,
         argument_syntax,
         Some(expectations),
+        path_fork,
     )
 }
 
@@ -91,6 +94,7 @@ pub(crate) fn parse_generic_call_arguments_typed(
     string_table: &mut StringTable,
     generic_function_name: Option<StringId>,
     expectations: &[ParameterExpectation],
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     parse_call_arguments_inner(
         token_stream,
@@ -104,6 +108,7 @@ pub(crate) fn parse_generic_call_arguments_typed(
             callee_name: generic_function_name,
         },
         Some(expectations),
+        path_fork,
     )
 }
 
@@ -145,10 +150,11 @@ fn cast_target_context_for_parameter_expectation(
     expectation: &ParameterExpectation,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> CastTargetContext {
     match expectation.expected_type {
         ExpectedParameterType::Known(type_id) => {
-            cast_target_context_for_type_id(type_id, type_environment, string_table)
+            cast_target_context_for_type_id(type_id, type_environment, string_table, path_fork)
         }
         ExpectedParameterType::UnknownExternal => CastTargetContext::None,
     }
@@ -162,6 +168,7 @@ fn parse_call_arguments_inner(
     syntax_context: CallArgumentSyntaxContext,
     argument_syntax: CallArgumentSyntax,
     expectations: Option<&[ParameterExpectation]>,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     ast_log!("Creating function call arguments");
 
@@ -333,6 +340,7 @@ fn parse_call_arguments_inner(
                     expectation,
                     type_interner.environment(),
                     string_table,
+                    &*path_fork,
                 )
             })
             .unwrap_or(CastTargetContext::None);
@@ -346,6 +354,7 @@ fn parse_call_arguments_inner(
                 cast_target_context: &mut cast_target_context,
                 value_mode: &ValueMode::ImmutableOwned,
                 string_table,
+                path_fork,
             },
             false,
         );

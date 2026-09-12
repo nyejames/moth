@@ -62,6 +62,7 @@ use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, increment_ast_counter, record_ast_counter_max,
 };
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReferenceOutcome, ResolvedFileReferenceTable,
@@ -75,8 +76,7 @@ use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::source::{
     FrozenIdentityHandle, SourceDatabase, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -175,7 +175,7 @@ pub(crate) struct Stage0ResolvedFileReferenceView<'a> {
 pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
     NoPhysicalTarget,
     Content {
-        logical_path: Option<InternedPath>,
+        logical_path: Option<PathId>,
         value: Option<&'a OwnedFoldedString>,
     },
     Resource {
@@ -268,8 +268,9 @@ fn ordinary_reference_view<'a>(
                     "content file reference target was absent from the source identity table",
                 )
             })?;
+            let logical_path = Some(source_identity.logical_path);
             Stage0ResolvedFileReferenceOutcome::Content {
-                logical_path: Some(source_files.legacy_logical_path(source_identity.id)),
+                logical_path,
                 value: None,
             }
         }
@@ -391,7 +392,7 @@ pub struct ScopeShared {
     // Immutable semantic lookup tables.
     pub(crate) lookups: Option<Rc<AstModuleLookups>>,
     pub(crate) top_level_declarations: Rc<TopLevelDeclarationTable>,
-    pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
+    pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<PathId, TypeId>>,
     pub(crate) generated_evidence_pairs: Rc<FxHashSet<(TypeId, TraitId)>>,
 
     // External package and frontend services.
@@ -401,21 +402,20 @@ pub struct ScopeShared {
 
     // File-local visibility and resolved declarations.
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
-    pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>>,
+    pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<PathId, ResolvedTypeAlias>>>,
     pub(crate) generic_declarations_by_path:
-        Option<Rc<FxHashMap<InternedPath, GenericDeclarationKind>>>,
+        Option<Rc<FxHashMap<PathId, GenericDeclarationKind>>>,
     pub(crate) resolved_struct_fields_by_path:
-        Option<Rc<FxHashMap<InternedPath, Vec<Declaration>>>>,
+        Option<Rc<FxHashMap<PathId, Vec<Declaration>>>>,
     pub(crate) choice_variant_shells_by_path:
-        Option<Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>>,
+        Option<Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>>,
     pub(crate) resolved_module_constants_override: Option<Rc<ResolvedConstantSet>>,
+    pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
     pub(crate) emitted_warnings: Rc<RefCell<Vec<CompilerDiagnostic>>>,
 
     pub(crate) generic_function_instantiation_requests:
         Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
-    pub(crate) source_file_scope: Option<InternedPath>,
-    pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
-    /// Immutable project/package source `#Config` values for constant-header materialization.
+    pub(crate) source_file_scope: Option<PathId>,
     pub(crate) source_build_config_values: Option<Arc<ResolvedBuildConfigMap>>,
     /// Names of source `#Config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
@@ -445,7 +445,7 @@ pub struct ScopeShared {
 pub struct ScopeContext {
     // Core scope identity.
     pub kind: ContextKind,
-    pub scope: InternedPath,
+    pub scope: PathId,
 
     // Immutable shared services are cheap to clone into child scopes.
     pub(crate) shared: Rc<ScopeShared>,
@@ -456,40 +456,20 @@ pub struct ScopeContext {
     //       The arena is shared across all clones/children through `Rc<RefCell<_>>`,
     //       but borrow guards are never exposed through parser APIs.
     // WHY: replaces per-frame `Rc<ScopeFrame>` allocations with stable IDs and
-    //      index-based parent chains.
+    //       index-based parent chains.
     pub(crate) arena: Rc<RefCell<ScopeArena>>,
 
     /// Module-local TIR store shared by all scope contexts in this AST build.
-    ///
-    /// WHAT: carries the direct `Rc<RefCell<TemplateIrStore>>` handle used by
-    ///       every module-local TIR reference.
-    /// WHY: child scope constructors clone one shared handle, so exact root,
-    ///      phase, and overlay identity stays coherent across the scope tree.
     pub(crate) template_ir_store: Rc<RefCell<TemplateIrStore>>,
 
     // Stable ID of the frame that owns this scope layer's local declarations.
-    //
-    // WHAT: `current_frame_id` points to the arena frame that receives `add_var` calls.
-    //       Child contexts get a new frame whose parent is the parent's current frame.
-    // WHY: explicit frame identity makes clone/child semantics clear and prevents
-    //      accidental mutation of a shared `Rc<ScopeFrame>` from multiple contexts.
     pub(crate) current_frame_id: ScopeFrameId,
 
-    // Assignment targets are readable on the success side of an assignment expression, but not from
-    // catch recovery subtrees attached to that assignment. The pending set is activated only when
-    // the parser enters a `catch` handler body.
     unavailable_assignment_targets: FxHashSet<StringId>,
     pending_catch_assignment_targets: FxHashSet<StringId>,
 
     // Optional file-local visibility gate over declarations.
-    // When present, references must be in this set, which enforces dependency boundaries.
-    //
-    // Kept directly on `ScopeContext` rather than in `ScopeShared` because `add_var` extends it.
-    // The set is shared copy-on-write: child scopes and header-pass scopes clone the handle, and
-    // only a scope that actually declares a local pays for a private copy.
-    pub visible_declaration_ids: Option<Arc<FxHashSet<InternedPath>>>,
-
-    // Type expectations.
+    pub visible_declaration_ids: Option<Arc<FxHashSet<PathId>>>,
     pub expected_result_type_ids: Vec<TypeId>,
     pub expected_error_type: Option<TypeId>,
 
@@ -708,7 +688,7 @@ impl ScopeContext {
     /// `AstPhaseContext::from_build_context`.
     pub(crate) fn new(
         kind: ContextKind,
-        scope: InternedPath,
+        scope: PathId,
         top_level_declarations: Rc<TopLevelDeclarationTable>,
         external_package_registry: Arc<ExternalPackageRegistry>,
         expected_result_type_ids: Vec<TypeId>,
@@ -776,13 +756,12 @@ impl ScopeContext {
             inside_anonymous_const_record: false,
         }
     }
-
     pub fn new_child_control_flow(
         &self,
         kind: ContextKind,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> ScopeContext {
-        increment_ast_counter(AstCounter::ScopeContextsCreated);
 
         let child_frame_id = self
             .arena
@@ -797,9 +776,10 @@ impl ScopeContext {
         };
 
         let scope_id = CONTROL_FLOW_SCOPE_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let scope = self
-            .scope
-            .join_str(&format!("__scope_{scope_id}"), string_table);
+        let scope_component = string_table.intern(&format!("__scope_{scope_id}"));
+        let scope = path_fork
+            .try_intern_child(self.scope, scope_component)
+            .expect("path table exhausted while creating child scope");
         let active_value_target = if matches!(kind, ContextKind::Branch | ContextKind::MatchArm) {
             self.active_value_target.clone()
         } else {
@@ -839,12 +819,12 @@ impl ScopeContext {
             inside_anonymous_const_record: self.inside_anonymous_const_record,
         }
     }
-
     pub fn new_child_function(
         &self,
         function_name: StringId,
         signature: FunctionSignature,
         _string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 
@@ -859,10 +839,12 @@ impl ScopeContext {
 
         let expected_result_type_ids = signature.success_return_type_ids();
         let expected_error_type = signature.error_return_type_id();
-
+        let function_scope = path_fork
+            .try_intern_child(self.scope, function_name)
+            .expect("path table exhausted while creating child function scope");
         let mut new_context = ScopeContext {
             kind: ContextKind::Function,
-            scope: self.scope.append(function_name),
+            scope: function_scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
             template_ir_store: Rc::clone(&self.template_ir_store),
@@ -882,7 +864,7 @@ impl ScopeContext {
         };
 
         // Share the top-level declaration table (cheap Rc clone); reset locals to params only.
-        new_context.set_local_declarations(signature.parameters);
+        new_context.set_local_declarations(signature.parameters, path_fork);
 
         new_context
     }
@@ -966,7 +948,7 @@ impl ScopeContext {
     /// WHY: resolver-less constant contexts are invalid for template folding and
     ///      template-head path coercion.
     ///
-    pub fn new_constant(scope: InternedPath, parent: &ScopeContext) -> ScopeContext {
+    pub fn new_constant(scope: PathId, parent: &ScopeContext) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 
         let child_frame_id = parent

@@ -16,7 +16,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
@@ -30,7 +30,7 @@ use std::collections::HashSet;
 /// types have no header graph node, while unresolved names remain available for later diagnostics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum VisibleNamedTypeResolution {
-    Declaration(InternedPath),
+    Declaration(PathId),
     External,
     Unresolved,
 }
@@ -106,9 +106,10 @@ pub(crate) fn resolve_visible_named_type_path(
 pub(super) fn canonicalize_local_ordering_hints(
     headers: &mut [Header],
     binding_environment: &HeaderBindingEnvironment,
-    file_dependency_clauses_by_source: &FxHashMap<InternedPath, Vec<RetainedDependencyClause>>,
-    dependency_selections_by_source: &FxHashMap<InternedPath, Vec<DependencySelection>>,
+    file_dependency_clauses_by_source: &FxHashMap<PathId, Vec<RetainedDependencyClause>>,
+    dependency_selections_by_source: &FxHashMap<PathId, Vec<DependencySelection>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), HeaderPreparationFailure> {
     for header in headers.iter_mut() {
         let visibility = match binding_environment.visibility_for(&header.source_file) {
@@ -130,8 +131,12 @@ pub(super) fn canonicalize_local_ordering_hints(
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             if hint.origin() == LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling {
+                let mut scratch = Vec::new();
+                let components = path_fork
+                    .resolve_components(hint.path(), &mut scratch)
+                    .to_vec();
                 match resolve_visible_named_type_path(
-                    ParsedNamedTypeReference::Qualified(hint.path().as_components()),
+                    ParsedNamedTypeReference::Qualified(&components),
                     visibility,
                 ) {
                     VisibleNamedTypeResolution::Declaration(path) => {
@@ -154,9 +159,9 @@ pub(super) fn canonicalize_local_ordering_hints(
                         return Err(HeaderPreparationFailure::Infrastructure(error));
                     }
                 };
-                if dependency.dependency.path == *hint.path() && selections.is_empty() {
+                if dependency.dependency.path == hint.path() && selections.is_empty() {
                     matching_dependency = dependency
-                        .effective_namespace_local_name(string_table)
+                        .effective_namespace_local_name(string_table, path_fork)
                         .map(|local_name| (dependency, local_name));
                     if matching_dependency.is_some() {
                         break;
@@ -165,7 +170,9 @@ pub(super) fn canonicalize_local_ordering_hints(
                 }
 
                 if let Some(selection) = selections.iter().find(|selection| {
-                    dependency.dependency.path.append(selection.source_name) == *hint.path()
+                    path_fork
+                        .try_intern_child(dependency.dependency.path, selection.source_name)
+                        == Some(hint.path())
                 }) {
                     matching_dependency = Some((dependency, selection.local_name()));
                     break;

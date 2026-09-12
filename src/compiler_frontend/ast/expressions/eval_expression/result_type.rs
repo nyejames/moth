@@ -18,6 +18,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(super) fn resolve_expression_result_type(
@@ -25,6 +26,7 @@ pub(super) fn resolve_expression_result_type(
     expression_span: Option<SourceSpan>,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
+    path_fork: &PathInternerFork,
 ) -> Result<TypeId, ExpressionTypingError> {
     // Mirror the final RPN evaluation shape with a type-only stack so operator diagnostics fire
     // before constant folding mutates any nodes.
@@ -85,6 +87,7 @@ pub(super) fn resolve_expression_result_type(
                         operator,
                         *span,
                         type_environment,
+                        path_fork,
                     )?);
                 }
 

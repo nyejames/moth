@@ -34,105 +34,31 @@ fn int_with_provenance(value: i32, provenance: SyntheticInterfaceProvenance) -> 
 }
 
 #[test]
-fn retains_direct_provenance_per_function() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let helper_name = entry_path.join_str("helper", &mut string_table);
-    let var_name = super::symbol("result", &mut string_table);
+fn retains_direct_provenance_per_function() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let helper_name = path_fork.try_intern_child(entry_path, string_table.intern("helper")).expect("test path fits");
+let var_name = super::symbol("result", &mut path_fork, &mut string_table);
 
-    let member_a = provenance_member("render", "html");
-    let member_b = provenance_member("render", "wasm");
-    let injected =
-        SyntheticInterfaceProvenance::from_members(vec![member_a.clone(), member_b.clone()]);
+let member_a = provenance_member("render", "html");
+let member_b = provenance_member("render", "wasm");
+let injected =
+    SyntheticInterfaceProvenance::from_members(vec![member_a.clone(), member_b.clone()]);
 
-    let start_body = vec![node(NodeKind::Return(vec![]), None)];
-    let helper_body = vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                var_name,
-                int_with_provenance(42, injected),
-            )),
-            None,
-        ),
-        node(NodeKind::Return(vec![]), None),
-    ];
+let start_body = vec![node(NodeKind::Return(vec![]), None)];
+let helper_body = vec![
+    node(
+        NodeKind::VariableDeclaration(make_test_variable(
+            var_name,
+            int_with_provenance(42, injected),
+        )),
+        None,
+    ),
+    node(NodeKind::Return(vec![]), None),
+];
 
-    let ast = build_ast_with_registered_types(
-        vec![
-            function_node(
-                start_name,
-                FunctionSignature {
-                    parameters: vec![],
-                    returns: vec![],
-                },
-                start_body,
-                None,
-            ),
-            function_node(
-                helper_name.clone(),
-                FunctionSignature {
-                    parameters: vec![],
-                    returns: vec![],
-                },
-                helper_body,
-                None,
-            ),
-        ],
-        entry_path,
-    );
-
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-
-    // Every function has exactly one provenance fact.
-    assert_eq!(module.function_provenance.len(), module.functions.len());
-
-    // The start function has an explicit empty (portable) fact.
-    let start_provenance = module
-        .function_provenance
-        .get(
-            &module
-                .start_function
-                .expect("normal test module should have start"),
-        )
-        .expect("start function should have a provenance fact");
-    assert!(start_provenance.is_empty());
-
-    // The helper function carries the injected member-granular dependencies.
-    let helper_id = module
-        .functions
-        .iter()
-        .find(|function| {
-            module
-                .side_table
-                .function_name_path(function.id)
-                .is_some_and(|path| path == &helper_name)
-        })
-        .map(|function| function.id)
-        .expect("helper function should be present");
-
-    let helper_provenance = module
-        .function_provenance
-        .get(&helper_id)
-        .expect("helper function should have a provenance fact");
-    assert_eq!(
-        helper_provenance.members(),
-        &[
-            provenance_member("render", "html"),
-            provenance_member("render", "wasm"),
-        ]
-    );
-}
-
-#[test]
-fn empty_function_has_explicit_empty_provenance() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-
-    let start_body = vec![node(NodeKind::Return(vec![]), None)];
-
-    let ast = build_ast_with_registered_types(
-        vec![function_node(
+let ast = build_ast_with_registered_types(
+    vec![
+        function_node(
             start_name,
             FunctionSignature {
                 parameters: vec![],
@@ -140,138 +66,203 @@ fn empty_function_has_explicit_empty_provenance() {
             },
             start_body,
             None,
-        )],
-        entry_path,
-    );
-
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-
-    assert_eq!(module.function_provenance.len(), module.functions.len());
-    let provenance = module
-        .function_provenance
-        .get(
-            &module
-                .start_function
-                .expect("normal test module should have start"),
-        )
-        .expect("start function should have a provenance fact");
-    assert!(provenance.is_empty());
-}
-
-#[test]
-fn validation_rejects_missing_provenance_coverage() {
-    use crate::compiler_frontend::hir::validation::validate_hir_module;
-
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-
-    let ast = build_ast_with_registered_types(
-        vec![function_node(
-            start_name,
+        ),
+        function_node(
+            helper_name.clone(),
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
             },
-            vec![node(NodeKind::Return(vec![]), None)],
+            helper_body,
             None,
-        )],
-        entry_path,
-    );
+        ),
+    ],
+    entry_path,
+);
 
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    // Remove the provenance fact to simulate missing coverage.
-    module.function_provenance.clear();
+// Every function has exactly one provenance fact.
+assert_eq!(module.function_provenance.len(), module.functions.len());
 
-    let result = validate_hir_module(&module, &type_environment);
-    assert!(result.is_err());
-    let error = result.unwrap_err();
-    assert!(
-        error.msg.contains("function_provenance"),
-        "error should mention function_provenance, got: {}",
-        error.msg
-    );
-}
+// The start function has an explicit empty (portable) fact.
+let start_provenance = module
+    .function_provenance
+    .get(
+        &module
+            .start_function
+            .expect("normal test module should have start"),
+    )
+    .expect("start function should have a provenance fact");
+assert!(start_provenance.is_empty());
+
+// The helper function carries the injected member-granular dependencies.
+let helper_id = module
+    .functions
+    .iter()
+    .find(|function| {
+        module
+            .side_table
+            .function_name_path(function.id)
+            .is_some_and(|path| path == helper_name)
+    })
+    .map(|function| function.id)
+    .expect("helper function should be present");
+
+let helper_provenance = module
+    .function_provenance
+    .get(&helper_id)
+    .expect("helper function should have a provenance fact");
+assert_eq!(
+    helper_provenance.members(),
+    &[
+        provenance_member("render", "html"),
+        provenance_member("render", "wasm"),
+    ]
+); }
 
 #[test]
-fn validation_rejects_extra_provenance_entry() {
-    use crate::compiler_frontend::hir::ids::FunctionId;
-    use crate::compiler_frontend::hir::validation::validate_hir_module;
+fn empty_function_has_explicit_empty_provenance() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+let start_body = vec![node(NodeKind::Return(vec![]), None)];
 
-    let ast = build_ast_with_registered_types(
-        vec![function_node(
-            start_name,
-            FunctionSignature {
-                parameters: vec![],
-                returns: vec![],
-            },
-            vec![node(NodeKind::Return(vec![]), None)],
-            None,
-        )],
-        entry_path,
-    );
+let ast = build_ast_with_registered_types(
+    vec![function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        start_body,
+        None,
+    )],
+    entry_path,
+);
 
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    // Add an extra provenance entry for a non-existent function.
-    module
-        .function_provenance
-        .insert(FunctionId(999), SyntheticInterfaceProvenance::empty());
-
-    let result = validate_hir_module(&module, &type_environment);
-    assert!(result.is_err());
-    let error = result.unwrap_err();
-    assert!(
-        error.msg.contains("function_provenance"),
-        "error should mention function_provenance, got: {}",
-        error.msg
-    );
-}
+assert_eq!(module.function_provenance.len(), module.functions.len());
+let provenance = module
+    .function_provenance
+    .get(
+        &module
+            .start_function
+            .expect("normal test module should have start"),
+    )
+    .expect("start function should have a provenance fact");
+assert!(provenance.is_empty()); }
 
 #[test]
-fn validation_rejects_replaced_out_of_range_provenance_key() {
-    use crate::compiler_frontend::hir::ids::FunctionId;
-    use crate::compiler_frontend::hir::validation::validate_hir_module;
+fn validation_rejects_missing_provenance_coverage() { let mut path_fork = super::PathInternerFork::empty(); use crate::compiler_frontend::hir::validation::validate_hir_module;
 
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let ast = build_ast_with_registered_types(
-        vec![function_node(
-            start_name,
-            FunctionSignature {
-                parameters: vec![],
-                returns: vec![],
-            },
-            vec![node(NodeKind::Return(vec![]), None)],
-            None,
-        )],
-        entry_path,
-    );
+let ast = build_ast_with_registered_types(
+    vec![function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
+    )],
+    entry_path,
+);
 
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let (mut module, type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    let start_function = module
-        .start_function
-        .expect("normal test module should have start");
-    module.function_provenance.remove(&start_function);
-    module
-        .function_provenance
-        .insert(FunctionId(999), SyntheticInterfaceProvenance::empty());
+// Remove the provenance fact to simulate missing coverage.
+module.function_provenance.clear();
 
-    let result = validate_hir_module(&module, &type_environment);
-    assert!(result.is_err());
-    let error = result.unwrap_err();
-    assert!(
-        error.msg.contains("function_provenance"),
-        "error should mention function_provenance, got: {}",
-        error.msg
-    );
-}
+let result = validate_hir_module(&module, &type_environment);
+assert!(result.is_err());
+let error = result.unwrap_err();
+assert!(
+    error.msg.contains("function_provenance"),
+    "error should mention function_provenance, got: {}",
+    error.msg
+); }
+
+#[test]
+fn validation_rejects_extra_provenance_entry() { let mut path_fork = super::PathInternerFork::empty(); use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::hir::validation::validate_hir_module;
+
+let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+
+let ast = build_ast_with_registered_types(
+    vec![function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
+    )],
+    entry_path,
+);
+
+let (mut module, type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+
+// Add an extra provenance entry for a non-existent function.
+module
+    .function_provenance
+    .insert(FunctionId(999), SyntheticInterfaceProvenance::empty());
+
+let result = validate_hir_module(&module, &type_environment);
+assert!(result.is_err());
+let error = result.unwrap_err();
+assert!(
+    error.msg.contains("function_provenance"),
+    "error should mention function_provenance, got: {}",
+    error.msg
+); }
+
+#[test]
+fn validation_rejects_replaced_out_of_range_provenance_key() { let mut path_fork = super::PathInternerFork::empty(); use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::hir::validation::validate_hir_module;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
+let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+
+let ast = build_ast_with_registered_types(
+    vec![function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
+    )],
+    entry_path,
+);
+
+let (mut module, type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+
+let start_function = module
+    .start_function
+    .expect("normal test module should have start");
+module.function_provenance.remove(&start_function);
+module
+    .function_provenance
+    .insert(FunctionId(999), SyntheticInterfaceProvenance::empty());
+
+let result = validate_hir_module(&module, &type_environment);
+assert!(result.is_err());
+let error = result.unwrap_err();
+assert!(
+    error.msg.contains("function_provenance"),
+    "error should mention function_provenance, got: {}",
+    error.msg
+); }

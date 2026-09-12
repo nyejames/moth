@@ -26,6 +26,7 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -51,12 +52,10 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
     );
     CompiledModuleArtifact {
         module: Module {
-            executable: ModuleExecutable {
-                hir: HirModule::new(),
-                resource_table: ModuleResourceTable::new(),
-                type_environment: TypeEnvironment::new(),
-                borrow_analysis: BorrowCheckReport::default(),
-            },
+            executable: ModuleExecutable { hir: HirModule::new(),
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
             link_facts: ModuleLinkFacts {
                 external_package_registry: Arc::new(ExternalPackageRegistry::new()),
                 external_import_candidates: Vec::new(),

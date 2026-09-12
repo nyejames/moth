@@ -146,7 +146,7 @@ fn render_payload_message(
         | DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
         | DiagnosticPayload::UnsupportedExternalExtension { .. }
         | DiagnosticPayload::InvalidExternalModule { .. } => {
-            import_payload_message(payload, string_table)
+            import_payload_message(payload, context)
         }
         DiagnosticPayload::BorrowConflict { .. }
         | DiagnosticPayload::MultipleMutableBorrows { .. }
@@ -156,7 +156,7 @@ fn render_payload_message(
         | DiagnosticPayload::WholeObjectBorrowConflict { .. }
         | DiagnosticPayload::InvalidMutableAccess { .. }
         | DiagnosticPayload::UseOfUninitializedLocal { .. } => {
-            borrow_payload_message(payload, string_table)
+            borrow_payload_message(payload, context)
         }
         DiagnosticPayload::InvalidConfig { key, reason } => {
             invalid_config_message(*key, reason, string_table)
@@ -297,10 +297,7 @@ fn render_payload_message(
             )
         }
         DiagnosticPayload::CircularDependency { path } => {
-            format!(
-                "Circular dependency at '{}'",
-                path.to_portable_string(string_table)
-            )
+            format!("Circular dependency at '{}'", context.render_path(*path))
         }
         DiagnosticPayload::NamespaceMisuse {
             name,
@@ -533,7 +530,7 @@ fn render_payload_message(
             invalid_page_metadata_message(*key, *reason, string_table)
         }
         DiagnosticPayload::InvalidCompileTimePath { path, reason } => {
-            invalid_compile_time_path_message(path, *reason, string_table)
+            invalid_compile_time_path_message(*path, *reason, context)
         }
         DiagnosticPayload::InvalidExpression { reason } => invalid_expression_message(*reason),
         DiagnosticPayload::CommonSyntaxMistake { reason } => {
@@ -787,28 +784,29 @@ fn trait_name_used_as_type_message(
 
 fn import_payload_message(
     payload: &DiagnosticPayload,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
+    let string_table = context.string_table;
     match payload {
         DiagnosticPayload::MissingImportTarget { path } => {
             format!(
                 "Cannot resolve dependency '{}'.",
-                path.to_portable_string(string_table)
+                context.render_path(*path)
             )
         }
         DiagnosticPayload::AmbiguousImportTarget { path } => format!(
             "Ambiguous dependency target '{}'. Use a more specific path.",
-            path.to_portable_string(string_table)
+            context.render_path(*path)
         ),
         DiagnosticPayload::BareFileImport { path } => format!(
             "Bare file dependency clauses are not supported; select an exported symbol from the file '{}'.",
-            path.to_portable_string(string_table)
+            context.render_path(*path)
         ),
         DiagnosticPayload::DirectSpecialFileImport { path } => {
-            let special_file = special_file_name_from_path(path, string_table);
-            let path_text = path.to_portable_string(string_table);
+            let special_file = special_file_name_from_path(*path, context);
+            let path_text = context.render_path(*path);
             // Guide the author toward the support package directory dependency rather than the root filename.
-            let suggestion = support_root_import_suggestion(path, string_table);
+            let suggestion = support_root_import_suggestion(*path, context);
             format!(
                 "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
             )
@@ -822,7 +820,7 @@ fn import_payload_message(
         DiagnosticPayload::NotExportedBySourceFile { symbol_path } => {
             format!(
                 "Cannot bind '{}' because it is not exported.",
-                symbol_path.to_portable_string(string_table)
+                context.render_path(*symbol_path)
             )
         }
         DiagnosticPayload::NotExportedByPublicSurface {
@@ -830,7 +828,7 @@ fn import_payload_message(
             public_surface_name,
             public_surface_type,
         } => {
-            let path_text = requested_path.to_portable_string(string_table);
+            let path_text = context.render_path(*requested_path);
             let public_surface_name = string_table.resolve(*public_surface_name);
             match public_surface_type {
                 crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::SourcePackage => {
@@ -847,7 +845,7 @@ fn import_payload_message(
         }
         DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path } => format!(
             "Cannot bind '{}' because the target module has no public export surface. Depend on a concrete file from inside the same module, or add a module root file with an `export:` block to define the module's public dependency surface.",
-            symbol_path.to_portable_string(string_table)
+            context.render_path(*symbol_path)
         ),
         DiagnosticPayload::MissingPackageSymbol {
             symbol,
@@ -859,49 +857,49 @@ fn import_payload_message(
         ),
         DiagnosticPayload::CrossModuleImportNotExported { symbol_path } => format!(
             "Cannot bind '{}' because it is not exported by the target module's public surface.",
-            symbol_path.to_portable_string(string_table)
+            context.render_path(*symbol_path)
         ),
         DiagnosticPayload::InvalidImportPath { path, reason } => {
-            invalid_import_path_message(path, *reason, string_table)
+            invalid_import_path_message(*path, *reason, context)
         }
         DiagnosticPayload::DirectSymbolPathImport { path } => {
-            direct_symbol_path_import_message(path, string_table)
+            direct_symbol_path_import_message(*path, context)
         }
         DiagnosticPayload::InvalidNamespaceDefaultName { path } => {
-            invalid_namespace_default_name_message(path, string_table)
+            invalid_namespace_default_name_message(*path, context)
         }
         DiagnosticPayload::DuplicateImportSurfaceMember {
             surface_path,
             member_name,
-        } => duplicate_import_surface_member_message(surface_path, *member_name, string_table),
+        } => duplicate_import_surface_member_message(*surface_path, *member_name, context),
         DiagnosticPayload::ExplicitMothExtension { path } => {
-            explicit_moth_extension_message(path, string_table)
+            explicit_moth_extension_message(*path, context)
         }
         DiagnosticPayload::ExplicitSourceExtension { path, extension } => {
-            explicit_source_extension_message(path, *extension, string_table)
+            explicit_source_extension_message(*path, *extension, context)
         }
         DiagnosticPayload::UnsupportedSourceFileKind { path, extension } => {
-            unsupported_source_file_kind_message(path, *extension, string_table)
+            unsupported_source_file_kind_message(*path, *extension, context)
         }
         DiagnosticPayload::InvalidSourceFileEntry { path, extension } => {
-            invalid_source_file_entry_message(path, *extension, string_table)
+            invalid_source_file_entry_message(*path, *extension, context)
         }
         DiagnosticPayload::DuplicateMothTemplateInputPath { path, .. } => {
-            duplicate_moth_template_input_path_message(path, string_table)
+            duplicate_moth_template_input_path_message(*path, context)
         }
         DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
             first_path,
             second_path,
         } => moth_template_inputs_share_no_common_ancestor_message(
-            first_path,
-            second_path,
-            string_table,
+            *first_path,
+            *second_path,
+            context,
         ),
         DiagnosticPayload::UnsupportedExternalExtension { path, extension } => {
-            unsupported_external_extension_message(path, *extension, string_table)
+            unsupported_external_extension_message(*path, *extension, context)
         }
         DiagnosticPayload::InvalidExternalModule { path, reason } => {
-            invalid_external_module_message(path, reason, string_table)
+            invalid_external_module_message(*path, reason, context)
         }
         _ => String::new(),
     }
@@ -909,7 +907,7 @@ fn import_payload_message(
 
 fn borrow_payload_message(
     payload: &DiagnosticPayload,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     match payload {
         DiagnosticPayload::BorrowConflict {
@@ -917,11 +915,11 @@ fn borrow_payload_message(
             existing_access,
             requested_access,
             ..
-        } => borrow_conflict_message(place, *existing_access, *requested_access, string_table),
+        } => borrow_conflict_message(place, *existing_access, *requested_access, context),
         DiagnosticPayload::MultipleMutableBorrows {
             place,
             conflicting_place,
-        } => multiple_mutable_borrows_message(place, conflicting_place.as_ref(), string_table),
+        } => multiple_mutable_borrows_message(place, conflicting_place.as_ref(), context),
         DiagnosticPayload::SharedMutableConflict {
             place,
             existing_access,
@@ -932,30 +930,30 @@ fn borrow_payload_message(
             *existing_access,
             *requested_access,
             conflicting_place.as_ref(),
-            string_table,
+            context,
         ),
         DiagnosticPayload::UseAfterPossibleMove { place, .. } => {
-            use_after_possible_move_message(place, string_table)
+            use_after_possible_move_message(place, context)
         }
         DiagnosticPayload::MoveWhileBorrowed {
             place,
             existing_access,
             ..
-        } => move_while_borrowed_message(place, *existing_access, string_table),
+        } => move_while_borrowed_message(place, *existing_access, context),
         DiagnosticPayload::WholeObjectBorrowConflict {
             whole_place,
             part_place,
             ..
-        } => whole_object_borrow_conflict_message(whole_place, part_place, string_table),
+        } => whole_object_borrow_conflict_message(whole_place, part_place, context),
         DiagnosticPayload::InvalidMutableAccess {
             place,
             reason,
             conflicting_place,
         } => {
-            invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), string_table)
+            invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), context)
         }
         DiagnosticPayload::UseOfUninitializedLocal { place } => {
-            use_of_uninitialized_local_message(place, string_table)
+            use_of_uninitialized_local_message(place, context)
         }
         _ => String::new(),
     }

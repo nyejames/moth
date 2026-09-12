@@ -48,7 +48,7 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use rustc_hash::FxHashSet;
@@ -382,7 +382,7 @@ pub(super) fn resolve_generic_base_type(
             Err(CompilerDiagnostic::unknown_type_name(*type_name, span))
         }
         GenericBaseType::ResolvedNominal(path) => {
-            resolve_generic_base_path(path.name(), path, arguments, span, context)
+            resolve_generic_base_path(None, path, arguments, span, context)
         }
         GenericBaseType::External(_) => Err(CompilerDiagnostic::invalid_generic_instantiation(
             None,
@@ -427,7 +427,7 @@ fn invalid_carrier_type_syntax(
 /// WHY: bare generic names like `Box` are not valid types; they must be applied as `Box of T`.
 fn reject_bare_generic_type_name(
     visible_name: StringId,
-    canonical_path: &InternedPath,
+    canonical_path: &PathId,
     span: Option<SourceSpan>,
     context: &TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<()> {
@@ -458,7 +458,7 @@ fn reject_bare_generic_type_name(
 ///      used by lazy generic instantiation.
 fn resolve_generic_base_path(
     visible_name: Option<StringId>,
-    canonical_path: &InternedPath,
+    canonical_path: &PathId,
     arguments: &[DataType],
     span: Option<SourceSpan>,
     context: &TypeResolutionContext<'_>,
@@ -508,8 +508,8 @@ fn resolve_generic_base_path(
 /// Fetch a declaration by canonical path, respecting the visible declaration id set.
 fn resolve_declaration_by_path<'a>(
     declaration_table: &'a TopLevelDeclarationTable,
-    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
-    canonical_path: &InternedPath,
+    visible_declaration_ids: Option<&Arc<FxHashSet<PathId>>>,
+    canonical_path: &PathId,
 ) -> Option<&'a Declaration> {
     declaration_table
         .get_visible_resolved_by_path(canonical_path, visible_declaration_ids.map(Arc::as_ref))
@@ -518,7 +518,7 @@ fn resolve_declaration_by_path<'a>(
 /// Fetch a declaration by bare name, respecting the visible declaration id set.
 fn visible_declaration_by_name<'a>(
     declaration_table: &'a TopLevelDeclarationTable,
-    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
+    visible_declaration_ids: Option<&Arc<FxHashSet<PathId>>>,
     name: StringId,
 ) -> Option<&'a Declaration> {
     declaration_table.get_visible_resolved_by_name(name, visible_declaration_ids.map(Arc::as_ref))

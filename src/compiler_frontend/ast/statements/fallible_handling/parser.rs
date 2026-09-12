@@ -32,9 +32,11 @@ use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use super::catch_handler::{
     CatchFallibleHandler, CatchFallibleHandlerSite, parse_catch_fallible_handler_typed,
@@ -45,7 +47,7 @@ use super::success_types::fallible_success_type_ids;
 use super::{EXPRESSION_STAGE, FUNCTION_CALL_STAGE};
 
 pub(crate) struct HandledFallibleCall {
-    pub(crate) name: InternedPath,
+    pub(crate) name: PathId,
     pub(crate) args: Vec<CallArgument>,
     pub(crate) result_type_ids: Vec<TypeId>,
     pub(crate) call_span: Option<SourceSpan>,
@@ -175,6 +177,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
     value_required: bool,
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let expression_type_id = expression.type_id;
     let type_environment = type_interner.environment();
@@ -228,6 +231,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
         },
         None,
         string_table,
+        path_fork,
     )? {
         let expression_span = expression.span;
 
@@ -261,6 +265,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
 }
 
 /// Returns whether `catch` handlers are syntactically permitted in the given scope context.
+/// Returns whether `catch` handlers are syntactically permitted in the given scope context.
 ///
 /// WHY: catch introduces a statement-like body block, so it is forbidden inside expression-only
 /// contexts (conditions, templates, constants) where statements are not allowed.
@@ -282,15 +287,13 @@ fn parse_fallible_handling_suffix(
     site: FallibleHandlingSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Option<FallibleHandling>, ExpressionParseError> {
     match token_stream.current_token_kind() {
-        // `!` — propagate the error upward to the enclosing function's error slot.
         TokenKind::Bang => {
             parse_postfix_propagation(token_stream, context, site, type_interner.environment())
                 .map(Some)
         }
-
-        // `catch:` or `catch |err|:` — recover locally with a fallback or handler body.
         TokenKind::Catch => parse_catch_handling_suffix(
             token_stream,
             context,
@@ -298,10 +301,9 @@ fn parse_fallible_handling_suffix(
             site,
             warnings,
             string_table,
+            path_fork,
         )
         .map(Some),
-
-        // No fallible handling suffix present.
         _ => Ok(None),
     }
 }
@@ -379,6 +381,7 @@ fn parse_catch_handling_suffix(
     site: FallibleHandlingSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FallibleHandling, ExpressionParseError> {
     if !site.allow_boundary_catch {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -399,6 +402,7 @@ fn parse_catch_handling_suffix(
             type_interner,
             site,
             string_table,
+            path_fork,
         ),
 
         // `catch:` — no error binding, just a fallback body.
@@ -409,6 +413,7 @@ fn parse_catch_handling_suffix(
             site,
             warnings,
             string_table,
+            path_fork,
         ),
 
         // `catch |err|:` or `catch |err| then ...` — bind the error value before recovery.
@@ -418,8 +423,9 @@ fn parse_catch_handling_suffix(
             type_interner,
             site,
             warnings,
-            string_table,
-        ),
+        string_table,
+        path_fork,
+    ),
 
         _ => Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
@@ -429,13 +435,13 @@ fn parse_catch_handling_suffix(
     }
 }
 
-/// Delegates to `parse_inline_catch_without_error_binding_typed` for `catch then ...`.
 fn parse_inline_catch_without_error_binding(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FallibleHandling, ExpressionParseError> {
     let CatchFallibleHandler { error, body } = parse_inline_catch_without_error_binding_typed(
         token_stream,
@@ -449,6 +455,7 @@ fn parse_inline_catch_without_error_binding(
             value_required_span: site.value_required_span,
         },
         string_table,
+        path_fork,
     )?;
 
     Ok(FallibleHandling::Handler { error, body })
@@ -462,6 +469,7 @@ fn parse_catch_without_error_binding(
     site: FallibleHandlingSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FallibleHandling, ExpressionParseError> {
     let CatchFallibleHandler { error, body } = parse_catch_without_error_binding_typed(
         token_stream,
@@ -476,6 +484,7 @@ fn parse_catch_without_error_binding(
         },
         warnings,
         string_table,
+        path_fork,
     )?;
 
     Ok(FallibleHandling::Handler { error, body })
@@ -489,6 +498,7 @@ fn parse_catch_handler(
     site: FallibleHandlingSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FallibleHandling, ExpressionParseError> {
     let handler_site = CatchFallibleHandlerSite {
         success_result_type_ids: site.success_result_type_ids,
@@ -506,6 +516,7 @@ fn parse_catch_handler(
             handler_site,
             warnings,
             string_table,
+            path_fork,
         )?
     } else {
         parse_catch_fallible_handler_typed(
@@ -515,6 +526,7 @@ fn parse_catch_handler(
             handler_site,
             warnings,
             string_table,
+            path_fork,
         )?
     };
 
@@ -555,6 +567,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let FallibleCallSite {
         call,
@@ -580,6 +593,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
         },
         warnings,
         string_table,
+        path_fork,
     )?;
 
     let Some(handling) = handling else {
@@ -604,6 +618,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let FallibleHostCallSite {
         call,
@@ -628,6 +643,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
         },
         warnings,
         string_table,
+        path_fork,
     )?;
 
     let Some(handling) = handling else {
@@ -669,6 +685,7 @@ pub(crate) fn parse_cast_catch_handling_suffix(
     type_interner: &mut AstTypeInterner<'_>,
     site: CastCatchSite,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FallibleHandling, ExpressionParseError> {
     let success_type_ids = [site.success_type_id];
     parse_catch_handling_suffix(
@@ -685,5 +702,6 @@ pub(crate) fn parse_cast_catch_handling_suffix(
         },
         None,
         string_table,
+        path_fork,
     )
 }

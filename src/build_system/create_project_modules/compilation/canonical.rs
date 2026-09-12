@@ -238,7 +238,8 @@ fn facade_project_globals_dependency(
     {
         for clause in clauses {
             if is_project_globals_dependency(
-                &clause.dependency.path,
+                clause.dependency.path,
+                &prepared.semantic.path_fork,
                 &prepared.semantic.string_table,
             ) {
                 let diagnostic = CompilerDiagnostic::invalid_dependency_clause(
@@ -319,7 +320,8 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             for clause in file_dependency_clauses {
                 let shell_id = clause.dependency.dependency_shell_id;
                 if is_project_globals_dependency(
-                    &clause.dependency.path,
+                    clause.dependency.path,
+                    &prepared.semantic.path_fork,
                     &prepared.semantic.string_table,
                 ) {
                     let Some(project_globals) = self.boundary.project_globals else {

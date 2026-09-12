@@ -44,7 +44,8 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -66,6 +67,7 @@ impl ModuleMaterialisationPreparation {
         phase_context: &AstPhaseContext<'_>,
         module_resources: Rc<RefCell<ModuleResourceTable>>,
         string_table: &mut StringTable,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Result<AstModuleEnvironment, CompilerError> {
         let mut declaration_table =
             TopLevelDeclarationTable::fork_for_generated(Rc::clone(&self.declaration_table));
@@ -77,6 +79,7 @@ impl ModuleMaterialisationPreparation {
             nominal_source: self,
             template_ir_store: Rc::clone(&phase_context.template_ir_store),
             module_resources: Rc::clone(&module_resources),
+            path_fork,
         };
         for path in self.const_values.module_constant_paths() {
             let value_id = self.const_values.value_for_path(path).ok_or_else(|| {
@@ -151,7 +154,7 @@ impl ModuleMaterialisationPreparation {
 
     pub(crate) fn generic_function_templates(
         &self,
-    ) -> &FxHashMap<InternedPath, GenericFunctionTemplate> {
+    ) -> &FxHashMap<PathId, GenericFunctionTemplate> {
         &self.generic_function_templates_by_path
     }
 
@@ -180,8 +183,8 @@ impl ModuleMaterialisationPreparation {
     }
 
     pub(super) fn generic_template_identity_index(
-        templates: &FxHashMap<InternedPath, GenericFunctionTemplate>,
-    ) -> Result<FxHashMap<GeneratedDeclarationIdentity, InternedPath>, CompilerError> {
+        templates: &FxHashMap<PathId, GenericFunctionTemplate>,
+    ) -> Result<FxHashMap<GeneratedDeclarationIdentity, PathId>, CompilerError> {
         let mut paths_by_identity = FxHashMap::default();
         for (path, template) in templates {
             if template.body_tokens.is_none() {
@@ -204,6 +207,7 @@ impl ModuleMaterialisationPreparation {
         identity: &GeneratedFunctionIdentity,
         requester_context: &ModuleMaterialisationPreparation,
         requester_call_span: Option<SourceSpan>,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
         let template = self
@@ -216,7 +220,7 @@ impl ModuleMaterialisationPreparation {
                     &self.string_table,
                 )
             })?;
-        let content_value_at_path = |logical_path: &InternedPath| {
+        let content_value_at_path = |logical_path: &PathId| {
             let content_path = self.content_constant_path_for_capture(logical_path)?;
             let resources = self.module_resources.as_ref().ok_or_else(|| {
                 CompilerError::compiler_error(
@@ -224,7 +228,7 @@ impl ModuleMaterialisationPreparation {
                 )
             })?;
             let resources = resources.borrow();
-            self.stable_folded_value_at_path(&content_path, &resources)
+            self.stable_folded_value_at_path(&content_path, &resources, path_fork)
         };
         let body = template.body_tokens.as_ref().ok_or_else(|| {
             CompilerMessages::from_error_ref(
@@ -246,7 +250,8 @@ impl ModuleMaterialisationPreparation {
             .unwrap_or_else(|| self.frozen_identity_handle.clone());
         let stable_body = StableBodySyntax::capture(
             body.tokens(),
-            &template.source_file,
+            template.source_file,
+            path_fork,
             &self.string_table,
             stage0_resolution_facts,
             frozen_identity_handle,
@@ -273,7 +278,8 @@ impl ModuleMaterialisationPreparation {
                 .unwrap_or_else(|| self.frozen_identity_handle.clone());
             let stable_nested_body = StableBodySyntax::capture(
                 nested_body.tokens(),
-                &nested_template.source_file,
+                nested_template.source_file,
+                path_fork,
                 &self.string_table,
                 nested_stage0_resolution_facts,
                 nested_frozen_identity_handle,
@@ -291,7 +297,7 @@ impl ModuleMaterialisationPreparation {
             requester_context.fork_materialisation_string_table();
         let source_file = template.source_file.clone();
         let materialised_body = stable_body
-            .materialise(&source_file, &mut string_table)
+            .materialise(source_file, path_fork, &mut string_table)
             .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
@@ -303,7 +309,8 @@ impl ModuleMaterialisationPreparation {
             external_package_registry: Arc::clone(&self.external_package_registry),
             style_directives: &self.style_directives,
             string_table: &mut string_table,
-            entry_dir: self.entry_dir.clone(),
+            path_fork,
+            entry_dir: self.entry_dir,
             root_role: ModuleRootRole::Support,
             build_profile: self.build_profile,
             file_value_resolution: Some(file_value_resolution),
@@ -316,7 +323,7 @@ impl ModuleMaterialisationPreparation {
             #[cfg(feature = "timers")]
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
-        let (phase_context, string_table_ref) =
+        let (phase_context, string_table_ref, path_fork_ref) =
             AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()));
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
@@ -328,7 +335,9 @@ impl ModuleMaterialisationPreparation {
                 &phase_context,
                 Rc::clone(&module_resources),
                 string_table_ref,
+                path_fork_ref,
             )
+            // `build_environment` uses the path fork retained by the AST build context.
             .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
         {
             let lookups = Rc::make_mut(&mut environment.lookups);
@@ -344,7 +353,7 @@ impl ModuleMaterialisationPreparation {
             generated_template.body_tokens = Some(materialised_body.into_generic_body());
             for (path, source_file, stable_nested_body) in stable_nested_bodies {
                 let materialised_nested_body = stable_nested_body
-                    .materialise(&source_file, string_table_ref)
+                    .materialise(source_file, path_fork_ref, string_table_ref)
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
                 let nested_template = lookups
                     .generic_function_templates_by_path
@@ -369,6 +378,7 @@ impl ModuleMaterialisationPreparation {
                 requester_call_span,
             },
             self,
+            path_fork_ref,
             string_table_ref,
         )?;
         Ok(MaterialisedGenericAst {
@@ -386,7 +396,7 @@ impl ModuleMaterialisationPreparation {
 ///       request description belongs to the shared contract rather than its parameter list.
 pub(super) struct GeneratedSidecarRequest<'a> {
     pub identity: &'a GeneratedFunctionIdentity,
-    pub function_path: InternedPath,
+    pub function_path: PathId,
     pub requester_context: &'a ModuleMaterialisationPreparation,
     pub requester_string_remap: &'a StringIdRemap,
     pub requester_call_span: Option<SourceSpan>,
@@ -403,8 +413,9 @@ pub(super) fn emit_materialised_sidecar<PrimarySource>(
     mut environment: AstModuleEnvironment,
     request: GeneratedSidecarRequest<'_>,
     primary_source: &PrimarySource,
+    path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<(AstBuildResult, InternedPath), CompilerMessages>
+) -> Result<(AstBuildResult, PathId), CompilerMessages>
 where
     PrimarySource: MaterialisationNominalSource,
 {
@@ -424,6 +435,7 @@ where
             phase_context.external_package_registry.as_ref(),
             requester_context,
             string_table,
+            path_fork,
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         materialised_type_arguments.push(type_id);
@@ -441,17 +453,19 @@ where
         identity.declaration(),
         function_path,
         materialised_type_arguments.into_boxed_slice(),
+        path_fork,
         string_table,
         requester_call_span,
-    );
-    let instance_path = request.instance_path.clone();
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let instance_path = request.instance_path;
     let emitted = {
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_emit,
             crate::timing::TimingMetric::FrontendGeneratedAstEmit,
             phase_context.timing_context
         );
-        AstEmitter::new(phase_context, &mut environment, 1)
+        AstEmitter::new(phase_context, &mut environment, 1, path_fork)
             .with_generic_call_site_identity_handle(
                 requester_context.frozen_identity_handle.clone(),
             )
@@ -464,7 +478,7 @@ where
             crate::timing::TimingMetric::FrontendGeneratedAstFinalise,
             phase_context.timing_context
         );
-        AstFinalizer::new(phase_context, environment).finalize(emitted, &[], string_table)?
+        AstFinalizer::new(phase_context, environment, path_fork).finalize(emitted, &[], string_table)?
     };
     // The declaring source owns authored field provenance. Imported or synthetic requester
     // blueprints omit those spans, so donor-first merging keeps source ranges stable.
@@ -591,8 +605,7 @@ fn install_generated_request_evidence(
                         "Generated evidence has no executable target for a trait requirement",
                     )
                 })?;
-            let mut method_path = requester_mapping.method_path.clone();
-            method_path.remap_string_ids(requester_string_remap);
+            let method_path = requester_mapping.method_path;
             requirements.push(TraitRequirementEvidence {
                 requirement_id: generated_requirement.id,
                 method_path: method_path.clone(),
@@ -665,8 +678,7 @@ fn install_generated_request_evidence(
             ));
         }
 
-        let mut source_file = requester_evidence.source_file.clone();
-        source_file.remap_string_ids(requester_string_remap);
+        let source_file = requester_evidence.source_file;
         let declaration_span = requester_evidence.declaration_span;
         let generated_evidence = TraitEvidenceDefinition {
             id: TraitEvidenceId(0),

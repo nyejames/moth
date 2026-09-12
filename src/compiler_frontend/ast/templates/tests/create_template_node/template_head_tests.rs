@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token() {
@@ -7,12 +8,14 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
     // routing symbol-led head items through the ordinary expression parser.
     let source = "[unknown_name]";
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = runtime_template_context(&token_stream.src_path.clone(), &mut string_table);
 
-    let diagnostic = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let diagnostic =
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("unknown name in template head should fail");
     let diagnostic = expect_template_diagnostic(diagnostic);
 
@@ -54,6 +57,7 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
         .expect("the test formatter directive should merge");
     let source = format!("// π\n[$raw, ${long_directive_name}: body]");
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         &source,
@@ -67,7 +71,7 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
     );
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("incompatible formatter directives should fail"),
     );
     assert!(matches!(
@@ -100,6 +104,7 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
 #[test]
 fn template_head_expression_preserves_infrastructure_failure() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[stale_template]", &mut string_table, &mut span_builder);
@@ -114,7 +119,9 @@ fn template_head_expression_preserves_infrastructure_failure() {
         span: None,
     };
     let declaration = Declaration {
-        id: scope.append(stale_name),
+        id: path_fork
+            .try_intern_child(scope, stale_name)
+            .expect("stale declaration path should intern"),
         value: Expression::template(stale_template, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -124,7 +131,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
         ScopeContext::new_for_tests(
             ContextKind::Template,
             scope.clone(),
-            Rc::new(TopLevelDeclarationTable::new(vec![declaration])),
+            Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
             0,
@@ -150,6 +157,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
             construction_context: &mut construction_context,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
         },
     ) {
         Err(error) => error,
@@ -168,6 +176,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
 #[test]
 fn template_head_path_lookup_preserves_infrastructure_failure() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[@core/math]", &mut string_table, &mut span_builder);
@@ -205,6 +214,7 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
             construction_context: &mut construction_context,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
         },
     ) {
         Err(error) => error,
@@ -226,6 +236,7 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
 #[test]
 fn template_head_content_path_uses_stage0_resolution_without_project_resolver() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[@docs/intro.mtf]", &mut string_table, &mut span_builder);
@@ -246,12 +257,17 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         &mut string_table,
     )
     .expect("content source identity should build without a project resolver");
-    let source_file = source_files
+    let source_slot = source_files
         .get_by_canonical_path(&target_path)
-        .expect("content source identity should be present")
-        .id;
-    let content_logical_path = source_files.legacy_logical_path(source_file);
-    let content_path = content_constant_path(&content_logical_path, &mut string_table);
+        .expect("content source identity should be present");
+    let source_file = source_slot.id;
+    let content_logical_path = source_slot.logical_path;
+    let content_path = content_constant_path(
+        content_logical_path,
+        &mut path_fork,
+        &mut string_table,
+    )
+    .expect("content constant path should intern");
     let content_string = string_table.intern("resolved head content");
     let content_declaration = Declaration {
         id: content_path,
@@ -278,7 +294,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     let context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         token_stream.src_path.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![content_declaration])),
+        Rc::new(TopLevelDeclarationTable::new(vec![content_declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
@@ -296,8 +312,13 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     }))
     .with_declaring_file_id(source_file);
 
-    let template =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new_const_required(
+        &mut token_stream,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
             .expect("content path in a template head should resolve from Stage 0")
             .template;
     let folded = fold_template_in_context(&template, &context, &mut string_table);
@@ -312,6 +333,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
 fn template_head_extensionless_path_retains_exact_span() {
     let source = "// π\n[@docs/intro]";
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
@@ -351,7 +373,7 @@ fn template_head_extensionless_path_retains_exact_span() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         token_stream.src_path.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
@@ -370,7 +392,7 @@ fn template_head_extensionless_path_retains_exact_span() {
     .with_declaring_file_id(source_file);
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("an extensionless template-head path should fail"),
     );
     assert!(matches!(
@@ -402,7 +424,8 @@ fn template_head_extensionless_path_retains_exact_span() {
 #[test]
 fn single_item_template_head_with_close_is_foldable() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let context = new_constant_context(scope.to_owned());
 
     let mut token_stream = FileTokens::new(
@@ -416,7 +439,7 @@ fn single_item_template_head_with_close_is_foldable() {
         ],
     );
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("single-item head template should parse");
 
     assert!(matches!(
@@ -430,12 +453,13 @@ fn single_item_template_head_with_close_is_foldable() {
 #[test]
 fn parsed_template_tir_reference_carries_empty_view_context() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[: body]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.clone());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template source should parse");
     let reference = &template.tir_reference;
 
@@ -445,6 +469,7 @@ fn parsed_template_tir_reference_carries_empty_view_context() {
 #[test]
 fn template_control_flow_suffix_requires_comma_after_head_items() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[value if true: Visible]",
@@ -453,7 +478,7 @@ fn template_control_flow_suffix_requires_comma_after_head_items() {
     );
     let context = runtime_template_context(&token_stream.src_path.clone(), &mut string_table);
 
-    let diagnostic = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let diagnostic = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("missing comma before template control-flow suffix should fail");
     let diagnostic = expect_template_diagnostic(diagnostic);
 
@@ -505,13 +530,14 @@ fn template_if_suffix_requires_condition() {
 fn template_if_suffix_separator_retains_exact_multibyte_span() {
     let source = "[if true -- π\n, value: Visible]";
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.clone());
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("a separator after an if suffix should fail"),
     );
     assert!(matches!(

@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 
 fn runtime_template_handoff_from_expression(expression: Expression) -> OwnedRuntimeTemplateHandoff {
     let ExpressionKind::RuntimeTemplateHandoff(handoff) = expression.kind else {
@@ -11,6 +12,7 @@ fn runtime_template_handoff_from_expression(expression: Expression) -> OwnedRunt
 #[test]
 fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let location = None;
     let branch_text = string_table.intern("branch body");
     let fallback_text = string_table.intern("fallback body");
@@ -33,7 +35,7 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
         );
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::reference_with_type_id(
-                InternedPath::from_single_str("show_branch", &mut string_table),
+                path_fork.try_intern_portable_path("show_branch", &mut string_table).expect("test path fits"),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
                 location,
@@ -94,6 +96,7 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
 #[test]
 fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let location = None;
     let loop_text = string_table.intern("loop body");
     let open_text = string_table.intern("[");
@@ -119,7 +122,7 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
             builder.push_sequence_node(vec![open, aggregate_output, close], location);
         let header = TemplateLoopHeader::Conditional {
             condition: Box::new(Expression::reference_with_type_id(
-                InternedPath::from_single_str("keep_looping", &mut string_table),
+                path_fork.try_intern_portable_path("keep_looping", &mut string_table).expect("test path fits"),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
                 location,
@@ -256,8 +259,9 @@ fn registered_runtime_template(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
 ) -> Template {
+    let mut path_fork = PathInternerFork::empty();
     let byte_len = string_table.resolve(text).len();
-    let reference_path = InternedPath::from_single_str(reference_name, string_table);
+    let reference_path = path_fork.try_intern_portable_path(reference_name, string_table).expect("test path fits");
     let reference_expression = Expression::reference_with_type_id(
         reference_path,
         DataType::StringSlice,
@@ -298,6 +302,7 @@ fn registered_runtime_template(
 #[test]
 fn ordinary_runtime_template_handoff_uses_module_tir_store() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text = string_table.intern("hello ");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -328,6 +333,7 @@ fn ordinary_runtime_template_handoff_uses_module_tir_store() {
 #[test]
 fn folded_template_preserves_selected_effective_dynamic_provenance() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let unselected_text = string_table.intern("unselected");
     let selected_structural_text = string_table.intern("selected structural");
     let selected_effective_text = string_table.intern("selected effective");
@@ -476,6 +482,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
 #[test]
 fn runtime_template_expression_normalization_replaces_template_with_owned_handoff() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text = string_table.intern("hello ");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -531,8 +538,9 @@ fn runtime_template_expression_normalization_replaces_template_with_owned_handof
 #[test]
 fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let overlay_text = string_table.intern("normalized overlay text");
-    let runtime_path = InternedPath::from_single_str("runtime_name", &mut string_table);
+    let runtime_path = path_fork.try_intern_portable_path("runtime_name", &mut string_table).expect("test path fits");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty_context = TemplateViewContext::default();
@@ -620,6 +628,7 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
 #[test]
 fn nested_runtime_template_normalizes_through_final_view() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let nested_text = string_table.intern("nested runtime text");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -741,6 +750,7 @@ fn find_runtime_handoff_in_node(node: &OwnedRuntimeTemplateNode, found: &mut boo
 #[test]
 fn nested_const_template_folds_through_final_view() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let child_text_str = "child folded text";
     let child_text = string_table.intern(child_text_str);
     let child_byte_len = child_text_str.len();
@@ -813,7 +823,8 @@ fn nested_const_template_folds_through_final_view() {
 #[test]
 fn reactive_metadata_derived_from_nested_final_view() {
     let mut string_table = StringTable::new();
-    let reactive_path = InternedPath::from_single_str("reactive_source", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let reactive_path = path_fork.try_intern_portable_path("reactive_source", &mut string_table).expect("test path fits");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
@@ -900,10 +911,11 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
     use super::super::super::static_if_specialization::StaticIfCandidate;
 
     let mut string_table = StringTable::new();
-    let function_path = InternedPath::from_single_str("render_count", &mut string_table);
-    let parameter_path = InternedPath::from_single_str("source", &mut string_table);
-    let active_source_path = InternedPath::from_single_str("count", &mut string_table);
-    let inactive_source_path = InternedPath::from_single_str("inactive", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let function_path = path_fork.try_intern_portable_path("render_count", &mut string_table).expect("test path fits");
+    let parameter_path = path_fork.try_intern_portable_path("source", &mut string_table).expect("test path fits");
+    let active_source_path = path_fork.try_intern_portable_path("count", &mut string_table).expect("test path fits");
+    let inactive_source_path = path_fork.try_intern_portable_path("inactive", &mut string_table).expect("test path fits");
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let template_expression =
@@ -1117,6 +1129,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
 #[test]
 fn helper_artifact_rejected_after_final_view_traversal() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text = string_table.intern("slot insert content");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -1194,6 +1207,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
     // `synchronize_normalized_public_defaults`, not through a direct
     // `normalize_expression_templates` call labelled generic.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("generic default text");
@@ -1202,7 +1216,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
     let parameter_default = Expression::template(template, ValueMode::ImmutableOwned);
     let mut signature = FunctionSignature {
         parameters: vec![Declaration {
-            id: InternedPath::new(),
+            id: PathId::ROOT,
             value: parameter_default,
             binding_span: None,
             config_qualifier: None,
@@ -1231,6 +1245,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
 #[test]
 fn static_true_assertion_discards_normalized_runtime_template_message_after_validation() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let template = registered_runtime_template(
         string_table.intern("inactive: "),
@@ -1259,7 +1274,7 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
             message,
         },
         span: None,
-        scope: InternedPath::new(),
+        scope: PathId::ROOT,
     };
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,

@@ -126,6 +126,7 @@ pub(crate) fn compile_html_module_wasm(
         string_table,
         js_lowering_config,
         input.type_environment,
+        input.path_table,
     )
     .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 
@@ -152,6 +153,7 @@ pub(crate) fn compile_html_module_wasm(
             &build_plan.wasm_request,
             string_table,
             input.type_environment,
+            input.path_table,
         )?
     };
     let wasm_bytes = wasm_result.wasm_bytes.ok_or_else(|| {

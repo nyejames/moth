@@ -416,6 +416,8 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     };
     let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
+    let mut path_fork =
+        crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
 
     let (failure, source_database) = match super::source_discovery::collect_reachable_input_files(
         &root.join("main.moth"),
@@ -424,6 +426,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         &mut external_imports,
         &source_file_kinds,
         &mut resource_inputs,
+        &mut path_fork,
         &mut string_table,
     ) {
         Ok(_) => panic!("malformed synthetic preparation should diagnose"),

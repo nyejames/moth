@@ -204,8 +204,8 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
         &resolver,
         &source_packages,
         Some("helper"),
-        |resolution, string_table| {
-            let provider = provider_root(&["project"], string_table);
+        |resolution, string_table, provider_paths| {
+            let provider = provider_root(&["project"], provider_paths);
             let mut external_packages = ExternalPackageRegistry::new();
             let providers = ExternalImportProviderRegistry::empty();
             let mut cache =
@@ -224,6 +224,7 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
                 DependencyClauseKind::Namespace,
                 &declaring_source,
                 &resolver,
+                resolution.path_fork(),
                 &mut external_imports,
                 *resolution,
                 string_table,
@@ -478,7 +479,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
     );
     if let DiagnosticPayload::UnsupportedExternalExtension { path, extension } = &diagnostic.payload
     {
-        let path_text = path.to_portable_string(&messages.string_table);
+        let path_text = messages.diagnostic_render_context(0).render_path(*path);
         assert_eq!(path_text, "drawing.js", "unexpected path in diagnostic");
         assert_eq!(
             messages.string_table.resolve(*extension),
@@ -1056,7 +1057,7 @@ fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
     );
     if let DiagnosticPayload::ExplicitSourceExtension { path, extension } = &diagnostic.payload {
         assert_eq!(
-            path.to_portable_string(&messages.string_table),
+            messages.diagnostic_render_context(0).render_path(*path),
             "intro.md",
             "unexpected dependency path in explicit source extension diagnostic"
         );
@@ -1113,7 +1114,7 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
     );
     if let DiagnosticPayload::UnsupportedSourceFileKind { path, extension } = &diagnostic.payload {
         assert_eq!(
-            path.to_portable_string(&messages.string_table),
+            messages.diagnostic_render_context(0).render_path(*path),
             "intro",
             "unexpected dependency path in unsupported source file kind diagnostic"
         );

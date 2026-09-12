@@ -66,6 +66,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -77,24 +78,26 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
 
 /// Consumer-local materializer used to verify that projected const-template strings rebuild as
-/// structural TIR expressions rather than rendered text.
 struct ConstTemplateProjectionMaterializer {
     type_environment: TypeEnvironment,
     module_resources: ModuleResourceTable,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
+    path_fork: PathInternerFork,
 }
-
 impl ConstTemplateProjectionMaterializer {
     fn new() -> Self {
         Self {
             type_environment: TypeEnvironment::new(),
             module_resources: ModuleResourceTable::new(),
             template_ir_store: Rc::new(RefCell::new(TemplateIrStore::new())),
+            path_fork: PathInternerFork::empty(),
         }
     }
 }
-
 impl FoldedValueMaterialiser for ConstTemplateProjectionMaterializer {
+    fn path_fork(&mut self) -> &mut PathInternerFork {
+        &mut self.path_fork
+    }
     fn intern_resource_origin(
         &mut self,
         origin: &StableResourceOriginId,

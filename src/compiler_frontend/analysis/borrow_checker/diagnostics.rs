@@ -14,17 +14,23 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-
 pub(super) struct BorrowDiagnostics<'a> {
     module: &'a HirModule,
+    path_fork: &'a PathInternerFork,
     string_table: &'a StringTable,
 }
 
 impl<'a> BorrowDiagnostics<'a> {
-    pub(super) fn new(module: &'a HirModule, string_table: &'a StringTable) -> Self {
+    pub(super) fn new(
+        module: &'a HirModule,
+        path_fork: &'a PathInternerFork,
+        string_table: &'a StringTable,
+    ) -> Self {
         Self {
             module,
+            path_fork,
             string_table,
         }
     }
@@ -32,7 +38,7 @@ impl<'a> BorrowDiagnostics<'a> {
     pub(super) fn local_name(&self, local_id: LocalId) -> String {
         self.module
             .side_table
-            .resolve_local_name(local_id, self.string_table)
+            .resolve_local_name(local_id, self.path_fork, self.string_table)
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{local_id}"))
     }
@@ -41,7 +47,7 @@ impl<'a> BorrowDiagnostics<'a> {
         self.module
             .side_table
             .local_name_path(local_id)
-            .and_then(|path| path.name())
+            .and_then(|path| self.path_fork.component(path))
             .map(DiagnosticPlace::Local)
             .unwrap_or(DiagnosticPlace::Unknown)
     }
@@ -68,8 +74,9 @@ impl<'a> BorrowDiagnostics<'a> {
     pub(super) fn function_name(&self, function_id: FunctionId) -> String {
         self.module
             .side_table
-            .resolve_function_name(function_id, self.string_table)
-            .map(str::to_owned)
+            .function_name_path(function_id)
+            .and_then(|path| self.path_fork.component(path))
+            .map(|component| self.string_table.resolve(component).to_owned())
             .unwrap_or_else(|| format!("{function_id}"))
     }
 

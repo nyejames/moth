@@ -17,20 +17,22 @@ use crate::compiler_frontend::datatypes::{
     BuiltinScalarReceiver, DataType, ReceiverKey, builtin_type_ids,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-fn interned_path(parts: &[&str], string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_components(parts.iter().map(|part| string_table.intern(part)).collect())
+fn interned_path(parts: &[&str], string_table: &mut StringTable) -> PathId {
+    let mut path_fork = PathInternerFork::empty();
+    let components: Vec<_> = parts.iter().map(|part| string_table.intern(part)).collect();
+    path_fork.try_intern_components(&components).expect("test path fits")
 }
 
 fn empty_receiver_entry(
-    function_path: InternedPath,
-    source_file: InternedPath,
+    function_path: PathId,
+    source_file: PathId,
     receiver: ReceiverKey,
 ) -> ReceiverMethodEntry {
     ReceiverMethodEntry {
@@ -46,13 +48,13 @@ fn empty_receiver_entry(
 }
 
 fn context_for_source_file(
-    source_file: InternedPath,
+    source_file: PathId,
     receiver_methods: ReceiverMethodCatalog,
 ) -> ScopeContext {
     ScopeContext::new_for_tests(
         ContextKind::Function,
-        InternedPath::new(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        PathId::ROOT,
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -64,6 +66,7 @@ fn context_for_source_file(
 #[test]
 fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let method_name = string_table.intern("reset");
     let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int);
     let key = (receiver.to_owned(), method_name);
@@ -99,6 +102,7 @@ fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
 #[test]
 fn visible_method_lookup_prefers_same_file_before_catalog_fallback() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let method_name = string_table.intern("render");
 
     let local_source = interned_path(&["src", "@page.moth"], &mut string_table);
@@ -133,6 +137,7 @@ fn visible_method_lookup_prefers_same_file_before_catalog_fallback() {
 #[test]
 fn visible_method_lookup_uses_stable_catalog_fallback_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let method_name = string_table.intern("render");
     let context_source = interned_path(&["src", "@page.moth"], &mut string_table);
 
@@ -165,6 +170,7 @@ fn visible_method_lookup_uses_stable_catalog_fallback_order() {
 #[test]
 fn recursive_runtime_struct_cycles_are_rejected() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let struct_a = interned_path(&["A"], &mut string_table);
     let struct_b = interned_path(&["B"], &mut string_table);
     let struct_a_field_b = interned_path(&["A", "b"], &mut string_table);
@@ -216,6 +222,7 @@ fn recursive_runtime_struct_cycles_are_rejected() {
 #[test]
 fn non_recursive_runtime_structs_are_allowed() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let struct_a = interned_path(&["A"], &mut string_table);
     let field_ax = interned_path(&["A", "x"], &mut string_table);
 

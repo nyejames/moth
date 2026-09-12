@@ -18,12 +18,29 @@ use crate::compiler_frontend::datatypes::{
 };
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathInternerBuilder, PathTable,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::FxHashMap;
 
 fn single_generic_parameter_list(name: StringId) -> [(TypeParameterId, StringId); 1] {
     [(TypeParameterId(0), name)]
+}
+
+fn empty_path_table() -> PathTable {
+    PathInternerBuilder::new().freeze()
+}
+
+
+fn test_path(
+    path_builder: &mut PathInternerBuilder,
+    string_table: &mut StringTable,
+    spelling: &str,
+) -> PathId {
+    path_builder
+        .try_intern_portable_path(spelling, string_table)
+        .expect("test path fits")
 }
 
 #[test]
@@ -176,11 +193,26 @@ fn display_renders_builtin_names() {
     let env = TypeEnvironment::new();
     let table = StringTable::new();
 
-    assert_eq!(display_type(env.builtins().int, &env, &table), "Int");
-    assert_eq!(display_type(env.builtins().float, &env, &table), "Float");
-    assert_eq!(display_type(env.builtins().bool, &env, &table), "Bool");
-    assert_eq!(display_type(env.builtins().string, &env, &table), "String");
-    assert_eq!(display_type(env.builtins().char, &env, &table), "Char");
+    assert_eq!(
+        display_type(env.builtins().int, &env, &table, &empty_path_table()),
+        "Int"
+    );
+    assert_eq!(
+        display_type(env.builtins().float, &env, &table, &empty_path_table()),
+        "Float"
+    );
+    assert_eq!(
+        display_type(env.builtins().bool, &env, &table, &empty_path_table()),
+        "Bool"
+    );
+    assert_eq!(
+        display_type(env.builtins().string, &env, &table, &empty_path_table()),
+        "String"
+    );
+    assert_eq!(
+        display_type(env.builtins().char, &env, &table, &empty_path_table()),
+        "Char"
+    );
 }
 
 #[test]
@@ -196,7 +228,10 @@ fn display_renders_collection_with_braces() {
         Box::new([int]),
     );
 
-    assert_eq!(display_type(collection, &env, &table), "{Int}");
+    assert_eq!(
+        display_type(collection, &env, &table, &empty_path_table()),
+        "{Int}"
+    );
 }
 
 #[test]
@@ -210,7 +245,10 @@ fn display_renders_option_with_question_mark() {
         Box::new([int]),
     );
 
-    assert_eq!(display_type(option, &env, &table), "Int?");
+    assert_eq!(
+        display_type(option, &env, &table, &empty_path_table()),
+        "Int?"
+    );
 }
 
 #[test]
@@ -225,7 +263,10 @@ fn display_renders_internal_result_carrier_as_fallible_signature() {
         Box::new([int, error_type]),
     );
 
-    assert_eq!(display_type(result, &env, &table), "Int, String!");
+    assert_eq!(
+        display_type(result, &env, &table, &empty_path_table()),
+        "Int, String!"
+    );
 }
 
 #[test]
@@ -242,7 +283,10 @@ fn display_renders_multi_success_result_carrier_as_fallible_signature() {
         Box::new([success_tuple, error_type]),
     );
 
-    assert_eq!(display_type(result, &env, &table), "Int, String, String!");
+    assert_eq!(
+        display_type(result, &env, &table, &empty_path_table()),
+        "Int, String, String!"
+    );
 }
 
 #[test]
@@ -257,7 +301,10 @@ fn display_renders_zero_success_result_carrier_as_error_signature() {
         Box::new([none, error_type]),
     );
 
-    assert_eq!(display_type(result, &env, &table), "String!");
+    assert_eq!(
+        display_type(result, &env, &table, &empty_path_table()),
+        "String!"
+    );
 }
 
 #[test]
@@ -275,7 +322,7 @@ fn display_renders_function_error_return_slot() {
     });
 
     assert_eq!(
-        display_type(function, &env, &table),
+        display_type(function, &env, &table, &empty_path_table()),
         "Function(Int -> String, String!)"
     );
 }
@@ -292,14 +339,18 @@ fn display_renders_tuple_fields() {
         Box::new([int, string]),
     );
 
-    assert_eq!(display_type(tuple, &env, &table), "(Int, String)");
+    assert_eq!(
+        display_type(tuple, &env, &table, &empty_path_table()),
+        "(Int, String)"
+    );
 }
 
 #[test]
 fn display_renders_choice_variants() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Status", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Status");
     let ready = table.get_or_intern("Ready".to_string());
     let failed = table.get_or_intern("Failed".to_string());
 
@@ -327,7 +378,7 @@ fn display_renders_choice_variants() {
     });
 
     assert_eq!(
-        display_type(type_id, &env, &table),
+        display_type(type_id, &env, &table, path_builder.paths()),
         "Status::{Ready, Failed(...)}"
     );
 }
@@ -339,14 +390,18 @@ fn display_renders_generic_parameter_names() {
     let name = table.get_or_intern("T".to_string());
     let type_id = env.intern_generic_parameter(GenericParameterId(0), name);
 
-    assert_eq!(display_type(type_id, &env, &table), "T");
+    assert_eq!(
+        display_type(type_id, &env, &table, &empty_path_table()),
+        "T"
+    );
 }
 
 #[test]
 fn nominal_struct_registration_allocates_id() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Point", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Point");
 
     let struct_def = StructTypeDefinition {
         id: NominalTypeId(0), // will be overwritten by register_nominal_struct
@@ -378,7 +433,8 @@ fn nominal_struct_registration_allocates_id() {
 fn nominal_choice_registration_allocates_id() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Status", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Status");
 
     let choice_def = ChoiceTypeDefinition {
         id: NominalTypeId(0),
@@ -401,8 +457,9 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
 
-    let value_name = InternedPath::from_single_str("value", &mut table);
-    let point_path = InternedPath::from_single_str("Point", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let value_name = test_path(&mut path_builder, &mut table, "value");
+    let point_path = test_path(&mut path_builder, &mut table, "Point");
     let (_, point_type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: point_path,
@@ -419,16 +476,15 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
     let borrowed_fields: Option<&[FieldDefinition]> = env.fields_for(point_type_id);
     assert_eq!(borrowed_fields.map(|fields| fields.len()), Some(1));
 
-    let value_id = value_name
-        .name()
-        .expect("single-segment field path should expose a field name");
+    let path_fork = path_builder.fork_source().fork_for_module();
+    let value_id = table.intern("value");
     let value_field = env
-        .field_for(point_type_id, value_id)
+        .field_for(point_type_id, value_id, &path_fork)
         .expect("direct field lookup should find base struct field");
     assert_eq!(value_field.type_id, env.builtins().int);
 
     let ready_name = table.intern("Ready");
-    let status_path = InternedPath::from_single_str("Status", &mut table);
+    let status_path = test_path(&mut path_builder, &mut table, "Status");
     let (_, status_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
         path: status_path,
@@ -456,6 +512,7 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
 fn generic_member_definition_queries_return_substituted_borrowed_views() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
 
     let box_parameter_name = table.intern("T");
     let box_parameters = single_generic_parameter_list(box_parameter_name);
@@ -467,8 +524,8 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
         .type_id_for_generic_parameter(box_parameter_id)
         .expect("registered struct parameter should have a TypeId");
 
-    let item_name = InternedPath::from_single_str("item", &mut table);
-    let box_path = InternedPath::from_single_str("Box", &mut table);
+    let item_name = test_path(&mut path_builder, &mut table, "item");
+    let box_path = test_path(&mut path_builder, &mut table, "Box");
     let (box_nominal_id, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path,
@@ -486,11 +543,10 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
     let borrowed_fields: Option<&[FieldDefinition]> = env.fields_for(box_of_int);
     assert_eq!(borrowed_fields.map(|fields| fields.len()), Some(1));
 
-    let item_id = item_name
-        .name()
-        .expect("single-segment field path should expose a field name");
+    let path_fork = path_builder.fork_source().fork_for_module();
+    let item_id = table.intern("item");
     let item_field = env
-        .field_for(box_of_int, item_id)
+        .field_for(box_of_int, item_id, &path_fork)
         .expect("direct field lookup should find substituted generic field");
     assert_eq!(item_field.type_id, env.builtins().int);
 
@@ -505,7 +561,7 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
         .expect("registered choice parameter should have a TypeId");
 
     let full_name = table.intern("Full");
-    let state_path = InternedPath::from_single_str("State", &mut table);
+    let state_path = test_path(&mut path_builder, &mut table, "State");
     let (state_nominal_id, _) = env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
         path: state_path,
@@ -514,7 +570,7 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Record {
                 fields: vec![FieldDefinition {
-                    name: InternedPath::from_single_str("inner", &mut table),
+                        name: test_path(&mut path_builder, &mut table, "inner"),
                     type_id: state_parameter_type_id,
                     span: None,
                 }]
@@ -555,7 +611,8 @@ fn receiver_key_queries_use_type_id_semantics() {
         Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::String))
     );
 
-    let point_path = InternedPath::from_single_str("Point", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let point_path = test_path(&mut path_builder, &mut table, "Point");
     let (_, point_type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: point_path.clone(),
@@ -568,7 +625,7 @@ fn receiver_key_queries_use_type_id_semantics() {
         Some(ReceiverKey::Struct(point_path))
     );
 
-    let const_config_path = InternedPath::from_single_str("Config", &mut table);
+    let const_config_path = test_path(&mut path_builder, &mut table, "Config");
     let (_, const_config_type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: const_config_path.clone(),
@@ -595,7 +652,7 @@ fn receiver_key_queries_use_type_id_semantics() {
     let registered_box_parameters =
         env.register_generic_parameter_list(box_parameters.into_iter(), &Default::default());
     let box_parameter_list = registered_box_parameters.list_id;
-    let box_path = InternedPath::from_single_str("Box", &mut table);
+    let box_path = test_path(&mut path_builder, &mut table, "Box");
     let (box_nominal_id, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path.clone(),
@@ -615,7 +672,8 @@ fn receiver_key_queries_use_type_id_semantics() {
 fn updating_choice_variants_preserves_generic_parameter_list() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("ResultShape", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "ResultShape");
     let parameter_name = table.intern("T");
 
     let parameter_ids = single_generic_parameter_list(parameter_name);
@@ -651,7 +709,8 @@ fn updating_choice_variants_preserves_generic_parameter_list() {
 fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("State", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "State");
     let parameter_name = table.intern("T");
 
     let parameter_ids = single_generic_parameter_list(parameter_name);
@@ -694,7 +753,7 @@ fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
                 tag: 1,
                 payload: ChoiceVariantPayloadDefinition::Record {
                     fields: vec![FieldDefinition {
-                        name: InternedPath::from_single_str("value", &mut table),
+                        name: test_path(&mut path_builder, &mut table, "value"),
                         type_id: parameter_type_id,
                         span: None,
                     }]
@@ -727,7 +786,8 @@ fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
 fn updating_struct_fields_refreshes_cached_substituted_generic_instance_views() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Box", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Box");
     let parameter_name = table.intern("T");
 
     let parameter_ids = single_generic_parameter_list(parameter_name);
@@ -762,7 +822,7 @@ fn updating_struct_fields_refreshes_cached_substituted_generic_instance_views() 
     env.update_struct_fields(
         struct_type_id,
         vec![FieldDefinition {
-            name: InternedPath::from_single_str("value", &mut table),
+            name: test_path(&mut path_builder, &mut table, "value"),
             type_id: parameter_type_id,
             span: None,
         }]
@@ -796,7 +856,8 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
         )
     };
 
-    let box_path = InternedPath::from_single_str("Box", &mut local_table);
+    let mut path_builder = PathInternerBuilder::new();
+    let box_path = test_path(&mut path_builder, &mut local_table, "Box");
     let box_parameter_name = local_table.intern("T");
     let box_parameter_ids = single_generic_parameter_list(box_parameter_name);
     let box_registered_parameters =
@@ -811,7 +872,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
         id: NominalTypeId(0),
         path: box_path,
         fields: vec![FieldDefinition {
-            name: InternedPath::from_single_str("value", &mut local_table),
+            name: test_path(&mut path_builder, &mut local_table, "value"),
             type_id: box_parameter_type_id,
             span: Some(source_span),
         }]
@@ -821,7 +882,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     });
     let box_of_int = env.intern_generic_instance(box_nominal_id, Box::new([env.builtins().int]));
 
-    let state_path = InternedPath::from_single_str("State", &mut local_table);
+    let state_path = test_path(&mut path_builder, &mut local_table, "State");
     let state_parameter_name = local_table.intern("U");
     let state_parameter_ids = single_generic_parameter_list(state_parameter_name);
     let state_registered_parameters =
@@ -840,7 +901,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Record {
                 fields: vec![FieldDefinition {
-                    name: InternedPath::from_single_str("item", &mut local_table),
+                    name: test_path(&mut path_builder, &mut local_table, "item"),
                     type_id: state_parameter_type_id,
                     span: Some(source_span),
                 }]
@@ -871,13 +932,36 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
 
     env.remap_string_ids(&remap);
 
-    let remapped_box_path = InternedPath::from_single_str("Box", &mut merged_table);
+    let remapped_box_path = box_path;
     assert_eq!(
         env.nominal_id_for_path(&remapped_box_path),
         Some(box_nominal_id)
     );
-    assert_eq!(display_type(box_type_id, &env, &merged_table), "Box");
-    assert_eq!(display_type(box_of_int, &env, &merged_table), "Box of Int");
+    let mut remapped_path_builder = PathInternerBuilder::new();
+    let remapped_box_path =
+        test_path(&mut remapped_path_builder, &mut merged_table, "Box");
+    assert_eq!(
+        env.nominal_id_for_path(&remapped_box_path),
+        Some(box_nominal_id)
+    );
+    assert_eq!(
+        display_type(
+            box_type_id,
+            &env,
+            &merged_table,
+            remapped_path_builder.paths()
+        ),
+        "Box"
+    );
+    assert_eq!(
+        display_type(
+            box_of_int,
+            &env,
+            &merged_table,
+            remapped_path_builder.paths()
+        ),
+        "Box of Int"
+    );
 
     let generic_parameters = env
         .generic_parameters(box_parameter_list)
@@ -905,7 +989,13 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     let fields = env
         .fields_for(box_of_int)
         .expect("generic struct substituted fields should survive remapping");
-    assert_eq!(fields[0].name.name_str(&merged_table), Some("value"));
+    assert_eq!(
+        path_builder
+            .paths()
+            .component(fields[0].name)
+            .map(|name| local_table.resolve(name)),
+        Some("value")
+    );
     assert_eq!(fields[0].span, Some(source_span));
 
     let variants = env
@@ -916,7 +1006,13 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     let ChoiceVariantPayloadDefinition::Record { fields } = &variants[0].payload else {
         panic!("choice payload should remain a record");
     };
-    assert_eq!(fields[0].name.name_str(&merged_table), Some("item"));
+    assert_eq!(
+        path_builder
+            .paths()
+            .component(fields[0].name)
+            .map(|name| local_table.resolve(name)),
+        Some("item")
+    );
     assert_eq!(fields[0].span, Some(source_span));
 }
 
@@ -925,8 +1021,9 @@ fn struct_and_choice_share_nominal_id_space() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
 
-    let struct_path = InternedPath::from_single_str("Point", &mut table);
-    let choice_path = InternedPath::from_single_str("Status", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let struct_path = test_path(&mut path_builder, &mut table, "Point");
+    let choice_path = test_path(&mut path_builder, &mut table, "Status");
 
     let (struct_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
@@ -1012,7 +1109,8 @@ fn runtime_equality_query_accepts_supported_scalar_types() {
 fn runtime_equality_query_rejects_unsupported_non_choice_types() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let struct_path = InternedPath::from_single_str("Point", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let struct_path = test_path(&mut path_builder, &mut table, "Point");
     let int_type_id = env.builtins().int;
 
     let (_, struct_type_id) = env.register_nominal_struct(StructTypeDefinition {
@@ -1045,7 +1143,8 @@ fn runtime_equality_query_rejects_unsupported_non_choice_types() {
 fn runtime_equality_query_accepts_unit_choices() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Status", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Status");
 
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
@@ -1067,7 +1166,8 @@ fn runtime_equality_query_accepts_unit_choices() {
 fn runtime_equality_query_accepts_choice_payloads_when_fields_do() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Response", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Response");
     let int_type_id = env.builtins().int;
 
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
@@ -1078,7 +1178,7 @@ fn runtime_equality_query_accepts_choice_payloads_when_fields_do() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Record {
                 fields: vec![FieldDefinition {
-                    name: InternedPath::from_single_str("value", &mut table),
+                    name: test_path(&mut path_builder, &mut table, "value"),
                     type_id: int_type_id,
                     span: None,
                 }]
@@ -1097,7 +1197,8 @@ fn runtime_equality_query_accepts_choice_payloads_when_fields_do() {
 fn runtime_equality_query_rejects_choice_payloads_when_fields_do_not() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Response", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Response");
     let function_type_id = env.intern_function(FunctionTypeKey {
         parameters: Box::new([]),
         returns: Box::new([]),
@@ -1112,7 +1213,7 @@ fn runtime_equality_query_rejects_choice_payloads_when_fields_do_not() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Record {
                 fields: vec![FieldDefinition {
-                    name: InternedPath::from_single_str("callback", &mut table),
+                    name: test_path(&mut path_builder, &mut table, "callback"),
                     type_id: function_type_id,
                     span: None,
                 }]
@@ -1131,7 +1232,8 @@ fn runtime_equality_query_rejects_choice_payloads_when_fields_do_not() {
 fn runtime_equality_query_rejects_recursive_choice_payloads() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Recursive", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Recursive");
 
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
@@ -1147,7 +1249,7 @@ fn runtime_equality_query_rejects_recursive_choice_payloads() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Record {
                 fields: vec![FieldDefinition {
-                    name: InternedPath::from_single_str("next", &mut table),
+                    name: test_path(&mut path_builder, &mut table, "next"),
                     type_id: choice_type_id,
                     span: None,
                 }]
@@ -1201,7 +1303,8 @@ fn intern_generic_instance_reuses_ids() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
 
-    let box_path = InternedPath::from_single_str("Box", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let box_path = test_path(&mut path_builder, &mut table, "Box");
     let (box_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path,
@@ -1225,7 +1328,8 @@ fn intern_generic_instance_distinguishes_different_arguments() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
 
-    let box_path = InternedPath::from_single_str("Box", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let box_path = test_path(&mut path_builder, &mut table, "Box");
     let (box_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path,
@@ -1247,7 +1351,8 @@ fn intern_generic_instance_distinguishes_different_arguments() {
 fn const_record_display_uses_source_visible_terminology() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
-    let path = InternedPath::from_single_str("Config", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let path = test_path(&mut path_builder, &mut table, "Config");
 
     let (_, type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
@@ -1257,7 +1362,10 @@ fn const_record_display_uses_source_visible_terminology() {
         const_record: true,
     });
 
-    assert_eq!(display_type(type_id, &env, &table), "const record Config");
+    assert_eq!(
+        display_type(type_id, &env, &table, path_builder.paths()),
+        "const record Config"
+    );
 }
 
 #[test]
@@ -1265,7 +1373,8 @@ fn generic_instance_display_uses_of_syntax() {
     let mut env = TypeEnvironment::new();
     let mut table = StringTable::new();
 
-    let box_path = InternedPath::from_single_str("Box", &mut table);
+    let mut path_builder = PathInternerBuilder::new();
+    let box_path = test_path(&mut path_builder, &mut table, "Box");
     let (box_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path,
@@ -1277,7 +1386,10 @@ fn generic_instance_display_uses_of_syntax() {
     let int = env.builtins().int;
     let box_of_int = env.intern_generic_instance(box_nominal, Box::new([int]));
 
-    assert_eq!(display_type(box_of_int, &env, &table), "Box of Int");
+    assert_eq!(
+        display_type(box_of_int, &env, &table, path_builder.paths()),
+        "Box of Int"
+    );
 }
 
 // -----------------------------------------------------------
@@ -1384,8 +1496,14 @@ fn display_type_renders_growable_and_fixed_collections() {
     let growable = env.intern_collection(int, None);
     let fixed_64 = env.intern_collection(int, Some(64));
 
-    assert_eq!(display_type(growable, &env, &table), "{Int}");
-    assert_eq!(display_type(fixed_64, &env, &table), "{64 Int}");
+    assert_eq!(
+        display_type(growable, &env, &table, &empty_path_table()),
+        "{Int}"
+    );
+    assert_eq!(
+        display_type(fixed_64, &env, &table, &empty_path_table()),
+        "{64 Int}"
+    );
 }
 
 #[test]
@@ -1397,7 +1515,10 @@ fn display_type_renders_nested_fixed_collections() {
     let inner_fixed = env.intern_collection(int, Some(8));
     let outer_fixed = env.intern_collection(inner_fixed, Some(4));
 
-    assert_eq!(display_type(outer_fixed, &env, &table), "{4 {8 Int}}");
+    assert_eq!(
+        display_type(outer_fixed, &env, &table, &empty_path_table()),
+        "{4 {8 Int}}"
+    );
 }
 
 #[test]
@@ -1454,7 +1575,10 @@ fn display_renders_map_type() {
 
     let map_type = env.intern_map(string, int);
 
-    assert_eq!(display_type(map_type, &env, &table), "{String = Int}");
+    assert_eq!(
+        display_type(map_type, &env, &table, &empty_path_table()),
+        "{String = Int}"
+    );
 }
 
 #[test]
@@ -1468,7 +1592,7 @@ fn display_renders_nested_map_type() {
     let outer_map = env.intern_map(string, inner_map);
 
     assert_eq!(
-        display_type(outer_map, &env, &table),
+        display_type(outer_map, &env, &table, &empty_path_table()),
         "{String = {String = Int}}"
     );
 }
@@ -1518,13 +1642,14 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
         )
     };
 
-    let point_path = InternedPath::from_single_str("Point", &mut local_table);
+    let mut path_builder = PathInternerBuilder::new();
+    let point_path = test_path(&mut path_builder, &mut local_table, "Point");
     let (point_nominal_id, point_type_id) =
         requester.register_nominal_struct(StructTypeDefinition {
             id: NominalTypeId(0),
             path: point_path,
             fields: vec![FieldDefinition {
-                name: InternedPath::from_single_str("value", &mut local_table),
+                name: test_path(&mut path_builder, &mut local_table, "value"),
                 type_id: requester.builtins().int,
                 span: Some(source_span),
             }]
@@ -1532,12 +1657,13 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
             generic_parameters: None,
             const_record: false,
         });
-    let point_alias_path = InternedPath::from_single_str("PointAlias", &mut local_table);
+    let point_alias_path =
+        test_path(&mut path_builder, &mut local_table, "PointAlias");
     requester
         .register_nominal_path_alias(point_alias_path, point_type_id)
         .expect("point alias should target the registered nominal");
 
-    let state_path = InternedPath::from_single_str("State", &mut local_table);
+    let state_path = test_path(&mut path_builder, &mut local_table, "State");
     let (state_nominal_id, state_type_id) =
         requester.register_nominal_choice(ChoiceTypeDefinition {
             id: NominalTypeId(0),
@@ -1547,7 +1673,7 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
                 tag: 0,
                 payload: ChoiceVariantPayloadDefinition::Record {
                     fields: vec![FieldDefinition {
-                        name: InternedPath::from_single_str("item", &mut local_table),
+                        name: test_path(&mut path_builder, &mut local_table, "item"),
                         type_id: requester.builtins().string,
                         span: Some(source_span),
                     }]
@@ -1575,9 +1701,9 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
     sibling.remap_string_ids_with_cache(&remap, &mut remap_cache);
     nested.remap_string_ids_with_cache(&remap, &mut remap_cache);
 
-    let remapped_point_path = InternedPath::from_single_str("Point", &mut merged_table);
-    let remapped_point_alias_path = InternedPath::from_single_str("PointAlias", &mut merged_table);
-    let remapped_state_path = InternedPath::from_single_str("State", &mut merged_table);
+    let remapped_point_path = point_path;
+    let remapped_point_alias_path = point_alias_path;
+    let remapped_state_path = state_path;
     for generated in [&sibling, &nested] {
         assert_eq!(
             generated.nominal_id_for_path(&remapped_point_path),
@@ -1592,14 +1718,25 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
             Some(state_nominal_id)
         );
         assert_eq!(
-            display_type(point_type_id, generated, &merged_table),
+            display_type(
+                point_type_id,
+                generated,
+                &local_table,
+                path_builder.paths(),
+            ),
             "Point"
         );
 
         let fields = generated
             .fields_for(point_type_id)
             .expect("generated fork should resolve inherited struct fields");
-        assert_eq!(fields[0].name.name_str(&merged_table), Some("value"));
+        assert_eq!(
+            path_builder
+                .paths()
+                .component(fields[0].name)
+                .map(|name| local_table.resolve(name)),
+            Some("value")
+        );
         assert_eq!(fields[0].span, Some(source_span));
 
         let variants = generated
@@ -1609,7 +1746,13 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
         let ChoiceVariantPayloadDefinition::Record { fields } = &variants[0].payload else {
             panic!("inherited choice payload should remain a record");
         };
-        assert_eq!(fields[0].name.name_str(&merged_table), Some("item"));
+        assert_eq!(
+            path_builder
+                .paths()
+                .component(fields[0].name)
+                .map(|name| local_table.resolve(name)),
+            Some("item")
+        );
         assert_eq!(fields[0].span, Some(source_span));
     }
 }
@@ -1633,7 +1776,10 @@ fn anonymous_const_record_marker_is_interned_once_and_is_not_a_struct() {
     assert!(env.fields_for(marker).is_none());
     assert!(env.struct_definition_for(marker).is_none());
     assert!(!env.is_const_record(marker));
-    assert_eq!(display_type(marker, &env, &table), "anonymous const record");
+    assert_eq!(
+        display_type(marker, &env, &table, &empty_path_table()),
+        "anonymous const record"
+    );
 }
 
 #[test]

@@ -25,7 +25,7 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::traits::definitions::{
@@ -34,7 +34,7 @@ use crate::compiler_frontend::traits::definitions::{
 use crate::compiler_frontend::traits::evidence::TraitEvidenceDefinition;
 use crate::compiler_frontend::value_mode::ValueMode;
 pub(super) struct TraitSurfaceReceiverMethod {
-    pub(super) method_path: InternedPath,
+    pub(super) method_path: PathId,
     pub(super) signature: FunctionSignature,
     pub(super) receiver_mutable: bool,
 }
@@ -117,7 +117,7 @@ pub(super) fn requirement_receiver_is_mutable(requirement: &ResolvedTraitRequire
 pub(super) fn method_path_from_evidence(
     evidence: &TraitEvidenceDefinition,
     requirement: &ResolvedTraitRequirement,
-) -> Option<InternedPath> {
+) -> Option<PathId> {
     evidence
         .requirements
         .iter()
@@ -126,7 +126,7 @@ pub(super) fn method_path_from_evidence(
 }
 
 fn declaration_for_trait_bound_parameter(
-    id: InternedPath,
+    id: PathId,
     type_id: TypeId,
     diagnostic_type: DataType,
     value_mode: ValueMode,
@@ -148,12 +148,13 @@ fn declaration_for_trait_bound_parameter(
 }
 
 pub(super) fn signature_from_trait_requirement(
-    method_path: &InternedPath,
+    method_path: &PathId,
     trait_definition: &ResolvedTraitDefinition,
     requirement: &ResolvedTraitRequirement,
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> FunctionSignature {
     let receiver_mutable = requirement_receiver_is_mutable(requirement);
     let receiver_mode = if receiver_mutable {
@@ -162,7 +163,9 @@ pub(super) fn signature_from_trait_requirement(
         ValueMode::ImmutableReference
     };
     let mut parameters = Vec::with_capacity(requirement.parameters.len() + 1);
-    let receiver_name = method_path.join_str("__trait_bound_receiver", string_table);
+    let receiver_name = path_fork
+        .try_intern_child(*method_path, string_table.intern("__trait_bound_receiver"))
+        .expect("path table exhausted while interning synthetic trait receiver");
     parameters.push(declaration_for_trait_bound_parameter(
         receiver_name,
         receiver_type_id,

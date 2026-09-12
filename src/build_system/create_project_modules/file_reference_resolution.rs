@@ -21,8 +21,9 @@ use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_module_root_file;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
@@ -95,10 +96,11 @@ impl<'a> FileReferenceResolver<'a> {
         reference: &PreparedFileReference,
         source_files: &SourceDatabase,
         string_table: &mut StringTable,
+        path_fork: &PathInternerFork,
         discovered_content_sources: &mut Vec<SourceRecordIndex>,
     ) -> Result<ResolvedFileReference, CompilerError> {
         let source_file = reference.source_file;
-        let authored_path = &path_syntax
+        let authored_path = path_syntax
             .try_path_for_token(reference.path_syntax, reference.span)?
             .root;
 
@@ -131,8 +133,9 @@ impl<'a> FileReferenceResolver<'a> {
             .record(consumer_module_id)
             .root_directory()
             .to_path_buf();
-        let authored_components = authored_path
-            .as_components()
+        let mut authored_components_scratch = Vec::new();
+        let authored_components = path_fork
+            .resolve_components(authored_path, &mut authored_components_scratch)
             .iter()
             .map(|component| string_table.resolve(*component).to_owned())
             .collect::<Vec<_>>();
@@ -380,7 +383,7 @@ impl<'a> FileReferenceResolver<'a> {
         &self,
         source_file: SourceId,
         reference: &PreparedFileReference,
-        authored_path: &InternedPath,
+        authored_path: PathId,
         reason: InvalidCompileTimePathReason,
     ) -> ResolvedFileReference {
         ResolvedFileReference {
@@ -708,20 +711,20 @@ fn invalid_reason(
 /// rejected by the parser, and quoted `"@logo.svg"` is a legal filesystem component.
 fn invalid_components_diagnostic(
     components: &[String],
-    authored_path: &InternedPath,
+    authored_path: PathId,
     source_span: Option<SourceSpan>,
 ) -> Option<CompilerDiagnostic> {
     for component in components {
         if component == "." {
             return Some(CompilerDiagnostic::invalid_compile_time_path(
-                authored_path.clone(),
+                authored_path,
                 InvalidCompileTimePathReason::CurrentDirectorySegment,
                 source_span,
             ));
         }
         if component == ".." {
             return Some(CompilerDiagnostic::invalid_compile_time_path(
-                authored_path.clone(),
+                authored_path,
                 InvalidCompileTimePathReason::ParentDirectorySegment,
                 source_span,
             ));
@@ -740,12 +743,12 @@ fn invalid_components_diagnostic(
 
 /// One retained invalid-path diagnostic for a synthesized single-file reference.
 fn invalid_path_outcome(
-    authored_path: &InternedPath,
+    authored_path: PathId,
     reason: InvalidCompileTimePathReason,
     reference: &PreparedFileReference,
 ) -> SingleFileReferenceOutcome {
     let mut diagnostic = CompilerDiagnostic::invalid_compile_time_path(
-        authored_path.clone(),
+        authored_path,
         reason,
         Some(reference.span),
     );
@@ -810,15 +813,16 @@ impl<'a> SingleFileReferenceResolver<'a> {
             settled: FxHashMap::default(),
         }
     }
-
+    
     pub(crate) fn resolve(
         &mut self,
         source_path: &Path,
         path_syntax: &PathSyntaxTable,
         reference: &PreparedFileReference,
         string_table: &mut StringTable,
+        path_fork: &PathInternerFork,
     ) -> Result<SingleFileResolvedReference, CompilerError> {
-        let authored_path = &path_syntax
+        let authored_path = path_syntax
             .try_path_for_token(reference.path_syntax, reference.span)?
             .root;
         let result = SingleFileResolvedReference {
@@ -841,8 +845,9 @@ impl<'a> SingleFileReferenceResolver<'a> {
             | PreparedFileReferenceClass::ResourceFile => {}
         }
 
-        let authored_components = authored_path
-            .as_components()
+        let mut authored_components_scratch = Vec::new();
+        let authored_components = path_fork
+            .resolve_components(authored_path, &mut authored_components_scratch)
             .iter()
             .map(|component| string_table.resolve(*component).to_owned())
             .collect::<Vec<_>>();

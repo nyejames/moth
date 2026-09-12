@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::statements::collections::new_curly_literal;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -24,7 +25,6 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// WHAT: validates that `{...}` literals are used with a compatible expected type and dispatches
 ///       to the correct collection or map parser.
 /// WHY: curly-brace syntax introduces both homogeneous collections and ordered maps; the builtin
-///      parsing helper must own the dispatch so the expression parser stays flat.
 pub(crate) fn parse_curly_literal_expression(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -33,6 +33,7 @@ pub(crate) fn parse_curly_literal_expression(
     value_mode: &ValueMode,
     expression: &mut Vec<ExpressionRpnItem>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let curly_context = match expected_type {
         ExpectedType::Known(type_id) => {
@@ -70,7 +71,6 @@ pub(crate) fn parse_curly_literal_expression(
 
         ExpectedType::Infer => ExpectedCurlyLiteralContext::Infer,
     };
-
     expression.push(ExpressionRpnItem::Operand(new_curly_literal(
         token_stream,
         curly_context,
@@ -78,6 +78,7 @@ pub(crate) fn parse_curly_literal_expression(
         type_interner,
         value_mode,
         string_table,
+        path_fork,
     )?));
     Ok(())
 }

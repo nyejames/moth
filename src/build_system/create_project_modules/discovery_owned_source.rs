@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 /// Prepare one owned compiler-semantic source row directly into the module's input lane.
 ///
 /// WHAT: borrows a cached or newly selected snapshot and tokenizes selected Moth sources exactly
@@ -15,6 +16,7 @@ pub(crate) fn prepare_owned_source_input(
     source_spans: &mut SourceSpanBuilders<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     selected_source_texts: &mut SelectedSourceTextMap,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
     let (source_id, kind, text) = owned_source_text(
@@ -31,6 +33,7 @@ pub(crate) fn prepare_owned_source_input(
         source_files,
         style_directives,
         string_table,
+        path_fork,
         &mut builder,
     );
     source_spans.retain_span_builder(source_id, builder);
@@ -80,7 +83,6 @@ fn owned_source_text<'a>(
         .map_err(SourceDiscoveryError::from)?;
     Ok((source_id, *source_kind, source_code))
 }
-
 fn prepare_owned_source_text(
     source_id: SourceId,
     kind: SourceFileKind,
@@ -88,17 +90,22 @@ fn prepare_owned_source_text(
     source_files: &SourceDatabase,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     builder: &mut ExtendedSpanBuilder,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
     let source = match kind {
         SourceFileKind::Moth => {
-            let path = source_files.legacy_logical_path(source_id);
+            let path = source_files
+                .get(source_id)
+                .expect("owned source identity must be registered")
+                .logical_path;
             let tokens = tokenize(
                 text,
-                &path,
+                path,
                 TokenizerEntryMode::SourceFile,
                 style_directives,
                 string_table,
+                path_fork,
                 source_id,
                 builder,
             )

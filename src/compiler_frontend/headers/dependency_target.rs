@@ -8,7 +8,7 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use std::path::Path;
 
@@ -36,23 +36,26 @@ impl DependencyTargetKind {
 
 /// One checked explicit-extension provider target.
 ///
-/// WHAT: exposes the validated prefix, remaining provider-specific components and the
-///       interned extension whose spelling matches the prefix's last component.
-/// WHY: Stage 0 and binding must not reslice the raw count or reinterpret the extension ID.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// WHAT: exposes the validated prefix as a `PathId` in the same fork plus the
+///       remaining provider-specific components and the interned extension whose
+///       spelling matches the prefix's last component.
+/// WHY: Stage 0 and binding must not reslice a raw count or reinterpret the extension ID.
+///      The prefix stays a fork identity so later resolution never rebuilds an intermediate
+///      `InternedPath`; only the short provider suffix is owned here.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedExternalProviderTarget<'a> {
-    prefix_components: &'a [StringId],
-    remaining_components: &'a [StringId],
+    prefix: PathId,
+    remaining_components: Vec<StringId>,
     extension_spelling: &'a str,
 }
 
 impl<'a> DecodedExternalProviderTarget<'a> {
-    pub(crate) fn prefix_path(&self) -> InternedPath {
-        InternedPath::from_components(self.prefix_components.to_vec())
+    pub(crate) fn prefix_path_id(&self) -> PathId {
+        self.prefix
     }
 
-    pub(crate) fn remaining_components(&self) -> &'a [StringId] {
-        self.remaining_components
+    pub(crate) fn remaining_components(&self) -> &[StringId] {
+        &self.remaining_components
     }
 
     pub(crate) fn extension_spelling(&self) -> &'a str {
@@ -66,11 +69,14 @@ impl<'a> DecodedExternalProviderTarget<'a> {
 /// extensionless-source diagnostic. The first other explicit extension is the provider prefix.
 /// Header syntax does not consult the provider registry.
 pub(crate) fn classify_dependency_target(
-    path: &InternedPath,
+    path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> DependencyTargetKind {
+    let mut components = Vec::new();
+    path_fork.resolve_components(path, &mut components);
     let mut provider_extension = None;
-    for (index, component) in path.as_components().iter().enumerate() {
+    for (index, component) in components.iter().enumerate() {
         let spelling = string_table.resolve(*component);
         let Some(extension) = explicit_non_source_extension(spelling) else {
             continue;
@@ -96,8 +102,9 @@ pub(crate) fn classify_dependency_target(
 /// WHY: malformed retained classification is compiler corruption and must fail through
 ///      `CompilerError` rather than looking like an ordinary non-provider dependency.
 pub(crate) fn decode_dependency_target<'a>(
-    path: &'a InternedPath,
+    path: PathId,
     target: &DependencyTargetKind,
+    path_fork: &PathInternerFork,
     string_table: &'a StringTable,
 ) -> Result<Option<DecodedExternalProviderTarget<'a>>, CompilerError> {
     match target {
@@ -106,16 +113,17 @@ pub(crate) fn decode_dependency_target<'a>(
             prefix_component_count,
             extension,
         } => {
-            decode_external_provider_target(path, *prefix_component_count, *extension, string_table)
+            decode_external_provider_target(path, *prefix_component_count, *extension, path_fork, string_table)
                 .map(Some)
         }
     }
 }
 
 fn decode_external_provider_target<'a>(
-    path: &'a InternedPath,
+    path: PathId,
     prefix_component_count: u32,
     extension: StringId,
+    path_fork: &PathInternerFork,
     string_table: &'a StringTable,
 ) -> Result<DecodedExternalProviderTarget<'a>, CompilerError> {
     if prefix_component_count == 0 {
@@ -127,7 +135,8 @@ fn decode_external_provider_target<'a>(
     let prefix_len = usize::try_from(prefix_component_count).map_err(|_| {
         CompilerError::compiler_error("retained provider prefix count does not fit usize")
     })?;
-    let components = path.as_components();
+    let mut components = Vec::new();
+    path_fork.resolve_components(path, &mut components);
     if prefix_len > components.len() {
         return Err(CompilerError::compiler_error(
             "retained provider prefix count is outside the path",
@@ -152,9 +161,27 @@ fn decode_external_provider_target<'a>(
         ));
     }
 
+    let Some(depth) = path_fork.try_depth(path) else {
+        return Err(CompilerError::compiler_error(
+            "retained provider path is outside its owning path fork",
+        ));
+    };
+    let depth = depth as usize;
+    if prefix_len > depth {
+        return Err(CompilerError::compiler_error(
+            "retained provider prefix count is outside the path",
+        ));
+    }
+    let mut prefix = path;
+    for _ in 0..(depth - prefix_len) {
+        prefix = path_fork.try_parent(prefix).ok_or_else(|| {
+            CompilerError::compiler_error("retained provider path is missing a parent link")
+        })?;
+    }
+
     Ok(DecodedExternalProviderTarget {
-        prefix_components: &components[..prefix_len],
-        remaining_components: &components[prefix_len..],
+        prefix,
+        remaining_components: components[prefix_len..].to_vec(),
         extension_spelling,
     })
 }

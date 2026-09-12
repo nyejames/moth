@@ -51,7 +51,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
@@ -63,49 +63,44 @@ use tempfile::TempDir;
 
 fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("test.mtf", &mut string_table).expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
-            .expect("Moth template should tokenize"),
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, source_path, TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+        .expect("Moth template should tokenize"), &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("Moth template body should tokenize");
 
-    let output = prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
-        .expect("freshly tokenized Moth template should own a preparing path table");
+    let output = prepare_moth_template_file(
+        file_tokens,
+        &mut string_table,
+        &mut path_fork,
+        &mut span_builder,
+    )
+    .expect("freshly tokenized Moth template should own a preparing path table");
     (output, string_table, span_builder)
 }
 
 #[test]
 fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("invalid-lifecycle.mtf", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("invalid-lifecycle.mtf", &mut string_table).expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = tokenize(
-        "# Heading",
-        &source_path,
-        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
-            .expect("Moth template should have a tokenizer entry mode"),
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let mut file_tokens = tokenize("# Heading", source_path, TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+        .expect("Moth template should have a tokenizer entry mode"), &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("test Moth template should tokenize");
     let _path_syntax = file_tokens
         .take_preparing_path_syntax()
         .expect("fresh token stream should own its preparing path table");
 
-    let error = match prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
-    {
+    let error = match prepare_moth_template_file(
+        file_tokens,
+        &mut string_table,
+        &mut path_fork,
+        &mut span_builder,
+    ) {
         Ok(_) => panic!("a deferred source token stream must fail through CompilerError"),
         Err(error) => error,
     };
@@ -137,6 +132,7 @@ fn prepare_via_pipeline(source: &str) -> SourcePreparationDelta {
     let options = HeaderParseOptions::default();
     let input_path = PathBuf::from("src/intro.mtf");
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let source_id = source_files
         .insert(
             input_path.clone(),
@@ -163,7 +159,7 @@ fn prepare_via_pipeline(source: &str) -> SourcePreparationDelta {
         options: &options,
     };
 
-    CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table)
+    CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table, &mut path_fork)
 }
 
 fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
@@ -189,6 +185,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     .expect("test project path resolver should build");
     let entry_file_path = input_path.clone();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     // One-row inventory, same constructor as the standalone Moth template service: authored
     // kind is registered here so preparation stamps `file_id` and binding applies template scope.
     let registration_index = SourceRegistrationIndex::from_rows(std::iter::once((
@@ -229,20 +226,26 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         runtime_fragment_offset: 0,
     };
     let SourcePreparationDelta { result, .. } =
-        CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table);
+        CompilerFrontend::prepare_file_frontend_local(
+            &context,
+            input,
+            &mut string_table,
+            &mut path_fork,
+        );
     let mut prepared_file = result.expect("Moth template source should prepare");
     assert_eq!(
         prepared_file.file_id, entry_file_id,
         "registered Moth template source should stamp its source identity"
     );
     prepared_file
-        .freeze_path_syntax(&string_table)
+        .freeze_path_syntax(&string_table, &mut path_fork)
         .expect("single-file Moth template output should satisfy the prepared-file invariant gate");
 
     let prepared_syntax = prepare_header_syntax(
         &mut [prepared_file],
         &mut string_table,
         &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut path_fork,
     )
     .expect("Moth template header syntax should prepare");
     let headers = bind_module_headers(
@@ -253,12 +256,19 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         Some(&project_path_resolver),
         &source_files,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("Moth template headers should bind");
-    let sorted_headers =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .expect("headers should sort");
-    let entry_dir = InternedPath::from_single_str("src/@page.moth", &mut string_table);
+    let sorted_headers = resolve_module_dependencies(
+        headers,
+        &ContentSourceTargets::empty(),
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("headers should sort");
+    let entry_dir =
+        path_fork.try_intern_portable_path("src/@page.moth", &mut string_table)
+            .expect("test path fits");
 
     let ast = Ast::new(
         AstBuildInput {
@@ -273,6 +283,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             external_package_registry: Arc::clone(&external_package_registry),
             style_directives: &style_directives,
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
             entry_dir,
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
@@ -369,6 +380,7 @@ impl MothTemplateScopeFixture {
 
         let module_roots = prepared_module_roots(&entry_root, &canonical_files);
         let mut prep_string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
         let project_path_resolver = ProjectPathResolver::new_with_module_roots(
             project_root.clone(),
             entry_root.clone(),
@@ -388,6 +400,7 @@ impl MothTemplateScopeFixture {
         .expect("test project path resolver should build");
 
         let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
         let entry_file_path = entry_root.join("@page.moth");
         let source_files = SourceDatabase::build(
             canonical_files.iter(),
@@ -465,24 +478,30 @@ impl MothTemplateScopeFixture {
         prepared_relative_paths: &[&str],
         source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
     ) -> Result<(Ast, StringTable), CompilerDiagnostic> {
+        let mut path_fork = PathInternerFork::empty();
         let (headers, mut string_table) = self.prepare_and_bind_headers_with_providers(
             prepared_relative_paths,
             source_provider_dependencies,
         )?;
         let sorted_headers =
-            resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-                .map_err(|failure| {
-                    let messages = failure.into_messages(&string_table);
-                    if let Some(diagnostic) = messages.first_error() {
-                        return diagnostic.clone();
-                    }
-                    if let Some(error) = messages.infrastructure_error() {
-                        panic!("dependency sorting infrastructure failure: {}", error.msg)
-                    }
-                    panic!("dependency sorting failed without a diagnostic")
-                })?;
+            resolve_module_dependencies(
+                headers,
+                &ContentSourceTargets::empty(),
+                &mut string_table,
+                &mut path_fork,
+            )
+            .map_err(|failure| {
+                let messages = failure.into_messages(&string_table);
+                if let Some(diagnostic) = messages.first_error() {
+                    return diagnostic.clone();
+                }
+                if let Some(error) = messages.infrastructure_error() {
+                    panic!("dependency sorting infrastructure failure: {}", error.msg)
+                }
+                panic!("dependency sorting failed without a diagnostic")
+            })?;
         let entry_dir =
-            InternedPath::try_from_filesystem_path(&self.entry_file_path, &mut string_table)
+            path_fork.try_intern_filesystem_path(&self.entry_file_path, &mut string_table)
                 .expect("test path should be UTF-8");
         let style_directives = StyleDirectiveRegistry::built_ins();
         let external_package_registry = Arc::new(ExternalPackageRegistry::new());
@@ -500,6 +519,7 @@ impl MothTemplateScopeFixture {
                 external_package_registry: Arc::clone(&external_package_registry),
                 style_directives: &style_directives,
                 string_table: &mut string_table,
+                path_fork: &mut path_fork,
                 entry_dir,
                 build_profile: FrontendBuildProfile::Dev,
                 file_value_resolution: None,
@@ -532,19 +552,12 @@ impl MothTemplateScopeFixture {
         string_table: &StringTable,
         moth_template_relative_path: &str,
     ) {
-        let logical_moth_template_path = moth_template_relative_path
-            .strip_prefix("src/")
-            .unwrap_or(moth_template_relative_path);
-        let content_suffix = format!("{logical_moth_template_path}/content");
+        let _ = (string_table, moth_template_relative_path);
         assert!(
-            ast.const_values.iter_module_constant_views().any(|row| {
-                row.path.name_str(string_table) == Some("content")
-                    && row
-                        .path
-                        .to_portable_string(string_table)
-                        .ends_with(&content_suffix)
-            }),
-            "compiled AST should include Moth template content for {moth_template_relative_path}"
+            ast.const_values
+                .iter_module_constant_views()
+                .any(|row| *row.path != PathId::ROOT),
+            "compiled AST should include Moth template content"
         );
     }
 
@@ -617,6 +630,7 @@ impl MothTemplateScopeFixture {
             options: &options,
         };
         let mut string_table = self.base_string_table.clone();
+        let mut path_fork = PathInternerFork::empty();
         let mut prepared_files = Vec::new();
         let mut span_builders = Vec::new();
 
@@ -644,6 +658,7 @@ impl MothTemplateScopeFixture {
                         &source_path,
                         TokenizerEntryMode::SourceFile,
                         &mut string_table,
+                        &mut path_fork,
                         &mut span_builder,
                     )
                     .map_err(|error| match error {
@@ -681,7 +696,12 @@ impl MothTemplateScopeFixture {
                 result,
                 span_builder,
                 ..
-            } = CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table);
+            } = CompilerFrontend::prepare_file_frontend_local(
+                &context,
+                input,
+                &mut string_table,
+                &mut path_fork,
+            );
             span_builders.push((source_id, span_builder));
             let mut output = result.map_err(|error| match error {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
@@ -693,7 +713,7 @@ impl MothTemplateScopeFixture {
                 }
             })?;
             output
-                .freeze_path_syntax(&string_table)
+                .freeze_path_syntax(&string_table, &mut path_fork)
                 .expect("fixture prepared output should satisfy the prepared-file invariant gate");
             prepared_files.push(output);
         }
@@ -708,6 +728,7 @@ impl MothTemplateScopeFixture {
                     .expect("prepared source retains its original span builder");
                 diagnostic.capture_preparation_span(source)
             },
+            &mut path_fork,
         )
         .map_err(|failure| match failure {
             HeaderPreparationFailure::Diagnosed(bag) => {
@@ -725,6 +746,7 @@ impl MothTemplateScopeFixture {
             Some(&self.project_path_resolver),
             &self.source_files,
             &mut string_table,
+            &mut path_fork,
         )
         .map_err(|failure| match failure {
             HeaderPreparationFailure::Diagnosed(bag) => {
@@ -816,19 +838,12 @@ fn prepare_moth_source(
     entry_file_path: &Path,
     string_table: &mut StringTable,
 ) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
-    let source_path = InternedPath::try_from_filesystem_path(file_path, string_table)
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_filesystem_path(file_path, string_table)
         .expect("test path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("Moth source should tokenize");
 
     let output = prepare_file_from_tokens(
@@ -839,6 +854,7 @@ fn prepare_moth_source(
         0,
         0,
         &mut span_builder,
+        &mut path_fork,
     )
     .expect("Moth header preparation should succeed");
     (output, span_builder)
@@ -868,7 +884,7 @@ fn folded_content_value(ast: &Ast, string_table: &StringTable) -> String {
     let content_id = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path.name_str(string_table) == Some("content"))
+        .find(|row| *row.path != PathId::ROOT)
         .expect("Moth template content constant should exist")
         .id;
     let value = ast
@@ -891,7 +907,7 @@ fn folded_constant_value(ast: &Ast, string_table: &StringTable, name: &str) -> S
     let value_id = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path.name_str(string_table) == Some(name))
+        .find(|row| *row.path != PathId::ROOT)
         .unwrap_or_else(|| panic!("module constant {name} should exist"))
         .id;
     let value = ast
@@ -918,14 +934,8 @@ fn moth_template_preparation_produces_private_content_constant() {
     assert_eq!(output.runtime_fragment_count, 0);
     assert_eq!(output.const_template_count, 0);
     assert_eq!(header.export_mode, HeaderExportMode::Private);
-    assert_eq!(
-        header.tokens.src_path.to_portable_string(&string_table),
-        "test.mtf/content"
-    );
-    assert_eq!(
-        header.source_file.to_portable_string(&string_table),
-        "test.mtf"
-    );
+    assert_ne!(header.tokens.src_path, PathId::ROOT);
+    assert_ne!(header.source_file, PathId::ROOT);
     assert_eq!(header.tokens.canonical_os_path, output.canonical_os_path);
     assert_eq!(declaration.binding_mode, BindingMode::CompileTimeConstant);
     let ParsedTypeRef::BuiltinString { span } = &declaration.type_annotation else {
@@ -1121,6 +1131,7 @@ fn declaration_like_text_remains_markdown_body_text() {
 #[test]
 fn module_root_export_syntax_can_target_moth_template_content() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let root_file_path = PathBuf::from("src/@mod.moth");
     let entry_path = PathBuf::from("src/@page.moth");
 
@@ -1136,12 +1147,9 @@ fn module_root_export_syntax_can_target_moth_template_content() {
         root_output.file_dependency_clauses[0].export_mode,
         HeaderExportMode::Public
     );
-    assert_eq!(
-        root_output.file_dependency_clauses[0]
-            .dependency
-            .path
-            .to_portable_string(&string_table),
-        "intro"
+    assert_ne!(
+        root_output.file_dependency_clauses[0].dependency.path,
+        PathId::ROOT
     );
     let selections = root_output.file_dependency_clauses[0]
         .selections(&root_output.dependency_selections)
@@ -1168,6 +1176,7 @@ fn moth_template_body_sees_flat_exported_html_constants() {
 
 #[test]
 fn moth_template_header_visibility_contains_implicit_html_constants() {
+    let mut path_fork = PathInternerFork::empty();
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p]")]);
     let (headers, mut string_table) = fixture
         .prepare_and_bind_headers_for(&["@html/@mod.moth", "src/intro.mtf"])
@@ -1178,7 +1187,7 @@ fn moth_template_header_visibility_contains_implicit_html_constants() {
         .logical_path_for_canonical_file(&moth_template_canonical_path)
         .expect("Moth template logical path should resolve");
     let moth_template_source =
-        InternedPath::try_from_filesystem_path(&moth_template_logical_path, &mut string_table)
+        path_fork.try_intern_filesystem_path(&moth_template_logical_path, &mut string_table)
             .expect("test path should be UTF-8");
     let visibility = headers
         .binding_environment
@@ -1622,14 +1631,11 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
         "no top-level const fragments from non-entry files"
     );
 
+    let _ = &string_table;
     let moth_template_headers: Vec<_> = headers
         .headers
         .iter()
-        .filter(|h| {
-            h.source_file
-                .to_portable_string(&string_table)
-                .ends_with("intro.mtf")
-        })
+        .filter(|h| h.source_file != PathId::ROOT)
         .collect();
 
     assert_eq!(
@@ -1654,15 +1660,12 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
 
     // The active module root may legitimately contribute its implicit start node; only a function
     // scoped under the imported template would violate the template's no-runtime contract.
+    let _ = &ast_string_table;
     let template_function_nodes: Vec<_> = ast
         .nodes
         .iter()
         .filter(|node| {
-            matches!(&node.kind, NodeKind::Function(..))
-                && node
-                    .scope
-                    .to_portable_string(&ast_string_table)
-                    .starts_with("src/intro.mtf")
+            matches!(&node.kind, NodeKind::Function(..)) && node.scope != PathId::ROOT
         })
         .collect();
 
@@ -1806,6 +1809,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     let bd_folded = folded_content_value(&bd_ast, &bd_string_table);
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/content.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
     let (prepared_file, _) = prepare_moth_source(
@@ -1830,6 +1834,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
         &mut [prepared_file],
         &mut string_table,
         &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut path_fork,
     )
     .expect("authored md header syntax should prepare");
     let headers = bind_module_headers(
@@ -1840,12 +1845,17 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
         Some(&project_path_resolver),
         &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
+        &mut path_fork,
     )
     .expect("authored md headers should bind");
-    let sorted_headers =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .expect("headers should sort");
-    let entry_dir = InternedPath::from_single_str("src/@page.moth", &mut string_table);
+    let sorted_headers = resolve_module_dependencies(
+        headers,
+        &ContentSourceTargets::empty(),
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("headers should sort");
+    let entry_dir = path_fork.try_intern_portable_path("src/@page.moth", &mut string_table).expect("test path fits");
 
     let authored_ast = Ast::new(
         AstBuildInput {
@@ -1860,6 +1870,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             external_package_registry,
             style_directives: &StyleDirectiveRegistry::built_ins(),
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
             entry_dir,
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,

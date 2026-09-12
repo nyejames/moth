@@ -6,7 +6,7 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::Path;
@@ -33,24 +33,25 @@ pub(crate) fn validate_dependency_boundary(
     canonical_file: &Path,
     base_kind: &CompileTimePathBase,
     filesystem_base: &Path,
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
 ) -> Result<(), DependencyPathResolutionError> {
     let canonical_base =
         fs::canonicalize(filesystem_base).unwrap_or_else(|_| filesystem_base.to_path_buf());
-
     validate_dependency_boundary_against_base(
         canonical_file,
         base_kind,
         &canonical_base,
         dependency_path,
+        path_fork,
     )
 }
-
 fn validate_dependency_boundary_against_base(
     target_path: &Path,
     base_kind: &CompileTimePathBase,
     canonical_base: &Path,
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
 ) -> Result<(), DependencyPathResolutionError> {
     if !target_path.starts_with(canonical_base) {
         let reason = match base_kind {
@@ -69,9 +70,9 @@ fn validate_dependency_boundary_against_base(
 /// WHAT: validates that the dependency path casing matches the on-disk filesystem casing.
 /// WHY: dependency paths are logically case-sensitive even on case-insensitive filesystems.
 ///
-/// NOTE: `string_table` is used to intern case-mismatch strings for the diagnostic payload.
 pub(crate) fn validate_dependency_case_sensitivity(
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
     base_kind: &CompileTimePathBase,
     filesystem_base: &Path,
     canonical_file: &Path,
@@ -88,23 +89,22 @@ pub(crate) fn validate_dependency_case_sensitivity(
     let relative_canonical = relative_canonical.with_extension("");
     let canonical_components = canonical_normal_components(&relative_canonical);
 
+    let mut path_components = Vec::new();
+    let path_components = path_fork.resolve_components(dependency_path, &mut path_components);
     let user_components: Vec<String> = match base_kind {
-        CompileTimePathBase::SourcePackageRoot => dependency_path
-            .as_components()
+        CompileTimePathBase::SourcePackageRoot => path_components
             .iter()
             .skip(1)
             .map(|component| string_table.resolve(*component))
             .map(str::to_owned)
             .collect(),
-        CompileTimePathBase::RelativeToFile => dependency_path
-            .as_components()
+        CompileTimePathBase::RelativeToFile => path_components
             .iter()
             .skip_while(|component| string_table.resolve(**component) == ".")
             .map(|component| string_table.resolve(*component))
             .map(str::to_owned)
             .collect(),
-        CompileTimePathBase::EntryRoot => dependency_path
-            .as_components()
+        CompileTimePathBase::EntryRoot => path_components
             .iter()
             .map(|component| string_table.resolve(*component))
             .map(str::to_owned)

@@ -16,7 +16,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, TraitVisibility};
@@ -33,6 +33,7 @@ fn trait_header(
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
 ) -> Header {
+    let mut path_fork = PathInternerFork::empty();
     Header {
         kind: HeaderKind::Trait {
             declaration: TraitDeclarationSyntax {
@@ -48,11 +49,11 @@ fn trait_header(
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: Some(root_span()),
         tokens: FileTokens::new(
-            InternedPath::from_single_str(name, string_table),
+            path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
             SourceId::COMPILATION_ROOT,
             Vec::new(),
         ),
-        source_file: InternedPath::from_single_str("root.moth", string_table),
+        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
         capacity_references: Vec::new(),
     }
 }
@@ -63,6 +64,7 @@ fn function_header(
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
 ) -> Header {
+    let mut path_fork = PathInternerFork::empty();
     Header {
         kind: HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -73,11 +75,11 @@ fn function_header(
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: Some(root_span()),
         tokens: FileTokens::new(
-            InternedPath::from_single_str(name, string_table),
+            path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
             SourceId::COMPILATION_ROOT,
             Vec::new(),
         ),
-        source_file: InternedPath::from_single_str("root.moth", string_table),
+        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
         capacity_references: Vec::new(),
     }
 }
@@ -92,12 +94,13 @@ fn register_source_trait(
     trait_name: &str,
     this_type: TypeId,
 ) -> crate::compiler_frontend::traits::ids::TraitId {
+    let mut path_fork = PathInternerFork::empty();
     let trait_id = trait_environment.next_trait_id();
     let definition = ResolvedTraitDefinition {
         id: trait_id,
         name: string_table.intern(trait_name),
-        canonical_path: InternedPath::from_single_str(trait_name, string_table),
-        source_file: InternedPath::new(),
+        canonical_path: path_fork.try_intern_portable_path(trait_name, string_table).expect("test path fits"),
+        source_file: PathId::ROOT,
         this_type,
         requirements: Vec::new(),
         declaration_span: None,
@@ -110,6 +113,7 @@ fn register_source_trait(
 #[test]
 fn retains_directly_authored_active_root_public_source_traits_in_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -142,12 +146,12 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
 
     assert_eq!(trait_roots.len(), 2);
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Alpha"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Alpha")
     );
     assert_eq!(
-        trait_roots[1].canonical_path.to_string(&string_table),
-        "Beta"
+        path_fork.component(trait_roots[1].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Beta")
     );
     assert_eq!(trait_roots[0].this_type, this_id);
     assert_eq!(trait_roots[1].this_type, this_id);
@@ -156,6 +160,7 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
 #[test]
 fn excludes_private_traits() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -193,14 +198,15 @@ fn excludes_private_traits() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Public"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Public")
     );
 }
 
 #[test]
 fn excludes_imported_and_non_active_root_traits() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -238,14 +244,15 @@ fn excludes_imported_and_non_active_root_traits() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Local"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Local")
     );
 }
 
 #[test]
 fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -280,6 +287,7 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
 #[test]
 fn excludes_non_trait_declarations() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -311,14 +319,15 @@ fn excludes_non_trait_declarations() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Shape"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Shape")
     );
 }
 
 #[test]
 fn missing_trait_definition_is_compiler_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let trait_environment = TraitEnvironment::new();
 
     let headers = vec![trait_header(
@@ -360,6 +369,7 @@ fn register_two_public_traits(
 #[test]
 fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -396,14 +406,14 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     // of which side authored the public relation. The order is the deterministic authored
     // source order recorded by the trait environment.
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Alpha"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Alpha")
     );
     assert_eq!(trait_roots[0].incompatible_trait_ids, vec![beta_id]);
 
     assert_eq!(
-        trait_roots[1].canonical_path.to_string(&string_table),
-        "Beta"
+        path_fork.component(trait_roots[1].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Beta")
     );
     assert_eq!(trait_roots[1].incompatible_trait_ids, vec![alpha_id]);
 }
@@ -411,6 +421,7 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
 #[test]
 fn private_incompatibility_relation_is_absent_from_trait_roots() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 

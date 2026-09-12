@@ -19,7 +19,7 @@ use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeConstructor, T
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -59,7 +59,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             }
 
-            let exported_name = header.tokens.src_path.name().ok_or_else(|| {
+            let exported_name = self.path_fork.component(header.tokens.src_path).ok_or_else(|| {
                 self.error_messages(
                     CompilerError::compiler_error("Public export header had no source-path name."),
                     string_table,
@@ -184,7 +184,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &self,
         exported_name: StringId,
         signature: &FunctionSignature,
-        public_root_file: &InternedPath,
+        public_root_file: &PathId,
         return_span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
         string_table: &StringTable,
@@ -222,7 +222,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &self,
         exported_name: StringId,
         type_id: TypeId,
-        public_root_file: &InternedPath,
+        public_root_file: &PathId,
         span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
         string_table: &StringTable,
@@ -248,7 +248,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn public_type_id_is_nameable(
         &self,
         type_id: TypeId,
-        public_root_file: &InternedPath,
+        public_root_file: &PathId,
         _trait_environment: &TraitEnvironment,
         visited_types: &mut FxHashSet<TypeId>,
     ) -> bool {
@@ -328,7 +328,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn type_constructor_is_public(
         &self,
         constructor: &TypeConstructor,
-        _public_root_file: &InternedPath,
+        _public_root_file: &PathId,
     ) -> bool {
         match constructor {
             TypeConstructor::Builtin(_) => true,
@@ -338,7 +338,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn nominal_id_is_public(
         &self,
         nominal_id: NominalTypeId,
-        public_root_file: &InternedPath,
+        public_root_file: &PathId,
     ) -> bool {
         self.type_environment
             .nominal_path_by_id(nominal_id)
@@ -348,7 +348,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn public_trait_definition_is_nameable(
         &self,
         trait_definition: &crate::compiler_frontend::traits::definitions::ResolvedTraitDefinition,
-        public_root_file: &InternedPath,
+        public_root_file: &PathId,
         trait_environment: &TraitEnvironment,
     ) -> bool {
         match trait_definition.visibility {
@@ -362,8 +362,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     pub(in crate::compiler_frontend::ast) fn source_path_is_public_from_root_file(
         &self,
-        path: &InternedPath,
-        public_root_file: &InternedPath,
+        path: &PathId,
+        public_root_file: &PathId,
     ) -> bool {
         if self
             .module_symbols
@@ -417,7 +417,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn validate_public_trait_incompatibility_surface(
         &self,
         incompatibility: &TraitIncompatibilitySyntax,
-        public_root_file: &InternedPath,
+        public_root_file: &PathId,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {

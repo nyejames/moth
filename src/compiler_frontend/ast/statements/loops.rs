@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::statements::loop_headers::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
@@ -33,6 +34,7 @@ pub fn create_loop(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> LoopResult<AstNode> {
     ast_log!("Creating a Loop");
 
@@ -62,6 +64,7 @@ pub fn create_loop(
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )?;
 
     token_stream.index = colon_index + 1;
@@ -71,6 +74,7 @@ pub fn create_loop(
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )?;
 
     let kind = match parsed_loop_header {

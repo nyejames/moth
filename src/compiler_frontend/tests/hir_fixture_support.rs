@@ -23,7 +23,7 @@ use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId, RegionI
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -31,15 +31,32 @@ use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub(crate) fn entry_and_start(string_table: &mut StringTable) -> (InternedPath, InternedPath) {
-    let entry_path = InternedPath::from_single_str("main.moth", string_table);
-    let start_name = entry_path.join_str(IMPLICIT_START_FUNC_NAME, string_table);
+pub(crate) fn entry_and_start(
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> (PathId, PathId) {
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", string_table)
+        .expect("test entry path fits");
+    let start_name = path_fork
+        .try_intern_portable_path(IMPLICIT_START_FUNC_NAME, string_table)
+        .expect("test start path fits");
     (entry_path, start_name)
 }
 
-pub(crate) fn lower_hir(ast: Ast, string_table: &mut StringTable) -> HirModule {
-    let lowering = lower_module(ast, string_table, HirFunctionOriginLookup::default(), None)
-        .expect("HIR lowering should succeed");
+pub(crate) fn lower_hir(
+    ast: Ast,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> HirModule {
+    let lowering = lower_module(
+        ast,
+        string_table,
+        path_fork,
+        HirFunctionOriginLookup::default(),
+        None,
+    )
+    .expect("HIR lowering should succeed");
     lowering.hir_module
 }
 

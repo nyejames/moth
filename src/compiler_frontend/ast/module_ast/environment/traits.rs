@@ -36,6 +36,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, ResolvedTraitReturn,
@@ -81,6 +82,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &mut trait_environment,
             &mut self.type_environment,
             string_table,
+            self.path_fork,
         )?;
 
         Ok(trait_environment)
@@ -168,10 +170,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &mut TraitEnvironment,
         type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerMessages> {
         for metadata in BUILTIN_CAST_TRAIT_ROWS {
             let Some(success_type) =
-                type_id_for_builtin_target(metadata.target, type_environment, string_table)
+                type_id_for_builtin_target(metadata.target, type_environment, string_table, path_fork)
             else {
                 return Err(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(
@@ -187,6 +190,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     BuiltinCastTarget::Error,
                     type_environment,
                     string_table,
+                    path_fork,
                 ) else {
                     return Err(CompilerMessages::from_error_ref(
                         CompilerError::compiler_error(
@@ -270,14 +274,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///      trait environment. Reject rows whose trait id is missing because
     ///      registration order was somehow violated.
     /// WHY: builtin evidence must satisfy static generic-bound checks via
-    ///      `builtin_for`, and the registration must be centralized so the
-    ///      evidence table is the single source of truth for the initial
-    ///      builtin evidence rows.
     pub(in crate::compiler_frontend::ast) fn register_builtin_cast_evidence(
         trait_environment: &TraitEnvironment,
         trait_evidence_environment: &mut TraitEvidenceEnvironment,
         type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerMessages> {
         use crate::compiler_frontend::traits::evidence::environment::{
             TraitEvidenceDefinition, TraitEvidenceKind,
@@ -304,7 +306,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 ));
             };
             let Some(source_type_id) =
-                type_id_for_builtin_target(source, type_environment, string_table)
+                type_id_for_builtin_target(source, type_environment, string_table, path_fork)
             else {
                 return Err(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(
@@ -320,7 +322,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 kind: TraitEvidenceKind::Builtin,
                 target_type_id: source_type_id,
                 trait_id,
-                source_file: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
+                source_file: crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
                 declaration_span: None,
                 requirements: Vec::new(),
             };
@@ -456,6 +458,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         )?;
 
+        let path_fork = self.path_fork as *const PathInternerFork;
         let mut type_resolution_context = self.type_resolution_context_for(
             &visibility,
             header.tokens.file_id,
@@ -466,6 +469,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &unresolved_signature,
             None,
             &mut type_resolution_context,
+            unsafe { &*path_fork },
             string_table,
         )
         .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
@@ -560,6 +564,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &mut type_interner,
             string_table,
             SignatureTypeFallbackPolicy::StrictCapacity,
+            self.path_fork,
         )
         .map_err(|error| self.expression_error_messages(error, string_table))?;
         self.warnings
@@ -787,7 +792,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         trait_name: StringId,
         requirements: &[ResolvedTraitRequirement],
-        public_root_file: &crate::compiler_frontend::symbols::interned_path::InternedPath,
+        public_root_file: &PathId,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -822,7 +827,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &self,
         trait_name: StringId,
         type_id: TypeId,
-        public_root_file: &crate::compiler_frontend::symbols::interned_path::InternedPath,
+        public_root_file: &PathId,
         span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,

@@ -162,6 +162,7 @@ pub(crate) fn type_id_for_builtin_target(
     target: BuiltinCastTarget,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
     string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
     use crate::compiler_frontend::datatypes::ids::TypeId;
     let builtins = type_environment.builtins();
@@ -173,6 +174,7 @@ pub(crate) fn type_id_for_builtin_target(
         BuiltinCastTarget::Float => Some(builtins.float),
         BuiltinCastTarget::Error => {
             let path = crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+                path_fork,
                 string_table,
             );
             let nominal_id = type_environment.nominal_id_for_path(&path)?;

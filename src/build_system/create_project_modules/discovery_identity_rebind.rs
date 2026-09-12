@@ -101,13 +101,14 @@ pub(super) fn rebind_discovery_batch(
     batch: PremergeDiagnosticBatch,
     source_ids: &SourceIdentityMap,
 ) -> Result<PremergeDiagnosticBatch, CompilerError> {
-    let (bag, string_table, render_type_contexts) = batch.into_parts();
+    let (bag, string_table, render_type_contexts, render_path_contexts) = batch.into_parts();
     let mut diagnostics = bag.into_diagnostics();
     rebind_discovery_diagnostics(&mut diagnostics, source_ids)?;
     Ok(PremergeDiagnosticBatch::from_parts(
         diagnostics,
         string_table,
         render_type_contexts,
+        render_path_contexts,
     ))
 }
 

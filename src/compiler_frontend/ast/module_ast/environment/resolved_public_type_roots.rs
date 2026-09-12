@@ -24,7 +24,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -78,7 +78,7 @@ pub(crate) enum ResolvedPublicTypeRootKind {
 /// Consumed by the defined public type-surface projection immediately before HIR lowering.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedPublicTypeRoot {
-    pub(crate) path: InternedPath,
+    pub(crate) path: PathId,
     pub(crate) kind: ResolvedPublicTypeRootKind,
 }
 
@@ -95,7 +95,7 @@ pub(crate) enum ResolvedTraitSourceFact {
     /// A compiler-owned core trait identified by its canonical kind.
     Core(CoreTraitKind),
     /// A source-defined trait identified by its canonical declaration path.
-    Source(InternedPath),
+    Source(PathId),
 }
 
 /// Transient AST-owned table of resolved public type roots for the module.
@@ -130,21 +130,21 @@ pub(crate) struct ResolvedPublicTypeRootTable {
 /// inputs named makes that boundary easier to audit than a long positional list.
 pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
     pub sorted_headers: &'a [Header],
-    pub resolved_struct_fields_by_path: &'a FxHashMap<InternedPath, Vec<Declaration>>,
+    pub resolved_struct_fields_by_path: &'a FxHashMap<PathId, Vec<Declaration>>,
     pub resolved_function_signatures_by_path:
-        &'a FxHashMap<InternedPath, ResolvedFunctionSignature>,
-    pub nominal_type_ids_by_path: &'a FxHashMap<InternedPath, TypeId>,
-    pub resolved_type_aliases_by_path: &'a FxHashMap<InternedPath, ResolvedTypeAlias>,
+        &'a FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub nominal_type_ids_by_path: &'a FxHashMap<PathId, TypeId>,
+    pub resolved_type_aliases_by_path: &'a FxHashMap<PathId, ResolvedTypeAlias>,
     pub declaration_table: &'a TopLevelDeclarationTable,
-    pub generic_function_templates_by_path: &'a FxHashMap<InternedPath, GenericFunctionTemplate>,
+    pub generic_function_templates_by_path: &'a FxHashMap<PathId, GenericFunctionTemplate>,
     pub receiver_methods: &'a ReceiverMethodCatalog,
     pub trait_environment: &'a TraitEnvironment,
     pub type_environment: &'a TypeEnvironment,
     pub string_table: &'a StringTable,
+    pub path_fork: &'a PathInternerFork,
     /// Source declaration paths re-exported through the root's `export:` block from private files
-    /// in the same module. These are not in the active root file but are targeted by public export
-    /// entries and need their resolved roots included in the table.
-    pub reexport_target_paths: &'a FxHashSet<InternedPath>,
+    /// in the same module.
+    pub reexport_target_paths: &'a FxHashSet<PathId>,
 }
 
 /// Build the resolved public type-root table from completed AST environment facts.
@@ -176,14 +176,14 @@ pub(crate) fn build_resolved_public_type_roots(
         trait_environment,
         type_environment,
         string_table,
+        path_fork,
         reexport_target_paths,
     } = input;
 
     let mut roots = Vec::new();
     // Directly-defined active-root public nominal paths, collected in full before the method
     // pass so method selection is independent of where a method appears relative to its
-    // receiver in sorted-header order.
-    let mut public_nominal_paths: FxHashSet<InternedPath> = FxHashSet::default();
+    let mut public_nominal_paths: FxHashSet<PathId> = FxHashSet::default();
 
     // Pass 1: collect declaration roots and the complete public nominal path set.
     for header in sorted_headers {
@@ -676,7 +676,7 @@ fn is_active_root_public_declaration(header: &Header) -> bool {
 ///
 /// WHAT: external and builtin-scalar receivers are not directly-defined nominal roots, so
 /// their methods are not retained by this table.
-fn nominal_receiver_path(receiver: &ReceiverKey) -> Option<&InternedPath> {
+fn nominal_receiver_path(receiver: &ReceiverKey) -> Option<&PathId> {
     match receiver {
         ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => Some(path),
         ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_) => None,
@@ -689,11 +689,10 @@ fn nominal_receiver_path(receiver: &ReceiverKey) -> Option<&InternedPath> {
 /// error lane without retaining source-location provenance.
 fn missing_public_root_fact(
     description: &str,
-    path: &InternedPath,
+    path: &PathId,
     string_table: &StringTable,
 ) -> CompilerError {
     CompilerError::compiler_error(format!(
-        "Public {description} '{}' was not published before root-table construction.",
-        path.to_string(string_table)
+        "Public {description} '{path:?}' was not published before root-table construction.",
     ))
 }

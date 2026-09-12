@@ -18,15 +18,16 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateIrStore, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
 fn declaration_semantics_preserves_missing_template_authority() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let declaration = Declaration {
-        id: InternedPath::from_single_str("value", &mut string_table),
+        id: path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits"),
         value: Expression::template(
             Template {
                 tir_reference: TemplateTirReference {
@@ -41,7 +42,7 @@ fn declaration_semantics_preserves_missing_template_authority() {
         binding_span: None,
         config_qualifier: None,
     };
-    let table = TopLevelDeclarationTable::new(vec![declaration]);
+    let table = TopLevelDeclarationTable::new(vec![declaration], &path_fork);
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let error = DeclarationSemanticTable::from_environment(

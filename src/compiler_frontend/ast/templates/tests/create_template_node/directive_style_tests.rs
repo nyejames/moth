@@ -19,6 +19,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use std::sync::Arc;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 type DirectiveStyleTestResult<T> = Result<T, CompilerDiagnostic>;
 
@@ -36,17 +37,10 @@ fn directive_tokens(
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> FileTokens {
-    let scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", string_table).expect("test path fits");
     let style_directives = frontend_test_style_directives();
-    let mut tokens = tokenize(
-        source,
-        &scope,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        string_table,
-        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
-        span_builder,
-    )
+    let mut tokens = tokenize(source, scope, TokenizerEntryMode::SourceFile, &style_directives, string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, span_builder)
     .expect("tokenization should succeed");
 
     tokens.index = tokens
@@ -58,11 +52,11 @@ fn directive_tokens(
     tokens
 }
 
-fn test_context(scope: InternedPath) -> ScopeContext {
+fn test_context(scope: PathId) -> ScopeContext {
     ScopeContext::new_for_tests(
         ContextKind::Constant,
         scope.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
@@ -80,6 +74,7 @@ fn parse_optional_parenthesized_expression_for_test(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let mut path_fork = PathInternerFork::empty();
     let directive_name = string_table.intern("test_directive");
     parse_optional_parenthesized_expression(
         directive_name,
@@ -87,6 +82,7 @@ fn parse_optional_parenthesized_expression_for_test(
         context,
         &mut type_interner,
         string_table,
+        &mut path_fork,
     )
     .map_err(directive_diagnostic)
 }
@@ -100,12 +96,14 @@ fn parse_required_parenthesized_expression_for_test(
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     let directive_name = string_table.intern("test_directive");
+    let mut path_fork = PathInternerFork::empty();
     parse_required_parenthesized_expression(
         directive_name,
         tokens,
         context,
         &mut type_interner,
         string_table,
+        &mut path_fork,
     )
     .map_err(directive_diagnostic)
 }
@@ -117,6 +115,7 @@ fn parse_required_parenthesized_expression_for_test(
 #[test]
 fn reject_arguments_succeeds_when_no_parens() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let tokens = directive_tokens("[$note]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("note");
@@ -127,6 +126,7 @@ fn reject_arguments_succeeds_when_no_parens() {
 #[test]
 fn reject_arguments_fails_when_parens_present() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let tokens = directive_tokens("[$note()]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("note");
@@ -148,6 +148,7 @@ fn reject_arguments_fails_when_parens_present() {
 #[test]
 fn optional_slot_target_no_parens_returns_default() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$slot]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("slot");
@@ -158,6 +159,7 @@ fn optional_slot_target_no_parens_returns_default() {
 #[test]
 fn optional_slot_target_named_string() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$slot(\"style\")]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("slot");
@@ -168,6 +170,7 @@ fn optional_slot_target_named_string() {
 #[test]
 fn optional_slot_target_positive_positional() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$slot(1)]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("slot");
@@ -178,6 +181,7 @@ fn optional_slot_target_positive_positional() {
 #[test]
 fn optional_slot_target_zero_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$slot(0)]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("slot");
@@ -196,6 +200,7 @@ fn optional_slot_target_zero_errors() {
 fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
     let source = "[$slot(π)]";
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens(source, &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("slot");
@@ -217,6 +222,7 @@ fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
 #[test]
 fn optional_slot_target_negative_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$slot(-1)]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("slot");
@@ -227,6 +233,7 @@ fn optional_slot_target_negative_errors() {
 #[test]
 fn optional_slot_target_empty_parens_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$slot()]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("slot");
@@ -244,6 +251,7 @@ fn optional_slot_target_empty_parens_errors() {
 #[test]
 fn optional_slot_target_missing_close_paren_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$slot(\"style\"]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("slot");
@@ -263,6 +271,7 @@ fn optional_slot_target_missing_close_paren_errors() {
 #[test]
 fn required_slot_name_missing_parens_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$insert]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("insert");
@@ -278,6 +287,7 @@ fn required_slot_name_missing_parens_errors() {
 #[test]
 fn required_slot_name_string_literal_ok() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$insert(\"style\")]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("insert");
@@ -288,6 +298,7 @@ fn required_slot_name_string_literal_ok() {
 #[test]
 fn required_slot_name_positional_rejected() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$insert(1)]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("insert");
@@ -305,6 +316,7 @@ fn required_slot_name_positional_rejected() {
 #[test]
 fn required_slot_name_empty_parens_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$insert()]", &mut string_table, &mut span_builder);
     let directive_name = string_table.intern("insert");
@@ -335,6 +347,7 @@ fn optional_string_literal_not_a_string_errors() {
 #[test]
 fn optional_expression_no_parens_returns_none() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$css]", &mut string_table, &mut span_builder);
     let context = test_context(tokens.src_path.to_owned());
@@ -346,6 +359,7 @@ fn optional_expression_no_parens_returns_none() {
 #[test]
 fn optional_expression_with_parens_returns_some() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$code(\"wrap\")]", &mut string_table, &mut span_builder);
     let context = test_context(tokens.src_path.to_owned());
@@ -357,6 +371,7 @@ fn optional_expression_with_parens_returns_some() {
 #[test]
 fn optional_expression_empty_parens_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$code()]", &mut string_table, &mut span_builder);
     let context = test_context(tokens.src_path.to_owned());
@@ -371,6 +386,7 @@ fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
     // rather than the `$children`-specific reason, proving non-`$children`
     // directives do not receive children wording.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$code(\n)]", &mut string_table, &mut span_builder);
     let context = test_context(tokens.src_path.to_owned());
@@ -389,6 +405,7 @@ fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
 #[test]
 fn optional_expression_extra_comma_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens(
         "[$children(\"a\", \"b\")]",
@@ -414,6 +431,7 @@ fn optional_expression_extra_comma_errors() {
 #[test]
 fn required_expression_missing_parens_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens("[$children]", &mut string_table, &mut span_builder);
     let context = test_context(tokens.src_path.to_owned());
@@ -431,6 +449,7 @@ fn required_expression_missing_parens_errors() {
 #[test]
 fn required_expression_compile_time_constant_ok() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = directive_tokens(
         "[$children(\"wrap\")]",
@@ -494,6 +513,7 @@ fn comment_directives_must_be_alone_in_template_head() {
 #[test]
 fn insert_directive_can_coexist_with_other_meaningful_head_items() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[\"prefix\", $insert(\"style\"): body]",
@@ -502,7 +522,7 @@ fn insert_directive_can_coexist_with_other_meaningful_head_items() {
     );
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("insert directive should coexist with other meaningful head items");
 
     assert!(matches!(
@@ -534,11 +554,12 @@ fn project_owned_formatter_directives_are_exclusive_per_template_head() {
 #[test]
 fn non_formatter_and_formatter_directives_can_coexist() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[1, $md:\n# Hello\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("non-formatter and formatter directives should coexist in the same head");
 
     assert_eq!(effective_tir_style(&template, &context).id, "markdown");
@@ -547,6 +568,7 @@ fn non_formatter_and_formatter_directives_can_coexist() {
 #[test]
 fn doc_templates_treat_brackets_as_literal_text() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[$doc:\n[value]\n]", &mut string_table, &mut span_builder);
@@ -554,7 +576,7 @@ fn doc_templates_treat_brackets_as_literal_text() {
 
     // With suppress_child_templates, brackets are balanced literal text,
     // not nested child templates. Parsing succeeds even with a runtime context.
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("doc template should parse brackets as literal text");
 
     let folded = fold_template_in_context(&template, &context, &mut string_table);
@@ -578,12 +600,13 @@ fn doc_templates_treat_brackets_as_literal_text() {
 #[test]
 fn doc_templates_are_markdown_formatted_by_default() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[$doc:\n# Heading\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("doc template should parse");
     assert!(matches!(
         effective_tir_kind(&template, &context),
@@ -597,12 +620,13 @@ fn doc_templates_are_markdown_formatted_by_default() {
 #[test]
 fn doc_brackets_remain_literal_text() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[$doc:\n[: child]\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("doc template should parse");
 
     let folded = fold_template_in_context(&template, &context, &mut string_table);
@@ -626,6 +650,7 @@ fn doc_brackets_remain_literal_text() {
 fn css_without_argument_uses_css_formatter() {
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         "[$css:\n.button { color: red; }\n]",
@@ -637,7 +662,7 @@ fn css_without_argument_uses_css_formatter() {
         token_stream.src_path.to_owned(),
         &style_directives,
     );
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("css template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -649,6 +674,7 @@ fn css_without_argument_uses_css_formatter() {
 fn css_inline_argument_parses_correctly() {
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         "[$css(\"inline\"):\ncolor: blue;\n]",
@@ -660,7 +686,7 @@ fn css_inline_argument_parses_correctly() {
         token_stream.src_path.to_owned(),
         &style_directives,
     );
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("inline css template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -836,6 +862,7 @@ fn code_rejects_multiple_language_arguments() {
 #[test]
 fn runtime_templates_with_code_format_only_static_body_strings() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[value, $code(\"moth\"):\nloop x\n]",
@@ -844,7 +871,7 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
     );
     let context = runtime_template_context(&token_stream.src_path, &mut string_table);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template should parse");
 
     let store = context.template_ir_store.borrow();

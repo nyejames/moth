@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::FxHashMap;
 
@@ -42,9 +42,9 @@ impl From<CompilerError> for ReceiverMethodCatalogError {
 /// Canonical metadata for one receiver method declaration.
 #[derive(Clone)]
 pub(crate) struct ReceiverMethodEntry {
-    pub(crate) function_path: InternedPath,
+    pub(crate) function_path: PathId,
     pub(crate) receiver: ReceiverKey,
-    pub(crate) source_file: InternedPath,
+    pub(crate) source_file: PathId,
     pub(crate) receiver_mutable: bool,
     pub(crate) signature: FunctionSignature,
 }
@@ -62,7 +62,7 @@ pub(crate) struct ReceiverMethodCatalog {
     /// Maps canonical function path to its receiver-method entry.
     /// WHY: file visibility resolves source receiver methods by function path, so a path-keyed
     /// index lets lookups avoid scanning the whole catalog.
-    pub(crate) by_function_path: FxHashMap<InternedPath, ReceiverMethodEntry>,
+    pub(crate) by_function_path: FxHashMap<PathId, ReceiverMethodEntry>,
 }
 
 /// Inputs required to build the receiver-method catalog.
@@ -74,18 +74,19 @@ pub(crate) struct ReceiverMethodCatalog {
 pub(crate) struct BuildReceiverMethodCatalogInput<'a> {
     pub(crate) sorted_headers: &'a [Header],
     pub(crate) resolved_function_signatures_by_path:
-        &'a FxHashMap<InternedPath, ResolvedFunctionSignature>,
-    pub(crate) struct_fields_by_path: &'a FxHashMap<InternedPath, Vec<Declaration>>,
-    pub(crate) struct_source_by_path: &'a FxHashMap<InternedPath, InternedPath>,
-    pub(crate) choice_source_by_path: &'a FxHashMap<InternedPath, InternedPath>,
-    pub(crate) source_file_by_symbol_path: &'a FxHashMap<InternedPath, InternedPath>,
+        &'a FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub(crate) struct_fields_by_path: &'a FxHashMap<PathId, Vec<Declaration>>,
+    pub(crate) struct_source_by_path: &'a FxHashMap<PathId, PathId>,
+    pub(crate) choice_source_by_path: &'a FxHashMap<PathId, PathId>,
+    pub(crate) source_file_by_symbol_path: &'a FxHashMap<PathId, PathId>,
+    pub(crate) path_fork: &'a PathInternerFork,
     pub(crate) string_table: &'a StringTable,
 }
 
 /// Render a human-readable receiver name for diagnostics.
-pub(crate) fn receiver_kind_label(receiver: &ReceiverKey, string_table: &StringTable) -> String {
+pub(crate) fn receiver_kind_label(receiver: &ReceiverKey, _string_table: &StringTable) -> String {
     match receiver {
-        ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => path.to_string(string_table),
+        ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => format!("{path:?}"),
         ReceiverKey::External(type_id) => format!("External({})", type_id.0),
         ReceiverKey::BuiltinScalar(builtin) => format!("{builtin:?}"),
     }
@@ -119,9 +120,9 @@ pub(crate) fn free_function_receiver_method_call_error(
 /// receiver methods to values owned by another file, package, or builtin surface.
 fn validate_source_receiver_method_declaration(
     receiver: &ReceiverKey,
-    method_source_file: &InternedPath,
-    struct_source_by_path: &FxHashMap<InternedPath, InternedPath>,
-    choice_source_by_path: &FxHashMap<InternedPath, InternedPath>,
+    method_source_file: &PathId,
+    struct_source_by_path: &FxHashMap<PathId, PathId>,
+    choice_source_by_path: &FxHashMap<PathId, PathId>,
     span: Option<SourceSpan>,
 ) -> Result<(), CompilerDiagnostic> {
     match receiver {
@@ -203,18 +204,21 @@ pub(crate) fn build_receiver_method_catalog(
             continue;
         };
 
-        let Some(method_name) = header.tokens.src_path.name() else {
+        let Some(method_name) = input.path_fork.component(header.tokens.src_path) else {
             continue;
         };
-
         let Some(method_source_file) = input
             .source_file_by_symbol_path
             .get(&header.tokens.src_path)
-            .cloned()
+            .copied()
         else {
             return Err(CompilerError::compiler_error(format!(
                 "Receiver method '{}' is missing canonical source-file metadata.",
-                header.tokens.src_path.to_string(input.string_table)
+                input.path_fork.render_portable(
+                    header.tokens.src_path,
+                    input.string_table,
+                    &mut Vec::new(),
+                )
             ))
             .into());
         };
@@ -237,7 +241,7 @@ pub(crate) fn build_receiver_method_catalog(
                 .is_some_and(|fields| {
                     fields
                         .iter()
-                        .any(|field| field.id.name() == Some(method_name))
+                        .any(|field| input.path_fork.component(field.id) == Some(method_name))
                 })
         {
             return Err(CompilerDiagnostic::invalid_receiver_declaration(
@@ -270,7 +274,7 @@ pub(crate) fn build_receiver_method_catalog(
             .is_some_and(|parameter| parameter.value.value_mode.is_mutable());
 
         let entry = ReceiverMethodEntry {
-            function_path: header.tokens.src_path.to_owned(),
+            function_path: header.tokens.src_path,
             receiver: receiver.to_owned(),
             source_file: method_source_file,
             receiver_mutable,
@@ -292,14 +296,16 @@ pub(crate) fn build_receiver_method_catalog(
             .insert(header.tokens.src_path.to_owned(), entry);
     }
 
-    // ----------------------------
-    //  Sort catalog entries for deterministic lookup
-    // ----------------------------
     for entries in catalog.by_method_name.values_mut() {
         entries.sort_by(|left, right| {
-            left.function_path
-                .to_string(input.string_table)
-                .cmp(&right.function_path.to_string(input.string_table))
+            input
+                .path_fork
+                .render_portable(left.function_path, input.string_table, &mut Vec::new())
+                .cmp(&input.path_fork.render_portable(
+                    right.function_path,
+                    input.string_table,
+                    &mut Vec::new(),
+                ))
         });
     }
 

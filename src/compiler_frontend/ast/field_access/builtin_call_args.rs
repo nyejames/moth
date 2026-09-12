@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 pub(super) fn parse_builtin_method_args_typed(
@@ -27,6 +28,7 @@ pub(super) fn parse_builtin_method_args_typed(
     type_interner: &mut AstTypeInterner<'_>,
     member_span: Option<SourceSpan>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     let expectations = expected_type_ids
         .iter()
@@ -50,6 +52,7 @@ pub(super) fn parse_builtin_method_args_typed(
             member_name: Some(callee_name),
             takes_no_arguments: expected_type_ids.is_empty(),
         },
+        path_fork,
     )?;
 
     let type_check_context = type_interner.type_check_context();
@@ -63,6 +66,7 @@ pub(super) fn parse_builtin_method_args_typed(
             string_table,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
+            path_fork,
         },
     )?)
 }

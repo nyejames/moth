@@ -3,7 +3,7 @@
 //! These mirror types intentionally own donor-independent names, identities and spans. A frozen
 //! artefact must outlive the declaring environment, so it cannot retain live `StringId`,
 //! `InternedPath` or type-table handles.
-use super::frozen_syntax::{StableBodySyntax, materialise_path, stable_path};
+use super::frozen_syntax::StableBodySyntax;
 use super::nominal_blueprints::{
     MaterialisationTypeBlueprint, NominalMaterialisationBlueprint, intern_generated_canonical_type,
 };
@@ -32,7 +32,9 @@ use crate::compiler_frontend::semantic_identity::{
     OriginDeclarationId, OriginFunctionId, OriginTypeId, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathIdRemap, PathInternerFork,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -45,19 +47,43 @@ pub(super) struct GenericTemplateArtefact {
     pub(super) generic_parameter_owner: Option<GenericDeclarationOrigin>,
     pub(super) receiver: Option<StableReceiverKey>,
     pub(super) receiver_nominal_identity: Option<CanonicalTypeIdentity>,
-    pub(super) function_path: Box<[String]>,
-    pub(super) source_file: Box<[String]>,
+    pub(super) function_path: PathId,
+    pub(super) source_file: PathId,
     pub(super) declaration_span: Option<SourceSpan>,
     pub(super) body: StableBodySyntax,
     pub(super) signature: StableFunctionSignature,
     pub(super) generic_parameters: Box<[StableGenericParameter]>,
     pub(super) visibility: StableFileVisibility,
     pub(super) declarations: Box<[StableDeclarationBinding]>,
-    pub(super) local_declarations: Box<[Box<[String]>]>,
+    pub(super) local_declarations: Box<[PathId]>,
     pub(super) callables: Box<[StableCallableBinding]>,
     pub(super) nominals: Box<[StableNominalBinding]>,
     pub(super) nominal_blueprints:
         FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
+}
+
+impl GenericTemplateArtefact {
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.function_path = remap.get(self.function_path);
+        self.source_file = remap.get(self.source_file);
+        if let Some(receiver) = &mut self.receiver {
+            receiver.remap_path_ids(remap);
+        }
+        self.body.remap_path_ids(remap);
+        self.visibility.remap_path_ids(remap);
+        for declaration in &mut self.declarations {
+            declaration.remap_path_ids(remap);
+        }
+        for path in &mut self.local_declarations {
+            *path = remap.get(*path);
+        }
+        for callable in &mut self.callables {
+            callable.remap_path_ids(remap);
+        }
+        for nominal in &mut self.nominals {
+            nominal.remap_path_ids(remap);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -91,13 +117,13 @@ pub(super) struct StableFunctionReturn {
 
 #[derive(Clone)]
 pub(super) struct StableDeclarationBinding {
-    pub(super) local_path: Box<[String]>,
+    pub(super) local_path: PathId,
     pub(super) origin: OriginDeclarationId,
 }
 
 #[derive(Clone)]
 pub(super) struct StableCallableBinding {
-    pub(super) local_path: Box<[String]>,
+    pub(super) local_path: PathId,
     pub(super) target: StableFunctionTarget,
     pub(super) signature: StableFunctionSignature,
     pub(super) summary: PublicCallSummary,
@@ -105,9 +131,27 @@ pub(super) struct StableCallableBinding {
 
 #[derive(Clone)]
 pub(super) struct StableNominalBinding {
-    pub(super) local_path: Box<[String]>,
+    pub(super) local_path: PathId,
     pub(super) identity: CanonicalTypeIdentity,
 }
+impl StableDeclarationBinding {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.local_path = remap.get(self.local_path);
+    }
+}
+
+impl StableCallableBinding {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.local_path = remap.get(self.local_path);
+    }
+}
+
+impl StableNominalBinding {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.local_path = remap.get(self.local_path);
+    }
+}
+
 
 #[derive(Clone)]
 pub(super) enum StableFunctionTarget {
@@ -118,18 +162,24 @@ pub(super) enum StableFunctionTarget {
 
 #[derive(Clone)]
 pub(super) enum StableReceiverKey {
-    Struct(Box<[String]>),
-    Choice(Box<[String]>),
+    Struct(PathId),
+    Choice(PathId),
 }
 
 impl StableReceiverKey {
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        match self {
+            Self::Struct(path) | Self::Choice(path) => *path = remap.get(*path),
+        }
+    }
+
     pub(super) fn capture(
         receiver: &ReceiverKey,
-        string_table: &StringTable,
+        _string_table: &StringTable,
     ) -> Result<Self, CompilerError> {
         match receiver {
-            ReceiverKey::Struct(path) => Ok(Self::Struct(stable_path(path, string_table))),
-            ReceiverKey::Choice(path) => Ok(Self::Choice(stable_path(path, string_table))),
+            ReceiverKey::Struct(path) => Ok(Self::Struct(*path)),
+            ReceiverKey::Choice(path) => Ok(Self::Choice(*path)),
             ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_) => {
                 Err(CompilerError::compiler_error(
                     "Retained receiver method has a non-source receiver key",
@@ -138,10 +188,10 @@ impl StableReceiverKey {
         }
     }
 
-    pub(super) fn materialise(&self, string_table: &mut StringTable) -> ReceiverKey {
+    pub(super) fn materialise(&self, _string_table: &mut StringTable) -> ReceiverKey {
         match self {
-            Self::Struct(path) => ReceiverKey::Struct(materialise_path(path, string_table)),
-            Self::Choice(path) => ReceiverKey::Choice(materialise_path(path, string_table)),
+            Self::Struct(path) => ReceiverKey::Struct(*path),
+            Self::Choice(path) => ReceiverKey::Choice(*path),
         }
     }
 }
@@ -203,6 +253,7 @@ pub(super) struct GeneratedFoldedValueMaterialiser<'a, 'b, N: MaterialisationNom
     pub(super) template_ir_store:
         Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
     pub(super) module_resources: Rc<RefCell<ModuleResourceTable>>,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 impl<N: MaterialisationNominalSource> FoldedValueMaterialiser
@@ -233,7 +284,12 @@ impl<N: MaterialisationNominalSource> FoldedValueMaterialiser
             self.external_registry,
             self.nominal_source,
             string_table,
+            self.path_fork,
         )
+    }
+
+    fn path_fork(&mut self) -> &mut PathInternerFork {
+        self.path_fork
     }
 
     fn type_environment(&self) -> &TypeEnvironment {
@@ -315,7 +371,7 @@ impl StableFunctionTarget {
         }
     }
 
-    pub(super) fn materialise(&self, local_path: InternedPath) -> SourceFunctionTarget {
+    pub(super) fn materialise(&self, local_path: PathId) -> SourceFunctionTarget {
         match self {
             Self::Imported(origin) => SourceFunctionTarget::Imported {
                 origin: origin.clone(),

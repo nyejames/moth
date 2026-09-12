@@ -8,7 +8,7 @@
 use super::builder::PathNode;
 use super::id::PathId;
 use crate::compiler_frontend::symbols::string_interning::{
-    FrozenStringTable, StringId, StringTable, StringTableResolver,
+    FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
 };
 use std::path::PathBuf;
 
@@ -22,8 +22,17 @@ pub struct PathTable {
     depths: Vec<u32>,
 }
 
-#[allow(dead_code)] // Slice 2B wires complete path operations into module compilation.
 impl PathTable {
+    pub(crate) fn from_parts(nodes: Vec<PathNode>, depths: Vec<u32>) -> Self {
+        Self { nodes, depths }
+    }
+    /// Rewrite component IDs after the owning diagnostic string table merges.
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for node in &mut self.nodes {
+            node.component = remap.get(node.component);
+        }
+    }
+
     pub(super) fn new() -> Self {
         // The root's absent parent is the table terminator. Its component is a valid-shaped
         // placeholder that is never read.

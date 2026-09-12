@@ -72,7 +72,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::traits::environment::CoreTraitKind;
@@ -107,13 +107,13 @@ pub(super) struct ProjectedReceiverMethodSignature {
 /// without a project-module owner fail through `CompilerError`.
 pub(super) struct TransientNominalOriginResolver<'a> {
     type_environment: &'a TypeEnvironment,
-    public_source_nominal_type_origins: &'a FxHashMap<InternedPath, OriginTypeId>,
+    public_source_nominal_type_origins: &'a FxHashMap<PathId, OriginTypeId>,
 }
 
 impl<'a> TransientNominalOriginResolver<'a> {
     pub(super) fn new(
         type_environment: &'a TypeEnvironment,
-        public_source_nominal_type_origins: &'a FxHashMap<InternedPath, OriginTypeId>,
+        public_source_nominal_type_origins: &'a FxHashMap<PathId, OriginTypeId>,
     ) -> Self {
         Self {
             type_environment,
@@ -280,16 +280,20 @@ impl<'a> RootIndex<'a> {
     pub(super) fn new(
         roots: &'a [ResolvedPublicTypeRoot],
         string_table: &StringTable,
+        path_fork: &PathInternerFork,
     ) -> Result<Self, CompilerError> {
         let mut roots_by_name = FxHashMap::default();
         for root in roots {
-            let name = root.path.name_str(string_table).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "defined public type-surface projection: a public type root has no \
-                     resolvable defining name (path: {:?})",
-                    root.path
-                ))
-            })?;
+            let name = path_fork
+                .component(root.path)
+                .map(|component| string_table.resolve(component))
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "defined public type-surface projection: a public type root has no \
+                         resolvable defining name (path: {:?})",
+                        root.path
+                    ))
+                })?;
             if roots_by_name.insert(name.to_owned(), root).is_some() {
                 return Err(CompilerError::compiler_error(format!(
                     "defined public type-surface projection: two public type roots share the \
@@ -349,10 +353,11 @@ pub(super) fn register_generic_parameter_origins(
     generic_resolver: &mut TransientGenericParameterOriginResolver,
     root_table: &ResolvedPublicTypeRootTable,
     export_bindings: &[ExportBinding],
-    generic_function_templates: &FxHashMap<InternedPath, GenericFunctionTemplate>,
+    generic_function_templates: &FxHashMap<PathId, GenericFunctionTemplate>,
     nominal_resolver: &TransientNominalOriginResolver,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
     // Build a defining-name-to-function-origin lookup from the export bindings. Public aliases
     // remain spelling only and must not affect generic declaration identity.
@@ -372,13 +377,16 @@ pub(super) fn register_generic_parameter_origins(
                 generic_parameter_list_id: Some(list_id),
                 ..
             } => {
-                let function_name = root.path.name_str(string_table).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "defined public type-surface projection: a public free-function root \
-                         has no resolvable name (path: {:?})",
-                        root.path
-                    ))
-                })?;
+                let function_name = path_fork
+                    .component(root.path)
+                    .map(|component| string_table.resolve(component))
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "defined public type-surface projection: a public free-function root \
+                             has no resolvable name (path: {:?})",
+                            root.path
+                        ))
+                    })?;
 
                 let function_origin = function_origin_by_name
                     .get(function_name)
@@ -481,14 +489,10 @@ fn register_nominal_generic_origins(
 ///
 /// WHAT: for each receiver method with a validated `GenericFunctionTemplate`, resolves the
 /// method's `GenericParameterListId` and the receiver nominal's `GenericParameterListId` from
-/// the `TypeEnvironment`, verifies position-by-position authored-name alignment, then aliases
-/// each receiver-local `GenericParameterId` to the nominal's already-registered
-/// `ExportedGenericParameterIdentity`. The receiver method must not become a
-/// `GenericDeclarationOrigin` owner.
 fn register_receiver_method_generic_parameter_aliases(
     generic_resolver: &mut TransientGenericParameterOriginResolver,
     receiver_method_entries: &[ReceiverMethodEntry],
-    generic_function_templates: &FxHashMap<InternedPath, GenericFunctionTemplate>,
+    generic_function_templates: &FxHashMap<PathId, GenericFunctionTemplate>,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
 ) -> Result<(), CompilerError> {
@@ -639,7 +643,7 @@ fn alias_aligned_generic_parameters(
 /// projection owner rather than duplicating it.
 pub(super) fn project_trait_source_fact_to_canonical_identity(
     source_fact: &ResolvedTraitSourceFact,
-    public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
 ) -> Result<CanonicalTraitIdentity, CompilerError> {
     match source_fact {
         ResolvedTraitSourceFact::Source(path) => {
@@ -672,7 +676,7 @@ fn project_generic_parameter_bounds(
     parameter_id: GenericParameterId,
     type_environment: &TypeEnvironment,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
-    public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
 ) -> Result<Vec<CanonicalTraitIdentity>, CompilerError> {
     let Some(bounds) = type_environment.trait_bounds_for_generic_parameter(parameter_id) else {
         return Ok(Vec::new());
@@ -714,7 +718,7 @@ fn project_exported_generic_parameter_surfaces(
     generic_resolver: &dyn GenericParameterOriginResolver,
     expected_origin: &GenericDeclarationOrigin,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
-    public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
 ) -> Result<Vec<PublicGenericParameterSurface>, CompilerError> {
     let Some(list_id) = generic_parameter_list_id else {
         return Ok(Vec::new());
@@ -778,8 +782,9 @@ pub(super) fn project_free_function_semantics(
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
-    public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
     folded_value_context: &FoldedValueProjectionContext<'_>,
 ) -> Result<PublicFunctionSemantics, CompilerError> {
     let expected_origin = GenericDeclarationOrigin::free_function(function_origin.clone())?;
@@ -797,10 +802,9 @@ pub(super) fn project_free_function_semantics(
         .parameters
         .iter()
         .map(|declaration| {
-            let name = declaration
-                .id
-                .name_str(string_table)
-                .map(|name| name.to_owned());
+            let name = path_fork
+                .component(declaration.id)
+                .map(|name| string_table.resolve(name).to_owned());
             let type_identity = project_type_id_to_canonical_identity(
                 declaration.value.type_id,
                 type_environment,
@@ -850,8 +854,9 @@ pub(super) fn project_struct_parts(
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
-    public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
     folded_value_context: &FoldedValueProjectionContext<'_>,
 ) -> Result<(Vec<PublicGenericParameterSurface>, Vec<PublicFieldTypeSlot>), CompilerError> {
     let definition = type_environment.get(type_id).ok_or_else(|| {
@@ -904,6 +909,7 @@ pub(super) fn project_struct_parts(
         type_environment,
         context,
         string_table,
+        path_fork,
         folded_value_context,
     )?;
 
@@ -914,16 +920,15 @@ pub(super) fn project_struct_parts(
 ///
 /// WHAT: validates the nominal resolves to the export binding's origin, projects the exported
 /// generic parameter surfaces and the choice variants. Returns the parts the declaration join
-/// assembles into a [`super::model::PublicChoiceSemantics`] after attaching receiver methods.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn project_choice_parts(
     type_origin: OriginTypeId,
     type_id: TypeId,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
-    public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<
     (
         Vec<PublicGenericParameterSurface>,
@@ -974,9 +979,13 @@ pub(super) fn project_choice_parts(
         public_source_trait_origins,
     )?;
 
-    let variants =
-        project_choice_variants(choice_definition, type_environment, context, string_table)?;
-
+    let variants = project_choice_variants(
+        choice_definition,
+        type_environment,
+        context,
+        string_table,
+        path_fork,
+    )?;
     Ok((generic_parameters, variants))
 }
 
@@ -1047,12 +1056,6 @@ pub(super) fn project_return_slots(
 /// Total-join retained struct field declarations against the canonical
 /// [`StructTypeDefinition`] fields and project stable field type slots with folded defaults.
 ///
-/// WHAT: the canonical `StructTypeDefinition.fields` is the sole type authority for field
-/// names, order and `TypeId`s. The retained `Declaration` values supply only the folded
-/// default expression for each field. The join rejects count, name/order, duplicate-name and
-/// declaration-value `TypeId` mismatches with a `CompilerError` so the retained declaration
-/// vector is never trusted as a parallel type authority.
-#[allow(clippy::too_many_arguments)]
 fn project_fields_with_defaults(
     root_type_id: TypeId,
     struct_definition: &StructTypeDefinition,
@@ -1060,6 +1063,7 @@ fn project_fields_with_defaults(
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
     folded_value_context: &FoldedValueProjectionContext<'_>,
 ) -> Result<Vec<PublicFieldTypeSlot>, CompilerError> {
     if struct_definition.fields.len() != field_declarations.len() {
@@ -1079,8 +1083,8 @@ fn project_fields_with_defaults(
         .iter()
         .zip(field_declarations.iter())
     {
-        let canonical_name_id = canonical_field.name.name();
-        let declaration_name_id = declaration.id.name();
+        let canonical_name_id = path_fork.component(canonical_field.name);
+        let declaration_name_id = path_fork.component(declaration.id);
 
         if canonical_name_id != declaration_name_id {
             return Err(CompilerError::compiler_error(format!(
@@ -1099,10 +1103,9 @@ fn project_fields_with_defaults(
             )));
         }
 
-        let name = canonical_field
-            .name
-            .name_str(string_table)
-            .map(|name| name.to_owned())
+        let name = path_fork
+            .component(canonical_field.name)
+            .map(|name| string_table.resolve(name).to_owned())
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "defined public type-surface projection: a struct field has no resolvable name (path: {:?})",
@@ -1142,6 +1145,7 @@ fn project_choice_variants(
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<PublicChoiceVariantSurface>, CompilerError> {
     let mut variants = Vec::with_capacity(choice_definition.variants.len());
     for variant in choice_definition.variants.iter() {
@@ -1152,10 +1156,9 @@ fn project_choice_variants(
             ChoiceVariantPayloadDefinition::Record { fields } => {
                 let mut projected_fields = Vec::with_capacity(fields.len());
                 for field in fields.iter() {
-                    let field_name = field
-                        .name
-                        .name_str(string_table)
-                        .map(|name| name.to_owned())
+                    let field_name = path_fork
+                        .component(field.name)
+                        .map(|name| string_table.resolve(name).to_owned())
                         .ok_or_else(|| {
                             CompilerError::compiler_error(format!(
                                 "defined public type-surface projection: a choice variant \

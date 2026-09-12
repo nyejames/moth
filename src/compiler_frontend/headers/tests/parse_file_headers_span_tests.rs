@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Preparation retains exact dependency and file-path ranges across identity normalization.
 #[test]
@@ -10,6 +11,7 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
     );
     let canonical = PathBuf::from("dependency-spans.moth");
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
         .expect("source should register");
     let source_id = sources
@@ -19,23 +21,16 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
     let options = HeaderParseOptions::default();
     let directives = StyleDirectiveRegistry::built_ins();
     let scope =
-        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
-        &source,
-        &scope,
-        TokenizerEntryMode::SourceFile,
-        &directives,
-        &mut strings,
-        source_id,
-        &mut spans,
-    )
+    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &directives, &mut strings, &mut path_fork, source_id, &mut spans)
     .expect("source should tokenize");
     let mut prepared = parse_file_headers_with_table(
         &mut tokens,
         &canonical,
         &options,
         &mut strings,
+        &mut PathInternerFork::empty(),
         0,
         0,
         &mut spans,
@@ -49,6 +44,7 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
     );
 
     let mut merged = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     merged.intern("unrelated");
     let remap = merged.merge_from(&strings);
     prepared
@@ -67,9 +63,9 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         final_id, source_id,
         "canonical membership changes the provisional identity"
     );
-    let final_path = InternedPath::from_single_str("dependency-spans.moth", &mut merged);
+    let final_path = path_fork.try_intern_portable_path("dependency-spans.moth", &mut merged).expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical)
+        .rebind_source_identity(final_id, final_path, canonical, &mut path_fork)
         .expect("retained source should rebind");
     assert_eq!(
         prepared.file_dependency_clauses[0].dependency.span.local(),
@@ -145,6 +141,7 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
     );
     let canonical = PathBuf::from("member-spans.moth");
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
         .expect("registered source");
     let source_id = sources
@@ -152,23 +149,16 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .expect("source identity")
         .id;
     let scope =
-        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
-        &source,
-        &scope,
-        TokenizerEntryMode::SourceFile,
-        &StyleDirectiveRegistry::built_ins(),
-        &mut strings,
-        source_id,
-        &mut spans,
-    )
+    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
     .expect("source should tokenize");
     let mut prepared = parse_file_headers_with_table(
         &mut tokens,
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
+        &mut PathInternerFork::empty(),
         0,
         0,
         &mut spans,
@@ -210,6 +200,7 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .expect("choice shell");
 
     let mut merged = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     merged.intern("unrelated");
     prepared
         .remap_string_ids(&merged.merge_from(&strings))
@@ -228,9 +219,9 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         final_id, source_id,
         "canonical membership changes the provisional identity"
     );
-    let final_path = InternedPath::from_single_str("member-spans.moth", &mut merged);
+    let final_path = path_fork.try_intern_portable_path("member-spans.moth", &mut merged).expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical)
+        .rebind_source_identity(final_id, final_path, canonical, &mut path_fork)
         .expect("retained source should rebind");
     assert_eq!(prepared.file_id, final_id);
 
@@ -273,9 +264,8 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         member_name
     );
     assert_eq!(
-        signature.parameters[0]
-            .id
-            .name()
+        path_fork
+            .component(signature.parameters[0].id)
             .map(|name| merged.resolve(name)),
         Some(member_name.as_str())
     );
@@ -356,6 +346,7 @@ Generic of A must {trait_name}\n"
     );
     let canonical = PathBuf::from("trait-spans.moth");
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
         .expect("registered source");
     let source_id = sources
@@ -363,23 +354,16 @@ Generic of A must {trait_name}\n"
         .expect("source identity")
         .id;
     let scope =
-        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
-        &source,
-        &scope,
-        TokenizerEntryMode::SourceFile,
-        &StyleDirectiveRegistry::built_ins(),
-        &mut strings,
-        source_id,
-        &mut spans,
-    )
+    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
     .expect("source should tokenize");
     let mut prepared = parse_file_headers_with_table(
         &mut tokens,
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
+        &mut PathInternerFork::empty(),
         0,
         0,
         &mut spans,
@@ -407,7 +391,7 @@ Generic of A must {trait_name}\n"
                             header_counts[3] += 1;
                         }
                     }
-                    generated_header_names.push(header.tokens.src_path.to_portable_string(table));
+                    generated_header_names.push(format!("{:?}", header.tokens.src_path));
                     anchors.push((
                         conformance.target.span,
                         table.resolve(conformance.target.name).to_owned(),
@@ -418,7 +402,7 @@ Generic of A must {trait_name}\n"
                 }
                 HeaderKind::TraitIncompatibility { incompatibility } => {
                     header_counts[2] += 1;
-                    generated_header_names.push(header.tokens.src_path.to_portable_string(table));
+                    generated_header_names.push(format!("{:?}", header.tokens.src_path));
                     anchors.push((
                         incompatibility.subject.span,
                         table.resolve(incompatibility.subject.name).to_owned(),
@@ -448,6 +432,7 @@ Generic of A must {trait_name}\n"
     );
 
     let mut merged = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     merged.intern("unrelated");
     prepared
         .remap_string_ids(&merged.merge_from(&strings))
@@ -466,9 +451,9 @@ Generic of A must {trait_name}\n"
         final_id, source_id,
         "canonical membership changes the provisional identity"
     );
-    let final_path = InternedPath::from_single_str("trait-spans.moth", &mut merged);
+    let final_path = path_fork.try_intern_portable_path("trait-spans.moth", &mut merged).expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical)
+        .rebind_source_identity(final_id, final_path, canonical, &mut path_fork)
         .expect("retained source should rebind");
 
     let mut database = SourceDatabaseBuilder::new(final_sources);

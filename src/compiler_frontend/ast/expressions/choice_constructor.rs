@@ -37,6 +37,7 @@ use crate::compiler_frontend::datatypes::definitions::{
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -54,6 +55,7 @@ pub(super) fn parse_choice_construct(
     choice_declaration: &Declaration,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<Expression, ExpressionParseError> {
     let type_id = choice_declaration.value.type_id;
@@ -84,8 +86,9 @@ pub(super) fn parse_choice_construct(
         })
         .unwrap_or_default();
 
-    let choice_name_str = nominal_path
-        .name_str(string_table)
+    let choice_name_str = path_fork
+        .component(nominal_path)
+        .map(|name| string_table.resolve(name))
         .unwrap_or("<choice>")
         .to_owned();
 
@@ -138,7 +141,7 @@ pub(super) fn parse_choice_construct(
 
         return Err(CompilerDiagnostic::invalid_choice_variant(
             InvalidChoiceVariantReason::UnknownVariant,
-            choice_declaration.id.name(),
+            path_fork.component(choice_declaration.id),
             Some(variant_name),
             available_variant_ids,
             variant_span,
@@ -163,7 +166,8 @@ pub(super) fn parse_choice_construct(
         constructor_span = Some(token_stream.current_span());
 
         let payload_field_views = ConstructorField::from_choice_payload_fields(fields);
-        let field_expectations = expectations_from_constructor_fields(&payload_field_views);
+        let field_expectations =
+            expectations_from_constructor_fields(&payload_field_views, path_fork);
         let variant_name_str = string_table.resolve(variant_name).to_owned();
         let callee_name = string_table.intern(&format!("{choice_name_str}::{variant_name_str}"));
         parsed_payload_arguments = Some(parse_call_arguments_typed_with_expectations(
@@ -175,6 +179,7 @@ pub(super) fn parse_choice_construct(
             CallArgumentSyntax::Supported {
                 callee_name: Some(callee_name),
             },
+            path_fork,
         )?);
     }
 
@@ -203,6 +208,7 @@ pub(super) fn parse_choice_construct(
                     constructor_fields: constructor_fields.as_deref(),
                     raw_args: parsed_payload_arguments.as_deref(),
                     span: constructor_span,
+                    path_fork,
                 },
                 context,
                 type_interner,
@@ -241,7 +247,7 @@ pub(super) fn parse_choice_construct(
                 if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
                     return Err(CompilerDiagnostic::invalid_choice_variant(
                         InvalidChoiceVariantReason::UnitVariantWithParentheses,
-                        choice_declaration.id.name(),
+                        path_fork.component(choice_declaration.id),
                         Some(variant_name),
                         vec![],
                         Some(token_stream.current_span()),
@@ -251,7 +257,7 @@ pub(super) fn parse_choice_construct(
 
                 return Err(CompilerDiagnostic::invalid_choice_variant(
                     InvalidChoiceVariantReason::UnitVariantAsConstructor,
-                    choice_declaration.id.name(),
+                    path_fork.component(choice_declaration.id),
                     Some(variant_name),
                     vec![],
                     variant_span,
@@ -282,7 +288,7 @@ pub(super) fn parse_choice_construct(
                 token_stream.advance();
                 return Err(CompilerDiagnostic::invalid_choice_variant(
                     InvalidChoiceVariantReason::PayloadVariantMissingArguments,
-                    choice_declaration.id.name(),
+                    path_fork.component(choice_declaration.id),
                     Some(variant_name),
                     vec![],
                     Some(token_stream.current_span()),
@@ -300,7 +306,7 @@ pub(super) fn parse_choice_construct(
             };
 
             let constructor_fields = ConstructorField::from_choice_payload_fields(fields);
-            let expectations = expectations_from_constructor_fields(&constructor_fields);
+            let expectations = expectations_from_constructor_fields(&constructor_fields, path_fork);
             let type_check_context = type_interner.type_check_context();
             let resolved_args = resolve_call_arguments(
                 CallDiagnosticContext::choice_constructor(&format!(
@@ -313,6 +319,7 @@ pub(super) fn parse_choice_construct(
                 constructor_span,
                 CallArgumentResolutionContext {
                     string_table,
+                    path_fork,
                     type_environment: type_check_context.type_environment,
                     compatibility_cache: type_check_context.compatibility_cache,
                 },
@@ -329,7 +336,7 @@ pub(super) fn parse_choice_construct(
                     // environment construction resolves constants in graph order.
                     let is_placeholder_reference =
                         if let ExpressionKind::Reference(path) = &value.kind {
-                            path.name().is_some_and(|name| {
+                            path_fork.component(*path).is_some_and(|name| {
                                 context.get_reference(&name).is_some_and(|declaration| {
                                     declaration
                                         .as_declaration()
@@ -339,7 +346,6 @@ pub(super) fn parse_choice_construct(
                         } else {
                             false
                         };
-
                     let value_is_compile_time_constant = if is_placeholder_reference {
                         true
                     } else {
@@ -354,9 +360,8 @@ pub(super) fn parse_choice_construct(
                     };
 
                     if !value_is_compile_time_constant {
-                        let field_name = field
-                            .name
-                            .name()
+                        let field_name = path_fork
+                            .component(field.name)
                             .unwrap_or_else(|| string_table.intern("<field>"));
                         return Err(CompilerDiagnostic::compile_time_evaluation_error(
                             CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,

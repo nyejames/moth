@@ -20,13 +20,14 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigQualifierSyntax;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::return_compiler_error;
 
 #[derive(Debug, Clone)]
 pub struct Declaration {
-    pub id: InternedPath,
+    pub id: PathId,
     pub value: Expression,
     /// Span of the declaration name/binding token when authored.
     ///
@@ -54,7 +55,7 @@ pub enum MultiBindTargetKind {
 
 #[derive(Debug, Clone)]
 pub struct MultiBindTarget {
-    pub id: InternedPath,
+    pub id: PathId,
     pub type_id: TypeId,
     pub value_mode: ValueMode,
     pub kind: MultiBindTargetKind,
@@ -67,7 +68,7 @@ pub struct AstNode {
     pub kind: NodeKind,
     /// Exact source span of the authored node, or `None` for generated nodes.
     pub span: Option<SourceSpan>,
-    pub scope: InternedPath,
+    pub scope: PathId,
 }
 
 /// Authored statement-branch facts retained until static selection.
@@ -78,15 +79,15 @@ pub struct AstNode {
 #[derive(Debug, Clone)]
 pub struct IfBranchMetadata {
     pub(crate) request_ranges: IfGenericRequestRanges,
-    pub(crate) then_scope: InternedPath,
-    pub(crate) else_scope: Option<InternedPath>,
+    pub(crate) then_scope: PathId,
+    pub(crate) else_scope: Option<PathId>,
 }
 
 impl IfBranchMetadata {
     pub(crate) fn new(
         request_ranges: IfGenericRequestRanges,
-        then_scope: InternedPath,
-        else_scope: Option<InternedPath>,
+        then_scope: PathId,
+        else_scope: Option<PathId>,
     ) -> Self {
         Self {
             request_ranges,
@@ -198,12 +199,11 @@ pub enum NodeKind {
     // example: new_struct_instance = MyStructDefinition(arg1, arg2)
     //          new_struct_instance(arg) -- Calls the main function of the struct
     StructDefinition(
-        InternedPath,     // Full unique name path
+        PathId,     // Full unique name path
         Vec<Declaration>, // Fields
     ),
 
-    Function(InternedPath, FunctionSignature, Vec<AstNode>),
-
+    Function(PathId, FunctionSignature, Vec<AstNode>),
     // Mutation of existing mutable variables
     Assignment {
         target: PlaceExpression, // Variable or field projection

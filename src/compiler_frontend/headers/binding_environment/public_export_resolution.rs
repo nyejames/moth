@@ -15,7 +15,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -31,7 +31,7 @@ pub(crate) enum PublicExportLookupResult {
     NotAPublicExportBoundary,
     /// The public export surface exports a source symbol with this canonical path.
     ExportedSource {
-        path: InternedPath,
+        path: PathId,
         exported_entries: FxHashSet<PublicExportEntry>,
     },
     /// The public surface exports one provider-backed selection. Its shell and selected provider
@@ -39,7 +39,7 @@ pub(crate) enum PublicExportLookupResult {
     ExportedProviderSelection {
         selection: DependencySelectionId,
         source_name: StringId,
-        diagnostic_path: InternedPath,
+        diagnostic_path: PathId,
     },
     /// The public export surface exports an external package symbol.
     ExportedExternal { symbol_id: ExternalSymbolId },
@@ -60,15 +60,16 @@ pub(crate) enum PublicExportSurfaceType {
 ///
 /// WHY: boundary resolution needs both the dependency path and the module's public export metadata.
 pub(crate) struct PublicExportResolutionInput<'a> {
-    pub(crate) consumer_file: &'a InternedPath,
-    pub(crate) header_path: &'a InternedPath,
+    pub(crate) consumer_file: &'a PathId,
+    pub(crate) header_path: &'a PathId,
     pub(crate) source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
-    pub(crate) file_package_membership: &'a FxHashMap<InternedPath, String>,
+    pub(crate) file_package_membership: &'a FxHashMap<PathId, String>,
     pub(crate) module_root_public_exports:
-        &'a FxHashMap<InternedPath, FxHashSet<PublicExportEntry>>,
-    pub(crate) file_module_membership: &'a FxHashMap<InternedPath, InternedPath>,
+        &'a FxHashMap<PathId, FxHashSet<PublicExportEntry>>,
+    pub(crate) file_module_membership: &'a FxHashMap<PathId, PathId>,
     pub(crate) module_root_boundaries: &'a [ModuleRootBoundary],
     pub(crate) string_table: &'a StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 /// Attempt to resolve a dependency through a source-backed package or module-root public surface.
@@ -77,7 +78,7 @@ pub(crate) struct PublicExportResolutionInput<'a> {
 /// and whether the consumer is outside that module. If so, looks up the symbol name in the
 /// public surface's exported entries.
 pub(crate) fn resolve_public_export_boundary(
-    input: &PublicExportResolutionInput<'_>,
+    input: &mut PublicExportResolutionInput<'_>,
 ) -> Option<PublicExportLookupResult> {
     // Try cross-package public export resolution first.
     if let Some(result) = try_resolve_package_public_export(input) {
@@ -93,9 +94,12 @@ pub(crate) fn resolve_public_export_boundary(
 /// WHAT: when a dependency path starts with a package prefix and the consumer is outside that
 /// package, the symbol must be exported by the module's root-file public surface.
 fn try_resolve_package_public_export(
-    input: &PublicExportResolutionInput<'_>,
+    input: &mut PublicExportResolutionInput<'_>,
 ) -> Option<PublicExportLookupResult> {
-    let components = input.header_path.as_components();
+    let mut components_buf = Vec::new();
+    let components = input
+        .path_fork
+        .resolve_components(*input.header_path, &mut components_buf);
     if components.is_empty() {
         return None;
     }
@@ -168,52 +172,57 @@ fn try_resolve_package_public_export(
 ///      Centralising the derivation prevents the physical-parent or `@./` interpretation from
 ///      reappearing in a sibling owner.
 pub(super) fn effective_module_boundary_path(
-    consumer_file: &InternedPath,
-    dependency_path: &InternedPath,
-    file_module_membership: &FxHashMap<InternedPath, InternedPath>,
+    consumer_file: &PathId,
+    dependency_path: &PathId,
+    file_module_membership: &FxHashMap<PathId, PathId>,
     module_root_boundaries: &[ModuleRootBoundary],
-) -> InternedPath {
-    let module_root_prefix: &[StringId] = file_module_membership
-        .get(consumer_file)
+    path_fork: &mut PathInternerFork,
+) -> PathId {
+    let module_root = file_module_membership.get(consumer_file).copied();
+    let prefix = module_root
         .and_then(|root| {
             module_root_boundaries
                 .iter()
-                .find(|boundary| &boundary.module_root == root)
-                .map(|boundary| boundary.dependency_prefix.as_components())
+                .find(|boundary| boundary.module_root == root)
+                .map(|boundary| boundary.dependency_prefix)
         })
-        .unwrap_or(&[]);
-
-    let mut combined = module_root_prefix.to_vec();
-    combined.extend_from_slice(dependency_path.as_components());
-    InternedPath::from_components(combined)
+        .unwrap_or(PathId::ROOT);
+    let mut scratch = Vec::new();
+    path_fork
+        .try_join(prefix, *dependency_path, &mut scratch)
+        .expect("path interner fork exhausted while deriving module boundary path")
 }
 
 /// Cross-module-root public export lookup.
 ///
 /// WHAT: when a dependency path targets a regular module root under the entry root and the
-/// consumer is outside that module, the symbol must be exported by the module root file.
 fn try_resolve_module_root_public_export(
-    input: &PublicExportResolutionInput<'_>,
+    input: &mut PublicExportResolutionInput<'_>,
 ) -> Option<PublicExportLookupResult> {
     if input.module_root_boundaries.is_empty() {
         return None;
     }
 
-    let components = input.header_path.as_components();
+    let mut components_buf = Vec::new();
+    let components = input
+        .path_fork
+        .resolve_components(*input.header_path, &mut components_buf);
     if components.is_empty() {
         return None;
     }
-
     let effective_path = effective_module_boundary_path(
         input.consumer_file,
         input.header_path,
         input.file_module_membership,
         input.module_root_boundaries,
+        input.path_fork,
     );
 
     // Find the longest matching module root prefix.
     for boundary in input.module_root_boundaries {
-        if effective_path.starts_with(&boundary.dependency_prefix) {
+        if input
+            .path_fork
+            .starts_with(effective_path, boundary.dependency_prefix) {
             // Internal dependencies within the same module root use normal resolution.
             let consumer_root = input.file_module_membership.get(input.consumer_file);
             if consumer_root == Some(&boundary.module_root) {
@@ -223,8 +232,11 @@ fn try_resolve_module_root_public_export(
             // Named module roots use the root path as their public API prefix. The entry root
             // has no prefix, so its public re-exports stay addressable at their real
             // source paths, but arbitrary paths with the same final name must not match.
-            let prefix_len = boundary.dependency_prefix.as_components().len();
-            let effective_components = effective_path.as_components();
+            let prefix_len = input.path_fork.depth(boundary.dependency_prefix) as usize;
+            let mut effective_components_buf = Vec::new();
+            let effective_components = input
+                .path_fork
+                .resolve_components(effective_path, &mut effective_components_buf);
             let public_suffix = &effective_components[prefix_len..];
             let exports = input
                 .module_root_public_exports
@@ -265,11 +277,12 @@ fn try_resolve_module_root_public_export(
 
                 for entry in exports {
                     if let Some(path) = entry.target.source_path()
-                        && suffix_matches_with_optional_source_extension(
-                            path,
-                            &effective_path,
-                            input.string_table,
-                        )
+                    && suffix_matches_with_optional_source_extension(
+                        path,
+                        &effective_path,
+                        input.string_table,
+                        &*input.path_fork,
+                    )
                     {
                         return Some(PublicExportLookupResult::ExportedSource {
                             path: path.clone(),
@@ -279,9 +292,11 @@ fn try_resolve_module_root_public_export(
                 }
 
                 return Some(PublicExportLookupResult::NotExported {
-                    public_surface_name: boundary
-                        .dependency_prefix
-                        .to_portable_string(input.string_table),
+                    public_surface_name: input.path_fork.render_portable(
+                        boundary.dependency_prefix,
+                        input.string_table,
+                        &mut Vec::new(),
+                    ),
                     public_surface_type: PublicExportSurfaceType::ModuleRoot,
                 });
             }
@@ -293,9 +308,11 @@ fn try_resolve_module_root_public_export(
             };
             let Some(symbol_name) = symbol_name else {
                 return Some(PublicExportLookupResult::NotExported {
-                    public_surface_name: boundary
-                        .dependency_prefix
-                        .to_portable_string(input.string_table),
+                    public_surface_name: input.path_fork.render_portable(
+                        boundary.dependency_prefix,
+                        input.string_table,
+                        &mut Vec::new(),
+                    ),
                     public_surface_type: PublicExportSurfaceType::ModuleRoot,
                 });
             };
@@ -329,9 +346,11 @@ fn try_resolve_module_root_public_export(
                 }
             }
             return Some(PublicExportLookupResult::NotExported {
-                public_surface_name: boundary
-                    .dependency_prefix
-                    .to_portable_string(input.string_table),
+                public_surface_name: input.path_fork.render_portable(
+                    boundary.dependency_prefix,
+                    input.string_table,
+                    &mut Vec::new(),
+                ),
                 public_surface_type: PublicExportSurfaceType::ModuleRoot,
             });
         }
@@ -342,12 +361,12 @@ fn try_resolve_module_root_public_export(
 
 /// Input bundle for source-backed package boundary checking.
 pub(crate) struct SourcePackageBoundaryCheckInput<'a> {
-    pub(crate) consumer_file: &'a InternedPath,
-    pub(crate) target_file: &'a InternedPath,
-    pub(crate) requested_path: &'a InternedPath,
+    pub(crate) consumer_file: &'a PathId,
+    pub(crate) target_file: &'a PathId,
+    pub(crate) requested_path: &'a PathId,
     pub(crate) span: Option<SourceSpan>,
-    pub(crate) file_package_membership: &'a FxHashMap<InternedPath, String>,
-    pub(crate) source_package_root_files: &'a FxHashMap<String, InternedPath>,
+    pub(crate) file_package_membership: &'a FxHashMap<PathId, String>,
+    pub(crate) source_package_root_files: &'a FxHashMap<String, PathId>,
     pub(crate) string_table: &'a mut StringTable,
 }
 
@@ -386,17 +405,14 @@ pub(crate) fn check_source_package_boundary(
 }
 
 /// Input bundle for module boundary checking.
-///
-/// WHY: cross-module-root dependencies must respect the target module's public root even when they
-/// resolved through normal file-based path matching.
 pub(crate) struct ModuleBoundaryCheckInput<'a> {
-    pub(crate) consumer_file: &'a InternedPath,
-    pub(crate) target_file: &'a InternedPath,
-    pub(crate) symbol_path: &'a InternedPath,
+    pub(crate) consumer_file: &'a PathId,
+    pub(crate) target_file: &'a PathId,
+    pub(crate) symbol_path: &'a PathId,
     pub(crate) span: Option<SourceSpan>,
-    pub(crate) file_module_membership: &'a FxHashMap<InternedPath, InternedPath>,
+    pub(crate) file_module_membership: &'a FxHashMap<PathId, PathId>,
     pub(crate) module_root_public_exports:
-        &'a FxHashMap<InternedPath, FxHashSet<PublicExportEntry>>,
+        &'a FxHashMap<PathId, FxHashSet<PublicExportEntry>>,
 }
 
 /// Enforces module-private boundaries for cross-module-root dependencies.

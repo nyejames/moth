@@ -22,7 +22,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -35,6 +35,7 @@ use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 #[test]
 fn displayable_registers_through_unified_core_path() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -56,6 +57,7 @@ fn displayable_registers_through_unified_core_path() {
 #[test]
 fn displayable_resolves_via_core_trait_id_for_name() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
@@ -71,6 +73,7 @@ fn displayable_resolves_via_core_trait_id_for_name() {
 #[test]
 fn register_core_trait_returns_same_id_for_repeated_calls() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -98,11 +101,12 @@ fn register_core_trait_returns_same_id_for_repeated_calls() {
 #[test]
 fn fallible_core_trait_appends_error_return_channel() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
     let int_type_id = type_environment.builtins().int;
-    let error_type_id = register_error_nominal_type(&mut type_environment, &mut string_table);
+    let error_type_id = register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
     let trait_id = trait_environment.register_core_trait(
         &mut type_environment,
         &mut string_table,
@@ -144,15 +148,17 @@ fn fallible_core_trait_appends_error_return_channel() {
 #[test]
 fn register_core_cast_traits_populates_every_canonical_name() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
 
-    register_error_nominal_type(&mut type_environment, &mut string_table);
+    register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
     AstModuleEnvironmentBuilder::register_core_cast_traits(
         &mut trait_environment,
         &mut type_environment,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("core cast traits should register");
 
@@ -183,8 +189,9 @@ fn register_core_cast_traits_populates_every_canonical_name() {
 #[test]
 fn register_builtin_cast_evidence_registers_initial_14_rows() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    register_error_nominal_type(&mut type_environment, &mut string_table);
+    register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
 
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
@@ -192,6 +199,7 @@ fn register_builtin_cast_evidence_registers_initial_14_rows() {
         &mut trait_environment,
         &mut type_environment,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("core cast traits should register");
 
@@ -201,6 +209,7 @@ fn register_builtin_cast_evidence_registers_initial_14_rows() {
         &mut trait_evidence_environment,
         &type_environment,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("builtin evidence registration should succeed");
 
@@ -212,6 +221,7 @@ fn register_builtin_cast_evidence_registers_initial_14_rows() {
                 row.source,
                 &type_environment,
                 &mut string_table,
+                &mut path_fork,
             )
             .expect("source builtin type must resolve to a TypeId");
         let trait_kind = crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_trait_kind_for_row(row)
@@ -237,14 +247,16 @@ fn register_builtin_cast_evidence_registers_initial_14_rows() {
 #[test]
 fn register_core_cast_traits_records_incompatibility_pairs_symmetrically() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
-    register_error_nominal_type(&mut type_environment, &mut string_table);
+    register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
     AstModuleEnvironmentBuilder::register_core_cast_traits(
         &mut trait_environment,
         &mut type_environment,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("core cast traits should register");
 
@@ -290,14 +302,16 @@ fn register_core_cast_traits_records_incompatibility_pairs_symmetrically() {
 #[test]
 fn core_trait_kind_classifier_records_target_and_fallibility() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
-    register_error_nominal_type(&mut type_environment, &mut string_table);
+    register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
     AstModuleEnvironmentBuilder::register_core_cast_traits(
         &mut trait_environment,
         &mut type_environment,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("core cast traits should register");
 
@@ -332,10 +346,11 @@ fn core_trait_kind_classifier_records_target_and_fallibility() {
 
 fn register_error_nominal_type(
     type_environment: &mut TypeEnvironment,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> crate::compiler_frontend::datatypes::ids::TypeId {
     let error_path =
-        crate::compiler_frontend::builtins::error_type::builtin_error_type_path(string_table);
+        crate::compiler_frontend::builtins::error_type::builtin_error_type_path(path_fork, string_table);
     let struct_def = crate::compiler_frontend::datatypes::definitions::StructTypeDefinition {
         id: crate::compiler_frontend::datatypes::ids::NominalTypeId(0),
         path: error_path,
@@ -351,6 +366,7 @@ fn register_error_nominal_type(
 fn trait_this_substitution_preserves_authored_signature_spans() {
     let source = "CLONE_VALUE must:\n    clone_value |This, other This| -> This\n;\n";
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let path = std::path::PathBuf::from("requirement.moth");
     let sources =
         SourceDatabase::build([&path], &path, None, &mut strings).expect("registered source");
@@ -358,31 +374,22 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         .get_by_canonical_path(&path)
         .expect("source identity")
         .id;
-    let scope = InternedPath::try_from_filesystem_path(&path, &mut strings).expect("source path");
+    let scope = path_fork.try_intern_filesystem_path(&path, &mut strings).expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
-        source,
-        &scope,
-        TokenizerEntryMode::SourceFile,
-        &StyleDirectiveRegistry::built_ins(),
-        &mut strings,
-        source_id,
-        &mut spans,
-    )
+    let mut tokens = tokenize(source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
     .expect("signature tokens");
     let prepared = parse_file_headers_with_table(
         &mut tokens,
         &path,
         &HeaderParseOptions::default(),
         &mut strings,
+        &mut path_fork,
         0,
         0,
         &mut spans,
     )
     .expect("trait declaration should prepare");
-    let declaration = prepared
-        .headers
-        .iter()
+    let declaration = prepared.headers.iter()
         .find_map(|header| match &header.kind {
             HeaderKind::Trait { declaration } => Some(declaration),
             _ => None,

@@ -92,8 +92,36 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     Ok(())
 }
 
-/// Materialise one request, completing every nested request it raises first.
+/// Attach the compiler's live path table to any diagnosed generated request before its local
+/// compiler owner is dropped.
 fn materialise_generated_request<'build>(
+    context: &ModuleCompilationContext<'build>,
+    request_id: GeneratedRequestId,
+    request: &MaterialisingRequest,
+    transaction: &mut GeneratedFunctionTransaction<'_>,
+    requester_context: &ModuleMaterialisationPreparation,
+    compiler: &mut CompilerFrontend<'_>,
+    entry_file_path: &Path,
+) -> Result<(), PremergeFailure> {
+    let result = materialise_generated_request_inner(
+        context,
+        request_id,
+        request,
+        transaction,
+        requester_context,
+        compiler,
+        entry_file_path,
+    );
+    match result {
+        Ok(()) => Ok(()),
+        Err(mut failure) => {
+            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()));
+            Err(failure)
+        }
+    }
+}
+
+fn materialise_generated_request_inner<'build>(
     context: &ModuleCompilationContext<'build>,
     request_id: GeneratedRequestId,
     request: &MaterialisingRequest,
@@ -151,6 +179,7 @@ fn materialise_generated_request<'build>(
                 identity: &request.identity,
                 requester_context,
                 requester_call_span: request.call_span,
+                path_fork: &mut compiler.path_fork,
                 external_package_registry: context.external_packages.as_ref(),
                 style_directives: context.style_directives,
                 build_profile: context.build_profile,
@@ -166,6 +195,7 @@ fn materialise_generated_request<'build>(
                 &request.identity,
                 requester_context,
                 request.call_span,
+                &mut compiler.path_fork,
                 #[cfg(feature = "timers")]
                 request.timing_context,
             ),
@@ -195,6 +225,7 @@ fn materialise_generated_request<'build>(
         &generated_context,
         generated_context.generic_function_templates(),
         context.external_packages.as_ref(),
+        &compiler.path_fork,
         &mut generated_ast,
     )
     .map_err(PremergeFailure::Infrastructure)?;
@@ -273,7 +304,7 @@ fn materialise_generated_request<'build>(
         .functions
         .iter()
         .find_map(|function| {
-            (hir_module.side_table.function_name_path(function.id) == Some(&instance_path))
+            (hir_module.side_table.function_name_path(function.id) == Some(instance_path))
                 .then_some(function.id)
         })
         .ok_or_else(|| {
@@ -318,6 +349,10 @@ fn materialise_generated_request<'build>(
             resource_table,
             type_environment,
             borrow_analysis,
+            path_table: Arc::new(
+                crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
+                    .freeze(),
+            ),
         },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::clone(&context.external_packages),
@@ -333,19 +368,28 @@ fn materialise_generated_request<'build>(
             materialisation_context: None,
         },
     };
-    let summary = exact_generated_sidecar_summary(&request.identity, &generated_module)
-        .map_err(PremergeFailure::Infrastructure)?;
     let generated_remap = requester_context.merge_materialisation_string_table_into(
         &mut compiler.string_table,
         &generated_compiler.string_table,
     );
-    if !generated_remap.is_identity() {
-        transaction.remap_sidecars_and_module_from(
-            first_nested_sidecar,
-            &mut generated_module,
-            &generated_remap,
-        );
-    }
+    let generated_path_remap = compiler
+        .path_fork
+        .merge_delta_from(&generated_compiler.path_fork, &generated_remap)
+        .map_err(|error| {
+            PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "generated path merge failed: {error:?}"
+            )))
+        })?;
+    transaction.remap_sidecars_and_module_from(
+        first_nested_sidecar,
+        &mut generated_module,
+        &generated_remap,
+        &generated_path_remap,
+    );
+    generated_module.executable.path_table =
+        Arc::new(compiler.path_fork.snapshot_table());
+    let summary = exact_generated_sidecar_summary(&request.identity, &generated_module)
+        .map_err(PremergeFailure::Infrastructure)?;
     transaction
         .complete(
             request_id,

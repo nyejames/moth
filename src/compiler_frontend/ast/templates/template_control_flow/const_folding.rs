@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -28,7 +28,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 ///       the resolved expressions to the constant folder or string coercion path.
 #[derive(Clone)]
 pub(crate) struct TemplateFoldBinding {
-    pub(crate) path: InternedPath,
+    pub(crate) path: PathId,
     pub(crate) value: Expression,
 }
 
@@ -378,14 +378,14 @@ pub(crate) fn build_range_iteration_bindings(
         }
         .with_synthetic_interface_provenance(range_provenance.clone());
         fold_bindings.push(TemplateFoldBinding {
-            path: item.id.clone(),
+            path: item.id,
             value,
         });
     }
 
     if let Some(index) = &bindings.index {
         fold_bindings.push(TemplateFoldBinding {
-            path: index.id.clone(),
+            path: index.id,
             value: Expression::int(
                 zero_based_index as i32,
                 index.value.span,
@@ -413,14 +413,14 @@ pub(crate) fn build_collection_iteration_bindings(
             .synthetic_interface_provenance
             .union(iterable_provenance);
         fold_bindings.push(TemplateFoldBinding {
-            path: item.id.clone(),
+            path: item.id,
             value,
         });
     }
 
     if let Some(index) = &bindings.index {
         fold_bindings.push(TemplateFoldBinding {
-            path: index.id.clone(),
+            path: index.id,
             value: Expression::int(
                 zero_based_index as i32,
                 index.value.span,

@@ -14,6 +14,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashSet;
 
@@ -22,6 +23,7 @@ pub(crate) fn lower_hir_module_to_lir(
     borrow_facts: &BorrowFacts,
     request: &WasmBackendRequest,
     string_table: &StringTable,
+    path_table: &PathTable,
     type_environment: &TypeEnvironment,
 ) -> Result<crate::backends::wasm::lir::module::WasmLirModule, CompilerMessages> {
     // WHAT: one mutable context carries all per-module lowering state.
@@ -31,6 +33,7 @@ pub(crate) fn lower_hir_module_to_lir(
         borrow_facts,
         request,
         string_table,
+        path_table,
         type_environment,
     );
     let function_selection = select_functions_for_lowering(hir_module, request);

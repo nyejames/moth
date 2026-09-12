@@ -51,7 +51,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginTypeCategory, OriginTypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -84,21 +84,19 @@ pub(crate) struct PublicInterfaceDraftBuildResult {
 pub(in crate::compiler_frontend) struct PublicInterfaceDraftBuilderInput<'a> {
     pub export_seed: DirectExportSeed,
     pub public_interface_projection_input: AstPublicInterfaceProjectionInput,
-    pub public_source_nominal_type_origins: &'a FxHashMap<InternedPath, OriginTypeId>,
+    pub public_source_nominal_type_origins: &'a FxHashMap<PathId, OriginTypeId>,
     pub public_source_trait_origins:
-        &'a FxHashMap<InternedPath, crate::compiler_frontend::semantic_identity::OriginTraitId>,
+        &'a FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTraitId>,
     pub type_environment: &'a TypeEnvironment,
     pub external_registry: &'a ExternalPackageRegistry,
     pub string_table: &'a StringTable,
+    pub path_fork: &'a PathInternerFork,
     /// Validated generic callable templates retained by AST generic-template validation.
     /// Borrowed only while the transient type projection records the corresponding stable callable
     /// origin and aliases receiver-method local generic parameter IDs; no path or template
     /// enters the declaration-centric draft.
-    pub generic_function_templates: &'a FxHashMap<InternedPath, GenericFunctionTemplate>,
+    pub generic_function_templates: &'a FxHashMap<PathId, GenericFunctionTemplate>,
     /// The module-local folded-value authority from AST finalization.
-    ///
-    /// WHAT: each public constant root joins to a store row by its exact defining
-    /// `InternedPath`, then converts the stored value to an owned [`PublicFoldedValue`].
     pub const_values: &'a ConstValueStore,
     /// The module-local resource table that issued structural-string resource handles, when
     /// available. Public projection never flattens a structural value when this is absent.
@@ -156,6 +154,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             type_environment,
             external_registry,
             string_table,
+            path_fork,
             generic_function_templates,
             const_values,
             module_resources,
@@ -204,6 +203,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             &nominal_resolver,
             type_environment,
             string_table,
+            path_fork,
         )?;
         let type_projection_context = CanonicalTypeProjectionContext::new(
             &nominal_resolver,
@@ -213,7 +213,6 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
 
         // Build the one transient callable seed table at the post-AST boundary where the
         // resolved root table, receiver entries, generic-template classification and stable
-        // export origins are all available. This is the single callable identity authority.
         let callable_seeds = build_callable_seed_table(
             export_seed.export_bindings(),
             export_seed.module_origin(),
@@ -221,6 +220,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             &root_table,
             generic_function_templates,
             string_table,
+            path_fork,
         )?;
 
         // Build the folded-value projection context from the same shared nominal resolver and
@@ -237,15 +237,18 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             string_table,
             projection_context: &folded_projection_context,
             resources: module_resources,
+            path_fork,
         };
         let folded_value_context = FoldedValueJoinContext {
             folded_value_projection_context: &folded_value_projection_context,
             const_values,
+            path_fork,
         };
         let receiver_projection_context = ReceiverProjectionContext {
             type_environment,
             projection_context: &type_projection_context,
             string_table,
+            path_fork,
             folded_value_context: &folded_value_projection_context,
         };
         let receiver_method_signatures = project_receiver_method_signatures(
@@ -295,13 +298,14 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
                 type_environment,
                 external_registry,
                 string_table,
+                path_fork,
             })?;
-
         let type_context = DeclarationTypeProjectionContext {
             type_projection_context: &type_projection_context,
             public_source_trait_origins,
             type_environment,
             string_table,
+            path_fork,
             folded_value_context: &folded_value_projection_context,
         };
         let mut state = DeclarationRecordProjectionState {
@@ -334,6 +338,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             public_source_trait_origins,
             type_environment,
             string_table,
+            path_fork,
             projection_context: &folded_projection_context,
         };
         // Reusable evidence projection runs after the declaration-centric projection so the
@@ -372,10 +377,11 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
 /// WHAT: bundles the shared public folded-value conversion context with the module value store,
 /// keeping resource-table lookup and canonical projection together at the declaration boundary.
 /// WHY: the converter must read structural strings through the table that issued their local
-/// handles and emit portable stable origins, never flattening them into text.
+/// handles and emit portable stable origins, never flattening them to text.
 pub(super) struct FoldedValueJoinContext<'a> {
     pub(super) folded_value_projection_context: &'a FoldedValueProjectionContext<'a>,
     pub(super) const_values: &'a ConstValueStore,
+    pub(super) path_fork: &'a PathInternerFork,
 }
 
 // ===========================================================================
@@ -386,13 +392,13 @@ pub(super) struct FoldedValueJoinContext<'a> {
 ///
 /// WHAT: bundles the canonical type projection context, the public source-trait origin index,
 /// the type environment and the string table so each per-binding projection helper receives one
-/// named context instead of four positional references.
 struct DeclarationTypeProjectionContext<'a> {
     type_projection_context: &'a CanonicalTypeProjectionContext<'a>,
     public_source_trait_origins:
-        &'a FxHashMap<InternedPath, crate::compiler_frontend::semantic_identity::OriginTraitId>,
+        &'a FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTraitId>,
     type_environment: &'a TypeEnvironment,
     string_table: &'a StringTable,
+    path_fork: &'a PathInternerFork,
     folded_value_context: &'a FoldedValueProjectionContext<'a>,
 }
 
@@ -435,7 +441,8 @@ fn project_declaration_records<'a>(
     type_context: &DeclarationTypeProjectionContext<'_>,
     state: &mut DeclarationRecordProjectionState<'a, '_>,
 ) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
-    let mut root_index = RootIndex::new(&root_table.roots, type_context.string_table)?;
+    let mut root_index =
+        RootIndex::new(&root_table.roots, type_context.string_table, type_context.path_fork)?;
 
     let mut declarations = Vec::new();
     let mut seen_origins: FxHashSet<OriginDeclarationId> = FxHashSet::default();
@@ -475,6 +482,7 @@ fn project_declaration_records<'a>(
                     &root_table.trait_source_facts,
                     type_context.public_source_trait_origins,
                     type_context.string_table,
+                    type_context.path_fork,
                     type_context.folded_value_context,
                 )?;
                 declarations.push(PublicDeclarationRecord {
@@ -505,6 +513,7 @@ fn project_declaration_records<'a>(
                         &root_table.trait_source_facts,
                         type_context.public_source_trait_origins,
                         type_context.string_table,
+                        type_context.path_fork,
                         type_context.folded_value_context,
                     )?;
                     let (receiver_methods, receiver_default_provenance) =
@@ -543,6 +552,7 @@ fn project_declaration_records<'a>(
                         &root_table.trait_source_facts,
                         type_context.public_source_trait_origins,
                         type_context.string_table,
+                        type_context.path_fork,
                     )?;
                     let (receiver_methods, synthetic_interface_provenance) =
                         receiver_methods_for_origin(
@@ -601,7 +611,7 @@ fn project_declaration_records<'a>(
                     type_context.type_projection_context,
                 )?;
                 let (folded_value, synthetic_interface_provenance) = fold_constant_value(
-                    &root.path,
+                    root.path,
                     state.consumed_const_values,
                     state.folded_value_context,
                 )?;
@@ -725,17 +735,25 @@ fn receiver_methods_for_origin(
 /// returns the canonical union of the root metadata and every nested folded value node, while the
 /// public folded payload remains unchanged.
 fn fold_constant_value(
-    defining_path: &InternedPath,
+    defining_path: PathId,
     consumed_const_values: &mut FxHashSet<ConstValueId>,
     context: &FoldedValueJoinContext,
 ) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), CompilerError> {
-    let Some(value_id) = context.const_values.value_for_path(defining_path) else {
-        let defining_path =
-            defining_path.to_path_buf(context.folded_value_projection_context.string_table);
+    let Some(value_id) = context.const_values.value_for_path(&defining_path) else {
+        let mut scratch = Vec::new();
+        let defining_path = context
+            .path_fork
+            .render_portable(defining_path, context.folded_value_projection_context.string_table, &mut scratch);
         let mut available_paths = context
             .const_values
             .module_constant_paths()
-            .map(|path| path.to_path_buf(context.folded_value_projection_context.string_table))
+            .map(|path| {
+                context.path_fork.render_portable(
+                    *path,
+                    context.folded_value_projection_context.string_table,
+                    &mut scratch,
+                )
+            })
             .collect::<Vec<_>>();
         available_paths.sort();
         return Err(CompilerError::compiler_error(format!(

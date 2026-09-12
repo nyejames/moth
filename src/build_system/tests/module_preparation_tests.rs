@@ -76,6 +76,7 @@ fn tokenized_moth_prepared_input(
     source_code: &str,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> PreparedSourceInput {
+    let mut path_fork = PathInternerFork::empty();
     let tokens = CompilerFrontend::tokenize_source(
         source_files,
         style_directives,
@@ -83,6 +84,7 @@ fn tokenized_moth_prepared_input(
         &source_path,
         TokenizerEntryMode::SourceFile,
         string_table,
+        &mut path_fork,
         span_builder,
     )
     .expect("test source should tokenize");
@@ -104,6 +106,7 @@ fn source_byte_count(input_files: &[PreparedSourceInput], source_files: &SourceD
 struct FrontendPreparationInputs {
     style_directives: StyleDirectiveRegistry,
     string_table: StringTable,
+    path_fork: PathInternerFork,
     project_path_resolver: Option<ProjectPathResolver>,
     source_files: Arc<SourceDatabase>,
 }
@@ -134,6 +137,7 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         .clone();
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
@@ -168,6 +172,7 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
             canonical,
             TokenizerEntryMode::SourceFile,
             &mut string_table,
+            &mut path_fork,
             &mut span_builder,
         )
         .expect("fixture source should tokenize");
@@ -178,6 +183,7 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
     let frontend = FrontendPreparationInputs {
         style_directives,
         string_table,
+        path_fork,
         project_path_resolver: None,
         source_files: Arc::clone(source_files),
     };
@@ -194,14 +200,14 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
 fn header_source_file_names(
     headers: &PreparedHeaderSyntax,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Vec<String> {
     headers
         .headers
         .iter()
         .map(|header| {
-            header
-                .source_file
-                .to_path_buf(string_table)
+            path_fork
+                .render_native(header.source_file, string_table, &mut Vec::new())
                 .file_name()
                 .expect("test logical source path should have a file name")
                 .to_string_lossy()
@@ -243,6 +249,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let canonical_b = fs::canonicalize(&file_b).unwrap();
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let source_files = Arc::new(
         SourceDatabase::build(
             &[&canonical_a, &canonical_b],
@@ -299,12 +306,14 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             source_path,
             TokenizerEntryMode::SourceFile,
             &mut frontend.string_table,
+            &mut frontend.path_fork,
             &mut span_builder,
         )
         .expect("test source should tokenize");
 
         let fork_source = frontend.string_table.fork_source();
         let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
+        let mut local_path_fork = frontend.path_fork.fork_source().fork_for_module();
 
         let SourcePreparationDelta {
             span_builder,
@@ -332,6 +341,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 &prepare_context,
                 input,
                 &mut local_string_table,
+                &mut local_path_fork,
             )
         };
         retained_span_builders.push((source_id, span_builder));
@@ -345,7 +355,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                     .remap_string_ids(&remap)
                     .expect("chunk-local output should remap into the module table");
                 output
-                    .freeze_path_syntax(&frontend.string_table)
+                    .freeze_path_syntax(&frontend.string_table, &mut frontend.path_fork)
                     .expect("remapped output should pass the prepared-file invariant gate");
                 Ok(output)
             }
@@ -393,14 +403,20 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         &mut [output_a, output_b],
         &mut frontend.string_table,
         &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut frontend.path_fork,
     )
     .expect("header syntax preparation should succeed");
 
-    // Verify source text string "beta" resolves through the module table in file B headers.
     let beta_header = headers
         .headers
         .iter()
-        .find(|h| h.tokens.src_path.name_str(&frontend.string_table) == Some("beta"));
+        .find(|h| {
+            frontend
+                .path_fork
+                .component(h.tokens.src_path)
+                .map(|id| frontend.string_table.resolve(id))
+                == Some("beta")
+        });
     assert!(
         beta_header.is_some(),
         "beta header should exist with name resolvable through module table"
@@ -418,8 +434,11 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let const_template_name = const_template_header
         .unwrap()
         .tokens
-        .src_path
-        .name_str(&frontend.string_table)
+        .src_path;
+    let const_template_name = frontend
+        .path_fork
+        .component(const_template_name)
+        .map(|id| frontend.string_table.resolve(id))
         .expect("const template should have a name");
     assert_eq!(
         const_template_name, "#const_template0",
@@ -443,17 +462,13 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
 
     // Verify that beta and the const template have different global IDs, proving
     // non-identity remapping occurred for at least one file's local suffix.
-    let beta_id = beta_header
-        .unwrap()
-        .tokens
-        .src_path
-        .name()
+    let beta_id = frontend
+        .path_fork
+        .component(beta_header.unwrap().tokens.src_path)
         .expect("beta should have a name ID");
-    let const_template_id = const_template_header
-        .unwrap()
-        .tokens
-        .src_path
-        .name()
+    let const_template_id = frontend
+        .path_fork
+        .component(const_template_header.unwrap().tokens.src_path)
         .expect("const template should have a name ID");
     assert_ne!(
         beta_id, const_template_id,
@@ -492,6 +507,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let canonical_entry = fs::canonicalize(&entry_file).unwrap();
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.as_path()),
         &canonical_entry,
@@ -731,6 +747,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.as_path()),
         &canonical_entry,
@@ -982,6 +999,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let canonical_c = fs::canonicalize(&file_c).unwrap();
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         &[&canonical_a, &canonical_b, &canonical_c],
         &canonical_a,
@@ -1108,10 +1126,11 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         style_directives: frontend.style_directives,
         project_path_resolver: frontend.project_path_resolver.cloned(),
     };
+    let mut preparation_path_fork = PathInternerFork::empty();
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
-            &mut PathInternerFork::empty(),
+            &mut preparation_path_fork,
             input_files,
             &mut span_owners.split().1,
             &canonical_a,
@@ -1132,8 +1151,8 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         .headers
         .iter()
         .map(|h| {
-            h.source_file
-                .to_path_buf(&frontend.string_table)
+            preparation_path_fork
+                .render_native(h.source_file, &frontend.string_table, &mut Vec::new())
                 .file_name()
                 .expect("test logical source path should have a file name")
                 .to_string_lossy()
@@ -1162,13 +1181,23 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let beta_header = headers
         .headers
         .iter()
-        .find(|h| h.tokens.src_path.name_str(&frontend.string_table) == Some("Beta"));
+        .find(|h| {
+            preparation_path_fork
+                .component(h.tokens.src_path)
+                .map(|id| frontend.string_table.resolve(id))
+                == Some("Beta")
+        });
     assert!(beta_header.is_some(), "Beta header should exist");
 
     let gamma_header = headers
         .headers
         .iter()
-        .find(|h| h.tokens.src_path.name_str(&frontend.string_table) == Some("Gamma"));
+        .find(|h| {
+            preparation_path_fork
+                .component(h.tokens.src_path)
+                .map(|id| frontend.string_table.resolve(id))
+                == Some("Gamma")
+        });
     assert!(gamma_header.is_some(), "Gamma header should exist");
 
     let const_template_header = headers
@@ -1179,11 +1208,10 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         const_template_header.is_some(),
         "const template header should exist"
     );
-    let const_template_name = const_template_header
-        .unwrap()
-        .tokens
-        .src_path
-        .name_str(&frontend.string_table)
+    let const_template_path = const_template_header.unwrap().tokens.src_path;
+    let const_template_name = preparation_path_fork
+        .component(const_template_path)
+        .map(|id| frontend.string_table.resolve(id))
         .expect("const template should have a name");
     assert_eq!(
         const_template_name, "#const_template0",
@@ -1236,17 +1264,11 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
 
     // Verify non-identity remapping: Beta and the const template should have different
     // global IDs, proving at least one file's local suffix was remapped.
-    let beta_id = beta_header
-        .unwrap()
-        .tokens
-        .src_path
-        .name()
+    let beta_id = preparation_path_fork
+        .component(beta_header.unwrap().tokens.src_path)
         .expect("Beta should have a name ID");
-    let const_template_id = const_template_header
-        .unwrap()
-        .tokens
-        .src_path
-        .name()
+    let const_template_id = preparation_path_fork
+        .component(const_template_header.unwrap().tokens.src_path)
         .expect("const template should have a name ID");
     assert_ne!(
         beta_id, const_template_id,
@@ -1274,6 +1296,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         .expect("test should create an entry file")
         .clone();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
@@ -1362,10 +1385,11 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         style_directives: frontend.style_directives,
         project_path_resolver: frontend.project_path_resolver.cloned(),
     };
+    let mut preparation_path_fork = PathInternerFork::empty();
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
-            &mut PathInternerFork::empty(),
+            &mut preparation_path_fork,
             input_files,
             &mut span_owners.split().1,
             &entry_file_path,
@@ -1380,8 +1404,8 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         .headers
         .iter()
         .map(|h| {
-            h.source_file
-                .to_path_buf(&frontend.string_table)
+            preparation_path_fork
+                .render_native(h.source_file, &frontend.string_table, &mut Vec::new())
                 .file_name()
                 .expect("test logical source path should have a file name")
                 .to_string_lossy()
@@ -1463,9 +1487,10 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
     }
     chunks.reverse();
 
+    let mut chunk_path_fork = PathInternerFork::empty();
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut fixture.frontend.string_table,
-        &mut PathInternerFork::empty(),
+        &mut chunk_path_fork,
         chunks,
         input_file_count,
         base_len,
@@ -1474,7 +1499,8 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
 
     assert!(warnings.is_empty(), "test declarations should not warn");
 
-    let header_source_names = header_source_file_names(&headers, &fixture.frontend.string_table);
+    let header_source_names =
+        header_source_file_names(&headers, &fixture.frontend.string_table, &chunk_path_fork);
     let mut previous_file_last_header = None;
     for index in 0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT {
         let expected_name = format!("{index}.moth");
@@ -1510,10 +1536,11 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
+    let mut preparation_path_fork = PathInternerFork::empty();
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &mut PathInternerFork::empty(),
+            &mut preparation_path_fork,
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
@@ -1528,11 +1555,9 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
         .headers
         .iter()
         .filter_map(|header| {
-            header
-                .tokens
-                .src_path
-                .name_str(&fixture.frontend.string_table)
-                .map(str::to_owned)
+            preparation_path_fork
+                .component(header.tokens.src_path)
+                .map(|id| fixture.frontend.string_table.resolve(id).to_owned())
         })
         .collect();
 
@@ -1718,23 +1743,13 @@ fn parsed_prepared_output(
     span_builder: &mut ExtendedSpanBuilder,
     source_id: SourceId,
 ) -> FileFrontendPrepareOutput {
+    let mut path_fork = PathInternerFork::empty();
     let source_path = PathBuf::from(source_name);
-    let source_identity =
-        crate::compiler_frontend::symbols::interned_path::InternedPath::try_from_filesystem_path(
-            &source_path,
-            string_table,
-        )
+    let source_identity = path_fork
+        .try_intern_filesystem_path(&source_path, string_table)
         .expect("test source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut tokens = tokenize(
-        source_code,
-        &source_identity,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        string_table,
-        source_id,
-        span_builder,
-    )
+    let mut tokens = tokenize(source_code, source_identity, TokenizerEntryMode::SourceFile, &style_directives, string_table, &mut path_fork, source_id, span_builder)
     .expect("test source should tokenize");
 
     parse_file_headers_with_table(
@@ -1742,6 +1757,7 @@ fn parsed_prepared_output(
         Path::new(source_name),
         &HeaderParseOptions::default(),
         string_table,
+        &mut path_fork,
         0,
         0,
         span_builder,
@@ -1755,6 +1771,7 @@ fn dummy_preparation_chunk(
     file_indexes: Vec<usize>,
 ) -> super::FilePreparationChunk {
     let mut local_string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builders = Vec::with_capacity(file_indexes.len());
     let results = file_indexes
         .into_iter()
@@ -1794,6 +1811,7 @@ fn assert_malformed_chunks_rejected(
     use crate::compiler_frontend::compiler_messages::PremergeFailure;
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
@@ -1869,6 +1887,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         [
             PathBuf::from("synthetic.moth"),
@@ -1909,8 +1928,9 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
         &mut synthetic_spans,
         synthetic_id,
     );
+    let mut synthetic_path_fork = PathInternerFork::empty();
     synthetic_output
-        .freeze_path_syntax(&string_table)
+        .freeze_path_syntax(&string_table, &mut synthetic_path_fork)
         .expect("synthetic output should freeze before chunk aggregation");
 
     // Parallel chunks fork from one base. Merging the first chunk makes the second chunk's
@@ -2019,6 +2039,7 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     let canonical_entry = fs::canonicalize(&entry_path).expect("file should canonicalize");
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.clone()),
         &canonical_entry,

@@ -16,6 +16,7 @@ use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefini
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 
 pub(super) fn is_comparison_operator(op: &Operator) -> bool {
@@ -29,13 +30,13 @@ pub(super) fn is_comparison_operator(op: &Operator) -> bool {
             | Operator::LessThanOrEqual
     )
 }
-
 pub(super) fn resolve_comparison_operator_type(
     lhs: TypeId,
     rhs: TypeId,
     op: &Operator,
     span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
+    path_fork: &PathInternerFork,
 ) -> Result<TypeId, ExpressionTypingError> {
     let builtins = type_environment.builtins();
 
@@ -97,18 +98,16 @@ pub(super) fn resolve_comparison_operator_type(
                 _ => invalid_comparison_types(lhs, rhs, op, span),
             };
         }
-
         // Choice types support structural equality when every payload field supports it.
         if type_environment.variants_for(lhs).is_some() {
             return match op {
                 Operator::Equality | Operator::NotEqual => {
-                    validate_choice_equality_support(lhs, rhs, span, type_environment)?;
+                    validate_choice_equality_support(lhs, rhs, span, type_environment, path_fork)?;
                     Ok(builtins.bool)
                 }
                 _ => invalid_comparison_types(lhs, rhs, op, span),
             };
         }
-
         // Same type but not a comparable category.
         return invalid_comparison_types(lhs, rhs, op, span);
     }
@@ -160,6 +159,7 @@ fn validate_choice_equality_support(
     rhs_type_id: TypeId,
     span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
+    path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionTypingError> {
     let Some(variants) = type_environment.variants_for(lhs_type_id) else {
         return Ok(());
@@ -169,7 +169,7 @@ fn validate_choice_equality_support(
         if let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload {
             for field in fields {
                 if !type_environment.supports_runtime_equality(field.type_id) {
-                    let Some(field_name_id) = field.name.name() else {
+                    let Some(field_name_id) = path_fork.component(field.name) else {
                         return Err(CompilerError::compiler_error(
                             "Field definition has empty path in choice payload equality check",
                         )

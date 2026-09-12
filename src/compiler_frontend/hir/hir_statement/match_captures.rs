@@ -24,7 +24,7 @@ use crate::compiler_frontend::hir::ids::{ChoiceId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
 use rustc_hash::FxHashMap;
 
@@ -330,7 +330,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn choice_id_for_scrutinee_type(
         &mut self,
-        nominal_path: &InternedPath,
+        nominal_path: &PathId,
         scrutinee_type_id: TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<ChoiceId, CompilerError> {
@@ -365,7 +365,7 @@ impl<'a> HirBuilder<'a> {
 fn arm_capture_bindings(
     arm: &MatchArm,
     capture_locals: &[LocalId],
-) -> Vec<(InternedPath, LocalId)> {
+) -> Vec<(PathId, LocalId)> {
     match &arm.pattern {
         MatchPattern::ChoiceVariant { captures, .. } => captures
             .iter()

@@ -33,7 +33,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::{
     FrozenIdentityHandle, SourceId, SourceSpan, SpanCapacityError, SpanCapacityReason,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 #[derive(Clone, Debug, PartialEq)]
@@ -164,7 +164,7 @@ impl CompilerDiagnostic {
     //  Import Constructors
     // ------------------------------------------------------------------
 
-    pub(crate) fn missing_import_target(path: InternedPath, span: Option<SourceSpan>) -> Self {
+    pub(crate) fn missing_import_target(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
             span,
@@ -172,7 +172,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn ambiguous_import_target(path: InternedPath, span: Option<SourceSpan>) -> Self {
+    pub(crate) fn ambiguous_import_target(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget),
             span,
@@ -180,7 +180,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn bare_file_import(path: InternedPath, span: Option<SourceSpan>) -> Self {
+    pub(crate) fn bare_file_import(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::BareFileImport),
             span,
@@ -188,7 +188,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn direct_special_file_import(path: InternedPath, span: Option<SourceSpan>) -> Self {
+    pub(crate) fn direct_special_file_import(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::DirectSpecialFileImport),
             span,
@@ -217,7 +217,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn not_exported_by_source_file(
-        symbol_path: InternedPath,
+        symbol_path: PathId,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
@@ -228,7 +228,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn not_exported_by_public_surface(
-        requested_path: InternedPath,
+        requested_path: PathId,
         public_surface_name: StringId,
         public_surface_type: ImportPublicSurfaceType,
         span: Option<SourceSpan>,
@@ -245,7 +245,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn missing_module_root_public_surface(
-        symbol_path: InternedPath,
+        symbol_path: PathId,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
@@ -271,7 +271,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn cross_module_import_not_exported(
-        symbol_path: InternedPath,
+        symbol_path: PathId,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
@@ -282,7 +282,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn invalid_import_path(
-        path: InternedPath,
+        path: PathId,
         reason: InvalidImportPathReason,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -293,7 +293,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn direct_symbol_path_import(path: InternedPath, span: Option<SourceSpan>) -> Self {
+    pub(crate) fn direct_symbol_path_import(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::DirectSymbolPathImport),
             span,
@@ -302,7 +302,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn invalid_namespace_default_name(
-        path: InternedPath,
+        path: PathId,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
@@ -313,7 +313,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn duplicate_import_surface_member(
-        surface_path: InternedPath,
+        surface_path: PathId,
         member_name: StringId,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -327,7 +327,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn explicit_moth_extension(path: InternedPath, span: Option<SourceSpan>) -> Self {
+    pub(crate) fn explicit_moth_extension(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::ExplicitMothExtension),
             span,
@@ -336,7 +336,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn explicit_source_extension(
-        path: InternedPath,
+        path: PathId,
         extension: StringId,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -348,7 +348,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn unsupported_source_file_kind(
-        path: InternedPath,
+        path: PathId,
         extension: StringId,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -360,7 +360,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn invalid_source_file_entry(
-        path: InternedPath,
+        path: PathId,
         extension: StringId,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -375,8 +375,8 @@ impl CompilerDiagnostic {
     // source boundary. Its current consumer is the test-gated Moth-template input service.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn moth_template_inputs_share_no_common_ancestor(
-        first_path: InternedPath,
-        second_path: InternedPath,
+        first_path: PathId,
+        second_path: PathId,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
@@ -393,7 +393,7 @@ impl CompilerDiagnostic {
     // source boundary. Its current consumer is the test-gated Moth-template input service.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn duplicate_moth_template_input_path(
-        path: InternedPath,
+        path: PathId,
         first_span: Option<SourceSpan>,
         duplicate_span: Option<SourceSpan>,
     ) -> Self {
@@ -406,7 +406,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn unsupported_external_extension(
-        path: InternedPath,
+        path: PathId,
         extension: StringId,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -418,7 +418,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn invalid_external_module(
-        path: InternedPath,
+        path: PathId,
         reason: InvalidExternalModuleReason,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -576,7 +576,7 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn invalid_compile_time_path(
-        path: InternedPath,
+        path: PathId,
         reason: InvalidCompileTimePathReason,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -1206,7 +1206,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn circular_dependency(path: InternedPath, span: Option<SourceSpan>) -> Self {
+    pub(crate) fn circular_dependency(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::CircularDependency),
             span,
@@ -1950,6 +1950,11 @@ impl CompilerDiagnostic {
         }
 
         self.payload.remap_string_ids(remap);
+    }
+
+    /// Remap every complete path identity after a module-local path fork merges.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.payload.remap_path_ids(remap);
     }
 }
 

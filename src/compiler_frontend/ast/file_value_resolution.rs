@@ -25,8 +25,9 @@ use crate::compiler_frontend::headers::synthetic_content_header::content_constan
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -42,6 +43,7 @@ pub(crate) fn resolve_file_value(
     type_interner: &AstTypeInterner<'_>,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let token_span = SourceSpan::new(token_stream.file_id, token_stream.current_token().span);
     let span = Some(token_span);
@@ -124,7 +126,7 @@ pub(crate) fn resolve_file_value(
                         "ordinary content file reference had no logical source path",
                     )
                 })?;
-                let content_path = content_constant_path(logical_path, string_table);
+                let content_path = content_constant_path(*logical_path, path_fork, string_table)?;
                 let declaration = context
                     .shared
                     .top_level_declarations

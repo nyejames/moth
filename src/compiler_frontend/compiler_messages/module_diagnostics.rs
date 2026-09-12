@@ -10,7 +10,8 @@
 //!      as a typed `CompilerError` instead of storing it as a normal diagnosed result.
 
 use super::compiler_errors::{
-    CompilerError, CompilerMessages, RenderFrozenContext, RenderSourceContext, RenderTypeContext,
+    CompilerError, CompilerMessages, RenderFrozenContext, RenderPathContext, RenderSourceContext,
+    RenderTypeContext,
 };
 use super::{CompilerDiagnostic, DiagnosticSeverity, PremergeDiagnosticBatch};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -31,6 +32,7 @@ pub(crate) struct ModuleDiagnostics {
     render_frozen_contexts: Vec<RenderFrozenContext>,
     render_source_contexts: Vec<RenderSourceContext>,
     render_type_contexts: Vec<RenderTypeContext>,
+    render_path_contexts: Vec<RenderPathContext>,
 }
 
 impl ModuleDiagnostics {
@@ -55,7 +57,6 @@ impl ModuleDiagnostics {
     ///
     /// The infrastructure error carries its own typed source span or host path. The consumed
     /// message set's `StringTable` remains owned by the diagnosed lane and is not attached to or
-    /// remapped through the error.
     pub(crate) fn from_messages(messages: CompilerMessages) -> Result<Self, CompilerError> {
         let CompilerMessages {
             diagnostics,
@@ -64,6 +65,7 @@ impl ModuleDiagnostics {
             render_frozen_contexts,
             render_source_contexts,
             render_type_contexts,
+            render_path_contexts,
         } = messages;
 
         // One explicit classification pass over the diagnostic stream. The boundary reads only
@@ -100,6 +102,8 @@ impl ModuleDiagnostics {
                     render_frozen_contexts,
                     render_source_contexts,
                     render_type_contexts,
+                    render_path_contexts: render_path_contexts
+                        .map_or_else(Vec::new, |contexts| *contexts),
                 })
             }
             Some(error) => {
@@ -129,8 +133,6 @@ impl ModuleDiagnostics {
     /// WHAT: moves the owned diagnostics, string table and render type contexts back into the
     ///       boundary container existing outer callers still consume.
     /// WHY: this is the lossless inverse of `from_messages`. Build and render boundaries keep
-    ///       using `CompilerMessages` while the semantic boundary exchanges the typed
-    ///       `ModuleDiagnostics` owner.
     pub(crate) fn into_messages(self) -> CompilerMessages {
         CompilerMessages {
             diagnostics: self.diagnostics,
@@ -139,6 +141,8 @@ impl ModuleDiagnostics {
             render_frozen_contexts: self.render_frozen_contexts,
             render_source_contexts: self.render_source_contexts,
             render_type_contexts: self.render_type_contexts,
+            render_path_contexts: (!self.render_path_contexts.is_empty())
+                .then(|| Box::new(self.render_path_contexts)),
         }
     }
     /// Classify a premerge batch into a diagnosed module or a typed invariant failure.
@@ -151,10 +155,8 @@ impl ModuleDiagnostics {
     /// final boundary attaches them later.
     /// WHY: canonical aggregation merges premerge batches exactly once and only then needs the
     /// diagnosed owner the render boundary consumes. Classifying here keeps the single
-    /// user-error/infrastructure separation beside the existing `from_messages` owner instead
-    /// of reintroducing a mixed message vessel for the merge.
     pub(crate) fn from_batch(batch: PremergeDiagnosticBatch) -> Result<Self, CompilerError> {
-        let (bag, string_table, render_type_contexts) = batch.into_parts();
+        let (bag, string_table, render_type_contexts, render_path_contexts) = batch.into_parts();
         let diagnostics = bag.into_diagnostics();
         let mut has_user_error = false;
         for diagnostic in &diagnostics {
@@ -178,6 +180,7 @@ impl ModuleDiagnostics {
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts,
+            render_path_contexts,
         })
     }
 
@@ -212,6 +215,7 @@ impl ModuleDiagnostics {
         let Self {
             diagnostics,
             string_table,
+            render_path_contexts,
             render_type_contexts,
             ..
         } = self;
@@ -219,6 +223,7 @@ impl ModuleDiagnostics {
             diagnostics,
             string_table,
             render_type_contexts,
+            render_path_contexts,
         ))
     }
 

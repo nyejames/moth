@@ -22,7 +22,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -159,6 +159,7 @@ fn structural_string_requirement_has_stable_rule_identity() {
 
     for (requirement, operation_name) in requirements {
         let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
         let value =
             Expression::structural_string(vec![ConstStringPiece::SiteRoot], Default::default());
         let diagnostic = require_concrete_text(&value, requirement, &mut string_table)
@@ -186,6 +187,7 @@ fn structural_string_requirement_has_stable_rule_identity() {
 fn all_text_structural_string_requirement_concatenates_in_order() {
     // Test-only construction stands in for item 3's first structural text-piece producer.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let first = string_table.intern("first/");
     let second = string_table.intern("second");
     let value = Expression::structural_string(
@@ -210,6 +212,7 @@ fn all_text_structural_string_requirement_concatenates_in_order() {
 #[test]
 fn structural_string_equality_reports_text_unavailable_outcome() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::structural_string(vec![ConstStringPiece::SiteRoot], Default::default());
     let rhs = Expression::string_slice(
         string_table.intern("plain"),
@@ -241,6 +244,7 @@ fn structural_string_equality_reports_text_unavailable_outcome() {
 #[test]
 fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let nodes = vec![
         ExpressionRpnItem::Operand(Expression::structural_string(
             vec![ConstStringPiece::SiteRoot],
@@ -279,7 +283,8 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
 #[test]
 fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
     let mut string_table = StringTable::new();
-    let flag = InternedPath::from_single_str("flag", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let flag = path_fork.try_intern_portable_path("flag", &mut string_table).expect("test path fits");
     let nodes = vec![
         ExpressionRpnItem::Operand(Expression::structural_string(
             vec![ConstStringPiece::SiteRoot],
@@ -335,6 +340,7 @@ fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
 #[test]
 fn evaluate_operator_rejects_string_concatenation() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::string_slice(
         string_table.intern("moth"),
         Default::default(),
@@ -360,6 +366,7 @@ fn evaluate_operator_rejects_string_concatenation() {
 #[test]
 fn evaluate_operator_rejects_negative_integer_exponent() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
 
@@ -377,6 +384,7 @@ fn evaluate_operator_rejects_negative_integer_exponent() {
 #[test]
 fn evaluate_operator_returns_not_constant_for_mismatched_constant_types() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::bool(true, Default::default(), ValueMode::ImmutableOwned);
 
@@ -390,6 +398,7 @@ fn evaluate_operator_returns_not_constant_for_mismatched_constant_types() {
 #[test]
 fn evaluate_operator_divides_ints_to_float() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
 
@@ -410,6 +419,7 @@ fn evaluate_operator_divides_ints_to_float() {
 #[test]
 fn evaluate_operator_integer_division_truncates_toward_zero() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(-5, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
 
@@ -426,6 +436,7 @@ fn evaluate_operator_integer_division_truncates_toward_zero() {
 #[test]
 fn evaluate_operator_rejects_divide_by_zero_for_both_division_operators() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
     let zero = Expression::int(0, Default::default(), ValueMode::ImmutableOwned);
 
@@ -453,6 +464,7 @@ fn evaluate_operator_rejects_divide_by_zero_for_both_division_operators() {
 #[test]
 fn evaluate_operator_rejects_integer_add_overflow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(i32::MAX, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(1, Default::default(), ValueMode::ImmutableOwned);
 
@@ -470,6 +482,7 @@ fn evaluate_operator_rejects_integer_add_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_subtract_overflow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(i32::MIN, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(1, Default::default(), ValueMode::ImmutableOwned);
 
@@ -487,6 +500,7 @@ fn evaluate_operator_rejects_integer_subtract_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_multiply_overflow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(i32::MAX, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
 
@@ -504,6 +518,7 @@ fn evaluate_operator_rejects_integer_multiply_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_exponent_overflow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(31, Default::default(), ValueMode::ImmutableOwned);
 
@@ -521,6 +536,7 @@ fn evaluate_operator_rejects_integer_exponent_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_division_overflow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(i32::MIN, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
 
@@ -538,6 +554,7 @@ fn evaluate_operator_rejects_integer_division_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_modulus_overflow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(i32::MIN, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
 
@@ -555,6 +572,7 @@ fn evaluate_operator_rejects_integer_modulus_overflow() {
 #[test]
 fn evaluate_operator_rejects_non_finite_float_exponent_result() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::float(2.0, Default::default(), ValueMode::ImmutableOwned);
 
@@ -572,6 +590,7 @@ fn evaluate_operator_rejects_non_finite_float_exponent_result() {
 #[test]
 fn evaluate_operator_rejects_non_finite_float_multiply_result() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
 
@@ -589,6 +608,7 @@ fn evaluate_operator_rejects_non_finite_float_multiply_result() {
 #[test]
 fn constant_fold_rejects_integer_unary_negation_overflow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let nodes = vec![
         rvalue_item(Expression::int(i32::MIN, None, ValueMode::ImmutableOwned)),
         operator_item(Operator::Negate),
@@ -607,6 +627,7 @@ fn constant_fold_rejects_integer_unary_negation_overflow() {
 #[test]
 fn evaluate_operator_rejects_float_modulo_by_zero() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::float(1.0, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::float(0.0, Default::default(), ValueMode::ImmutableOwned);
 
@@ -624,6 +645,7 @@ fn evaluate_operator_rejects_float_modulo_by_zero() {
 #[test]
 fn evaluate_operator_folds_mixed_int_float_addition() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::float(1.5, Default::default(), ValueMode::ImmutableOwned);
 
@@ -640,6 +662,7 @@ fn evaluate_operator_folds_mixed_int_float_addition() {
 #[test]
 fn evaluate_operator_folds_mixed_int_float_division() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::float(2.0, Default::default(), ValueMode::ImmutableOwned);
 
@@ -656,8 +679,9 @@ fn evaluate_operator_folds_mixed_int_float_division() {
 #[test]
 fn constant_fold_reports_static_failure_inside_runtime_expression() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let runtime_var = Expression::reference(
-        InternedPath::from_single_str("runtime_var", &mut string_table),
+        path_fork.try_intern_portable_path("runtime_var", &mut string_table).expect("test path fits"),
         DataType::Int,
         None,
         ValueMode::ImmutableReference,
@@ -686,8 +710,9 @@ fn constant_fold_reports_static_failure_inside_runtime_expression() {
 #[test]
 fn constant_fold_partially_folds_runtime_expression() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let runtime_var = Expression::reference(
-        InternedPath::from_single_str("runtime_var", &mut string_table),
+        path_fork.try_intern_portable_path("runtime_var", &mut string_table).expect("test path fits"),
         DataType::Int,
         None,
         ValueMode::ImmutableReference,
@@ -793,6 +818,7 @@ fn fold_float_cast_rejects_non_finite_string_value() {
 #[test]
 fn fold_string_to_int_cast_uses_string_policy_row() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("42".to_string());
@@ -821,6 +847,7 @@ fn fold_string_to_int_cast_uses_string_policy_row() {
 #[test]
 fn fold_string_to_float_cast_uses_string_policy_row() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("3.5e2".to_string());
@@ -860,6 +887,7 @@ fn operator_item(operator: Operator) -> ExpressionRpnItem {
 #[test]
 fn constant_fold_folds_comparison_then_boolean_chain() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let nodes = vec![
         rvalue_item(Expression::int(1, None, ValueMode::ImmutableOwned)),
         rvalue_item(Expression::int(2, None, ValueMode::ImmutableOwned)),
@@ -882,6 +910,7 @@ fn constant_fold_folds_comparison_then_boolean_chain() {
 #[test]
 fn constant_fold_keeps_unary_not_when_operand_is_not_bool_literal() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let nodes = vec![
         rvalue_item(Expression::int(1, None, ValueMode::ImmutableOwned)),
         operator_item(Operator::Not),
@@ -908,7 +937,8 @@ fn constant_fold_keeps_unary_not_when_operand_is_not_bool_literal() {
 #[test]
 fn constant_fold_preserves_runtime_operands_in_partial_fold() {
     let mut string_table = StringTable::new();
-    let flag_name = InternedPath::from_single_str("flag", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let flag_name = path_fork.try_intern_portable_path("flag", &mut string_table).expect("test path fits");
     let nodes = vec![
         rvalue_item(Expression::reference(
             flag_name,
@@ -961,7 +991,8 @@ fn partial_fold_moves_non_foldable_operands_back_without_rebuilding_them() {
     // reconstruction. Distinct spans and value modes on every input make that visible:
     // a rebuilt operand would carry defaults, not the values asserted below.
     let mut string_table = StringTable::new();
-    let flag_name = InternedPath::from_single_str("flag", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let flag_name = path_fork.try_intern_portable_path("flag", &mut string_table).expect("test path fits");
     let flag_span = marked_span(70);
     let literal_span = marked_span(110);
     let operator_span = marked_span(230);
@@ -1012,7 +1043,8 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
     // A fold that reduces only part of the expression must move the untouched operands back in
     // their original order while the folded operand takes its own provenance from the fold.
     let mut string_table = StringTable::new();
-    let counter_name = InternedPath::from_single_str("counter", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let counter_name = path_fork.try_intern_portable_path("counter", &mut string_table).expect("test path fits");
     let counter_span = marked_span(30);
     let left_literal_span = marked_span(50);
 
@@ -1060,6 +1092,7 @@ fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
     // The single-result path hands the folded operand back by move. Its anchor must still be
     // the authored one, not a default produced by rebuilding the value.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let left_span = marked_span(130);
 
     let nodes = vec![
@@ -1089,6 +1122,7 @@ fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
 #[test]
 fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(42, None, ValueMode::ImmutableOwned);
@@ -1121,6 +1155,7 @@ fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
 #[test]
 fn fold_structural_string_cast_reports_text_unavailable_rule() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source =
@@ -1152,6 +1187,7 @@ fn fold_structural_string_cast_reports_text_unavailable_rule() {
 #[test]
 fn fold_cast_optional_wrap_coerces_value_to_optional() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(7, None, ValueMode::ImmutableOwned);
@@ -1191,6 +1227,7 @@ fn fold_cast_optional_wrap_coerces_value_to_optional() {
 #[test]
 fn fold_cast_fallible_string_to_int_success_folds_to_int() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("123".to_string());
@@ -1219,6 +1256,7 @@ fn fold_cast_fallible_string_to_int_success_folds_to_int() {
 #[test]
 fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("not a number".to_string());
@@ -1246,11 +1284,12 @@ fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const
 #[test]
 fn fold_cast_user_defined_evidence_rejected_in_const_context() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(42, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
-    let method_path = InternedPath::from_single_str("to_string", &mut string_table);
+    let method_path = path_fork.try_intern_portable_path("to_string", &mut string_table).expect("test path fits");
 
     let cast = cast_expression(
         source,
@@ -1277,6 +1316,7 @@ fn fold_cast_user_defined_evidence_rejected_in_const_context() {
 #[test]
 fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(42, None, ValueMode::ImmutableOwned);
@@ -1313,7 +1353,7 @@ fn catch_handler_body(value: Expression) -> Vec<AstNode> {
             span,
         }),
         span,
-        scope: InternedPath::new(),
+        scope: PathId::ROOT,
     }]
 }
 
@@ -1348,6 +1388,7 @@ fn fallible_builtin_cast_with_catch(
 #[test]
 fn fold_cast_fallible_builtin_failure_with_catch_folds_to_handler_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
@@ -1395,6 +1436,7 @@ fn fold_cast_fallible_builtin_failure_with_catch_folds_to_handler_value() {
 #[test]
 fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("123".to_string());
@@ -1439,6 +1481,7 @@ fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
 #[test]
 fn fold_cast_fallible_builtin_failure_with_non_foldable_catch_rejects_handler() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
@@ -1446,7 +1489,7 @@ fn fold_cast_fallible_builtin_failure_with_non_foldable_catch_rejects_handler() 
     let target_type_id = type_environment.builtins().int;
 
     let handler_value = Expression::reference(
-        InternedPath::from_single_str("runtime_value", &mut string_table),
+        path_fork.try_intern_portable_path("runtime_value", &mut string_table).expect("test path fits"),
         DataType::Int,
         None,
         ValueMode::ImmutableReference,
@@ -1470,6 +1513,7 @@ fn fold_cast_fallible_builtin_failure_with_non_foldable_catch_rejects_handler() 
 #[test]
 fn fold_cast_fallible_builtin_failure_with_empty_catch_rejects_handler() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
@@ -1494,6 +1538,7 @@ fn fold_cast_fallible_builtin_failure_with_empty_catch_rejects_handler() {
 #[test]
 fn fold_cast_fallible_builtin_failure_with_branching_catch_rejects_handler() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
@@ -1511,7 +1556,7 @@ fn fold_cast_fallible_builtin_failure_with_branching_catch_rejects_handler() {
             test_if_branch_metadata(true),
         ),
         span,
-        scope: InternedPath::new(),
+        scope: PathId::ROOT,
     }];
 
     let cast = fallible_builtin_cast_with_catch(

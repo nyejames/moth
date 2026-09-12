@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
@@ -36,7 +37,6 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 };
 use crate::compiler_frontend::utilities::token_scan::find_expression_end_index;
 use crate::compiler_frontend::value_mode::ValueMode;
-
 /// Input for the shared inline then/else parser.
 pub(super) struct InlineThenElseInput<'a, 'b> {
     pub(super) token_stream: &'a mut FileTokens,
@@ -45,8 +45,8 @@ pub(super) struct InlineThenElseInput<'a, 'b> {
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
-
 /// Output of the shared inline then/else parser.
 pub(super) struct InlineThenElseOutput {
     pub(super) then_span: Option<SourceSpan>,
@@ -104,6 +104,7 @@ fn parse_inline_then_else_with_target(
     type_interner: &mut AstTypeInterner<'_>,
     target: &ActiveValueProductionTarget,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> InlineThenElseResult<ParsedInlineBranchValues> {
     let then_request_start = then_context.generic_request_checkpoint();
     let then_index = token_stream.index;
@@ -135,6 +136,7 @@ fn parse_inline_then_else_with_target(
         target,
         label: "then branch",
         string_table,
+        path_fork,
     })?;
     let then_request_end = then_context.generic_request_checkpoint();
 
@@ -153,6 +155,7 @@ fn parse_inline_then_else_with_target(
         target,
         label: "else branch",
         string_table,
+        path_fork,
     })?;
     let else_request_end = else_context.generic_request_checkpoint();
 
@@ -184,8 +187,8 @@ pub(super) fn parse_inline_then_else(
         type_interner,
         target,
         string_table,
+        path_fork,
     } = input;
-
     let expected_result_type_ids = target.result_type_ids.clone();
     let receiver_kind = target.receiver_kind;
 
@@ -197,6 +200,7 @@ pub(super) fn parse_inline_then_else(
             type_interner,
             &target,
             string_table,
+            path_fork,
         )?;
         if target.needs_slot_inference() {
             return Ok(InlineThenElseOutput {
@@ -255,11 +259,10 @@ pub(super) fn parse_inline_then_else(
         .map(ExpectedType::Known)
         .unwrap_or(ExpectedType::Infer);
     let mut then_cast_target_context =
-        cast_target_context_for_inline_branch(expected_type_id, type_interner, string_table);
+        cast_target_context_for_inline_branch(expected_type_id, type_interner, string_table, path_fork);
 
     // An authored `else` keeps the existing bounded branch parse. Without one,
     // stop at the first receiving boundary so the missing-keyword diagnostic
-    // retains that boundary's real source span.
     let else_follows = inline_else_follows_before_statement_end(token_stream);
 
     let input = ExpressionParseInput::until(ExpressionParseResources {
@@ -270,6 +273,7 @@ pub(super) fn parse_inline_then_else(
         cast_target_context: &mut then_cast_target_context,
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
+        path_fork,
     });
     let then_expr = if else_follows {
         create_expression_until(input, &[TokenKind::Else])?
@@ -301,7 +305,7 @@ pub(super) fn parse_inline_then_else(
         .map(ExpectedType::Known)
         .unwrap_or(ExpectedType::Infer);
     let mut else_cast_target_context =
-        cast_target_context_for_inline_branch(expected_type_id, type_interner, string_table);
+        cast_target_context_for_inline_branch(expected_type_id, type_interner, string_table, path_fork);
     let else_expression_start_index = token_stream.index;
     let input = ExpressionParseInput::ordinary(
         ExpressionParseResources {
@@ -312,6 +316,7 @@ pub(super) fn parse_inline_then_else(
             cast_target_context: &mut else_cast_target_context,
             value_mode: &ValueMode::ImmutableOwned,
             string_table,
+            path_fork,
         },
         false,
     );
@@ -377,10 +382,16 @@ fn cast_target_context_for_inline_branch(
     expected_type_id: Option<TypeId>,
     type_interner: &AstTypeInterner<'_>,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> CastTargetContext {
     expected_type_id
         .map(|type_id| {
-            cast_target_context_for_type_id(type_id, type_interner.environment(), string_table)
+            cast_target_context_for_type_id(
+                type_id,
+                type_interner.environment(),
+                string_table,
+                path_fork,
+            )
         })
         .unwrap_or(CastTargetContext::None)
 }

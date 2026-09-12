@@ -14,13 +14,15 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 pub(crate) fn run_borrow_checker(
     module: &HirModule,
     external_package_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
 ) -> Result<BorrowCheckReport, BorrowCheckError> {
-    check_borrows(module, external_package_registry, string_table)
+    let path_fork = PathInternerFork::empty();
+    check_borrows(module, external_package_registry, &path_fork, string_table)
 }
 
 pub(crate) fn assert_borrow_error_kind(

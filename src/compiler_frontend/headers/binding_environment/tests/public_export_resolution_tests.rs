@@ -11,22 +11,25 @@ use crate::compiler_frontend::headers::module_symbols::{
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-fn intern_path(components: &[&str], string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_components(
-        components
-            .iter()
-            .map(|component| string_table.intern(component))
-            .collect(),
-    )
+fn intern_path(components: &[&str], string_table: &mut StringTable) -> PathId {
+    let mut path_fork = PathInternerFork::empty();
+    path_fork
+        .try_intern_components(
+            &components
+                .iter()
+                .map(|component| string_table.intern(component))
+                .collect::<Vec<_>>(),
+        )
+        .expect("test path fits")
 }
 
 fn empty_exports_for_roots(
-    roots: &[InternedPath],
-) -> FxHashMap<InternedPath, FxHashSet<PublicExportEntry>> {
+    roots: &[PathId],
+) -> FxHashMap<PathId, FxHashSet<PublicExportEntry>> {
     let mut map = FxHashMap::default();
     for root in roots {
         map.entry(root.clone()).or_default();
@@ -39,6 +42,7 @@ fn empty_exports_for_roots(
 #[test]
 fn nested_module_root_same_module_dependency_bypasses_public_surface() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let helper_root = intern_path(&["helper-root"], &mut string_table);
@@ -57,7 +61,7 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
 
     let module_root_public_exports = empty_exports_for_roots(std::slice::from_ref(&helper_root));
 
-    let input = PublicExportResolutionInput {
+    let mut input = PublicExportResolutionInput {
         consumer_file: &consumer_file,
         header_path: &intern_path(&["impl", "helper"], &mut string_table),
         source_package_public_exports: &FxHashMap::default(),
@@ -66,9 +70,10 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
         file_module_membership: &file_module_membership,
         module_root_boundaries: &boundaries,
         string_table: &string_table,
+        path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&input);
+    let result = resolve_public_export_boundary(&mut input);
     assert!(
         matches!(
             result,
@@ -83,6 +88,7 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
 #[test]
 fn cross_module_child_dependency_resolves_through_public_surface() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let child_root = intern_path(&["child-root"], &mut string_table);
@@ -112,7 +118,7 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
     let mut module_root_public_exports = FxHashMap::default();
     module_root_public_exports.insert(child_root.clone(), child_exports);
 
-    let input = PublicExportResolutionInput {
+    let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
         header_path: &intern_path(&["child", "greet"], &mut string_table),
         source_package_public_exports: &FxHashMap::default(),
@@ -121,9 +127,10 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
         file_module_membership: &file_module_membership,
         module_root_boundaries: &boundaries,
         string_table: &string_table,
+        path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&input);
+    let result = resolve_public_export_boundary(&mut input);
     assert!(
         matches!(result, Some(PublicExportLookupResult::ExportedSource { ref path, .. }) if path == &greet_source),
         "cross-module child dependency should resolve through the child public surface"
@@ -135,6 +142,7 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
 #[test]
 fn cross_module_child_dependency_missing_symbol_is_not_exported() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let child_root = intern_path(&["child-root"], &mut string_table);
@@ -153,7 +161,7 @@ fn cross_module_child_dependency_missing_symbol_is_not_exported() {
 
     let module_root_public_exports = empty_exports_for_roots(&[child_root]);
 
-    let input = PublicExportResolutionInput {
+    let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
         header_path: &intern_path(&["child", "private"], &mut string_table),
         source_package_public_exports: &FxHashMap::default(),
@@ -162,9 +170,10 @@ fn cross_module_child_dependency_missing_symbol_is_not_exported() {
         file_module_membership: &file_module_membership,
         module_root_boundaries: &boundaries,
         string_table: &string_table,
+        path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&input);
+    let result = resolve_public_export_boundary(&mut input);
     assert!(
         matches!(result, Some(PublicExportLookupResult::NotExported { .. })),
         "cross-module dependency of a non-exported symbol should be rejected"
@@ -174,6 +183,7 @@ fn cross_module_child_dependency_missing_symbol_is_not_exported() {
 #[test]
 fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let child_root = intern_path(&["child-root"], &mut string_table);
@@ -208,7 +218,7 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
     module_root_public_exports.insert(child_root, child_exports);
 
     let header_path = intern_path(&["child", "public_name"], &mut string_table);
-    let input = PublicExportResolutionInput {
+    let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
         header_path: &header_path,
         source_package_public_exports: &FxHashMap::default(),
@@ -217,9 +227,10 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
         file_module_membership: &file_module_membership,
         module_root_boundaries: &boundaries,
         string_table: &string_table,
+        path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&input);
+    let result = resolve_public_export_boundary(&mut input);
     assert!(matches!(
         result,
         Some(PublicExportLookupResult::ExportedProviderSelection {
@@ -237,6 +248,7 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
 #[test]
 fn source_package_nested_module_root_same_module_dependency_bypasses_public_surface() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let entry_root = intern_path(&["entry-root"], &mut string_table);
     let utils_root = intern_path(&["lib", "utils-root"], &mut string_table);
@@ -254,7 +266,7 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
 
     let module_root_public_exports = empty_exports_for_roots(&[utils_root]);
 
-    let input = PublicExportResolutionInput {
+    let mut input = PublicExportResolutionInput {
         consumer_file: &utils_mod_file,
         header_path: &intern_path(&["internal", "empty_values"], &mut string_table),
         source_package_public_exports: &FxHashMap::default(),
@@ -263,9 +275,10 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
         file_module_membership: &file_module_membership,
         module_root_boundaries: &boundaries,
         string_table: &string_table,
+        path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&input);
+    let result = resolve_public_export_boundary(&mut input);
     assert!(
         matches!(
             result,
@@ -280,6 +293,7 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
 #[test]
 fn consumer_without_module_membership_uses_empty_prefix() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let child_root = intern_path(&["child-root"], &mut string_table);
     let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table);
@@ -293,7 +307,7 @@ fn consumer_without_module_membership_uses_empty_prefix() {
 
     let module_root_public_exports = empty_exports_for_roots(&[child_root]);
 
-    let input = PublicExportResolutionInput {
+    let mut input = PublicExportResolutionInput {
         consumer_file: &unknown_consumer,
         header_path: &intern_path(&["child", "greet"], &mut string_table),
         source_package_public_exports: &FxHashMap::default(),
@@ -302,9 +316,10 @@ fn consumer_without_module_membership_uses_empty_prefix() {
         file_module_membership: &FxHashMap::default(),
         module_root_boundaries: &boundaries,
         string_table: &string_table,
+        path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&input);
+    let result = resolve_public_export_boundary(&mut input);
     assert!(
         matches!(result, Some(PublicExportLookupResult::NotExported { .. })),
         "unknown consumer targeting a child module should see NotExported for a missing symbol"

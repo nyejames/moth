@@ -25,7 +25,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueLexicalScope,
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -80,7 +80,7 @@ impl StaticIfCandidate {
 pub(super) struct StaticIfSpecialization {
     inactive_generic_requests: Vec<GenericRequestRange>,
     selection_count: usize,
-    function_provenance: FxHashMap<InternedPath, SyntheticInterfaceProvenance>,
+    function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
 }
 
 impl StaticIfSpecialization {
@@ -102,7 +102,7 @@ impl StaticIfSpecialization {
 
     pub(super) fn function_provenance(
         &self,
-    ) -> &FxHashMap<InternedPath, SyntheticInterfaceProvenance> {
+    ) -> &FxHashMap<PathId, SyntheticInterfaceProvenance> {
         &self.function_provenance
     }
 
@@ -157,8 +157,8 @@ struct StaticIfSpecializer<'a> {
     resolver: ConstValueResolver<'a>,
     inactive_generic_requests: Vec<GenericRequestRange>,
     selection_count: usize,
-    current_function_path: Option<InternedPath>,
-    function_provenance: FxHashMap<InternedPath, SyntheticInterfaceProvenance>,
+    current_function_path: Option<PathId>,
+    function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
 }
 
 impl StaticIfSpecializer<'_> {
@@ -549,7 +549,7 @@ impl StaticIfSpecializer<'_> {
         &mut self,
         body: &mut [AstNode],
         environment: &mut ConstValueEnvironment,
-    ) -> Result<FxHashMap<InternedPath, SyntheticInterfaceProvenance>, TemplateNormalizationError>
+    ) -> Result<FxHashMap<PathId, SyntheticInterfaceProvenance>, TemplateNormalizationError>
     {
         let saved_provenance = std::mem::take(&mut self.function_provenance);
         let result = self.specialize_body(body, environment);
@@ -560,7 +560,7 @@ impl StaticIfSpecializer<'_> {
 
     fn merge_provenance_map(
         &mut self,
-        branch_provenance: FxHashMap<InternedPath, SyntheticInterfaceProvenance>,
+        branch_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
     ) {
         for (function_path, provenance) in branch_provenance {
             if provenance.is_empty() {
@@ -621,7 +621,7 @@ impl StaticIfSpecializer<'_> {
 ///
 /// The receiver never observes a value in this case. Keeping a value expression would force HIR
 /// to invent an unreachable merge and result local after the selected return or error return.
-fn take_terminal_receiver_body(kind: &mut NodeKind) -> Option<(Vec<AstNode>, InternedPath)> {
+fn take_terminal_receiver_body(kind: &mut NodeKind) -> Option<(Vec<AstNode>, PathId)> {
     let expression = match kind {
         NodeKind::VariableDeclaration(declaration) => &mut declaration.value,
         NodeKind::Assignment { value, .. }
@@ -634,7 +634,7 @@ fn take_terminal_receiver_body(kind: &mut NodeKind) -> Option<(Vec<AstNode>, Int
     take_terminal_value_body(expression)
 }
 
-fn take_terminal_value_body(expression: &mut Expression) -> Option<(Vec<AstNode>, InternedPath)> {
+fn take_terminal_value_body(expression: &mut Expression) -> Option<(Vec<AstNode>, PathId)> {
     match &mut expression.kind {
         ExpressionKind::ValueBlock { block } => {
             let ValueBlock::LexicalScope(value_lexical_scope) = block.as_mut() else {

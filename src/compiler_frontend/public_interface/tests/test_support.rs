@@ -24,7 +24,7 @@ use crate::compiler_frontend::semantic_identity::{
     OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::FxHashMap;
@@ -53,8 +53,9 @@ pub(crate) fn trait_binding(name: &str) -> ExportBinding {
     )
 }
 
-pub(crate) fn path(name: &str, string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str(name, string_table)
+pub(crate) fn path(name: &str, string_table: &mut StringTable) -> PathId {
+    let mut path_fork = PathInternerFork::empty();
+    path_fork.try_intern_portable_path(name, string_table).expect("test path fits")
 }
 
 pub(crate) fn this_type(env: &mut TypeEnvironment, string_table: &mut StringTable) -> TypeId {
@@ -86,7 +87,8 @@ pub(crate) fn register_struct(
     fields: Box<[FieldDefinition]>,
     generic_parameters: Option<GenericParameterListId>,
 ) -> (NominalTypeId, TypeId) {
-    let path = InternedPath::from_single_str(name, string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
     env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path,
@@ -99,7 +101,7 @@ pub(crate) fn register_struct(
 pub(crate) fn nominal_origins_map(
     entries: Vec<(&str, OriginTypeId)>,
     string_table: &mut StringTable,
-) -> FxHashMap<InternedPath, OriginTypeId> {
+) -> FxHashMap<PathId, OriginTypeId> {
     let mut map = FxHashMap::default();
     for (name, origin) in entries {
         map.insert(path(name, string_table), origin);
@@ -110,7 +112,7 @@ pub(crate) fn nominal_origins_map(
 pub(crate) fn trait_origins_map(
     entries: Vec<(&str, OriginTraitId)>,
     string_table: &mut StringTable,
-) -> FxHashMap<InternedPath, OriginTraitId> {
+) -> FxHashMap<PathId, OriginTraitId> {
     let mut map = FxHashMap::default();
     for (name, origin) in entries {
         map.insert(path(name, string_table), origin);
@@ -143,14 +145,14 @@ pub(crate) fn struct_root(
 }
 
 pub(crate) fn receiver_entry(
-    function_path: InternedPath,
+    function_path: PathId,
     receiver: ReceiverKey,
     signature: FunctionSignature,
 ) -> ReceiverMethodEntry {
     ReceiverMethodEntry {
         function_path,
         receiver,
-        source_file: InternedPath::new(),
+        source_file: PathId::ROOT,
         receiver_mutable: false,
         signature,
     }

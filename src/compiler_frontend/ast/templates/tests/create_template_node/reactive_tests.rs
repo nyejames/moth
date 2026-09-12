@@ -10,7 +10,7 @@ fn reactive_head_unknown_source_retains_exact_multibyte_span() {
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
             .expect_err("an unknown reactive source should fail"),
     );
     assert!(matches!(

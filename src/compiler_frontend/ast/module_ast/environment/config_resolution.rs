@@ -31,6 +31,7 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     build_input_type_from_parsed, parsed_type_span,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -42,25 +43,25 @@ pub(super) fn resolve_direct_project_config_qualifiers(
     type_interner: &mut AstTypeInterner<'_>,
     services: &ConfigResolutionServices,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     if let Some(qualifier) = declaration.config_qualifier.take() {
         return Err(config_expression_error(
-            declaration.id.name(),
+            path_fork.component(declaration.id),
             InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
             qualifier.qualifier_span,
         ));
     }
 
-    let is_project = declaration
-        .id
-        .name()
+    let is_project = path_fork
+        .component(declaration.id)
         .is_some_and(|name| string_table.resolve(name) == "project");
     let ExpressionKind::AnonymousConstRecord { fields } = &mut declaration.value.kind else {
         return Ok(());
     };
 
     for field in fields {
-        let field_name = field.id.name();
+        let field_name = path_fork.component(field.id);
         if let Some(qualifier) = field.config_qualifier.take() {
             let Some(field_name) = field_name else {
                 return Err(config_expression_error(

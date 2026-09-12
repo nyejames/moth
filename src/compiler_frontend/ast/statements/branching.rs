@@ -28,6 +28,7 @@ use crate::compiler_frontend::ast::statements::match_headers::{
     ParsedMatchArmHeader, parse_match_arm_header,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
@@ -37,7 +38,8 @@ use crate::compiler_frontend::compiler_messages::{
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 
@@ -76,7 +78,7 @@ pub(crate) struct ParsedMatchBlock {
     pub arms: Vec<MatchArm>,
     pub default: Option<Vec<AstNode>>,
     pub exhaustiveness: MatchExhaustiveness,
-    pub scope: InternedPath,
+    pub scope: PathId,
 }
 
 /// Peek at the next non-newline token without advancing the stream.
@@ -131,6 +133,7 @@ pub fn create_branch(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> BranchingResult<Vec<AstNode>> {
     let header_token = token_stream
         .tokens
@@ -138,7 +141,8 @@ pub fn create_branch(
     let header_span = header_token
         .map(|token| SourceSpan::new(token_stream.file_id, token.span))
         .or_else(|| Some(token_stream.current_span()));
-    let parsed_header = parse_if_header(token_stream, context, type_interner, string_table)?;
+    let parsed_header =
+        parse_if_header(token_stream, context, type_interner, string_table, path_fork)?;
 
     let condition = match parsed_header {
         ParsedIfHeader::OptionPresentCapture {
@@ -158,6 +162,7 @@ pub fn create_branch(
                 type_interner,
                 warnings,
                 string_table,
+                path_fork,
             );
         }
         ParsedIfHeader::MatchStyle { scrutinee } => {
@@ -169,6 +174,7 @@ pub fn create_branch(
                 type_interner,
                 warnings,
                 string_table,
+                path_fork,
             )?;
             return Ok(vec![match_statement]);
         }
@@ -190,7 +196,11 @@ pub fn create_branch(
     // selection, so retain the exact parser boundaries without rescanning calls later.
     let then_request_start = context.generic_request_checkpoint();
 
-    let then_context = context.new_child_control_flow(ContextKind::Branch, string_table);
+    let then_context = context.new_child_control_flow(
+        ContextKind::Branch,
+        string_table,
+        path_fork,
+    );
     let then_scope = then_context.scope.clone();
     let then_block = function_body_to_ast(
         token_stream,
@@ -198,13 +208,15 @@ pub fn create_branch(
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )?;
     let then_request_end = context.generic_request_checkpoint();
 
     let (else_block, else_scope) = if token_stream.current_token_kind() == &TokenKind::Else {
         reject_same_line_else_if(token_stream)?;
         token_stream.advance();
-        let else_context = context.new_child_control_flow(ContextKind::Branch, string_table);
+        let else_context =
+            context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
         let else_scope = else_context.scope.clone();
         (
             Some(function_body_to_ast(
@@ -213,6 +225,7 @@ pub fn create_branch(
                 type_interner,
                 warnings,
                 string_table,
+                path_fork,
             )?),
             Some(else_scope),
         )
@@ -251,6 +264,7 @@ fn create_option_present_capture_branch(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> BranchingResult<Vec<AstNode>> {
     let OptionPresentCaptureBranch {
         scrutinee,
@@ -267,25 +281,26 @@ fn create_option_present_capture_branch(
         ));
     }
     token_stream.advance();
-
     let body = function_body_to_ast(
         token_stream,
-        then_context.new_child_control_flow(ContextKind::Branch, string_table),
+        then_context.new_child_control_flow(ContextKind::Branch, string_table, path_fork),
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )?;
 
     let else_block = if token_stream.current_token_kind() == &TokenKind::Else {
         reject_same_line_else_if(token_stream)?;
-        token_stream.advance();
-        let else_context = context.new_child_control_flow(ContextKind::Branch, string_table);
+        let else_context =
+            context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
         Some(function_body_to_ast(
             token_stream,
             else_context,
             type_interner,
             warnings,
             string_table,
+            path_fork,
         )?)
     } else {
         None
@@ -325,10 +340,11 @@ fn create_match_node(
     scrutinee: Expression,
     header_span: Option<SourceSpan>,
     token_stream: &mut FileTokens,
-    context: &mut ScopeContext,
+    context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> BranchingResult<AstNode> {
     let parsed_match = parse_match_block(
         scrutinee,
@@ -338,6 +354,7 @@ fn create_match_node(
         warnings,
         None,
         string_table,
+        path_fork,
     )?;
 
     Ok(AstNode {
@@ -367,6 +384,7 @@ pub(crate) fn parse_match_block(
     warnings: &mut Vec<CompilerDiagnostic>,
     active_value_target: Option<ActiveValueProductionTarget>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> BranchingResult<ParsedMatchBlock> {
     ast_log!("Creating Match Statement");
 
@@ -380,8 +398,8 @@ pub(crate) fn parse_match_block(
     }
 
     token_stream.advance();
-    let mut match_context = context.new_child_control_flow(ContextKind::Branch, string_table);
-    match_context.active_value_target = active_value_target;
+    let mut match_context =
+        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
 
     let mut arms: Vec<MatchArm> = Vec::new();
     let mut else_block = None;
@@ -451,6 +469,7 @@ pub(crate) fn parse_match_block(
                     type_interner,
                     warnings,
                     string_table,
+                    path_fork,
                 )?);
             }
 
@@ -467,6 +486,7 @@ pub(crate) fn parse_match_block(
                         type_interner,
                         warnings,
                         string_table,
+                        path_fork,
                     )?;
 
                     if seen_else {
@@ -537,6 +557,7 @@ fn parse_else_arm(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> BranchingResult<Vec<AstNode>> {
     token_stream.advance();
     token_stream.skip_newlines();
@@ -565,13 +586,14 @@ fn parse_else_arm(
     }
 
     token_stream.advance();
-    let arm_context = new_match_arm_body_context(match_context, string_table);
+    let arm_context = new_match_arm_body_context(match_context, string_table, path_fork);
     function_body_to_ast(
         token_stream,
         arm_context,
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )
 }
 
@@ -591,6 +613,7 @@ fn parse_match_arm(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> BranchingResult<ParsedMatchArm> {
     let ParsedMatchArmHeader {
         pattern,
@@ -605,6 +628,7 @@ fn parse_match_arm(
         type_interner,
         &[TokenKind::FatArrow],
         string_table,
+        path_fork,
     )?;
 
     if token_stream.current_token_kind() != &TokenKind::FatArrow {
@@ -617,13 +641,14 @@ fn parse_match_arm(
     }
 
     token_stream.advance();
-    let arm_body_context = new_match_arm_body_context(&arm_scope, string_table);
+    let arm_body_context = new_match_arm_body_context(&arm_scope, string_table, path_fork);
     let body = function_body_to_ast(
         token_stream,
         arm_body_context,
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )?;
 
     Ok(ParsedMatchArm {
@@ -640,9 +665,11 @@ fn parse_match_arm(
 fn new_match_arm_body_context(
     match_context: &ScopeContext,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ScopeContext {
     let active_value_target = match_context.active_value_target.clone();
-    let mut arm_context = match_context.new_child_control_flow(ContextKind::MatchArm, string_table);
+    let mut arm_context =
+        match_context.new_child_control_flow(ContextKind::MatchArm, string_table, path_fork);
     arm_context.active_value_target = active_value_target;
     arm_context
 }

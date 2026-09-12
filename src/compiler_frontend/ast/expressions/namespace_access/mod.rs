@@ -25,6 +25,7 @@ use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Input bundle for namespace access parsing.
@@ -42,6 +43,7 @@ pub(super) struct NamespaceAccessInput<'a, 'env> {
     pub(super) root_name: StringId,
     pub(super) root_record: &'a NamespaceRecord,
     pub(super) string_table: &'a mut StringTable,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Parse a dotted namespace access path in value position.
@@ -67,6 +69,7 @@ pub(super) fn parse_namespace_access(
         root_name,
         root_record,
         string_table,
+        path_fork,
     } = input;
 
     token_stream.advance(); // move from namespace name to '.'
@@ -146,6 +149,7 @@ pub(super) fn parse_namespace_access(
                     expression,
                     allow_boundary_catch,
                     string_table,
+                    path_fork,
                 };
 
                 return resolve_namespace_value_member(

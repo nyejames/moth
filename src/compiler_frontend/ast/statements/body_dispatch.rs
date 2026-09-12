@@ -37,6 +37,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -88,6 +89,7 @@ pub(crate) fn parse_function_body_statements(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> StatementDispatchResult<Vec<AstNode>> {
     let mut body_nodes: Vec<AstNode> =
         Vec::with_capacity(token_stream.length / settings::TOKEN_TO_NODE_RATIO);
@@ -136,6 +138,7 @@ pub(crate) fn parse_function_body_statements(
                 type_interner,
                 warnings,
                 string_table,
+                path_fork,
             )?,
 
             TokenKind::This => parse_this_statement(
@@ -144,6 +147,7 @@ pub(crate) fn parse_function_body_statements(
                 &mut context,
                 type_interner,
                 string_table,
+                path_fork,
             )?,
 
             // Deferred keyword-led semantic scopes
@@ -171,10 +175,11 @@ pub(crate) fn parse_function_body_statements(
 
                 body_nodes.push(create_loop(
                     token_stream,
-                    context.new_child_control_flow(ContextKind::Loop, string_table),
+                    context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
                     type_interner,
                     warnings,
                     string_table,
+                    path_fork,
                 )?);
             }
 
@@ -183,10 +188,15 @@ pub(crate) fn parse_function_body_statements(
 
                 body_nodes.extend(create_branch(
                     token_stream,
-                    &mut context.new_child_control_flow(ContextKind::Branch, string_table),
+                    &mut context.new_child_control_flow(
+                        ContextKind::Branch,
+                        string_table,
+                        path_fork,
+                    ),
                     type_interner,
                     warnings,
                     string_table,
+                    path_fork,
                 )?);
             }
 
@@ -216,6 +226,7 @@ pub(crate) fn parse_function_body_statements(
                     &context,
                     type_interner,
                     string_table,
+                    path_fork,
                 )?;
             }
 
@@ -226,6 +237,7 @@ pub(crate) fn parse_function_body_statements(
                     &context,
                     type_interner,
                     string_table,
+                    path_fork,
                 )?;
             }
 
@@ -314,6 +326,7 @@ pub(crate) fn parse_function_body_statements(
                     target: active_target,
                     label: "then fallback values",
                     string_table,
+                    path_fork,
                 })?;
 
                 body_nodes.push(AstNode {
@@ -371,6 +384,7 @@ pub(crate) fn parse_function_body_statements(
                     type_interner,
                     vec![],
                     string_table,
+                    path_fork,
                 )?;
                 let expression = Expression::template(template, ValueMode::MutableOwned);
 
@@ -399,6 +413,7 @@ pub(crate) fn parse_function_body_statements(
                     &context,
                     type_interner,
                     string_table,
+                    path_fork,
                 )?;
 
                 let span = expression.span;

@@ -68,8 +68,8 @@ fn rejects_exact_anonymous_declared_region_spelling() {
 
 #[test]
 fn block_group_and_region_are_ordinary_variable_names() {
-    let (ast, string_table) = parse_single_file_ast("block = 1\ngroup = 2\nregion = 3\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("block = 1\ngroup = 2\nregion = 3\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     assert_eq!(body.len(), 3);
     assert!(
@@ -80,25 +80,23 @@ fn block_group_and_region_are_ordinary_variable_names() {
 
 #[test]
 fn block_is_an_ordinary_function_name() {
-    let (ast, string_table) =
-        parse_single_file_ast("block || -> Int:\n    return 1\n;\n\nresult = block()\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("block || -> Int:\n    return 1\n;\n\nresult = block()\n");
 
-    assert_eq!(function_body_by_name(&ast, &string_table, "block").len(), 1);
+    assert_eq!(function_body_by_name(&ast, &path_fork, &string_table, "block").len(), 1);
 }
 
 #[test]
 fn typed_declaration_is_not_a_declared_region_header() {
-    let (ast, string_table) = parse_single_file_ast("name String = \"Priya\"\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("name String = \"Priya\"\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     assert!(matches!(body[0].kind, NodeKind::VariableDeclaration(_)));
 }
 
 #[test]
 fn executable_source_cannot_emit_internal_lexical_scope_node() {
-    let (ast, string_table) =
-        parse_single_file_ast("condition ~= true\nif condition:\n    value = 1\n;\n\nafter = 2\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("condition ~= true\nif condition:\n    value = 1\n;\n\nafter = 2\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     assert!(
         body.iter()

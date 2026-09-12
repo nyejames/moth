@@ -25,6 +25,7 @@ use crate::compiler_frontend::single_source_compilation::{
 };
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::bundle::{
     DIRECT_TEMPLATE_PROJECT_NAME, prepare_file_value_bundle,
@@ -75,7 +76,8 @@ pub(crate) fn compile_moth_template_with_registry(
     string_table: &mut StringTable,
     resource_inputs: &mut ResourceInputRegistry,
 ) -> Result<DirectTemplateRegistryCompile, CompilerMessages> {
-    let sources = request.collect_sources(string_table)?;
+    let mut path_fork = PathInternerFork::empty();
+    let sources = request.collect_sources(string_table, &mut path_fork)?;
 
     // The project's directive vocabulary is the same for every source in one request, so it is
     // merged once rather than per document.

@@ -13,7 +13,7 @@ fn markdown_formats_only_template_body_content() {
     );
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("template should parse");
 
     assert!(matches!(

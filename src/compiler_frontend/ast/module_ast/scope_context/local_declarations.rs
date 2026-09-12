@@ -11,11 +11,15 @@ impl ScopeContext {
     ///
     /// WHAT: rebuilds the frame-local name index and declaration vec. Used when a
     ///       function or start body frame is initialised with parameter declarations.
-    pub(crate) fn set_local_declarations(&mut self, declarations: Vec<Declaration>) {
+    pub(crate) fn set_local_declarations(
+        &mut self,
+        declarations: Vec<Declaration>,
+        path_fork: &PathInternerFork,
+    ) {
         self.arena
             .borrow_mut()
             .frame_mut(self.current_frame_id)
-            .set_local_declarations(declarations);
+            .set_local_declarations(declarations, path_fork);
     }
 
     pub(crate) fn with_pending_catch_assignment_targets(

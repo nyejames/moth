@@ -8,13 +8,13 @@ use super::*;
 
 pub(crate) fn diagnostic_place_name(
     place: &DiagnosticPlace,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     match place {
         DiagnosticPlace::Local(name) | DiagnosticPlace::RenderedText(name) => {
-            format!("`{}`", string_table.resolve(*name))
+            format!("`{}`", context.string_table.resolve(*name))
         }
-        DiagnosticPlace::Path(path) => format!("`{}`", path.to_portable_string(string_table)),
+        DiagnosticPlace::Path(path) => format!("`{}`", context.render_path(*path)),
         DiagnosticPlace::Unknown => "this value".to_string(),
     }
 }
@@ -31,11 +31,11 @@ pub(crate) fn borrow_conflict_message(
     place: &DiagnosticPlace,
     existing_access: BorrowAccessKind,
     requested_access: BorrowAccessKind,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     format!(
         "Cannot access {}: existing {} access conflicts with requested {} access.",
-        diagnostic_place_name(place, string_table),
+        diagnostic_place_name(place, context),
         borrow_access_name(existing_access),
         borrow_access_name(requested_access)
     )
@@ -44,13 +44,13 @@ pub(crate) fn borrow_conflict_message(
 pub(crate) fn multiple_mutable_borrows_message(
     place: &DiagnosticPlace,
     conflicting_place: Option<&DiagnosticPlace>,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let place_name = diagnostic_place_name(place, string_table);
+    let place_name = diagnostic_place_name(place, context);
 
     match conflicting_place {
         Some(conflicting) => {
-            let conflicting_name = diagnostic_place_name(conflicting, string_table);
+            let conflicting_name = diagnostic_place_name(conflicting, context);
             format!(
                 "Cannot create another mutable access to {place_name} while {conflicting_name} is active. Reuse {conflicting_name}, or move the new access after its last use."
             )
@@ -66,11 +66,11 @@ pub(crate) fn shared_mutable_conflict_message(
     existing_access: BorrowAccessKind,
     requested_access: BorrowAccessKind,
     conflicting_place: Option<&DiagnosticPlace>,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let place_name = diagnostic_place_name(place, string_table);
+    let place_name = diagnostic_place_name(place, context);
     let conflicting_name = conflicting_place
-        .map(|place| diagnostic_place_name(place, string_table))
+        .map(|place| diagnostic_place_name(place, context))
         .unwrap_or_else(|| place_name.clone());
 
     match (existing_access, requested_access) {
@@ -93,22 +93,22 @@ pub(crate) fn shared_mutable_conflict_message(
 
 pub(crate) fn use_after_possible_move_message(
     place: &DiagnosticPlace,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     format!(
         "Cannot use {} because it may have been moved or left its valid scope.",
-        diagnostic_place_name(place, string_table)
+        diagnostic_place_name(place, context)
     )
 }
 
 pub(crate) fn move_while_borrowed_message(
     place: &DiagnosticPlace,
     existing_access: BorrowAccessKind,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     format!(
         "Cannot transfer ownership of {} while it has an active {} access.",
-        diagnostic_place_name(place, string_table),
+        diagnostic_place_name(place, context),
         borrow_access_name(existing_access)
     )
 }
@@ -116,12 +116,12 @@ pub(crate) fn move_while_borrowed_message(
 pub(crate) fn whole_object_borrow_conflict_message(
     whole_place: &DiagnosticPlace,
     part_place: &DiagnosticPlace,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     format!(
         "Cannot access whole value {} while part {} is already active.",
-        diagnostic_place_name(whole_place, string_table),
-        diagnostic_place_name(part_place, string_table)
+        diagnostic_place_name(whole_place, context),
+        diagnostic_place_name(part_place, context)
     )
 }
 
@@ -129,9 +129,9 @@ pub(crate) fn invalid_mutable_access_message(
     place: &DiagnosticPlace,
     reason: InvalidMutableAccessReason,
     conflicting_place: Option<&DiagnosticPlace>,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let place_name = diagnostic_place_name(place, string_table);
+    let place_name = diagnostic_place_name(place, context);
 
     match reason {
         InvalidMutableAccessReason::ImmutablePlace => {
@@ -144,7 +144,7 @@ pub(crate) fn invalid_mutable_access_message(
         }
         InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess => {
             let conflicting_name = conflicting_place
-                .map(|place| diagnostic_place_name(place, string_table))
+                .map(|place| diagnostic_place_name(place, context))
                 .unwrap_or_else(|| "another live alias".to_string());
             format!(
                 "Cannot mutably access {place_name} because {conflicting_name} may alias the same value."
@@ -155,10 +155,10 @@ pub(crate) fn invalid_mutable_access_message(
 
 pub(crate) fn use_of_uninitialized_local_message(
     place: &DiagnosticPlace,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     format!(
         "Use of {} before initialization or after scope end.",
-        diagnostic_place_name(place, string_table)
+        diagnostic_place_name(place, context)
     )
 }

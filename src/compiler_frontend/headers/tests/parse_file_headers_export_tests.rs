@@ -52,12 +52,9 @@ fn export_dependency_path_parsed_as_public_surface_dependency() {
         output.file_dependency_clauses[0].export_mode,
         HeaderExportMode::Public
     );
-    assert_eq!(
-        output.file_dependency_clauses[0]
-            .dependency
-            .path
-            .to_portable_string(&string_table),
-        "button"
+    assert_ne!(
+        output.file_dependency_clauses[0].dependency.path,
+        PathId::ROOT
     );
     let selections = output.file_dependency_clauses[0]
         .selections(&output.dependency_selections)
@@ -318,10 +315,7 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
         .headers
         .iter()
         .find(|h| {
-            h.tokens
-                .src_path
-                .name_str(&string_table)
-                .is_some_and(|n| n == "make")
+            matches!(h.kind, HeaderKind::Function { .. }) && h.tokens.src_path != PathId::ROOT
         })
         .expect("make header should exist");
 

@@ -41,13 +41,13 @@ use crate::compiler_frontend::ast::templates::tir::{
     runtime_slot_plan_site_render_root,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 
 pub(super) fn annotate_nodes(
     nodes: &mut [AstNode],
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -88,7 +88,7 @@ struct EnvironmentAwarePayload {
 fn collect_environment_aware_tir_expression_payloads(
     root_view: TirView<'_>,
     base_environment: &ReactiveTemplateValueEnvironment,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
 ) -> Result<Vec<EnvironmentAwarePayload>, CompilerError> {
     let root = root_view.root_template()?.root;
     // This is a construction-time merge input used to annotate one complete
@@ -112,7 +112,7 @@ fn collect_environment_aware_tir_expression_payloads(
 ///      place so the annotation pass composes one authoritative root overlay
 ///      without flattening control-flow scopes.
 struct EnvironmentAwarePayloadCollector<'store, 'flow> {
-    flows: &'flow FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &'flow FxHashMap<PathId, FunctionTemplateFlow>,
     view: TirView<'store>,
     // Temporary normalization input for the root overlay being constructed.
     // Durable effective-expression reads belong to `TirView`, not this map.
@@ -128,7 +128,7 @@ struct EnvironmentAwarePayloadCollector<'store, 'flow> {
 
 impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
     fn new(
-        flows: &'flow FxHashMap<InternedPath, FunctionTemplateFlow>,
+        flows: &'flow FxHashMap<PathId, FunctionTemplateFlow>,
         view: TirView<'store>,
         effective_expressions: FxHashMap<ExpressionSiteId, Expression>,
     ) -> Self {
@@ -500,7 +500,7 @@ fn record_loop_binding_declarations(
 
 fn annotate_node(
     node: &mut AstNode,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -634,9 +634,9 @@ fn annotate_node(
 }
 
 fn apply_flow_to_signature(
-    path: &InternedPath,
+    path: &PathId,
     signature: &mut FunctionSignature,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
 ) {
     let Some(flow) = flows.get(path) else {
         return;
@@ -659,7 +659,7 @@ fn apply_flow_to_signature(
 
 fn annotate_declaration(
     declaration: &mut Declaration,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -679,7 +679,7 @@ fn annotate_declaration(
 
 fn annotate_expressions(
     expressions: &mut [Expression],
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -699,7 +699,7 @@ fn annotate_place_expression(place: &mut PlaceExpression) {
 
 fn annotate_expression(
     expression: &mut Expression,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -823,7 +823,7 @@ fn annotate_expression(
 
 fn annotate_template(
     template: &mut Template,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -838,7 +838,7 @@ fn annotate_template(
 
 fn annotate_branch_selector(
     selector: &mut TemplateBranchSelector,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -857,7 +857,7 @@ fn annotate_branch_selector(
 
 fn annotate_loop_header(
     header: &mut TemplateLoopHeader,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -884,7 +884,7 @@ fn annotate_loop_header(
 
 fn annotate_runtime_slot_handoff(
     handoff: &mut OwnedRuntimeSlotApplicationHandoff,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<ReactiveTemplateMetadata, CompilerError> {
@@ -906,7 +906,7 @@ fn annotate_runtime_slot_handoff(
 
 fn annotate_owned_runtime_template_handoff(
     handoff: &mut OwnedRuntimeTemplateHandoff,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<ReactiveTemplateMetadata, CompilerError> {
@@ -928,7 +928,7 @@ fn annotate_owned_runtime_template_handoff(
 
 fn annotate_owned_runtime_template_node(
     node: &mut OwnedRuntimeTemplateNode,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -963,7 +963,7 @@ fn annotate_owned_runtime_template_node(
 
 fn annotate_loop_bindings(
     bindings: &mut LoopBindings,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -979,7 +979,7 @@ fn annotate_loop_bindings(
 
 fn annotate_call_arguments(
     arguments: &mut [CallArgument],
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -992,7 +992,7 @@ fn annotate_call_arguments(
 
 fn annotate_fallible_handling(
     handling: &mut FallibleHandling,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -1009,7 +1009,7 @@ fn annotate_fallible_handling(
 
 fn annotate_match_pattern(
     pattern: &mut MatchPattern,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -1030,7 +1030,7 @@ fn annotate_match_pattern(
 
 fn annotate_value_block(
     block: &mut Box<ValueBlock>,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {
@@ -1096,7 +1096,7 @@ fn annotate_value_block(
 ///      required module-store authority failures propagate as compiler errors.
 fn annotate_template_tir_root(
     template: &mut Template,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &mut TemplateIrStore,
 ) -> Result<(), CompilerError> {

@@ -38,7 +38,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -48,8 +48,9 @@ use crate::compiler_frontend::value_mode::ValueMode;
 #[test]
 fn const_loop_iteration_bindings_preserve_source_provenance() {
     let mut string_table = StringTable::new();
-    let item_path = InternedPath::from_single_str("item", &mut string_table);
-    let index_path = InternedPath::from_single_str("index", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let item_path = path_fork.try_intern_portable_path("item", &mut string_table).expect("test path fits");
+    let index_path = path_fork.try_intern_portable_path("index", &mut string_table).expect("test path fits");
     let member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
         "render",
@@ -96,6 +97,7 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
 #[test]
 fn bool_condition_with_no_bindings_returns_borrowed() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
@@ -115,6 +117,7 @@ fn bool_condition_with_no_bindings_returns_borrowed() {
 #[test]
 fn string_slice_with_no_bindings_returns_borrowed() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text_id = string_table.intern("hello");
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
@@ -139,7 +142,8 @@ fn string_slice_with_no_bindings_returns_borrowed() {
 #[test]
 fn bool_condition_binding_substitution_returns_owned() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("show", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path("show", &mut string_table).expect("test path fits");
 
     let binding_value = Expression::bool(true, None, ValueMode::ImmutableOwned);
     let bindings = vec![TemplateFoldBinding {
@@ -184,7 +188,8 @@ fn bool_condition_binding_substitution_returns_owned() {
 #[test]
 fn option_present_capture_substitution_returns_owned() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("maybe_name", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path("maybe_name", &mut string_table).expect("test path fits");
 
     let inner_value = Expression::string_slice(
         string_table.intern("Alice"),
@@ -224,6 +229,7 @@ fn option_present_capture_substitution_returns_owned() {
 #[test]
 fn option_capture_classifies_same_store_payload_under_active_fold_borrow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -254,7 +260,8 @@ fn option_capture_classifies_same_store_payload_under_active_fold_borrow() {
 #[test]
 fn option_capture_scalar_payload_uses_ordinary_const_rules() {
     let mut string_table = StringTable::new();
-    let option_path = InternedPath::from_single_str("maybe_payload", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let option_path = path_fork.try_intern_portable_path("maybe_payload", &mut string_table).expect("test path fits");
     let option_value = Expression::coerced(
         Expression::string_slice(
             string_table.intern("payload"),
@@ -271,7 +278,7 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
         ValueMode::ImmutableOwned,
         ConstRecordState::RuntimeValue,
     );
-    let capture_path = InternedPath::from_single_str("payload", &mut string_table);
+    let capture_path = path_fork.try_intern_portable_path("payload", &mut string_table).expect("test path fits");
     let pattern = MatchPattern::OptionPresentCapture {
         name: string_table.intern("payload"),
         binding_path: capture_path.clone(),
@@ -316,7 +323,8 @@ fn assert_store_backed_option_capture(
     store: Rc<RefCell<TemplateIrStore>>,
     payload_template: Template,
 ) {
-    let option_path = InternedPath::from_single_str("maybe_payload", string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let option_path = path_fork.try_intern_portable_path("maybe_payload", string_table).expect("test path fits");
     let option_value = Expression::coerced(
         Expression::template(payload_template, ValueMode::ImmutableOwned),
         builtin_type_ids::STRING,
@@ -330,7 +338,7 @@ fn assert_store_backed_option_capture(
         ConstRecordState::RuntimeValue,
     );
     let capture_name = string_table.intern("payload");
-    let capture_path = InternedPath::from_single_str("payload", string_table);
+    let capture_path = path_fork.try_intern_portable_path("payload", string_table).expect("test path fits");
     let pattern = MatchPattern::OptionPresentCapture {
         name: capture_name,
         binding_path: capture_path.clone(),
@@ -372,6 +380,7 @@ fn assert_store_backed_option_capture(
 #[test]
 fn coerced_expression_with_no_bindings_returns_borrowed() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let inner = Expression::string_slice(
         string_table.intern("value"),
         None,
@@ -397,6 +406,7 @@ fn coerced_expression_with_no_bindings_returns_borrowed() {
 #[test]
 fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text_id = string_table.intern("nested");
 
     // Build a minimal module-local text template so the borrow path receives
@@ -458,6 +468,7 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
 #[test]
 fn rpn_with_no_substitutable_operands_returns_borrowed() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
@@ -494,7 +505,8 @@ fn rpn_with_no_substitutable_operands_returns_borrowed() {
 #[test]
 fn rpn_with_bound_reference_operand_returns_owned() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("counter", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path("counter", &mut string_table).expect("test path fits");
 
     let binding_value = Expression::int(5, None, ValueMode::ImmutableOwned);
     let bindings = vec![TemplateFoldBinding {

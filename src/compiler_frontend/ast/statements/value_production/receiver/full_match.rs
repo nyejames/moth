@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Full value matches recurse into statement match bodies, so their result retains internal
 /// frozen-token-table failures for the expression parser boundary.
@@ -37,6 +38,7 @@ pub(super) struct ValueMatchParseInput<'a, 'b> {
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) span: Option<SourceSpan>,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Parses a full value-producing match at a closed receiver.
@@ -53,14 +55,17 @@ pub(super) fn parse_value_match_at_receiver(
         target,
         string_table,
         span,
+        path_fork,
     } = input;
 
-    let scrutinee_context = context.new_child_control_flow(ContextKind::Condition, string_table);
+    let scrutinee_context =
+        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
     let scrutinee = parse_scrutinee_until_is(
         token_stream,
         &scrutinee_context,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     if token_stream.current_token_kind() != &TokenKind::Is {
@@ -84,6 +89,7 @@ pub(super) fn parse_value_match_at_receiver(
         &mut warnings,
         Some(target),
         string_table,
+        path_fork,
     )?;
     emit_collected_warnings(context, warnings);
 

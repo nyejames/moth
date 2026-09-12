@@ -26,7 +26,7 @@ fn loop_fixture_source(loop_body_source: &str) -> String {
     format!("loop_test ||:\n{indented_body}\n;\n\nloop_test()\n")
 }
 
-fn parse_loop_fixture(loop_body_source: &str) -> (Ast, StringTable) {
+fn parse_loop_fixture(loop_body_source: &str) -> (Ast, PathInternerFork, StringTable) {
     parse_single_file_ast(&loop_fixture_source(loop_body_source))
 }
 
@@ -34,8 +34,12 @@ fn parse_loop_fixture_diagnostic(loop_body_source: &str) -> DiagnosticPayload {
     parse_single_file_ast_diagnostic(&loop_fixture_source(loop_body_source)).payload
 }
 
-fn loop_function_body<'a>(ast: &'a Ast, string_table: &StringTable) -> &'a [AstNode] {
-    function_body_by_name(ast, string_table, "loop_test")
+fn loop_function_body<'a>(
+    ast: &'a Ast,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> &'a [AstNode] {
+    function_body_by_name(ast, path_fork, string_table, "loop_test")
 }
 
 // --------------------------
@@ -44,10 +48,10 @@ fn loop_function_body<'a>(ast: &'a Ast, string_table: &StringTable) -> &'a [AstN
 
 #[test]
 fn parses_conditional_loop_without_bindings() {
-    let (ast, string_table) =
+    let (ast, path_fork, string_table) =
         parse_loop_fixture("counter ~= 0\nloop counter < 3:\n    counter = counter + 1\n;");
 
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::WhileLoop(condition, loop_body) = &body[1].kind else {
         panic!("expected conditional loop in function body");
@@ -64,10 +68,10 @@ fn parses_conditional_loop_without_bindings() {
 
 #[test]
 fn parses_range_loop_with_pipe_binding() {
-    let (ast, string_table) =
+    let (ast, path_fork, string_table) =
         parse_loop_fixture("sum ~= 0\nloop 1 to & 5 by 2 |i|:\n    sum = sum + i\n;");
 
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop {
         bindings,
@@ -82,7 +86,7 @@ fn parses_range_loop_with_pipe_binding() {
         bindings
             .item
             .as_ref()
-            .and_then(|binding| binding.id.name_str(&string_table)),
+            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
         Some("i")
     );
     assert!(bindings.index.is_none());
@@ -98,10 +102,10 @@ fn parses_range_loop_with_pipe_binding() {
 
 #[test]
 fn parses_range_loop_with_value_and_index_bindings() {
-    let (ast, string_table) =
+    let (ast, path_fork, string_table) =
         parse_loop_fixture("sum ~= 0\nloop 0 to 4 |value, index|:\n    sum = sum + value\n;");
 
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { bindings, .. } = &body[1].kind else {
         panic!("expected range loop in function body");
@@ -111,23 +115,23 @@ fn parses_range_loop_with_value_and_index_bindings() {
         bindings
             .item
             .as_ref()
-            .and_then(|binding| binding.id.name_str(&string_table)),
+            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
         Some("value")
     );
     assert_eq!(
         bindings
             .index
             .as_ref()
-            .and_then(|binding| binding.id.name_str(&string_table)),
+            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
         Some("index")
     );
 }
 
 #[test]
 fn range_index_binding_has_int_type() {
-    let (ast, string_table) =
+    let (ast, path_fork, string_table) =
         parse_loop_fixture("sum ~= 0\nloop 0 to 4 |value, index|:\n    sum = sum + value\n;");
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { bindings, .. } = &body[1].kind else {
         panic!("expected range loop in function body");
@@ -148,10 +152,10 @@ fn range_index_binding_has_int_type() {
 
 #[test]
 fn parses_collection_loop_with_pipe_item_binding() {
-    let (ast, string_table) =
+    let (ast, path_fork, string_table) =
         parse_loop_fixture("items = {1, 2, 3}\nloop items |item|:\n    io.line([: [item]])\n;");
 
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::CollectionLoop {
         bindings,
@@ -166,7 +170,7 @@ fn parses_collection_loop_with_pipe_item_binding() {
         bindings
             .item
             .as_ref()
-            .and_then(|binding| binding.id.name_str(&string_table)),
+            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
         Some("item")
     );
     assert!(bindings.index.is_none());
@@ -177,11 +181,11 @@ fn parses_collection_loop_with_pipe_item_binding() {
 
 #[test]
 fn parses_collection_loop_with_item_and_index_pipe_bindings() {
-    let (ast, string_table) = parse_loop_fixture(
+    let (ast, path_fork, string_table) = parse_loop_fixture(
         "items = {1, 2, 3}\nloop items |item, index|:\n    io.line([: [item]])\n;",
     );
 
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::CollectionLoop { bindings, .. } = &body[1].kind else {
         panic!("expected collection loop in function body");
@@ -191,24 +195,24 @@ fn parses_collection_loop_with_item_and_index_pipe_bindings() {
         bindings
             .item
             .as_ref()
-            .and_then(|binding| binding.id.name_str(&string_table)),
+            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
         Some("item")
     );
     assert_eq!(
         bindings
             .index
             .as_ref()
-            .and_then(|binding| binding.id.name_str(&string_table)),
+            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
         Some("index")
     );
 }
 
 #[test]
 fn collection_index_binding_has_int_type() {
-    let (ast, string_table) = parse_loop_fixture(
+    let (ast, path_fork, string_table) = parse_loop_fixture(
         "items = {1, 2, 3}\nloop items |item, index|:\n    io.line([: [item]])\n;",
     );
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::CollectionLoop { bindings, .. } = &body[1].kind else {
         panic!("expected collection loop in function body");
@@ -301,9 +305,9 @@ fn rejects_range_loop_with_bare_dual_bindings() {
 
 #[test]
 fn parses_collection_loop_without_bindings() {
-    let (ast, string_table) =
+    let (ast, path_fork, string_table) =
         parse_loop_fixture("count ~= 0\nitems = {1, 2, 3}\nloop items:\n    count = count + 1\n;");
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::CollectionLoop { bindings, .. } = &body[2].kind else {
         panic!("expected collection loop in function body");
@@ -315,8 +319,8 @@ fn parses_collection_loop_without_bindings() {
 
 #[test]
 fn parses_range_loop_without_bindings() {
-    let (ast, string_table) = parse_loop_fixture("loop 0 to 10:\n    io.line([: [1]])\n;");
-    let body = loop_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_loop_fixture("loop 0 to 10:\n    io.line([: [1]])\n;");
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { bindings, .. } = &body[0].kind else {
         panic!("expected range loop in function body");
@@ -437,10 +441,10 @@ fn rejects_non_boolean_conditional_loop_condition() {
 
 #[test]
 fn parses_inclusive_range_loop_with_tight_ampersand() {
-    let (ast, string_table) =
+    let (ast, path_fork, string_table) =
         parse_loop_fixture("sum ~= 0\nloop 0 to &5 |i|:\n    sum = sum + i\n;");
 
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { range, .. } = &body[1].kind else {
         panic!("expected range loop in function body");
@@ -451,9 +455,9 @@ fn parses_inclusive_range_loop_with_tight_ampersand() {
 
 #[test]
 fn parses_omitted_start_exclusive_range_loop() {
-    let (ast, string_table) = parse_loop_fixture("sum ~= 0\nloop to 5 |i|:\n    sum = sum + i\n;");
+    let (ast, path_fork, string_table) = parse_loop_fixture("sum ~= 0\nloop to 5 |i|:\n    sum = sum + i\n;");
 
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { range, .. } = &body[1].kind else {
         panic!("expected range loop in function body");
@@ -466,10 +470,10 @@ fn parses_omitted_start_exclusive_range_loop() {
 
 #[test]
 fn parses_omitted_start_inclusive_range_loop() {
-    let (ast, string_table) =
+    let (ast, path_fork, string_table) =
         parse_loop_fixture("sum ~= 0\nloop to & 5 |i|:\n    sum = sum + i\n;");
 
-    let body = loop_function_body(&ast, &string_table);
+    let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { range, .. } = &body[1].kind else {
         panic!("expected range loop in function body");

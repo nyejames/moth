@@ -35,7 +35,7 @@ pub(super) fn parse_inline_value_if(
         string_table,
         condition,
         span,
-        ..
+        path_fork,
     } = input;
 
     let output = parse_inline_then_else(InlineThenElseInput {
@@ -45,6 +45,7 @@ pub(super) fn parse_inline_value_if(
         type_interner,
         target,
         string_table,
+        path_fork,
     })?;
 
     let then_body = vec![then_value_node(

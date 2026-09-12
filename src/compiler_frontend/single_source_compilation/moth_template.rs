@@ -53,7 +53,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -192,7 +192,7 @@ pub(crate) fn compile_moth_template_source(
                 (Vec::new(), None, source_builder, None)
             }
         };
-
+    let mut path_fork = source_builder.sources().fork_path_interner();
     let mut preparation_warnings = Vec::new();
     for prepared_source in &mut all_prepared {
         preparation_warnings.append(&mut prepared_source.warnings);
@@ -283,7 +283,11 @@ pub(crate) fn compile_moth_template_source(
             string_table,
         ));
     }
-    let entry_scope = source_builder.sources().legacy_logical_path(entry_file_id);
+    let entry_scope = source_builder
+        .sources()
+        .get(entry_file_id)
+        .expect("registered entry source must retain its identity")
+        .logical_path;
 
     // Consume Stage 0's retained entry syntax, or prepare the standalone source once.
     if !bundle_input {
@@ -299,6 +303,7 @@ pub(crate) fn compile_moth_template_source(
                 source_code,
                 entry_file_id,
                 string_table,
+                &mut path_fork,
                 span_builders.take_span_builder(entry_file_id),
             );
             span_builders.retain_span_builder(entry_file_id, delta.span_builder);
@@ -332,7 +337,7 @@ pub(crate) fn compile_moth_template_source(
                 ));
             }
         };
-        let freeze_result = prepared.freeze_path_syntax(string_table);
+        let freeze_result = prepared.freeze_path_syntax(string_table, &mut path_fork);
         preparation_warnings.append(&mut prepared.warnings);
         all_prepared.push(prepared);
         if let Err(error) = freeze_result {
@@ -370,6 +375,7 @@ pub(crate) fn compile_moth_template_source(
         &path_resolver,
         resolved_references.as_ref(),
         string_table,
+        &mut path_fork,
     ) {
         Ok(sorted) => sorted,
         Err(failure) => {
@@ -389,6 +395,7 @@ pub(crate) fn compile_moth_template_source(
         entry_scope,
         &request,
         string_table,
+        &mut path_fork,
         resolved_references,
         source_builder,
         module_origin,
@@ -455,20 +462,23 @@ fn order_template_headers(
     path_resolver: &ProjectPathResolver,
     resolved_references: Option<&ResolvedFileReferenceTable>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<SortedHeaders, PremergeFailure> {
     let (source_files, _) = source_builder.split();
-    let prepared_syntax =
-        prepare_header_syntax(prepared_sources, string_table, &mut |source, diagnostic| {
-            diagnostic.capture_preparation_span(source)
-        })
-        .map_err(|failure| match failure {
-            HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
-                PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
-            ),
-            HeaderPreparationFailure::Infrastructure(error) => {
-                PremergeFailure::Infrastructure(error)
-            }
-        })?;
+    let prepared_syntax = prepare_header_syntax(
+        prepared_sources,
+        string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        path_fork,
+    )
+    .map_err(|failure| match failure {
+        HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
+        ),
+        HeaderPreparationFailure::Infrastructure(error) => {
+            PremergeFailure::Infrastructure(error)
+        }
+    })?;
     let bound_headers = bind_module_headers(
         prepared_syntax,
         &ExternalPackageRegistry::new(),
@@ -477,6 +487,7 @@ fn order_template_headers(
         Some(path_resolver),
         source_files,
         string_table,
+        path_fork,
     )
     .map_err(|failure| match failure {
         HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
@@ -487,19 +498,29 @@ fn order_template_headers(
 
     // Stage 0 supplies content-source edges for bundles; standalone requests have none.
     let content_source_targets = match resolved_references {
-        Some(references) => {
-            ContentSourceTargets::from_resolved_references(references, source_files, string_table)
-        }
+        Some(references) => ContentSourceTargets::from_resolved_references(
+            references,
+            source_files,
+            string_table,
+            path_fork,
+        )
+        .map_err(PremergeFailure::Infrastructure)?,
         None => ContentSourceTargets::empty(),
     };
-    resolve_module_dependencies(bound_headers, &content_source_targets, string_table)
+    resolve_module_dependencies(
+        bound_headers,
+        &content_source_targets,
+        string_table,
+        path_fork,
+    )
 }
 
 fn fold_template_semantics(
     sorted: SortedHeaders,
-    entry_scope: InternedPath,
+    entry_scope: PathId,
     request: &MothTemplateCompilationRequest<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     resolved_references: Option<ResolvedFileReferenceTable>,
     source_builder: SourceDatabaseBuilder,
     module_origin: Option<StableModuleOriginIdentity>,
@@ -527,9 +548,10 @@ fn fold_template_semantics(
         });
         fold_template_ast(
             sorted,
-            entry_scope.clone(),
+            entry_scope,
             request,
             string_table,
+            path_fork,
             file_value_resolution,
         )
     };
@@ -548,7 +570,7 @@ fn fold_template_semantics(
     // Release the resource-table borrow before consuming its owner.
     let content = {
         let resources = module_resources.borrow();
-        extract_content_value(&ast, &entry_scope, &resources, string_table)
+        extract_content_value(&ast, entry_scope, &resources, path_fork, string_table)
     };
     drop(ast);
 
@@ -607,7 +629,6 @@ fn attach_finalized_source_database(
 /// Prepare the standalone template source exactly once.
 ///
 /// The preparation owner lends its split database and span-builder view for this one call, so
-/// the delta's returned builder can be retained beside the immutable borrow that produced it.
 fn prepare_template_source(
     source_files: &Arc<SourceDatabase>,
     path_resolver: &ProjectPathResolver,
@@ -615,6 +636,7 @@ fn prepare_template_source(
     source_code: &str,
     entry_file_id: SourceId,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     span_builder: ExtendedSpanBuilder,
 ) -> SourcePreparationDelta {
     let options = HeaderParseOptions {
@@ -640,14 +662,15 @@ fn prepare_template_source(
         runtime_fragment_offset: 0,
     };
 
-    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table)
+    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table, path_fork)
 }
 
 fn fold_template_ast(
     sorted: SortedHeaders,
-    entry_scope: InternedPath,
+    entry_scope: PathId,
     request: &MothTemplateCompilationRequest<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     file_value_resolution: Option<Rc<FileValueResolutionServices>>,
 ) -> Result<Ast, CompilerMessages> {
     let options = FrontendOptions::default();
@@ -665,6 +688,7 @@ fn fold_template_ast(
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             style_directives: request.style_directives,
             string_table,
+            path_fork,
             entry_dir: entry_scope,
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution,
@@ -685,18 +709,19 @@ fn fold_template_ast(
 ///
 /// The conversion is structural: resource pieces resolve through the folded module's resource
 /// table, so a bundle-bearing fold keeps `Resource` and `SiteRoot` pieces intact. A resource
-/// handle outside that table is a conversion invariant failure, never a user diagnostic.
 fn extract_content_value(
     ast: &Ast,
-    entry_scope: &InternedPath,
+    entry_scope: PathId,
     resources: &ModuleResourceTable,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<OwnedFoldedString, CompilerMessages> {
-    let content_path = content_constant_path(entry_scope, string_table);
+    let content_path = content_constant_path(entry_scope, path_fork, string_table)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let Some(content) = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path == &content_path)
+        .find(|row| *row.path == content_path)
     else {
         return Err(CompilerMessages::from_error_ref(
             CompilerError::compiler_error("Moth template AST did not produce a content constant."),

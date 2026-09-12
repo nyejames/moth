@@ -25,7 +25,7 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let context = new_constant_context(token_stream.src_path.clone());
 
     expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
             .expect_err("template source should fail to parse"),
     )
 }
@@ -49,7 +49,7 @@ fn parse_template_diagnostic_with_replaced_body_token(
     let context = new_constant_context(token_stream.src_path.clone());
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
             .expect_err("template source should fail to parse"),
     );
     (diagnostic, span_builder)
@@ -65,7 +65,7 @@ fn parse_template_diagnostic_with_span_builder(
     let context = new_constant_context(token_stream.src_path.clone());
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
             .expect_err("template source should fail to parse"),
     );
     (diagnostic, span_builder)

@@ -21,6 +21,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateCompileRequest,
@@ -652,10 +653,11 @@ fn content_source_identities_follow_canonical_logical_order_not_reference_order(
         ("alpha.mtf", "# Alpha"),
     ]);
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut units = request(MothTemplateInput::Files(vec![
         temp_dir.path().join("zeta.mtf"),
     ]))
-    .collect_sources(&mut string_table)
+    .collect_sources(&mut string_table, &mut path_fork)
     .expect("the template unit should collect");
     assert_eq!(units.len(), 1);
 
@@ -700,10 +702,11 @@ fn content_source_preparation_failures_name_the_logical_source() {
         ("docs/broken.mtf", "# Broken\n\n[$insert(\"unterminated]\n"),
     ]);
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut units = request(MothTemplateInput::Files(vec![
         temp_dir.path().join("page.mtf"),
     ]))
-    .collect_sources(&mut string_table)
+    .collect_sources(&mut string_table, &mut path_fork)
     .expect("the template unit should collect");
 
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
@@ -750,10 +753,11 @@ fn content_source_preparation_failures_name_the_logical_source() {
 fn retained_resolution_diagnostics_name_the_final_logical_source() {
     let temp_dir = temp_project(&[("page.mtf", "# Page\n\n[@absent.md]")]);
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut units = request(MothTemplateInput::Files(vec![
         temp_dir.path().join("page.mtf"),
     ]))
-    .collect_sources(&mut string_table)
+    .collect_sources(&mut string_table, &mut path_fork)
     .expect("the template unit should collect");
 
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())

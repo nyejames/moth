@@ -14,7 +14,7 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanJoinError,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
     InitializerReference, NestingDepth, collect_symbol_references,
@@ -23,7 +23,7 @@ use crate::projects::settings::TOP_LEVEL_CONST_TEMPLATE_NAME;
 use std::collections::HashSet;
 
 pub(super) fn create_top_level_const_template(
-    scope: InternedPath,
+    scope: PathId,
     opening_template_token: Token,
     const_template_number: usize,
     token_stream: &mut FileTokens,
@@ -45,7 +45,6 @@ pub(super) fn create_top_level_const_template(
         token_stream.tokens[token_stream.index].span,
     );
     let source_start = SourceSpan::new(token_stream.file_id, LocalSpan::source_start());
-
     let closing_bracket = context.string_table.intern("]");
     crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region(
         token_stream,
@@ -58,6 +57,7 @@ pub(super) fn create_top_level_const_template(
                     context.file_dependency_clauses,
                     context.dependency_selections,
                     context.string_table,
+                    context.path_fork,
                 ) {
                     Ok(Some(path)) => {
                         local_ordering_hints
@@ -82,8 +82,14 @@ pub(super) fn create_top_level_const_template(
     let condition_references =
         collect_template_if_condition_references(&body, token_stream.file_id);
 
-    let full_name = scope.append(const_template_name);
-
+    let full_name = context
+        .path_fork
+        .try_intern_child(scope, const_template_name)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path table exhausted while interning a const-template path",
+            )
+        })?;
     // Placement metadata retains the same range as the header: first interior token through
     // the post-close token. A long join appends to this source's original extended table.
     let name_span = start_span
@@ -100,8 +106,9 @@ pub(super) fn create_top_level_const_template(
             ),
         })?;
 
+    let template_id = full_name;
     let template_tokens =
-        FileTokens::new_substream(token_stream, full_name, token_stream.file_id, body);
+        FileTokens::new_substream(token_stream, template_id, token_stream.file_id, body);
 
     Ok(Header {
         kind: HeaderKind::ConstTemplate {

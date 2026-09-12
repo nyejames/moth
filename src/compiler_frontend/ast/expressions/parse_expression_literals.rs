@@ -24,6 +24,7 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -68,6 +69,7 @@ pub(super) fn parse_literal_expression(
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut LiteralParseState<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     match token_stream.current_token_kind().to_owned() {
         TokenKind::NumericLiteral(token) => {
@@ -114,6 +116,7 @@ pub(super) fn parse_literal_expression(
                 state.expression,
                 state.allow_boundary_catch,
                 expression,
+                path_fork,
             )?;
             Ok(())
         }
@@ -130,6 +133,7 @@ pub(super) fn parse_literal_expression(
                 state.expression,
                 state.allow_boundary_catch,
                 string_expr,
+                path_fork,
             )?;
             Ok(())
         }
@@ -146,6 +150,7 @@ pub(super) fn parse_literal_expression(
                 state.expression,
                 state.allow_boundary_catch,
                 bool_expr,
+                path_fork,
             )?;
             Ok(())
         }
@@ -162,6 +167,7 @@ pub(super) fn parse_literal_expression(
                 state.expression,
                 state.allow_boundary_catch,
                 char_expr,
+                path_fork,
             )?;
             Ok(())
         }
@@ -214,6 +220,7 @@ pub(super) fn parse_literal_expression(
                 state.expression,
                 state.allow_boundary_catch,
                 none_expr,
+                path_fork,
             )?;
             Ok(())
         }

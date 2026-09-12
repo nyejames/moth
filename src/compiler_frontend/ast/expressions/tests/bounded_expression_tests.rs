@@ -19,7 +19,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -28,12 +28,13 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
 use std::sync::Arc;
 
-fn test_scope(string_table: &mut StringTable) -> (InternedPath, ScopeContext) {
-    let scope = InternedPath::from_single_str("test.moth", string_table);
+fn test_scope(string_table: &mut StringTable) -> (PathId, ScopeContext) {
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork.try_intern_portable_path("test.moth", string_table).expect("test path fits");
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -41,14 +42,14 @@ fn test_scope(string_table: &mut StringTable) -> (InternedPath, ScopeContext) {
     (scope, context)
 }
 
-fn numeric_token(value: &str, _scope: &InternedPath, string_table: &mut StringTable) -> Token {
+fn numeric_token(value: &str, _scope: &PathId, string_table: &mut StringTable) -> Token {
     Token::new(
         TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table)),
         LocalSpan::source_start(),
     )
 }
 
-fn token(kind: TokenKind, _scope: &InternedPath) -> Token {
+fn token(kind: TokenKind, _scope: &PathId) -> Token {
     Token::new(kind, LocalSpan::source_start())
 }
 
@@ -59,6 +60,7 @@ fn create_expression_until_for_test(
     value_mode: &ValueMode,
     stop_tokens: &[TokenKind],
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<crate::compiler_frontend::ast::expressions::expression::Expression, ExpressionParseError>
 {
     let mut type_environment = TypeEnvironment::new();
@@ -73,6 +75,7 @@ fn create_expression_until_for_test(
         cast_target_context: &mut cast_target_context,
         value_mode,
         string_table,
+        path_fork,
     });
     create_expression_until(input, stop_tokens)
 }
@@ -80,6 +83,7 @@ fn create_expression_until_for_test(
 #[test]
 fn bounded_expression_empty_at_delimiter_errors() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (scope, context) = test_scope(&mut string_table);
 
     let tokens = vec![
@@ -96,6 +100,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
         &ValueMode::ImmutableOwned,
         &[TokenKind::Comma],
         &mut string_table,
+        &mut path_fork,
     )
     .expect_err("empty expression should error");
 
@@ -117,6 +122,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
 #[test]
 fn bounded_expression_parses_simple_literal() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (scope, context) = test_scope(&mut string_table);
 
     let tokens = vec![
@@ -134,6 +140,7 @@ fn bounded_expression_parses_simple_literal() {
         &ValueMode::ImmutableOwned,
         &[TokenKind::Comma],
         &mut string_table,
+        &mut path_fork,
     )
     .expect("simple literal should parse");
 
@@ -147,6 +154,7 @@ fn bounded_expression_parses_simple_literal() {
 #[test]
 fn bounded_expression_nested_parentheses() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (scope, context) = test_scope(&mut string_table);
 
     let tokens = vec![
@@ -170,6 +178,7 @@ fn bounded_expression_nested_parentheses() {
         &ValueMode::ImmutableOwned,
         &[TokenKind::Comma],
         &mut string_table,
+        &mut path_fork,
     )
     .expect("nested parentheses should parse");
 
@@ -184,6 +193,7 @@ fn bounded_expression_nested_parentheses() {
 #[test]
 fn bounded_expression_nested_curly_braces() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (scope, context) = test_scope(&mut string_table);
 
     // A collection literal `{2, 3}` followed by a comma.
@@ -207,6 +217,7 @@ fn bounded_expression_nested_curly_braces() {
         &ValueMode::ImmutableOwned,
         &[TokenKind::Comma],
         &mut string_table,
+        &mut path_fork,
     )
     .expect("nested curly braces should parse");
 
@@ -219,6 +230,7 @@ fn bounded_expression_nested_curly_braces() {
 #[test]
 fn bounded_expression_missing_delimiter_reaches_eof() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (scope, context) = test_scope(&mut string_table);
 
     let tokens = vec![
@@ -237,6 +249,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         &ValueMode::ImmutableOwned,
         &[TokenKind::Comma],
         &mut string_table,
+        &mut path_fork,
     )
     .expect_err("missing delimiter should error");
 

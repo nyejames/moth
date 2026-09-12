@@ -20,12 +20,12 @@ use crate::compiler_frontend::ast::templates::reactive_template_metadata::{
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::tir::{TemplateIrStore, TemplateTirPhase, TirView};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use rustc_hash::FxHashMap;
 
 pub(super) fn metadata_for_expression(
     expression: &Expression,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &ReactiveTemplateValueEnvironment,
     store: &TemplateIrStore,
 ) -> Result<Option<ReactiveTemplateMetadata>, CompilerError> {
@@ -69,9 +69,9 @@ pub(super) fn metadata_for_expression(
 }
 
 fn metadata_for_function_call(
-    name: &InternedPath,
+    name: &PathId,
     arguments: &[CallArgument],
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &ReactiveTemplateValueEnvironment,
     store: &TemplateIrStore,
 ) -> Result<Option<ReactiveTemplateMetadata>, CompilerError> {
@@ -96,7 +96,7 @@ fn metadata_for_function_call(
 
 fn metadata_for_template(
     template: &Template,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     value_environment: &ReactiveTemplateValueEnvironment,
     store: &TemplateIrStore,
 ) -> Result<Option<ReactiveTemplateMetadata>, CompilerError> {

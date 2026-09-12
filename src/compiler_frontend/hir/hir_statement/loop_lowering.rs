@@ -29,7 +29,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
 
 /// Jump targets of the range-loop CFG pipeline. These are destinations only. The module header
@@ -1181,9 +1181,9 @@ impl<'a> HirBuilder<'a> {
         binding: &crate::compiler_frontend::ast::ast_nodes::Declaration,
         ty: TypeId,
         value: HirExpression,
-        visible_bindings: &[(InternedPath, LocalId)],
+        visible_bindings: &[(PathId, LocalId)],
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(InternedPath, LocalId), CompilerError> {
+    ) -> Result<(PathId, LocalId), CompilerError> {
         // AST scopes already enforce no-shadowing. This guard keeps HIR honest if a
         // malformed AST ever tries to bind a loop name over an already-visible local.
         if self.locals_by_name.contains_key(&binding.id)

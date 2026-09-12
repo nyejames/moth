@@ -23,7 +23,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
@@ -56,7 +56,7 @@ pub enum SignatureMemberContext {
 /// One parsed parameter/field shell before AST type resolution.
 #[derive(Clone, Debug)]
 pub struct SignatureMemberSyntax {
-    pub id: InternedPath,
+    pub id: PathId,
     pub value_mode: ValueMode,
     pub is_reactive: bool,
     pub type_annotation: ParsedTypeRef,
@@ -92,22 +92,30 @@ pub struct FunctionSignatureSyntax {
 }
 
 impl SignatureMemberSyntax {
-    /// Remap all interned names, paths, type refs, tokens, and source locations.
+    /// Remap all interned names, type refs, and tokens.
     // Called by per-file frontend output remapping before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.id.remap_string_ids(remap);
         self.type_annotation.remap_string_ids(remap);
         for token in &mut self.default_tokens {
             token.remap_string_ids(remap);
         }
     }
 
+    /// Remap the member path identity after its path fork merges.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.id = remap.get(self.id);
+    }
+
     pub fn validate_required_source_prefix(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
-        self.id
-            .try_rebind_required_prefix(provisional_source_file, provisional_source_file)?;
+        if !path_fork.starts_with(self.id, provisional_source_file) {
+            return Err(CompilerError::compiler_error(
+                "source-owned retained path is missing its provisional source prefix",
+            ));
+        }
         Ok(())
     }
 }
@@ -132,12 +140,20 @@ impl FunctionSignatureSyntax {
         }
     }
 
+    /// Remap member path identities after the path fork merges.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for parameter in &mut self.parameters {
+            parameter.remap_path_ids(remap);
+        }
+    }
+
     pub fn validate_required_source_prefixes(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
         for parameter in &self.parameters {
-            parameter.validate_required_source_prefix(provisional_source_file)?;
+            parameter.validate_required_source_prefix(provisional_source_file, path_fork)?;
         }
         Ok(())
     }
@@ -151,7 +167,8 @@ pub fn parse_function_signature_syntax(
     token_stream: &mut FileTokens,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
-    function_path: &InternedPath,
+    function_path: PathId,
+    path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<FunctionSignatureSyntax> {
     token_stream.advance();
@@ -162,6 +179,7 @@ pub fn parse_function_signature_syntax(
         warnings,
         SignatureMemberContext::FunctionParameter,
         function_path,
+        path_fork,
         span_builder,
     )?;
     token_stream.advance();
@@ -228,7 +246,8 @@ pub fn parse_signature_members_syntax(
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     member_context: SignatureMemberContext,
-    owner_path: &InternedPath,
+    owner_path: PathId,
+    path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<Vec<SignatureMemberSyntax>> {
     let mut members = Vec::with_capacity(1);
@@ -277,17 +296,25 @@ pub fn parse_signature_members_syntax(
             TokenKind::Symbol(member_name) => {
                 ensure_member_slot(expecting_member, token_stream)?;
 
+                let member_path = path_fork
+                    .try_intern_child(owner_path, member_name)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "path table exhausted while interning a signature member path",
+                        )
+                    })?;
                 let member = parse_signature_member_syntax(
                     token_stream,
-                    owner_path.append(member_name),
+                    member_path,
                     string_table,
                     warnings,
                     false,
                     member_context,
+                    path_fork,
                     span_builder,
                 )?;
 
-                record_ordinary_member_name(&mut seen_member_names, &member)?;
+                record_ordinary_member_name(&mut seen_member_names, &member, path_fork)?;
                 members.push(member);
                 expecting_member = false;
                 member_index += 1;
@@ -297,13 +324,21 @@ pub fn parse_signature_members_syntax(
                 ensure_member_slot(expecting_member, token_stream)?;
 
                 let this_id = string_table.intern("this");
+                let this_path = path_fork
+                    .try_intern_child(owner_path, this_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "path table exhausted while interning a signature member path",
+                        )
+                    })?;
                 let member = parse_signature_member_syntax(
                     token_stream,
-                    owner_path.append(this_id),
+                    this_path,
                     string_table,
                     warnings,
                     true,
                     member_context,
+                    path_fork,
                     span_builder,
                 )?;
 
@@ -332,9 +367,16 @@ pub fn parse_signature_members_syntax(
                 }
 
                 let this_id = string_table.intern("This");
+                let this_path = path_fork
+                    .try_intern_child(owner_path, this_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "path table exhausted while interning a signature member path",
+                        )
+                    })?;
                 let member = parse_trait_this_member_syntax(
                     token_stream,
-                    owner_path.append(this_id),
+                    this_path,
                     ValueMode::ImmutableOwned,
                     span_builder,
                 )?;
@@ -366,9 +408,16 @@ pub fn parse_signature_members_syntax(
                 }
 
                 let this_id = string_table.intern("This");
+                let this_path = path_fork
+                    .try_intern_child(owner_path, this_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "path table exhausted while interning a signature member path",
+                        )
+                    })?;
                 let member = parse_trait_this_member_syntax(
                     token_stream,
-                    owner_path.append(this_id),
+                    this_path,
                     ValueMode::MutableOwned,
                     span_builder,
                 )?;
@@ -445,8 +494,9 @@ pub fn parse_signature_members_syntax(
 fn record_ordinary_member_name(
     seen_member_names: &mut FxHashMap<StringId, SourceSpan>,
     member: &SignatureMemberSyntax,
+    path_fork: &PathInternerFork,
 ) -> SignatureMemberParseResult<()> {
-    let Some(member_name) = member.id.name() else {
+    let Some(member_name) = path_fork.component(member.id) else {
         return Ok(());
     };
 
@@ -466,19 +516,20 @@ fn record_ordinary_member_name(
 }
 fn parse_signature_member_syntax(
     token_stream: &mut FileTokens,
-    full_name: InternedPath,
+    full_name: PathId,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     allow_reserved_this: bool,
     member_context: SignatureMemberContext,
+    path_fork: &PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
     let member_span = current_source_span(token_stream);
-    if !allow_reserved_this && let Some(name_id) = full_name.name() {
+    if !allow_reserved_this && let Some(name_id) = path_fork.component(full_name) {
         ensure_not_keyword_shadow_identifier(name_id, member_span, string_table)?;
     }
 
-    if let Some(name_id) = full_name.name()
+    if let Some(name_id) = path_fork.component(full_name)
         && let Some(warning) = naming_warning_for_identifier(
             name_id,
             member_span,
@@ -624,7 +675,7 @@ fn type_annotation_context_for_member(
 /// EXIT INVARIANT: the stream is positioned on the token after `This`.
 fn parse_trait_this_member_syntax(
     token_stream: &mut FileTokens,
-    full_name: InternedPath,
+    full_name: PathId,
     value_mode: ValueMode,
     _span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
@@ -782,7 +833,8 @@ pub fn parse_trait_requirement_signature_syntax(
     token_stream: &mut FileTokens,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
-    method_path: &InternedPath,
+    method_path: PathId,
+    path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<FunctionSignatureSyntax> {
     token_stream.advance(); // past |
@@ -792,6 +844,7 @@ pub fn parse_trait_requirement_signature_syntax(
         warnings,
         SignatureMemberContext::TraitRequirement,
         method_path,
+        path_fork,
         span_builder,
     )?;
     token_stream.advance(); // past |

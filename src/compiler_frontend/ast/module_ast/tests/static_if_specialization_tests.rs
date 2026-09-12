@@ -5,15 +5,16 @@ use crate::compiler_frontend::ast::ast_nodes::IfBranchMetadata;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueLexicalScope;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
 fn terminating_value_body_lift_uses_explicit_branch_scope() {
     let mut string_table = StringTable::new();
-    let branch_scope = InternedPath::from_single_str("branch", &mut string_table);
-    let nested_scope = InternedPath::from_single_str("nested", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let branch_scope = path_fork.try_intern_portable_path("branch", &mut string_table).expect("test path fits");
+    let nested_scope = path_fork.try_intern_portable_path("nested", &mut string_table).expect("test path fits");
     let span: Option<SourceSpan> = None;
     let nested_terminal = AstNode {
         kind: NodeKind::LexicalScope {
@@ -59,11 +60,12 @@ fn inactive_static_branch_drops_nested_provenance() {
     use std::rc::Rc;
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let span: Option<SourceSpan> = None;
-    let function_path = InternedPath::from_single_str("selected", &mut string_table);
-    let then_scope = InternedPath::from_single_str("then", &mut string_table);
-    let else_scope = InternedPath::from_single_str("else", &mut string_table);
-    let nested_scope = InternedPath::from_single_str("nested", &mut string_table);
+    let function_path = path_fork.try_intern_portable_path("selected", &mut string_table).expect("test path fits");
+    let then_scope = path_fork.try_intern_portable_path("then", &mut string_table).expect("test path fits");
+    let else_scope = path_fork.try_intern_portable_path("else", &mut string_table).expect("test path fits");
+    let nested_scope = path_fork.try_intern_portable_path("nested", &mut string_table).expect("test path fits");
     let nested_condition = Expression::bool(true, span, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
             SyntheticInterfaceMemberIdentity::new(

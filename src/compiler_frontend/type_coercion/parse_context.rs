@@ -27,6 +27,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Parse-time expected type for context-sensitive literals such as `none` and
@@ -111,14 +112,18 @@ pub(crate) fn parse_expectation_for_type_id(
 /// WHAT: classifies the receiving type as a builtin cast target and records
 ///      whether the cast should land in the inner type before optional wrapping.
 /// WHY: boundary callers should not re-derive the optional-unwrapping rule
-///      when building the cast target channel.
 pub(crate) fn cast_target_context_for_type_id(
     target_id: TypeId,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> CastTargetContext {
-    let resolution = match cast_target_for_receiving_type(target_id, type_environment, string_table)
-    {
+    let resolution = match cast_target_for_receiving_type(
+        target_id,
+        type_environment,
+        string_table,
+        path_fork,
+    ) {
         Some(resolution) => resolution,
         None => {
             let diagnostic_target_id = type_environment

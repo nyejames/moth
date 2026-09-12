@@ -16,6 +16,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 const PAGE_TITLE: &str = "page_title";
 const PAGE_DESCRIPTION: &str = "page_description";
@@ -86,18 +87,17 @@ impl From<CompilerError> for PageMetadataError {
 pub(crate) fn extract_html_page_metadata(
     hir_module: &HirModule,
     start_function: FunctionId,
+    path_table: &PathTable,
     resources: &ModuleResourceTable,
     string_table: &mut StringTable,
 ) -> Result<HtmlPageMetadataPlan, PageMetadataError> {
     let entry_scope = hir_module
         .side_table
         .function_name_path(start_function)
-        .and_then(|path| path.parent());
+        .and_then(|path| path_table.parent(path));
 
     let entry_scope_prefix = entry_scope
-        .as_ref()
-        .map(|path| path.to_portable_string(string_table));
-
+        .map(|path| path_table.render_portable(path, string_table, &mut Vec::new()));
     let mut metadata = HtmlPageMetadata::default();
     let mut resource_uses = Vec::new();
     let mut uses_site_root = false;
@@ -115,10 +115,13 @@ pub(crate) fn extract_html_page_metadata(
             .declarations
             .values()
             .find(|fact| {
-                fact.declaration_path.to_portable_string(string_table) == module_constant.name
+                path_table.render_portable(
+                    fact.declaration_path,
+                    string_table,
+                    &mut Vec::new(),
+                ) == module_constant.name
             })
             .and_then(|fact| fact.span);
-
         let value = match &module_constant.value {
             HirConstValue::String(value) => OwnedFoldedString::Text(value.to_owned()),
             HirConstValue::StructuralString { pieces } => {

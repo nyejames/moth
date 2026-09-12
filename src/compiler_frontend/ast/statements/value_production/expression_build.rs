@@ -14,14 +14,15 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Builds a `ThenValue` AST node from produced branch expressions.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn then_value_node(
     expressions: Vec<Expression>,
     span: Option<SourceSpan>,
-    scope: InternedPath,
+    scope: PathId,
 ) -> AstNode {
     AstNode {
         kind: NodeKind::ThenValue(ProducedValues { expressions, span }),

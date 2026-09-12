@@ -17,7 +17,8 @@ use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitRequirement, TraitReceiverRequirement, TraitVisibility,
@@ -51,7 +52,7 @@ pub(crate) struct ResolvedTraitReceiverFact {
 /// One non-receiver requirement parameter, location-free.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedTraitParameterFact {
-    pub(crate) name: InternedPath,
+    pub(crate) name: PathId,
     pub(crate) value_mode: ValueMode,
     pub(crate) type_id: TypeId,
 }
@@ -92,7 +93,7 @@ pub(crate) struct ResolvedTraitRequirementFact {
 /// never enter a cross-module artefact.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedPublicTraitRoot {
-    pub(crate) canonical_path: InternedPath,
+    pub(crate) canonical_path: PathId,
     pub(crate) this_type: TypeId,
     pub(crate) requirements: Vec<ResolvedTraitRequirementFact>,
     /// The publicly-authored incompatible trait ids for this direct public trait, in
@@ -155,7 +156,7 @@ pub(crate) struct AstPublicInterfaceProjectionInput {
 /// facts to build trait surfaces without the `TraitEnvironment`.
 pub(crate) fn build_resolved_public_trait_roots(
     sorted_headers: &[Header],
-    reexport_target_paths: &FxHashSet<InternedPath>,
+    reexport_target_paths: &FxHashSet<PathId>,
     trait_environment: &TraitEnvironment,
     string_table: &StringTable,
 ) -> Result<Vec<ResolvedPublicTraitRoot>, CompilerError> {
@@ -198,7 +199,7 @@ fn is_active_root_public_trait_declaration(header: &Header) -> bool {
 /// `CompilerError` rather than a silent omission. The requirement order is preserved exactly
 /// as the trait definition records it.
 fn build_trait_root(
-    canonical_path: &InternedPath,
+    canonical_path: &PathId,
     trait_environment: &TraitEnvironment,
     string_table: &StringTable,
 ) -> Result<ResolvedPublicTraitRoot, CompilerError> {
@@ -206,7 +207,7 @@ fn build_trait_root(
         return Err(CompilerError::compiler_error(format!(
             "resolved public trait-root construction: a public active-root trait '{}' has no \
              registered TraitEnvironment definition",
-            canonical_path.to_string(string_table)
+            format!("{canonical_path:?}")
         )));
     };
 
@@ -215,7 +216,7 @@ fn build_trait_root(
             "resolved public trait-root construction: TraitId({}) for trait '{}' has no resolved \
              definition",
             trait_id.0,
-            canonical_path.to_string(string_table)
+            format!("{canonical_path:?}")
         )));
     };
 
@@ -226,7 +227,7 @@ fn build_trait_root(
         return Err(CompilerError::compiler_error(format!(
             "resolved public trait-root construction: a public active-root trait '{}' resolved \
              to a compiler-owned core trait; core traits are not authored source declarations",
-            canonical_path.to_string(string_table)
+            format!("{canonical_path:?}")
         )));
     }
 

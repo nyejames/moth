@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -37,6 +38,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut project_source_files = None;
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
@@ -153,6 +155,7 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "first",
@@ -239,6 +242,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "broken",
@@ -318,6 +322,7 @@ io.line(result)
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
@@ -393,6 +398,7 @@ independent_result Int = independent(42)
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _counter_capture =
         crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
@@ -549,6 +555,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -635,6 +642,7 @@ html #= ||\n",
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "pkg",
@@ -842,6 +850,7 @@ export:
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "pkg",
@@ -976,6 +985,7 @@ same_private_box PrivateBox of Bool = forward(private_box)
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
@@ -1033,7 +1043,12 @@ same_private_box PrivateBox of Bool = forward(private_box)
                     .fields_for(instance_type_id)
                     .expect("generated Box instance should expose substituted fields");
                 assert_eq!(fields.len(), 1);
-                assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
+                assert_eq!(
+                    sidecar.module.executable.path_table
+                        .component(fields[0].name)
+                        .map(|id| string_table.resolve(id)),
+                    Some("value")
+                );
                 assert_eq!(fields[0].type_id, builtin_type_ids::INT);
             }
             "Maybe" => {
@@ -1048,7 +1063,12 @@ same_private_box PrivateBox of Bool = forward(private_box)
                     panic!("Some should retain its record payload");
                 };
                 assert_eq!(fields.len(), 1);
-                assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
+                assert_eq!(
+                    sidecar.module.executable.path_table
+                        .component(fields[0].name)
+                        .map(|id| string_table.resolve(id)),
+                    Some("value")
+                );
                 assert_eq!(fields[0].type_id, builtin_type_ids::STRING);
                 assert!(matches!(
                     variants[1].payload,
@@ -1061,7 +1081,12 @@ same_private_box PrivateBox of Bool = forward(private_box)
                     .fields_for(instance_type_id)
                     .expect("generated private Box instance should expose substituted fields");
                 assert_eq!(fields.len(), 1);
-                assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
+                assert_eq!(
+                    sidecar.module.executable.path_table
+                        .component(fields[0].name)
+                        .map(|id| string_table.resolve(id)),
+                    Some("value")
+                );
                 assert_eq!(fields[0].type_id, builtin_type_ids::BOOL);
             }
             other => panic!("unexpected generic nominal request base {other}"),
@@ -1117,6 +1142,7 @@ result String = outer(LocalMarker(1), "trigger")
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     string_table.intern("preexisting-global-name");
     let frontend = compile_project_frontend(
         &mut config,
@@ -1128,8 +1154,12 @@ result String = outer(LocalMarker(1), "trigger")
     )
     .expect("nested generated sidecars should publish after the provider module");
 
-    let imported_marker_path = InternedPath::from_single_str("provider", &mut string_table)
-        .join_str("RemoteMarker", &mut string_table);
+    let provider_path = path_fork
+        .try_intern_portable_path("provider", &mut string_table)
+        .expect("test path fits");
+    let imported_marker_path = path_fork
+        .try_intern_child(provider_path, string_table.intern("RemoteMarker"))
+        .expect("test path fits");
     let published_alias_owners = frontend
         .project
         .successful_artefacts_in_module_id_order()
@@ -1163,7 +1193,12 @@ result String = outer(LocalMarker(1), "trigger")
             .type_id_for_nominal_id(marker_nominal_id)
             .expect("sidecar should retain the inherited Marker type");
         assert_eq!(
-            display_type(marker_type_id, environment, &string_table),
+            display_type(
+                marker_type_id,
+                environment,
+                &string_table,
+                &sidecar.module.executable.path_table,
+            ),
             "RemoteMarker"
         );
 
@@ -1171,7 +1206,12 @@ result String = outer(LocalMarker(1), "trigger")
             .fields_for(marker_type_id)
             .expect("sidecar should retain inherited Marker fields");
         assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
+        assert_eq!(
+            sidecar.module.executable.path_table
+                .component(fields[0].name)
+                .map(|id| string_table.resolve(id)),
+            Some("value")
+        );
     }
 }
 
@@ -1236,6 +1276,7 @@ wrapped Wrapper = identity(make())
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
@@ -1306,6 +1347,7 @@ fn source_package_warning_retained_by_frontend_outcome() {
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "warnpkg",
@@ -1480,6 +1522,7 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "pkg",

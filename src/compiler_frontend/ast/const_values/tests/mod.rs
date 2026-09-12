@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -40,10 +40,11 @@ fn make_resolver<'a>(
 fn make_environment_with(
     path: &str,
     expression: Expression,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> ConstValueEnvironment {
     let mut env = ConstValueEnvironment::default();
-    let interned_path = InternedPath::from_single_str(path, string_table);
+    let interned_path = path_fork.try_intern_portable_path(path, string_table).expect("test path fits");
     env.insert(interned_path, expression);
     env
 }
@@ -66,6 +67,7 @@ fn operator_item(operator: Operator) -> ExpressionRpnItem {
 #[test]
 fn literal_int_resolves_as_const() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let expression = Expression::int(42, None, ValueMode::ImmutableOwned);
@@ -82,6 +84,7 @@ fn literal_int_resolves_as_const() {
 #[test]
 fn literal_string_resolves_as_const() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let string_id = string_table.intern("hello");
@@ -103,6 +106,7 @@ fn literal_string_resolves_as_const() {
 #[test]
 fn folded_arithmetic_resolves_to_literal() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let rpn = ExpressionRpn {
@@ -132,12 +136,13 @@ fn folded_arithmetic_resolves_to_literal() {
 #[test]
 fn folded_arithmetic_with_reference_substitution_resolves() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let rpn = ExpressionRpn {
         items: vec![
             rvalue_item(Expression::reference(
-                InternedPath::from_single_str("x", &mut string_table),
+                path_fork.try_intern_portable_path("x", &mut string_table).expect("test path fits"),
                 DataType::Int,
                 None,
                 ValueMode::ImmutableReference,
@@ -157,6 +162,7 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
     let env = make_environment_with(
         "x",
         Expression::int(3, None, ValueMode::ImmutableOwned),
+        &mut path_fork,
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -171,10 +177,11 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
 #[test]
 fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let reference = Expression::reference(
-        InternedPath::from_single_str("x", &mut string_table),
+        path_fork.try_intern_portable_path("x", &mut string_table).expect("test path fits"),
         DataType::Int,
         None,
         ValueMode::ImmutableReference,
@@ -197,6 +204,7 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
     let env = make_environment_with(
         "x",
         Expression::int(40, None, ValueMode::ImmutableOwned),
+        &mut path_fork,
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -215,14 +223,16 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
 #[test]
 fn reference_to_known_const_resolves() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
-    let path = InternedPath::from_single_str("ratio", &mut string_table);
+    let path = path_fork.try_intern_portable_path("ratio", &mut string_table).expect("test path fits");
     let expression = Expression::reference_with_type_id(path.clone(), DataType::Float, builtin_type_ids::FLOAT, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = make_environment_with(
         "ratio",
         Expression::float(2.71, None, ValueMode::ImmutableOwned),
+        &mut path_fork,
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -243,9 +253,10 @@ fn reference_to_known_const_resolves() {
 #[test]
 fn unresolved_reference_fails() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
-    let path = InternedPath::from_single_str("unknown", &mut string_table);
+    let path = path_fork.try_intern_portable_path("unknown", &mut string_table).expect("test path fits");
     let expression = Expression::reference_with_type_id(path, DataType::Int, builtin_type_ids::INT, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = ConstValueEnvironment::default();
@@ -265,10 +276,11 @@ fn unresolved_reference_fails() {
 #[test]
 fn function_call_fails_const_resolution() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let expression = Expression::function_call(
-        InternedPath::from_single_str("foo", &mut string_table),
+        path_fork.try_intern_portable_path("foo", &mut string_table).expect("test path fits"),
         vec![],
         vec![builtin_type_ids::INT],
         None,
@@ -291,10 +303,11 @@ fn function_call_fails_const_resolution() {
 #[test]
 fn mutable_declaration_fails_private_const_resolution() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
-        id: InternedPath::from_single_str("value", &mut string_table),
+        id: path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits"),
         value: Expression::int(1, None, ValueMode::MutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -337,6 +350,7 @@ fn fact_value_kind_from_runtime_is_non_const() {
 #[test]
 fn coerced_expression_resolves_inner_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let inner = Expression::int(7, None, ValueMode::ImmutableOwned);
@@ -360,12 +374,13 @@ fn coerced_expression_resolves_inner_value() {
 #[test]
 fn runtime_rpn_with_unresolved_reference_fails() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let rpn = ExpressionRpn {
         items: vec![
             rvalue_item(Expression::reference(
-                InternedPath::from_single_str("missing", &mut string_table),
+                path_fork.try_intern_portable_path("missing", &mut string_table).expect("test path fits"),
                 DataType::Int,
                 None,
                 ValueMode::ImmutableReference,
@@ -399,10 +414,11 @@ fn runtime_rpn_with_unresolved_reference_fails() {
 #[test]
 fn body_local_immutable_literal_resolves() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
-        id: InternedPath::from_single_str("local", &mut string_table),
+        id: path_fork.try_intern_portable_path("local", &mut string_table).expect("test path fits"),
         value: Expression::int(99, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -427,10 +443,11 @@ fn body_local_immutable_literal_resolves() {
 #[test]
 fn body_local_mutable_declaration_fails() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
-        id: InternedPath::from_single_str("local", &mut string_table),
+        id: path_fork.try_intern_portable_path("local", &mut string_table).expect("test path fits"),
         value: Expression::int(99, None, ValueMode::MutableOwned),
         binding_span: None,
         config_qualifier: None,

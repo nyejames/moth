@@ -45,6 +45,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, Sour
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_module_root_file,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use std::mem;
@@ -63,6 +64,7 @@ pub fn parse_file_headers_with_table(
     entry_file_path: &Path,
     options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
     span_builder: &mut ExtendedSpanBuilder,
@@ -71,15 +73,18 @@ pub fn parse_file_headers_with_table(
     let HeaderParseOptions { entry_file_id, .. } = options;
 
     let is_entry_file = entry_file_id.map_or_else(
-        || file_tokens.src_path.to_path_buf(string_table) == entry_file_path,
+        || {
+            let mut scratch = Vec::new();
+            path_fork.render_native(file_tokens.src_path, string_table, &mut scratch)
+                == entry_file_path
+        },
         |expected_id| expected_id == file_id,
     );
 
-    let source_path = file_tokens
-        .canonical_os_path
-        .as_deref()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| file_tokens.src_path.to_path_buf(string_table));
+    let source_path = file_tokens.canonical_os_path.as_deref().map(Path::to_path_buf).unwrap_or_else(|| {
+        let mut scratch = Vec::new();
+        path_fork.render_native(file_tokens.src_path, string_table, &mut scratch)
+    });
     // Directory Stage 0 supplies normal and support roots through `ModuleRootTable`. Keep the
     // canonical filename check as a fallback for synthetic or otherwise unindexed preparation so
     // a `+*.moth` support-package root remains export-capable in those contexts too.
@@ -114,6 +119,7 @@ pub fn parse_file_headers_with_table(
         file_role,
         is_config_file,
         string_table,
+        path_fork,
         span_builder,
         const_template_offset,
         runtime_fragment_offset,
@@ -173,21 +179,32 @@ pub(crate) fn prepare_file_from_tokens(
     const_template_offset: usize,
     runtime_fragment_offset: usize,
     span_builder: &mut ExtendedSpanBuilder,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let fork_source = string_table.fork_source();
     let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
+    let path_fork_source = path_fork.fork_source();
+    let mut local_path_fork = path_fork_source.fork_for_module();
 
     let file_output = parse_file_headers_with_table(
         &mut file_tokens,
         entry_file_path,
         options,
         &mut local_string_table,
+        &mut local_path_fork,
         const_template_offset,
         runtime_fragment_offset,
         span_builder,
     );
 
     let remap = string_table.merge_delta_from(&local_string_table, base_len);
+    let path_remap = path_fork
+        .merge_delta_from(&local_path_fork, &remap)
+        .map_err(|error| {
+            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "file path merge failed: {error:?}"
+            )))
+        })?;
 
     match file_output {
         Ok(mut output) => {
@@ -195,12 +212,16 @@ pub(crate) fn prepare_file_from_tokens(
                 .remap_string_ids(&remap)
                 .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             output
-                .freeze_path_syntax(string_table)
+                .remap_path_ids(&path_remap)
+                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+            output
+                .freeze_path_syntax(string_table, path_fork)
                 .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             Ok(output)
         }
         Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
             error.remap_string_ids(&remap);
+            error.remap_path_ids(&path_remap);
             Err(FileFrontendPrepareFailure::Diagnosed(error))
         }
         Err(error @ FileFrontendPrepareFailure::Infrastructure(_)) => Err(error),
@@ -227,16 +248,16 @@ impl From<DiagnosticBag> for HeaderPreparationFailure {
 /// the module-wide symbol package, retained headers, fragments and statistics. The caller keeps
 /// each source's live span builder, including when aggregation returns diagnostics.
 /// WHY: this is the only phase that discovers module-wide top-level declaration syntax. It must
-/// complete before provider interfaces are available so binding can consume retained syntax
-/// without retokenizing or reparsing source.
 pub fn prepare_header_syntax(
     prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
     capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+    path_fork: &mut PathInternerFork,
 ) -> Result<PreparedHeaderSyntax, HeaderPreparationFailure> {
     let source_build_config_contracts =
-        collect_source_build_config_contracts(prepared_files, string_table, capture)?;
-    let module_symbols = build_module_symbols(prepared_files, string_table, capture)?;
+        collect_source_build_config_contracts(prepared_files, string_table, capture, path_fork)?;
+    let module_symbols =
+        build_module_symbols(prepared_files, string_table, capture, path_fork)?;
 
     let mut headers: Vec<Header> = Vec::new();
     let mut top_level_const_fragments = Vec::new();
@@ -336,12 +357,11 @@ pub(super) fn find_config_qualifier_marker_in_header(
 ///
 /// The declaration shell itself remains in `PreparedHeaderSyntax::headers` for the later
 /// config-resolution barrier. This pass only creates the provider-independent contract carrier and
-/// performs flat retained-token placement checks; it never constructs an expression or turns the
-/// source contract into a module symbol.
 fn collect_source_build_config_contracts(
     prepared_files: &[FileFrontendPrepareOutput],
     string_table: &mut StringTable,
     capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<SourceBuildConfigContract>, HeaderPreparationFailure> {
     let mut contracts = Vec::new();
     let mut diagnostics = DiagnosticBag::new();
@@ -349,9 +369,8 @@ fn collect_source_build_config_contracts(
     for output in prepared_files {
         // The project config source has its own direct-project qualifier consumer. Leaving its
         // top-level qualifier diagnostics on that path keeps config.moth semantics unchanged.
-        let is_config_file = output
-            .source_file
-            .name()
+        let is_config_file = path_fork
+            .component(output.source_file)
             .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
         if is_config_file {
             continue;
@@ -361,7 +380,7 @@ fn collect_source_build_config_contracts(
             let report_marker = |span: SourceSpan, adjacent: bool| {
                 if adjacent {
                     CompilerDiagnostic::invalid_config_reason(
-                        header.tokens.src_path.name(),
+                        path_fork.component(header.tokens.src_path),
                         InvalidConfigReason::ConfigQualifierInvalidPlacement,
                         Some(span),
                     )
@@ -389,7 +408,7 @@ fn collect_source_build_config_contracts(
             let Some(qualifier) = &declaration.config_qualifier else {
                 continue;
             };
-            let Some(name) = header.tokens.src_path.name() else {
+            let Some(name) = path_fork.component(header.tokens.src_path) else {
                 let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                     None,
                     InvalidConfigReason::ConfigContractNameInvalid,
@@ -446,6 +465,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
     project_path_resolver: Option<&ProjectPathResolver>,
     source_files: &SourceDatabase,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<BoundModuleHeaders, HeaderPreparationFailure> {
     let PreparedHeaderSyntax {
         mut headers,
@@ -459,7 +479,12 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         mut module_symbols,
     } = prepared;
 
-    validate_prelude_declaration_shells(&headers, external_package_registry, string_table)?;
+    validate_prelude_declaration_shells(
+        &headers,
+        external_package_registry,
+        string_table,
+        path_fork,
+    )?;
 
     if let Some(resolver) = project_path_resolver {
         build_public_exports(
@@ -470,6 +495,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
             external_package_registry,
             source_provider_dependencies,
             string_table,
+            path_fork,
         )
         .map_err(|failure| match failure {
             HeaderParseFailure::Diagnostic(diagnostic) => {
@@ -488,6 +514,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         source_provider_dependencies,
         source_files,
         string_table,
+        path_fork,
     })
     .map_err(|messages| {
         if let Some(error) = messages.infrastructure_error().cloned() {
@@ -505,6 +532,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         &module_symbols.file_dependency_clauses_by_source,
         &module_symbols.dependency_selections_by_source,
         string_table,
+        path_fork,
     )?;
 
     let _constant_report = add_constant_initializer_dependencies(ConstantDependencyInput {
@@ -512,6 +540,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         module_symbols: &module_symbols,
         binding_environment: &binding_environment,
         string_table,
+        path_fork,
     })?;
 
     Ok(BoundModuleHeaders {
@@ -534,15 +563,15 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 /// prelude types, preserving their authored names and locations.
 /// WHY: prelude membership is provider-dependent, so syntax preparation retains these shells
 /// uniformly and binding validates them once the provider interface exists. Dependency-alias generic
-/// collisions remain syntax-owned; same-file and dependency-bound visible-type collisions remain AST-owned.
 fn validate_prelude_declaration_shells(
     headers: &[Header],
     external_package_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), DiagnosticBag> {
     let mut collision_bag = DiagnosticBag::new();
     for header in headers {
-        if let Some(name) = header.tokens.src_path.name()
+        if let Some(name) = path_fork.component(header.tokens.src_path)
             && external_package_registry.is_prelude_function(string_table.resolve(name))
         {
             collision_bag.push(CompilerDiagnostic::reserved_builtin_name(

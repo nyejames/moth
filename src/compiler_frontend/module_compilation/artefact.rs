@@ -24,6 +24,7 @@ use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFr
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 use std::path::PathBuf;
@@ -43,6 +44,11 @@ pub(crate) struct Module {
 }
 
 impl Module {
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.executable.remap_path_ids(remap);
+        self.metadata.remap_path_ids(remap);
+    }
+
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.remap_string_ids_with_type_environment_cache(
             remap,
@@ -88,9 +94,20 @@ pub(crate) struct ModuleExecutable {
     pub(crate) resource_table: ModuleResourceTable,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) borrow_analysis: BorrowCheckReport,
+    /// Immutable path identity table covering every `PathId` retained by this module.
+    ///
+    /// The semantic compiler owns a fork while producing the module. The build publication tail
+    /// installs the merged boundary table here before any backend consumes the executable lane.
+    pub(crate) path_table: Arc<PathTable>,
 }
 
 impl ModuleExecutable {
+    /// Remap every path identity retained by the executable lane after publication merge.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.hir.remap_path_ids(remap);
+        self.type_environment.remap_path_ids(remap);
+    }
+
     /// Remap interned string IDs after string-table merging.
     ///
     /// WHY: HIR, type identity, retained resource provenance and borrow-fact source locations
@@ -178,6 +195,12 @@ impl ModuleCompilerMetadata {
     ///
     /// Materialisation metadata owns self-contained strings and stable semantic identities, so
     /// this remap covers only executable presentation fields that retain local `StringId` values.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let Some(context) = &mut self.materialisation_context {
+            Arc::make_mut(context).remap_path_ids(remap);
+        }
+    }
+
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for warning in &mut self.warnings {
             warning.remap_string_ids(remap);

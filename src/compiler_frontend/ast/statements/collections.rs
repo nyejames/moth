@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -53,6 +54,7 @@ pub fn new_collection(
     type_interner: &mut AstTypeInterner<'_>,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CollectionParseResult<Expression> {
     parse_collection_literal(
         token_stream,
@@ -61,6 +63,7 @@ pub fn new_collection(
         type_interner,
         value_mode,
         string_table,
+        path_fork,
     )
 }
 
@@ -72,6 +75,7 @@ pub fn new_curly_literal(
     type_interner: &mut AstTypeInterner<'_>,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CollectionParseResult<Expression> {
     match curly_context {
         ExpectedCurlyLiteralContext::Collection(collection_context) => parse_collection_literal(
@@ -81,6 +85,7 @@ pub fn new_curly_literal(
             type_interner,
             value_mode,
             string_table,
+            path_fork,
         ),
         ExpectedCurlyLiteralContext::Map(map_context) => parse_map_literal(
             token_stream,
@@ -89,6 +94,7 @@ pub fn new_curly_literal(
             type_interner,
             value_mode,
             string_table,
+            path_fork,
         ),
         ExpectedCurlyLiteralContext::Infer => parse_inferred_curly_literal(
             token_stream,
@@ -96,6 +102,7 @@ pub fn new_curly_literal(
             type_interner,
             value_mode,
             string_table,
+            path_fork,
         ),
     }
 }
@@ -107,6 +114,7 @@ fn parse_collection_literal(
     type_interner: &mut AstTypeInterner<'_>,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CollectionParseResult<Expression> {
     let mut items: Vec<Expression> = Vec::new();
     let mut inner_type_spelling = None;
@@ -175,6 +183,7 @@ fn parse_collection_literal(
                         type_id,
                         type_interner.environment(),
                         string_table,
+                        &*path_fork,
                     ),
                     None => CastTargetContext::None,
                 };
@@ -195,6 +204,7 @@ fn parse_collection_literal(
                     &mut expression_type,
                     &mut cast_target_context,
                     string_table,
+                    path_fork,
                 )?;
 
                 // A trailing `=` means the literal is mixing collection and map syntax.
@@ -382,6 +392,7 @@ fn parse_expression_until_curly_entry_delimiter(
     expected_type: &mut ExpectedType,
     cast_target_context: &mut CastTargetContext,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CollectionParseResult<Expression> {
     let input = ExpressionParseInput::without_boundary_catch(
         ExpressionParseResources {
@@ -392,6 +403,7 @@ fn parse_expression_until_curly_entry_delimiter(
             cast_target_context,
             value_mode: &MutableOwned,
             string_table,
+            path_fork,
         },
         false,
     );
@@ -469,6 +481,7 @@ fn parse_map_literal(
     type_interner: &mut AstTypeInterner<'_>,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CollectionParseResult<Expression> {
     let ExpectedMapContext {
         key_type_id,
@@ -528,6 +541,7 @@ fn parse_map_literal(
                     key_type_id,
                     type_interner.environment(),
                     string_table,
+                    &*path_fork,
                 );
                 let key_expected_types = vec![key_type_id];
                 let mut key_context = context.new_child_expression(key_expected_types);
@@ -540,6 +554,7 @@ fn parse_map_literal(
                     &mut key_expression_type,
                     &mut key_cast_target_context,
                     string_table,
+                    path_fork,
                 )?;
 
                 // Top-level `=` separates key from value. Check `==` before consuming
@@ -553,6 +568,7 @@ fn parse_map_literal(
                     value_type_id,
                     type_interner.environment(),
                     string_table,
+                    &*path_fork,
                 );
                 let value_expected_types = vec![value_type_id];
                 let mut value_context = context.new_child_expression(value_expected_types);
@@ -567,6 +583,7 @@ fn parse_map_literal(
                         cast_target_context: &mut value_cast_target_context,
                         value_mode: &MutableOwned,
                         string_table,
+                        path_fork,
                     },
                     false,
                 );
@@ -644,6 +661,7 @@ fn parse_inferred_curly_literal(
     type_interner: &mut AstTypeInterner<'_>,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CollectionParseResult<Expression> {
     let literal_span = Some(token_stream.current_span());
 
@@ -672,6 +690,7 @@ fn parse_inferred_curly_literal(
         &mut first_expression_type,
         &mut first_cast_target_context,
         string_table,
+        path_fork,
     )?;
 
     match token_stream.current_token_kind() {
@@ -689,9 +708,10 @@ fn parse_inferred_curly_literal(
                     scope_context: &first_context,
                     type_interner,
                     expected_type: &mut first_value_type,
-                    cast_target_context: &mut first_value_cast_target_context,
+                    cast_target_context: &mut first_cast_target_context,
                     value_mode: &MutableOwned,
                     string_table,
+                    path_fork,
                 },
                 false,
             );
@@ -761,6 +781,7 @@ fn parse_inferred_curly_literal(
                             key_type_id,
                             type_interner.environment(),
                             string_table,
+                            &*path_fork,
                         );
                         let key_expected_types = vec![key_type_id];
                         let mut key_context = context.new_child_expression(key_expected_types);
@@ -773,6 +794,7 @@ fn parse_inferred_curly_literal(
                             &mut key_expression_type,
                             &mut key_cast_target_context,
                             string_table,
+                            path_fork,
                         )?;
 
                         consume_map_entry_separator(token_stream)?;
@@ -786,6 +808,7 @@ fn parse_inferred_curly_literal(
                             value_type_id,
                             type_interner.environment(),
                             string_table,
+                            &*path_fork,
                         );
                         let value_expected_types = vec![value_type_id];
                         let mut value_context = context.new_child_expression(value_expected_types);
@@ -800,6 +823,7 @@ fn parse_inferred_curly_literal(
                                 cast_target_context: &mut value_cast_target_context,
                                 value_mode: &MutableOwned,
                                 string_table,
+                                path_fork,
                             },
                             false,
                         );
@@ -913,6 +937,7 @@ fn parse_inferred_curly_literal(
                             element_type_id,
                             type_interner.environment(),
                             string_table,
+                            &*path_fork,
                         );
                         let expression_expected_types = vec![element_type_id];
                         let mut expression_context =
@@ -926,6 +951,7 @@ fn parse_inferred_curly_literal(
                             &mut expression_type,
                             &mut cast_target_context,
                             string_table,
+                            path_fork,
                         )?;
 
                         if let Some(error) = mixed_collection_entry_error(token_stream) {

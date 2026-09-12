@@ -18,7 +18,7 @@ use crate::compiler_frontend::headers::module_symbols::{
     DeclarationId, OrderedSemanticDeclaration,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
@@ -76,7 +76,7 @@ pub(crate) struct TopLevelDeclarationTable {
     /// Generated-local replacements for inherited declaration slots.
     replacements: FxHashMap<DeclarationId, Declaration>,
     /// Root semantic paths, including metadata-only rows, plus compiler/generated declaration paths.
-    by_path: FxHashMap<InternedPath, DeclarationId>,
+    by_path: FxHashMap<PathId, DeclarationId>,
     /// Name-to-IDs map for declarations that carry a simple name.
     ///
     /// Multiple declarations may share a name (overloads or different paths).
@@ -119,19 +119,22 @@ impl TopLevelDeclarationTable {
     }
 
     #[cfg(test)]
-    pub(crate) fn new(declarations: Vec<Declaration>) -> Self {
+    pub(crate) fn new(
+        declarations: Vec<Declaration>,
+        path_fork: &PathInternerFork,
+    ) -> Self {
         let ordered_declarations: Vec<_> = declarations
             .into_iter()
             .enumerate()
             .map(|(header_index, declaration)| OrderedSemanticDeclaration {
                 declaration_id: DeclarationId::from_index(header_index),
                 header_index,
-                path: declaration.id.clone(),
+                path: declaration.id,
                 kind: OrderedSemanticDeclarationKind::Function,
                 declaration: Some(declaration),
             })
             .collect();
-        Self::from_stage3_order(ordered_declarations, Vec::new())
+        Self::from_stage3_order(ordered_declarations, Vec::new(), path_fork)
             .expect("direct declaration tables require unique paths")
     }
 
@@ -139,6 +142,7 @@ impl TopLevelDeclarationTable {
     pub(crate) fn from_stage3_order(
         ordered_declarations: Vec<OrderedSemanticDeclaration>,
         compiler_owned_declarations: Vec<Declaration>,
+        path_fork: &PathInternerFork,
     ) -> Result<Self, CompilerError> {
         let mut by_path = FxHashMap::default();
         let mut by_name: FxHashMap<StringId, Vec<DeclarationId>> = FxHashMap::default();
@@ -152,8 +156,8 @@ impl TopLevelDeclarationTable {
                 ));
             }
             let declaration_id = ordered.declaration_id;
-            let path = ordered.path.clone();
-            if let Some(name) = path.name() {
+            let path = ordered.path;
+            if let Some(name) = path_fork.component(path) {
                 by_name.entry(name).or_default().push(declaration_id);
             }
             if ordered.kind.owns_value_row() != ordered.declaration.is_some() {
@@ -180,14 +184,14 @@ impl TopLevelDeclarationTable {
 
         for declaration in compiler_owned_declarations {
             let declaration_id = DeclarationId::from_index(declaration_slots.len());
-            let existing = by_path.insert(declaration.id.clone(), declaration_id);
+            let existing = by_path.insert(declaration.id, declaration_id);
 
             if existing.is_some() {
                 return Err(CompilerError::compiler_error(
                     "Compiler-owned declaration path collided with a Stage 3 declaration.",
                 ));
             }
-            if let Some(name) = declaration.id.name() {
+            if let Some(name) = path_fork.component(declaration.id) {
                 by_name.entry(name).or_default().push(declaration_id);
             }
             declaration_slots.push(Some(declaration));
@@ -222,7 +226,7 @@ impl TopLevelDeclarationTable {
 
     // Path-based lookups
 
-    pub(crate) fn get_by_path(&self, path: &InternedPath) -> Option<&Declaration> {
+    pub(crate) fn get_by_path(&self, path: &PathId) -> Option<&Declaration> {
         let declaration_id = self.declaration_id_by_path(path)?;
         self.get_by_id(declaration_id)
     }
@@ -239,14 +243,15 @@ impl TopLevelDeclarationTable {
     pub(in crate::compiler_frontend::ast) fn append_for_construction(
         &mut self,
         declaration: Declaration,
+        path_fork: &PathInternerFork,
     ) -> Option<DeclarationId> {
         if self.declaration_id_by_path(&declaration.id).is_some() {
             return None;
         }
 
         let declaration_id = DeclarationId::from_index(self.len());
-        let path = declaration.id.to_owned();
-        let name = declaration.id.name();
+        let path = declaration.id;
+        let name = path_fork.component(path);
         self.declarations.push(Some(declaration));
         self.by_path.insert(path, declaration_id);
         if let Some(name) = name {
@@ -264,7 +269,7 @@ impl TopLevelDeclarationTable {
     pub(in crate::compiler_frontend::ast) fn get_visible_non_receiver_by_name(
         &self,
         name: StringId,
-        visible: Option<&FxHashSet<InternedPath>>,
+        visible: Option<&FxHashSet<PathId>>,
     ) -> Option<&Declaration> {
         self.find_visible_by_name(name, visible, |declaration| {
             !is_receiver_method_declaration(declaration)
@@ -279,8 +284,8 @@ impl TopLevelDeclarationTable {
     /// accidentally consume a declaration whose type or value has not been determined yet.
     pub(crate) fn get_visible_resolved_by_path(
         &self,
-        path: &InternedPath,
-        visible: Option<&FxHashSet<InternedPath>>,
+        path: &PathId,
+        visible: Option<&FxHashSet<PathId>>,
     ) -> Option<&Declaration> {
         let declaration = self.get_by_path(path)?;
         if declaration.is_unresolved_constant_placeholder() {
@@ -298,7 +303,7 @@ impl TopLevelDeclarationTable {
     pub(crate) fn get_visible_resolved_by_name(
         &self,
         name: StringId,
-        visible: Option<&FxHashSet<InternedPath>>,
+        visible: Option<&FxHashSet<PathId>>,
     ) -> Option<&Declaration> {
         self.find_visible_by_name(name, visible, |declaration| {
             !declaration.is_unresolved_constant_placeholder()
@@ -368,7 +373,7 @@ impl TopLevelDeclarationTable {
 
     pub(in crate::compiler_frontend::ast) fn declaration_id_by_path(
         &self,
-        path: &InternedPath,
+        path: &PathId,
     ) -> Option<DeclarationId> {
         self.by_path.get(path).copied().or_else(|| {
             self.base
@@ -404,7 +409,7 @@ impl TopLevelDeclarationTable {
     fn find_visible_by_name(
         &self,
         name: StringId,
-        visible: Option<&FxHashSet<InternedPath>>,
+        visible: Option<&FxHashSet<PathId>>,
         predicate: impl Fn(&Declaration) -> bool,
     ) -> Option<&Declaration> {
         self.declaration_ids_by_name(name)

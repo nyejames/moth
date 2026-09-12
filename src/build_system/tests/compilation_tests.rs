@@ -53,6 +53,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 use crate::projects::settings::ProjectMetadataField;
@@ -121,12 +122,10 @@ fn invalid_artifact() -> CompiledModuleArtifact {
     let identity = duplicate_materialisation_identity();
     CompiledModuleArtifact {
         module: Module {
-            executable: ModuleExecutable {
-                hir: HirModule::new(),
-                resource_table: ModuleResourceTable::new(),
-                type_environment: TypeEnvironment::new(),
-                borrow_analysis: BorrowCheckReport::default(),
-            },
+            executable: ModuleExecutable { hir: HirModule::new(),
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
             link_facts: ModuleLinkFacts {
                 external_package_registry: Arc::new(ExternalPackageRegistry::new()),
                 external_import_candidates: Vec::new(),
@@ -194,12 +193,10 @@ fn generated_sidecar(
     summary: PublicCallSummary,
 ) -> GeneratedFunctionSidecar {
     let mut module = Module {
-        executable: ModuleExecutable {
-            hir: HirModule::new(),
-            resource_table: ModuleResourceTable::new(),
-            type_environment: TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(),
-        },
+        executable: ModuleExecutable { hir: HirModule::new(),
+        resource_table: ModuleResourceTable::new(),
+        type_environment: TypeEnvironment::new(),
+        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: Vec::new(),

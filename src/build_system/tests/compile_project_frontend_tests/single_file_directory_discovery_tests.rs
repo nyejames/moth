@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn single_file_remaps_module_type_environment_nominal_fields() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -15,6 +16,7 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
     let mut config = Config::new(moth_path.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     string_table.intern("preexisting");
 
     let modules = compile_project_frontend(
@@ -31,8 +33,12 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
         .successful_module_views()
         .next()
         .expect("expected compiled module");
-    let point_path = InternedPath::from_single_str("test.moth", &mut string_table)
-        .join_str("Point", &mut string_table);
+    let test_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
+    let point_path = path_fork
+        .try_intern_child(test_path, string_table.intern("Point"))
+        .expect("test path fits");
     let nominal_id = module
         .executable
         .type_environment
@@ -48,7 +54,8 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
         display_type(
             point_type_id,
             &module.executable.type_environment,
-            &string_table
+            &string_table,
+            &module.executable.path_table,
         ),
         "Point"
     );
@@ -58,12 +65,20 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
         .fields_for(point_type_id)
         .expect("Point fields should resolve through remapped TypeEnvironment");
     assert_eq!(fields.len(), 1);
-    assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
+    assert_eq!(
+        module
+            .executable
+            .path_table
+            .component(fields[0].name)
+            .map(|id| string_table.resolve(id)),
+        Some("value")
+    );
     assert_eq!(
         display_type(
             fields[0].type_id,
             &module.executable.type_environment,
-            &string_table
+            &string_table,
+            &module.executable.path_table,
         ),
         "Int"
     );
@@ -81,6 +96,7 @@ fn single_file_rejects_wrong_extension() {
     let mut config = Config::new(txt_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,
@@ -119,6 +135,7 @@ fn single_file_rejects_missing_file() {
     let mut config = Config::new(missing_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,
@@ -148,6 +165,7 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
     let mut config = Config::new(moth_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,
@@ -191,6 +209,7 @@ fn directory_project_discovers_multiple_entry_modules() {
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,
@@ -241,6 +260,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let modules = compile_project_frontend(
         &mut config,
@@ -263,10 +283,12 @@ fn directory_project_remaps_delta_collisions_across_modules() {
                 == Some("@b.moth")
         })
         .expect("expected @b.moth module");
-    let item_path =
-        InternedPath::try_from_filesystem_path(Path::new("second/@b.moth"), &mut string_table)
-            .expect("test path should be UTF-8")
-            .join_str("Item", &mut string_table);
+    let module_path = path_fork
+        .try_intern_filesystem_path(Path::new("second/@b.moth"), &mut string_table)
+        .expect("test path should be UTF-8");
+    let item_path = path_fork
+        .try_intern_child(module_path, string_table.intern("Item"))
+        .expect("test path fits");
     let nominal_id = second_module
         .executable
         .type_environment
@@ -284,14 +306,21 @@ fn directory_project_remaps_delta_collisions_across_modules() {
         .expect("Item fields should resolve through remapped TypeEnvironment");
     let field_names = fields
         .iter()
-        .map(|field| field.name.name_str(&string_table))
+        .map(|field| {
+            second_module
+                .executable
+                .path_table
+                .component(field.name)
+                .map(|id| string_table.resolve(id))
+        })
         .collect::<Vec<_>>();
 
     assert_eq!(
         display_type(
             item_type_id,
             &second_module.executable.type_environment,
-            &string_table
+            &string_table,
+            &second_module.executable.path_table,
         ),
         "Item"
     );
@@ -318,6 +347,7 @@ fn single_file_rejects_source_package_moth_folder_collision() {
     let mut config = Config::new(main_path.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(

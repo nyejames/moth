@@ -50,6 +50,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// One binding-environment build failure.
@@ -87,6 +88,7 @@ pub(crate) struct BindingEnvironmentInput<'a> {
     pub(crate) source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     pub(crate) source_files: &'a SourceDatabase,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 /// Build the header-stage binding environment for all parsed source files.
@@ -105,7 +107,6 @@ pub(crate) fn prepare_binding_environment(
         .source_provider_dependencies
         .validate_binding_targets(input.external_package_registry)
         .map_err(|error| CompilerMessages::from_error_ref(error, input.string_table))?;
-
     let mut builder = BindingEnvironmentBuilder {
         module_symbols: input.module_symbols,
         external_package_registry: input.external_package_registry,
@@ -113,6 +114,7 @@ pub(crate) fn prepare_binding_environment(
         source_provider_dependencies: input.source_provider_dependencies,
         source_files: input.source_files,
         string_table: input.string_table,
+        path_fork: input.path_fork,
         environment: HeaderBindingEnvironment::default(),
         warnings: Vec::new(),
         provider_semantics_registered: rustc_hash::FxHashSet::default(),

@@ -19,7 +19,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -136,6 +136,7 @@ pub(crate) fn parse_postfix_chain_expression(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let receiver_node = AstNode {
         kind: NodeKind::ExpressionStatement(receiver_expression),
@@ -150,6 +151,7 @@ pub(crate) fn parse_postfix_chain_expression(
         context,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     expression_from_postfix_node(&postfix_node)
@@ -175,6 +177,7 @@ fn parse_postfix_chain_typed(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<AstNode, ExpressionParseError> {
     let receiver_access_mode = chain_access.mode;
     let authored_marker_span = chain_access.authored_marker_span;
@@ -226,9 +229,12 @@ fn parse_postfix_chain_typed(
             scope_context: context,
         };
 
-        if let Some(field_access) =
-            parse_field_member_access_typed(token_stream, member_context.to_owned(), type_interner)?
-        {
+        if let Some(field_access) = parse_field_member_access_typed(
+            token_stream,
+            member_context.to_owned(),
+            type_interner,
+            path_fork,
+        )? {
             receiver_node = field_access;
             continue;
         }
@@ -238,6 +244,7 @@ fn parse_postfix_chain_typed(
             member_context.to_owned(),
             type_interner,
             string_table,
+            path_fork,
         )? {
             receiver_node = collection_builtin_call;
             encountered_receiver_call = true;
@@ -249,6 +256,7 @@ fn parse_postfix_chain_typed(
             member_context.to_owned(),
             type_interner,
             string_table,
+            path_fork,
         )? {
             receiver_node = map_builtin_call;
             encountered_receiver_call = true;
@@ -260,6 +268,7 @@ fn parse_postfix_chain_typed(
             member_context,
             type_interner,
             string_table,
+            path_fork,
         )? {
             receiver_node = receiver_method_call;
             encountered_receiver_call = true;
@@ -290,8 +299,7 @@ fn parse_postfix_chain_typed(
             InvalidFieldAccessReason::UnknownMember
         };
 
-        // Collect known field/method names for "did you mean?" suggestions on UnknownMember.
-        let known_fields = collect_known_member_names(receiver_type_id, type_interner);
+        let known_fields = collect_known_member_names(receiver_type_id, type_interner, path_fork);
         return Err(CompilerDiagnostic::invalid_field_access(
             reason,
             Some(member_name),
@@ -360,6 +368,7 @@ pub fn parse_field_access(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let postfix_node = parse_field_access_with_receiver_access(
         token_stream,
@@ -368,6 +377,7 @@ pub fn parse_field_access(
         PostfixChainAccess::shared(),
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     expression_from_postfix_node(&postfix_node)
@@ -380,6 +390,7 @@ fn parse_field_access_with_receiver_access(
     chain_access: PostfixChainAccess,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<AstNode, ExpressionParseError> {
     let base_span = if token_stream.index > 0 {
         Some(SourceSpan::new(
@@ -397,6 +408,7 @@ fn parse_field_access_with_receiver_access(
         context,
         type_interner,
         string_table,
+        path_fork,
     )
 }
 
@@ -407,6 +419,7 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
     chain_access: PostfixChainAccess,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let base_span = if token_stream.index > 0 {
         Some(SourceSpan::new(
@@ -428,6 +441,7 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
         context,
         type_interner,
         string_table,
+        path_fork,
     )
 }
 
@@ -440,15 +454,16 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
 fn collect_known_member_names(
     receiver_type_id: TypeId,
     type_interner: &AstTypeInterner<'_>,
+    path_fork: &PathInternerFork,
 ) -> Vec<StringId> {
     let environment = type_interner.environment();
     let mut names = Vec::new();
 
-    // Struct field names are stored as InternedPath; the field name is the last
+    // Struct field names are stored as PathId; the field name is the last
     // path component, not the first (which may be a source-file prefix).
     if let Some(fields) = environment.fields_for(receiver_type_id) {
         for field in fields {
-            if let Some(name) = field.name.name() {
+            if let Some(name) = path_fork.component(field.name) {
                 names.push(name);
             }
         }

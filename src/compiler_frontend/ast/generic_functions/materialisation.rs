@@ -29,7 +29,8 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) use artefact_emit::ModuleMaterialisationContext;
 pub(crate) use preparation_freeze::{
@@ -41,7 +42,7 @@ pub(crate) use sidecar_build::bootstrap_call_summary_from_signature;
 pub(crate) struct MaterialisedGenericAst {
     pub(crate) build_result: AstBuildResult,
     pub(crate) string_table: StringTable,
-    pub(crate) instance_path: InternedPath,
+    pub(crate) instance_path: PathId,
 }
 
 /// Active build services and requester facts for one published generic materialisation.
@@ -54,6 +55,7 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) requester_context: &'a ModuleMaterialisationPreparation,
     pub(crate) requester_call_span: Option<SourceSpan>,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
+    pub(crate) path_fork: &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,

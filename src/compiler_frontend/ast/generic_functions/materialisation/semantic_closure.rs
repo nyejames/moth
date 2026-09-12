@@ -1,7 +1,6 @@
 //! Closed semantic inputs selected for one retained generic materialisation.
 
 use super::artefact_emit::ModuleMaterialisationContext;
-use super::frozen_syntax::{materialise_path, stable_path};
 use super::nominal_blueprints::{
     MaterialisationTypeBlueprint, NominalMaterialisationBlueprint, intern_generated_canonical_type,
     intern_materialisation_type_blueprint,
@@ -29,7 +28,7 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, OriginDeclarationId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::traits::definitions::{
@@ -58,10 +57,26 @@ pub(super) struct StableSemanticClosure {
     traits: Box<[StablePrivateTrait]>,
     evidence: Box<[StablePrivateEvidence]>,
 }
+impl StableSemanticClosure {
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for constant in &mut self.constants {
+            constant.local_path = remap.get(constant.local_path);
+        }
+        for alias in &mut self.aliases {
+            alias.local_path = remap.get(alias.local_path);
+        }
+        for trait_definition in &mut self.traits {
+            trait_definition.remap_path_ids(remap);
+        }
+        for evidence in &mut self.evidence {
+            evidence.remap_path_ids(remap);
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct StableLocalConstant {
-    pub(super) local_path: Box<[String]>,
+    pub(super) local_path: PathId,
     pub(super) type_identity: CanonicalTypeIdentity,
     pub(super) value: PublicFoldedValue,
     pub(super) span: Option<crate::compiler_frontend::source::SourceSpan>,
@@ -69,7 +84,7 @@ pub(super) struct StableLocalConstant {
 
 #[derive(Clone)]
 pub(super) struct StableLocalAlias {
-    pub(super) local_path: Box<[String]>,
+    pub(super) local_path: PathId,
     pub(super) target_type_identity: CanonicalTypeIdentity,
     pub(super) declaration_span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
@@ -78,8 +93,8 @@ pub(super) struct StableLocalAlias {
 struct StablePrivateTrait {
     identity: CanonicalTraitIdentity,
     name: String,
-    canonical_path: Box<[String]>,
-    source_file: Box<[String]>,
+    canonical_path: PathId,
+    source_file: PathId,
     declaration_span: Option<crate::compiler_frontend::source::SourceSpan>,
     requirements: Box<[StablePrivateTraitRequirement]>,
 }
@@ -95,7 +110,7 @@ struct StablePrivateTraitRequirement {
 
 #[derive(Clone)]
 struct StablePrivateTraitParameter {
-    name: Box<[String]>,
+    name: PathId,
     value_mode: ValueMode,
     parameter_type: StableTraitTypeBlueprint,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
@@ -118,7 +133,7 @@ enum StableTraitTypeBlueprint {
 struct StablePrivateEvidence {
     target_type_identity: CanonicalTypeIdentity,
     trait_identity: CanonicalTraitIdentity,
-    source_file: Box<[String]>,
+    source_file: PathId,
     declaration_span: Option<crate::compiler_frontend::source::SourceSpan>,
     requirements: Box<[StablePrivateEvidenceRequirement]>,
 }
@@ -126,8 +141,41 @@ struct StablePrivateEvidence {
 #[derive(Clone)]
 struct StablePrivateEvidenceRequirement {
     requirement_name: String,
-    method_path: Box<[String]>,
+    method_path: PathId,
 }
+impl StablePrivateTrait {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.canonical_path = remap.get(self.canonical_path);
+        self.source_file = remap.get(self.source_file);
+        for requirement in &mut self.requirements {
+            requirement.remap_path_ids(remap);
+        }
+    }
+}
+
+impl StablePrivateTraitRequirement {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for parameter in &mut self.parameters {
+            parameter.remap_path_ids(remap);
+        }
+    }
+}
+
+impl StablePrivateTraitParameter {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.name = remap.get(self.name);
+    }
+}
+
+impl StablePrivateEvidence {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.source_file = remap.get(self.source_file);
+        for requirement in &mut self.requirements {
+            requirement.method_path = remap.get(requirement.method_path);
+        }
+    }
+}
+
 impl StableFunctionSignature {
     fn collect_nominal_identities(&self, identities: &mut FxHashSet<CanonicalTypeIdentity>) {
         for parameter in &self.parameters {
@@ -188,6 +236,7 @@ pub(super) fn install_private_semantic_closure(
     external_package_registry: &ExternalPackageRegistry,
     template_ir_store: &Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
     string_table: &mut StringTable,
+    path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> Result<(), CompilerError> {
     for stable_trait in &context.semantic_closure.traits {
         if environment
@@ -215,7 +264,7 @@ pub(super) fn install_private_semantic_closure(
                 .iter()
                 .map(|parameter| {
                     Ok(ResolvedTraitParameter {
-                        name: materialise_path(&parameter.name, string_table),
+                        name: parameter.name,
                         value_mode: parameter.value_mode.clone(),
                         type_id: intern_stable_trait_type(
                             &parameter.parameter_type,
@@ -225,6 +274,7 @@ pub(super) fn install_private_semantic_closure(
                             external_package_registry,
                             template_ir_store,
                             string_table,
+                            path_fork,
                         )?,
                         span: parameter.span,
                     })
@@ -243,6 +293,7 @@ pub(super) fn install_private_semantic_closure(
                             external_package_registry,
                             template_ir_store,
                             string_table,
+                            path_fork,
                         )?,
                         channel: returned.channel,
                         span: returned.span,
@@ -258,8 +309,8 @@ pub(super) fn install_private_semantic_closure(
                 span: stable_requirement.span,
             });
         }
-        let canonical_path = materialise_path(&stable_trait.canonical_path, string_table);
-        let source_file = materialise_path(&stable_trait.source_file, string_table);
+        let canonical_path = stable_trait.canonical_path;
+        let source_file = stable_trait.source_file;
         let definition = ResolvedTraitDefinition {
             id: trait_id,
             name: string_table.intern(&stable_trait.name),
@@ -288,6 +339,7 @@ pub(super) fn install_private_semantic_closure(
             external_package_registry,
             nominal_source,
             string_table,
+            path_fork,
         )?;
         let trait_id = environment
             .lookups
@@ -332,7 +384,7 @@ pub(super) fn install_private_semantic_closure(
                     })?;
                 Ok(TraitRequirementEvidence {
                     requirement_id: trait_requirement.id,
-                    method_path: materialise_path(&requirement.method_path, string_table),
+                    method_path: requirement.method_path,
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -341,7 +393,7 @@ pub(super) fn install_private_semantic_closure(
             kind: TraitEvidenceKind::Canonical,
             target_type_id,
             trait_id,
-            source_file: materialise_path(&stable_evidence.source_file, string_table),
+            source_file: stable_evidence.source_file,
             declaration_span: stable_evidence.declaration_span,
             requirements,
         };
@@ -361,6 +413,7 @@ fn intern_stable_trait_type(
         RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>,
     >,
     string_table: &mut StringTable,
+    path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> Result<TypeId, CompilerError> {
     match blueprint {
         StableTraitTypeBlueprint::This => Ok(this_type),
@@ -371,6 +424,7 @@ fn intern_stable_trait_type(
             type_environment,
             external_package_registry,
             string_table,
+            path_fork,
         ),
     }
 }
@@ -382,21 +436,23 @@ impl ModuleMaterialisationPreparation {
     pub(super) fn stable_semantic_closure(
         &self,
         resources: &ModuleResourceTable,
+        path_fork: &PathInternerFork,
     ) -> Result<StableSemanticClosure, CompilerError> {
         let mut constants = Vec::new();
         for row in self.const_values.iter_module_constant_views() {
-            let (path, metadata) = (row.path, row.metadata);
+            let path = *row.path;
+            let metadata = row.metadata;
             if self
                 .binding_environment
                 .imported_declarations_by_local_path
-                .contains_key(path)
+                .contains_key(&path)
             {
                 continue;
             }
             let type_identity = self.stable_type_identity(metadata.type_id)?;
-            let value = self.stable_folded_value_at_path(path, resources)?;
+            let value = self.stable_folded_value_at_path(&path, resources, path_fork)?;
             constants.push(StableLocalConstant {
-                local_path: stable_path(path, &self.string_table),
+                local_path: path,
                 type_identity,
                 value,
                 span: metadata.span,
@@ -416,7 +472,7 @@ impl ModuleMaterialisationPreparation {
             .map(|(path, alias)| {
                 let target_type_identity = self.stable_alias_target_identity(path, alias)?;
                 Ok(StableLocalAlias {
-                    local_path: stable_path(path, &self.string_table),
+                    local_path: *path,
                     target_type_identity,
                     declaration_span: alias.declaration_span,
                 })
@@ -456,7 +512,7 @@ impl ModuleMaterialisationPreparation {
                         .iter()
                         .map(|parameter| {
                             Ok(StablePrivateTraitParameter {
-                                name: stable_path(&parameter.name, &self.string_table),
+                                name: parameter.name,
                                 value_mode: parameter.value_mode.clone(),
                                 parameter_type: self.stable_trait_type(
                                     parameter.type_id,
@@ -496,8 +552,8 @@ impl ModuleMaterialisationPreparation {
             traits.push(StablePrivateTrait {
                 identity,
                 name: self.string_table.resolve(definition.name).to_owned(),
-                canonical_path: stable_path(&definition.canonical_path, &self.string_table),
-                source_file: stable_path(&definition.source_file, &self.string_table),
+                canonical_path: definition.canonical_path,
+                source_file: definition.source_file,
                 declaration_span: definition.declaration_span,
                 requirements,
             });
@@ -561,14 +617,14 @@ impl ModuleMaterialisationPreparation {
                             .string_table
                             .resolve(trait_requirement.name)
                             .to_owned(),
-                        method_path: stable_path(&requirement.method_path, &self.string_table),
+                        method_path: requirement.method_path,
                     })
                 })
                 .collect::<Result<Box<[_]>, CompilerError>>()?;
             evidence.push(StablePrivateEvidence {
                 target_type_identity,
                 trait_identity,
-                source_file: stable_path(&definition.source_file, &self.string_table),
+                source_file: definition.source_file,
                 declaration_span: definition.declaration_span,
                 requirements,
             });
@@ -606,8 +662,8 @@ impl ModuleMaterialisationPreparation {
 
     pub(super) fn stable_local_declaration_bindings(
         &self,
-        selected_paths: &FxHashSet<InternedPath>,
-    ) -> Box<[Box<[String]>]> {
+        selected_paths: &FxHashSet<PathId>,
+    ) -> Box<[PathId]> {
         let mut paths = selected_paths
             .iter()
             .filter(|path| {
@@ -622,16 +678,16 @@ impl ModuleMaterialisationPreparation {
                             .imported_declarations_by_local_path
                             .contains_key(*path))
             })
-            .map(|path| stable_path(path, &self.string_table))
+            .map(|path| *path)
             .collect::<Vec<_>>();
         paths.sort();
         paths.into_boxed_slice()
     }
     pub(super) fn selected_visible_paths(
         &self,
-        source_file: &InternedPath,
+        source_file: &PathId,
         referenced_names: &FxHashSet<String>,
-    ) -> Result<FxHashSet<InternedPath>, CompilerError> {
+    ) -> Result<FxHashSet<PathId>, CompilerError> {
         let visibility = self.binding_environment.visibility_for(source_file)?;
         let mut selected = visibility
             .visible_source_names
@@ -639,14 +695,14 @@ impl ModuleMaterialisationPreparation {
             .chain(visibility.visible_type_alias_names.iter())
             .chain(visibility.visible_trait_names.iter())
             .filter(|(name, _)| referenced_names.contains(self.string_table.resolve(**name)))
-            .map(|(_, target)| target.local_path().clone())
+            .map(|(_, target)| *target.local_path())
             .collect::<FxHashSet<_>>();
         for (name, methods) in &visibility.visible_receiver_methods {
             if referenced_names.contains(self.string_table.resolve(*name)) {
                 selected.extend(
                     methods
                         .iter()
-                        .map(|method| method.target.local_path().clone()),
+                        .map(|method| *method.target.local_path()),
                 );
             }
         }
@@ -686,7 +742,7 @@ impl ModuleMaterialisationPreparation {
 
     pub(super) fn stable_declaration_bindings(
         &self,
-        selected_paths: &FxHashSet<InternedPath>,
+        selected_paths: &FxHashSet<PathId>,
         public_interface: &PublicSemanticInterface,
     ) -> Result<Box<[StableDeclarationBinding]>, CompilerError> {
         let mut bindings = Vec::new();
@@ -701,7 +757,7 @@ impl ModuleMaterialisationPreparation {
                     .contains_key(origin)
             {
                 bindings.push(StableDeclarationBinding {
-                    local_path: stable_path(path, &self.string_table),
+                    local_path: *path,
                     origin: origin.clone(),
                 });
                 continue;
@@ -711,7 +767,7 @@ impl ModuleMaterialisationPreparation {
                 && public_interface.declaration(&origin).is_some()
             {
                 bindings.push(StableDeclarationBinding {
-                    local_path: stable_path(path, &self.string_table),
+                    local_path: *path,
                     origin,
                 });
             }
@@ -720,7 +776,7 @@ impl ModuleMaterialisationPreparation {
         Ok(bindings.into_boxed_slice())
     }
 
-    fn public_origin_for_path(&self, path: &InternedPath) -> Option<OriginDeclarationId> {
+    fn public_origin_for_path(&self, path: &PathId) -> Option<OriginDeclarationId> {
         if let Some(template) = self.generic_function_templates_by_path.get(path)
             && let Some(GeneratedDeclarationIdentity::Public(origin)) =
                 template.declaration_identity.as_ref()
@@ -750,8 +806,9 @@ impl ModuleMaterialisationPreparation {
 
     pub(super) fn stable_callable_bindings(
         &self,
-        selected_paths: &FxHashSet<InternedPath>,
+        selected_paths: &FxHashSet<PathId>,
         resources: &ModuleResourceTable,
+        path_fork: &PathInternerFork,
     ) -> Result<Box<[StableCallableBinding]>, CompilerError> {
         let mut callables = Vec::new();
         for path in selected_paths {
@@ -768,12 +825,13 @@ impl ModuleMaterialisationPreparation {
                 continue;
             }
             callables.push(StableCallableBinding {
-                local_path: stable_path(path, &self.string_table),
+                local_path: *path,
                 target,
                 signature: self.stable_function_signature(
                     &resolved.signature,
                     &FxHashMap::default(),
                     resources,
+                    path_fork,
                 )?,
                 summary: contract.summary.clone(),
             });
@@ -792,10 +850,11 @@ impl ModuleMaterialisationPreparation {
     /// base on the instance rather than as a nested identity.
     pub(super) fn stable_nominal_blueprints(
         &self,
-        selected_paths: &FxHashSet<InternedPath>,
+        selected_paths: &FxHashSet<PathId>,
         signature: &StableFunctionSignature,
         semantic_closure: &StableSemanticClosure,
         resources: &ModuleResourceTable,
+        path_fork: &PathInternerFork,
     ) -> Result<FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>, CompilerError>
     {
         let mut identities = FxHashSet::default();
@@ -814,7 +873,7 @@ impl ModuleMaterialisationPreparation {
                 {
                     collect_reachable_nominal_identities(&identity, &mut identities);
                 }
-                if let Ok(value) = self.stable_folded_value_at_path(path, resources) {
+                if let Ok(value) = self.stable_folded_value_at_path(path, resources, path_fork) {
                     value.visit_type_identities(&mut |identity| {
                         collect_reachable_nominal_identities(identity, &mut identities);
                     });
@@ -857,7 +916,7 @@ impl ModuleMaterialisationPreparation {
     /// rather than re-projected.
     fn collect_selected_alias_identities(
         &self,
-        path: &InternedPath,
+        path: &PathId,
         semantic_closure: &StableSemanticClosure,
         identities: &mut FxHashSet<CanonicalTypeIdentity>,
     ) {
@@ -865,7 +924,7 @@ impl ModuleMaterialisationPreparation {
             return;
         }
 
-        let components = stable_path(path, &self.string_table);
+        let components = *path;
         if let Ok(index) = semantic_closure
             .aliases
             .binary_search_by(|row| row.local_path.cmp(&components))
@@ -879,7 +938,7 @@ impl ModuleMaterialisationPreparation {
 
     pub(super) fn stable_nominal_bindings(
         &self,
-        selected_paths: &FxHashSet<InternedPath>,
+        selected_paths: &FxHashSet<PathId>,
     ) -> Box<[StableNominalBinding]> {
         let mut bindings = selected_paths
             .iter()
@@ -891,7 +950,7 @@ impl ModuleMaterialisationPreparation {
                 self.nominal_blueprints
                     .contains_key(identity)
                     .then(|| StableNominalBinding {
-                        local_path: stable_path(path, &self.string_table),
+                        local_path: *path,
                         identity: identity.clone(),
                     })
             })

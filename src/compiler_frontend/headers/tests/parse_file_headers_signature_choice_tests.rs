@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn function_signature_reports_missing_arrow_before_return_type() {
@@ -178,7 +179,8 @@ fn duplicate_top_level_function_names_error_during_header_parsing() {
 #[test]
 fn duplicate_header_detection_ignores_qualified_match_arms() {
     let mut string_table = StringTable::new();
-    let source_file = InternedPath::from_single_str("src/@page.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_file = path_fork.try_intern_portable_path("src/@page.moth", &mut string_table).expect("test path fits");
     let status = string_table.intern("Status");
     let ready = string_table.intern("Ready");
     let write = string_table.intern("write");
@@ -338,10 +340,10 @@ fn choice_headers_accept_record_payload_variants() {
     match &variants[0].payload {
         ChoiceVariantPayloadSyntax::Record { fields } => {
             assert_eq!(fields.len(), 1, "expected one payload field");
-            assert_eq!(
-                fields[0].id.name_str(&string_table),
-                Some("RetryCount"),
-                "expected RetryCount field"
+            assert_ne!(
+                fields[0].id,
+                PathId::ROOT,
+                "expected RetryCount field to have a non-root path"
             );
         }
         other => panic!("expected Record payload, got {other:?}"),

@@ -24,7 +24,7 @@ use crate::compiler_frontend::hir::ids::{FieldId, FunctionId, LocalId, StructId}
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::return_hir_transformation_error;
 
@@ -301,7 +301,9 @@ impl<'a> HirBuilder<'a> {
                 return Ok(None);
             }
 
-            let Some(field_value_id) = self.module_const_values.field_value(base_value_id, field)
+            let Some(field_value_id) =
+                self.module_const_values
+                    .field_value(base_value_id, field, &*self.path_fork)
             else {
                 return_hir_transformation_error!(
                     format!(
@@ -350,7 +352,8 @@ impl<'a> HirBuilder<'a> {
             ExpressionKind::Reference(name) => self.module_constants_by_name.get(name).copied(),
             ExpressionKind::FieldAccess { base, field } => {
                 let base_value_id = self.const_store_value_for_expression(base)?;
-                self.module_const_values.field_value(base_value_id, *field)
+                self.module_const_values
+                    .field_value(base_value_id, *field, &*self.path_fork)
             }
             _ => None,
         }
@@ -358,7 +361,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn lower_reference_expression(
         &mut self,
-        name: &InternedPath,
+        name: &PathId,
         type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
@@ -401,7 +404,7 @@ impl<'a> HirBuilder<'a> {
 
     fn try_lower_module_constant_reference(
         &mut self,
-        name: &InternedPath,
+        name: &PathId,
         span: &Option<SourceSpan>,
     ) -> Result<Option<HirExpression>, CompilerError> {
         let Some(value_id) = self.module_constants_by_name.get(name).copied() else {
@@ -450,7 +453,7 @@ impl<'a> HirBuilder<'a> {
     //      declaration registration stayed in sync.
     pub(crate) fn resolve_function_id_or_error(
         &self,
-        name: &InternedPath,
+        name: &PathId,
         span: &Option<SourceSpan>,
     ) -> Result<FunctionId, CompilerError> {
         let Some(function_id) = self.functions_by_name.get(name).copied() else {
@@ -468,7 +471,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn resolve_call_target_or_error(
         &self,
-        name: &InternedPath,
+        name: &PathId,
         span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::external_packages::CallTarget, CompilerError> {
         use crate::compiler_frontend::external_packages::CallTarget;
@@ -509,7 +512,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_field_id_or_error(
         &self,
         struct_id: StructId,
-        field_name: &InternedPath,
+        field_name: &PathId,
         span: &Option<SourceSpan>,
     ) -> Result<FieldId, CompilerError> {
         let Some(field_id) = self
@@ -532,7 +535,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn resolve_struct_id_from_nominal_path(
         &self,
-        nominal_path: &InternedPath,
+        nominal_path: &PathId,
         span: &Option<SourceSpan>,
     ) -> Result<StructId, CompilerError> {
         let Some(struct_id) = self.structs_by_name.get(nominal_path).copied() else {
@@ -565,9 +568,28 @@ impl<'a> HirBuilder<'a> {
             );
         };
 
-        let field_path = struct_path.append(field_name);
+        let field_id = self
+            .fields_by_struct_and_name
+            .iter()
+            .find_map(|(&(owner_id, path), &field_id)| {
+                (owner_id == struct_id
+                    && self.path_fork.try_parent(path) == Some(struct_path)
+                    && self.path_fork.try_component(path) == Some(field_name))
+                .then_some(field_id)
+            });
 
-        self.resolve_field_id_or_error(struct_id, &field_path, span)
+        let Some(field_id) = field_id else {
+            return_hir_transformation_error!(
+                format!(
+                    "Field '{}' is not registered for struct {:?}",
+                    self.string_table.resolve(field_name),
+                    struct_id
+                ),
+                self.hir_error_location(span)
+            );
+        };
+
+        Ok(field_id)
     }
 
     fn resolve_struct_id_for_place_or_error(
@@ -623,7 +645,7 @@ impl<'a> HirBuilder<'a> {
                 return_hir_transformation_error!(
                     format!(
                         "Struct '{}' is not registered in HIR builder",
-                        path.to_string(self.string_table)
+                        self.symbol_name_for_diagnostics(&path)
                     ),
                     self.hir_error_location(span)
                 )

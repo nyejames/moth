@@ -52,6 +52,7 @@ use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::{PathInternerFork, PathId};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 #[cfg(test)]
@@ -100,8 +101,10 @@ impl Template {
         type_interner: &mut AstTypeInterner<'_>,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> TemplateConstructionResult {
-        let default_style = default_nested_style_for_source_path(token_stream, string_table);
+        let default_style =
+            default_nested_style_for_source_path(token_stream, string_table, path_fork);
         let construction = Self::new_nested_template(
             token_stream,
             context,
@@ -109,6 +112,7 @@ impl Template {
             direct_child_wrappers,
             string_table,
             NestedTemplateParseOptions::runtime_capable().with_default_style(default_style),
+            path_fork,
         )?;
 
         Ok(construction.template)
@@ -125,8 +129,10 @@ impl Template {
         type_interner: &mut AstTypeInterner<'_>,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> PreparedTemplateConstructionResult {
-        let default_style = default_nested_style_for_source_path(token_stream, string_table);
+        let default_style =
+            default_nested_style_for_source_path(token_stream, string_table, path_fork);
         Self::new_nested_template(
             token_stream,
             context,
@@ -134,6 +140,7 @@ impl Template {
             direct_child_wrappers,
             string_table,
             NestedTemplateParseOptions::const_required().with_default_style(default_style),
+            path_fork,
         )
     }
 
@@ -143,6 +150,7 @@ impl Template {
         context: &ScopeContext,
         templates_inherited: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> TemplateConstructionResult {
         let mut type_environment = TypeEnvironment::new();
         let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -154,6 +162,7 @@ impl Template {
             &mut type_interner,
             templates_inherited,
             string_table,
+            path_fork,
         )
     }
 
@@ -163,6 +172,7 @@ impl Template {
         context: &ScopeContext,
         templates_inherited: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> PreparedTemplateConstructionResult {
         let mut type_environment = TypeEnvironment::new();
         let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -174,6 +184,7 @@ impl Template {
             &mut type_interner,
             templates_inherited,
             string_table,
+            path_fork,
         )
     }
 
@@ -186,6 +197,7 @@ impl Template {
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
         parse_options: NestedTemplateParseOptions,
+        path_fork: &mut PathInternerFork,
     ) -> PreparedTemplateConstructionResult {
         let NestedTemplateParseOptions {
             parsing_mode,
@@ -222,6 +234,7 @@ impl Template {
                 construction_context: &mut construction_context,
                 control_flow_validation,
                 string_table,
+                path_fork,
             },
         )?;
 
@@ -247,6 +260,7 @@ impl Template {
                 control_context,
                 string_table,
                 default_style: default_style.clone(),
+                path_fork,
             },
         )?;
 
@@ -478,12 +492,12 @@ impl Template {
         })
     }
 }
-
 fn default_nested_style_for_source_path(
     token_stream: &FileTokens,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Option<Style> {
-    if !is_moth_template_content_constant_path(token_stream, string_table) {
+    if !is_moth_template_content_constant_path(token_stream, string_table, path_fork) {
         return None;
     }
 
@@ -493,15 +507,19 @@ fn default_nested_style_for_source_path(
 fn is_moth_template_content_constant_path(
     token_stream: &FileTokens,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> bool {
-    if token_stream.src_path.name_str(string_table) != Some(SYNTHETIC_CONTENT_CONSTANT_NAME) {
+    if path_fork
+        .component(token_stream.src_path)
+        .is_none_or(|id| string_table.resolve(id) != SYNTHETIC_CONTENT_CONSTANT_NAME)
+    {
         return false;
     }
 
-    token_stream
-        .src_path
-        .parent()
-        .and_then(|parent| parent.name_str(string_table).map(str::to_owned))
+    path_fork
+        .parent(token_stream.src_path)
+        .and_then(|parent| path_fork.component(parent))
+        .map(|name| string_table.resolve(name).to_owned())
         .is_some_and(|source_name| {
             source_name.ends_with(SourceFileKind::MothTemplate.extension_suffix())
         })

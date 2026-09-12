@@ -37,7 +37,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, TraitVisibility};
@@ -47,17 +47,19 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-fn path(name: &str, string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str(name, string_table)
+fn path(name: &str, string_table: &mut StringTable) -> PathId {
+    let mut path_fork = PathInternerFork::empty();
+    path_fork.try_intern_portable_path(name, string_table).expect("test path fits")
 }
 
 fn header(
     kind: HeaderKind,
-    src_path: InternedPath,
+    src_path: PathId,
     file_role: FileRole,
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
 ) -> Header {
+    let mut path_fork = PathInternerFork::empty();
     Header {
         kind,
         file_role,
@@ -65,7 +67,7 @@ fn header(
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: None,
         tokens: FileTokens::new(src_path, SourceId::COMPILATION_ROOT, Vec::new()),
-        source_file: InternedPath::from_single_str("root.moth", string_table),
+        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
         capacity_references: Vec::new(),
     }
 }
@@ -112,7 +114,7 @@ fn constant_kind() -> HeaderKind {
 
 fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
     let parameter = Declaration {
-        id: InternedPath::new(),
+        id: PathId::ROOT,
         value: Expression::no_value_with_type_id(
             None,
             DataType::Int,
@@ -135,7 +137,7 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
 
 fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
     let parameter = Declaration {
-        id: InternedPath::new(),
+        id: PathId::ROOT,
         value: Expression::no_value_with_type_id(
             None,
             DataType::Int,
@@ -159,7 +161,7 @@ fn resolved_alias(target_type_id: TypeId) -> ResolvedTypeAlias {
     }
 }
 
-fn constant_declaration(type_id: TypeId, decl_path: InternedPath) -> Declaration {
+fn constant_declaration(type_id: TypeId, decl_path: PathId) -> Declaration {
     Declaration {
         id: decl_path,
         value: Expression::no_value_with_type_id(
@@ -174,15 +176,16 @@ fn constant_declaration(type_id: TypeId, decl_path: InternedPath) -> Declaration
 }
 
 fn receiver_entry(
-    function_path: InternedPath,
+    function_path: PathId,
     receiver: ReceiverKey,
     signature: FunctionSignature,
     string_table: &mut StringTable,
 ) -> ReceiverMethodEntry {
+    let mut path_fork = PathInternerFork::empty();
     ReceiverMethodEntry {
         function_path,
         receiver,
-        source_file: InternedPath::from_single_str("root.moth", string_table),
+        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
         receiver_mutable: false,
         signature,
     }
@@ -191,17 +194,18 @@ fn receiver_entry(
 #[allow(clippy::too_many_arguments)]
 fn build_table(
     headers: Vec<Header>,
-    signatures: FxHashMap<InternedPath, ResolvedFunctionSignature>,
-    nominal_ids: FxHashMap<InternedPath, TypeId>,
-    aliases: FxHashMap<InternedPath, ResolvedTypeAlias>,
+    signatures: FxHashMap<PathId, ResolvedFunctionSignature>,
+    nominal_ids: FxHashMap<PathId, TypeId>,
+    aliases: FxHashMap<PathId, ResolvedTypeAlias>,
     declarations: Vec<Declaration>,
-    struct_fields: FxHashMap<InternedPath, Vec<Declaration>>,
+    struct_fields: FxHashMap<PathId, Vec<Declaration>>,
     receiver_methods: ReceiverMethodCatalog,
     type_environment: &TypeEnvironment,
     trait_environment: &TraitEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<ResolvedPublicTypeRootTable, CompilerError> {
-    let declaration_table = TopLevelDeclarationTable::new(declarations);
+    let declaration_table = TopLevelDeclarationTable::new(declarations, path_fork);
     build_resolved_public_type_roots(BuildResolvedPublicTypeRootsInput {
         sorted_headers: &headers,
         resolved_struct_fields_by_path: &struct_fields,
@@ -214,6 +218,7 @@ fn build_table(
         trait_environment,
         type_environment,
         string_table,
+        path_fork,
         reexport_target_paths: &FxHashSet::default(),
     })
 }
@@ -221,6 +226,7 @@ fn build_table(
 #[test]
 fn retains_every_public_root_category_in_sorted_header_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
     let int_type_id = type_environment.builtins().int;
@@ -311,6 +317,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     )
     .expect("all root categories with resolved facts should be retained");
 
@@ -358,6 +365,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
 #[test]
 fn excludes_imported_root_private_and_non_declaration_headers() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
     let int_type_id = type_environment.builtins().int;
@@ -416,6 +424,7 @@ fn excludes_imported_root_private_and_non_declaration_headers() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     )
     .expect("imported/private/start exclusion should not fail");
 
@@ -434,6 +443,7 @@ fn excludes_imported_root_private_and_non_declaration_headers() {
 #[test]
 fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_independent_pass() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
     let int_type_id = type_environment.builtins().int;
@@ -553,6 +563,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     )
     .expect("receiver filtering should not fail");
 
@@ -579,6 +590,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
 #[test]
 fn missing_alias_entry_is_internal_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
 
@@ -602,6 +614,7 @@ fn missing_alias_entry_is_internal_error() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     );
 
     let error = match result {
@@ -619,6 +632,7 @@ fn missing_alias_entry_is_internal_error() {
 #[test]
 fn missing_resolved_function_signature_is_internal_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
 
@@ -642,6 +656,7 @@ fn missing_resolved_function_signature_is_internal_error() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     );
 
     assert!(
@@ -653,6 +668,7 @@ fn missing_resolved_function_signature_is_internal_error() {
 #[test]
 fn missing_nominal_type_id_is_internal_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
 
@@ -676,6 +692,7 @@ fn missing_nominal_type_id_is_internal_error() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     );
 
     assert!(
@@ -687,6 +704,7 @@ fn missing_nominal_type_id_is_internal_error() {
 #[test]
 fn missing_resolved_constant_is_internal_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
 
@@ -710,6 +728,7 @@ fn missing_resolved_constant_is_internal_error() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     );
 
     assert!(
@@ -721,6 +740,7 @@ fn missing_resolved_constant_is_internal_error() {
 #[test]
 fn missing_receiver_catalog_entry_is_internal_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
     let int_type_id = type_environment.builtins().int;
@@ -773,6 +793,7 @@ fn missing_receiver_catalog_entry_is_internal_error() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     );
 
     assert!(
@@ -784,6 +805,7 @@ fn missing_receiver_catalog_entry_is_internal_error() {
 #[test]
 fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
     let int_type_id = type_environment.builtins().int;
@@ -845,6 +867,7 @@ fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     );
 
     assert!(
@@ -883,12 +906,13 @@ fn register_source_trait(
     trait_name: &str,
     this_type: TypeId,
 ) -> TraitId {
+    let mut path_fork = PathInternerFork::empty();
     let trait_id = trait_environment.next_trait_id();
     let definition = ResolvedTraitDefinition {
         id: trait_id,
         name: string_table.intern(trait_name),
-        canonical_path: InternedPath::from_single_str(trait_name, string_table),
-        source_file: InternedPath::new(),
+        canonical_path: path_fork.try_intern_portable_path(trait_name, string_table).expect("test path fits"),
+        source_file: PathId::ROOT,
         this_type,
         requirements: Vec::new(),
         declaration_span: None,
@@ -901,6 +925,7 @@ fn register_source_trait(
 #[test]
 fn retains_source_trait_fact_for_generic_struct_bound() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
     let int_type_id = type_environment.builtins().int;
@@ -953,10 +978,11 @@ fn retains_source_trait_fact_for_generic_struct_bound() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     )
     .expect("a generic struct with a source trait bound should retain its root and facts");
 
-    let source_path = InternedPath::from_single_str("RENDERABLE", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("RENDERABLE", &mut string_table).expect("test path fits");
     assert_eq!(
         table.trait_source_facts.get(&source_trait_id),
         Some(&ResolvedTraitSourceFact::Source(source_path)),
@@ -967,6 +993,7 @@ fn retains_source_trait_fact_for_generic_struct_bound() {
 #[test]
 fn retains_core_trait_fact_for_generic_struct_bound() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -1014,6 +1041,7 @@ fn retains_core_trait_fact_for_generic_struct_bound() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     )
     .expect("a generic struct with a core trait bound should retain its root and facts");
 
@@ -1027,6 +1055,7 @@ fn retains_core_trait_fact_for_generic_struct_bound() {
 #[test]
 fn missing_trait_definition_for_bound_is_compiler_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
 
@@ -1071,6 +1100,7 @@ fn missing_trait_definition_for_bound_is_compiler_error() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     );
 
     assert!(
@@ -1082,6 +1112,7 @@ fn missing_trait_definition_for_bound_is_compiler_error() {
 #[test]
 fn missing_resolved_struct_fields_is_internal_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
 
@@ -1119,6 +1150,7 @@ fn missing_resolved_struct_fields_is_internal_error() {
         &type_environment,
         &trait_environment,
         &string_table,
+        &path_fork,
     );
 
     let CompilerError { msg, .. } = match result {

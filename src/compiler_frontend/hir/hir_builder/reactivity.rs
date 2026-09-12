@@ -31,7 +31,7 @@ impl<'a> HirBuilder<'a> {
         let source = HirReactiveSource {
             id: ReactiveSourceId(0),
             local_id,
-            path: source.path.clone(),
+            path: source.path,
             kind: hir_reactive_source_kind(source.kind),
             type_id,
             span: *span,
@@ -118,7 +118,7 @@ impl<'a> HirBuilder<'a> {
         source: &ReactiveSource,
         span: &Option<SourceSpan>,
     ) -> Result<ReactiveSourceId, CompilerError> {
-        if let Some(source_id) = self.side_table.reactive_source_id_for_path(&source.path) {
+        if let Some(source_id) = self.side_table.reactive_source_id_for_path(source.path) {
             return Ok(source_id);
         }
 

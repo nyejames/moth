@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use super::types::{TemplateBranchSelector, TemplateLoopHeader};
@@ -54,8 +54,8 @@ pub(crate) fn inline_source_consts_for_const_required_expression(
 
 pub(crate) fn loop_body_const_evaluation_bindings(
     header: &TemplateLoopHeader,
-    inherited_loop_binding_paths: &[InternedPath],
-) -> Vec<InternedPath> {
+    inherited_loop_binding_paths: &[PathId],
+) -> Vec<PathId> {
     let mut loop_binding_paths = inherited_loop_binding_paths.to_vec();
     match header {
         TemplateLoopHeader::Range { bindings, .. }
@@ -71,14 +71,14 @@ pub(crate) fn loop_body_const_evaluation_bindings(
 
 pub(crate) fn collect_option_capture_binding_path(
     pattern: &MatchPattern,
-    output: &mut Vec<InternedPath>,
+    output: &mut Vec<PathId>,
 ) {
     if let MatchPattern::OptionPresentCapture { binding_path, .. } = pattern {
         output.push(binding_path.clone());
     }
 }
 
-fn collect_loop_binding_paths(bindings: &LoopBindings, output: &mut Vec<InternedPath>) {
+fn collect_loop_binding_paths(bindings: &LoopBindings, output: &mut Vec<PathId>) {
     if let Some(item) = &bindings.item {
         output.push(item.id.clone());
     }
@@ -200,7 +200,7 @@ fn fold_substituted_runtime_condition(
 }
 
 fn source_const_value_for_path<'a>(
-    path: &InternedPath,
+    path: &PathId,
     context: &'a ScopeContext,
 ) -> Option<&'a Expression> {
     let declaration = context

@@ -12,7 +12,8 @@ use crate::compiler_frontend::ast::expressions::expression_kind::{ExpressionKind
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -105,7 +106,7 @@ pub struct PlaceExpression {
 #[derive(Clone, Debug)]
 pub enum PlaceExpressionKind {
     /// A local variable by its interned path.
-    Local(InternedPath),
+    Local(PathId),
     /// A field projection from another place.
     Field {
         base: Box<PlaceExpression>,

@@ -59,7 +59,7 @@ use crate::compiler_frontend::semantic_identity::{
     OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -272,7 +272,7 @@ fn export_binding(name: &str, origin: OriginDeclarationId) -> ExportBinding {
 fn nominal_origins_map(
     entries: Vec<(&str, OriginTypeId)>,
     string_table: &mut StringTable,
-) -> FxHashMap<InternedPath, OriginTypeId> {
+) -> FxHashMap<PathId, OriginTypeId> {
     let mut map = FxHashMap::default();
     for (name, origin) in entries {
         map.insert(path(name, string_table), origin);
@@ -287,7 +287,8 @@ fn register_choice(
     variants: Box<[ChoiceVariantDefinition]>,
     generic_parameters: Option<GenericParameterListId>,
 ) -> (NominalTypeId, TypeId) {
-    let path = InternedPath::from_single_str(name, string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
     env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
         path,
@@ -298,7 +299,7 @@ fn register_choice(
 
 fn register_struct_at_path(
     env: &mut TypeEnvironment,
-    path: InternedPath,
+    path: PathId,
     fields: Box<[FieldDefinition]>,
     generic_parameters: Option<GenericParameterListId>,
 ) -> (NominalTypeId, TypeId) {
@@ -387,10 +388,11 @@ fn root_table(
 /// declaration records. This is the test entry point for the per-binding declaration-record
 /// projection: the builder produces one `PublicDeclarationRecord` per stable origin.
 struct DraftRefs<'a> {
-    nominal_origins: &'a FxHashMap<InternedPath, OriginTypeId>,
-    trait_origins: &'a FxHashMap<InternedPath, OriginTraitId>,
+    nominal_origins: &'a FxHashMap<PathId, OriginTypeId>,
+    trait_origins: &'a FxHashMap<PathId, OriginTraitId>,
     env: &'a TypeEnvironment,
     string_table: &'a StringTable,
+    path_fork: &'a PathInternerFork,
 }
 
 fn build_draft(
@@ -430,6 +432,7 @@ fn build_draft_with_constants(
     let const_values =
         ConstValueStore::from_test_declarations(module_constants.to_vec(), refs.env)?;
     PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: refs.path_fork,
         export_seed,
         public_interface_projection_input: projection_input,
         public_source_nominal_type_origins: refs.nominal_origins,
@@ -467,6 +470,7 @@ fn project_struct_record(
     field_definitions: Box<[FieldDefinition]>,
     retained_fields: Vec<Declaration>,
 ) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
+    let mut path_fork = PathInternerFork::empty();
     let struct_path = path("Widget", string_table);
     let (_, type_id) = register_struct_at_path(env, struct_path, field_definitions, None);
     let root = struct_root("Widget", type_id, retained_fields, string_table);
@@ -481,12 +485,10 @@ fn project_struct_record(
             OriginDeclarationId::Type(struct_origin("Widget")),
         )],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &nominal_origins,
-            trait_origins: &FxHashMap::default(),
-            env,
-            string_table,
-        },
+        &DraftRefs { nominal_origins: &nominal_origins,
+        trait_origins: &FxHashMap::default(),
+        env,
+        string_table, path_fork: &path_fork, },
     )
 }
 
@@ -521,6 +523,7 @@ fn free_fn_binding_and_root(
 fn generic_free_function_exposes_ordered_generic_parameter_identities() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let param_list_id = register_param_list(&mut env, &mut string_table, &["Key", "Value"]);
 
     let key_type_id = env
@@ -549,12 +552,10 @@ fn generic_free_function_exposes_ordered_generic_parameter_identities() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("generic function projection should succeed");
 
@@ -577,6 +578,7 @@ fn generic_free_function_exposes_ordered_generic_parameter_identities() {
 fn generic_choice_exposes_ordered_generic_parameter_identities() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let param_list_id = register_param_list(&mut env, &mut string_table, &["T", "U"]);
 
     let first_type_id = env
@@ -613,12 +615,10 @@ fn generic_choice_exposes_ordered_generic_parameter_identities() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &nominal_map,
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &nominal_map,
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("generic choice projection should succeed");
 
@@ -653,6 +653,7 @@ fn generic_parameter_identities_are_stable_across_donor_local_allocation() {
     let make_draft = |perturb: bool| {
         let mut env = TypeEnvironment::new();
         let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
         if perturb {
             let _ = register_single_param_list(&mut env, &mut string_table, "Perturb");
         }
@@ -685,12 +686,10 @@ fn generic_parameter_identities_are_stable_across_donor_local_allocation() {
             Vec::new(),
             vec![binding],
             FxHashMap::default(),
-            &DraftRefs {
-                nominal_origins: &FxHashMap::default(),
-                trait_origins: &FxHashMap::default(),
-                env: &env,
-                string_table: &string_table,
-            },
+            &DraftRefs { nominal_origins: &FxHashMap::default(),
+            trait_origins: &FxHashMap::default(),
+            env: &env,
+            string_table: &string_table, path_fork: &path_fork, },
         )
         .expect("projection should succeed");
         (declarations, target_local_id)
@@ -716,6 +715,7 @@ fn generic_parameter_identities_are_stable_across_donor_local_allocation() {
 fn generic_parameter_with_no_bounds_projects_empty_bound_list() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let param_list_id = register_single_param_list(&mut env, &mut string_table, "T");
     let generic_type_id = env
         .type_id_for_generic_parameter(
@@ -742,12 +742,10 @@ fn generic_parameter_with_no_bounds_projects_empty_bound_list() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("parameter with no bounds should project");
 
@@ -762,6 +760,7 @@ fn generic_parameter_with_no_bounds_projects_empty_bound_list() {
 fn generic_parameter_with_source_trait_bound_projects_canonical_source_identity() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let source_trait_id = TraitId(0);
     let param_list_id =
@@ -797,12 +796,10 @@ fn generic_parameter_with_source_trait_bound_projects_canonical_source_identity(
         Vec::new(),
         vec![binding],
         trait_source_facts,
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &trait_origins,
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &trait_origins,
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("source trait bound should project");
 
@@ -818,6 +815,7 @@ fn generic_parameter_with_source_trait_bound_projects_canonical_source_identity(
 fn generic_parameter_with_displayable_core_bound_projects_canonical_core_identity() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let displayable_trait_id = TraitId(0);
     let param_list_id = register_param_list_with_bounds(
@@ -855,12 +853,10 @@ fn generic_parameter_with_displayable_core_bound_projects_canonical_core_identit
         Vec::new(),
         vec![binding],
         trait_source_facts,
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("displayable core bound should project");
 
@@ -878,6 +874,7 @@ fn generic_parameter_with_displayable_core_bound_projects_canonical_core_identit
 fn multiple_bounds_preserve_declaration_order() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let source_trait_id = TraitId(0);
     let displayable_trait_id = TraitId(1);
@@ -935,12 +932,10 @@ fn multiple_bounds_preserve_declaration_order() {
         Vec::new(),
         vec![binding],
         trait_source_facts,
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &trait_origins,
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &trait_origins,
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("multiple bounds should project in order");
 
@@ -963,6 +958,7 @@ fn multiple_bounds_preserve_declaration_order() {
 fn missing_trait_source_fact_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let unknown_trait_id = TraitId(99);
     let param_list_id =
@@ -988,12 +984,10 @@ fn missing_trait_source_fact_is_compiler_error() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     );
 
     assert!(
@@ -1006,6 +1000,7 @@ fn missing_trait_source_fact_is_compiler_error() {
 fn duplicate_canonical_generic_bound_identity_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let first_trait_id = TraitId(0);
     let second_trait_id = TraitId(1);
@@ -1058,12 +1053,10 @@ fn duplicate_canonical_generic_bound_identity_is_compiler_error() {
             OriginDeclarationId::Function(free_function_origin("duplicate_bound")),
         )],
         trait_source_facts,
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &trait_origins,
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &trait_origins,
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect_err("duplicate canonical generic bounds must be rejected");
 
@@ -1077,6 +1070,7 @@ fn duplicate_canonical_generic_bound_identity_is_compiler_error() {
 fn source_trait_bound_resolves_to_provider_module_origin_not_active_origin() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let source_trait_id = TraitId(0);
     let param_list_id =
@@ -1118,12 +1112,10 @@ fn source_trait_bound_resolves_to_provider_module_origin_not_active_origin() {
         Vec::new(),
         vec![binding],
         trait_source_facts,
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &trait_origins,
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &trait_origins,
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("a source trait bound from a provider module should project");
 
@@ -1147,6 +1139,7 @@ fn project_free_function_with_parameter(
     env: &TypeEnvironment,
     string_table: &mut StringTable,
 ) -> crate::compiler_frontend::public_interface::PublicFunctionSemantics {
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
     let signature = free_function_signature(vec![parameter], vec![int_id]);
     let root = function_root("render", signature, None, string_table);
@@ -1159,12 +1152,10 @@ fn project_free_function_with_parameter(
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env,
-            string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env,
+        string_table, path_fork: &path_fork, },
     )
     .expect("free function projection should succeed");
     declaration_function(&declarations, "render").clone()
@@ -1174,6 +1165,7 @@ fn project_free_function_with_parameter(
 fn shared_free_function_parameter_projects_shared_access() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let function = project_free_function_with_parameter(
@@ -1197,6 +1189,7 @@ fn shared_free_function_parameter_projects_shared_access() {
 fn mutable_free_function_parameter_projects_mutable_access() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let function = project_free_function_with_parameter(
@@ -1220,6 +1213,7 @@ fn mutable_free_function_parameter_projects_mutable_access() {
 fn reactive_free_function_parameter_projects_reactive_access() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let function = project_free_function_with_parameter(
@@ -1243,6 +1237,7 @@ fn reactive_free_function_parameter_projects_reactive_access() {
 fn generic_free_function_retains_mutable_parameter_access_without_concrete_summary() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let param_list_id = register_single_param_list(&mut env, &mut string_table, "T");
     let generic_type_id = env
         .type_id_for_generic_parameter(
@@ -1267,12 +1262,10 @@ fn generic_free_function_retains_mutable_parameter_access_without_concrete_summa
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("generic function projection should succeed");
 
@@ -1299,6 +1292,7 @@ fn generic_free_function_retains_mutable_parameter_access_without_concrete_summa
 fn projects_nested_collection_and_option_types() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let collection_id = env.intern_collection(int_id, None);
@@ -1318,12 +1312,10 @@ fn projects_nested_collection_and_option_types() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("nested constructed type projection should succeed");
 
@@ -1353,6 +1345,7 @@ fn projects_nested_collection_and_option_types() {
 fn projects_imported_public_nominal_reference_to_provider_origin() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     // An imported public struct "Imported" owned by a different module origin.
     let (_imported_nominal_id, imported_type_id) = register_struct(
@@ -1396,12 +1389,10 @@ fn projects_imported_public_nominal_reference_to_provider_origin() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &nominal_map,
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &nominal_map,
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     )
     .expect("imported nominal projection should succeed");
 
@@ -1419,6 +1410,7 @@ fn projects_imported_public_nominal_reference_to_provider_origin() {
 fn imported_nominal_required_but_absent_from_index_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let (_imported_nominal_id, imported_type_id) = register_struct(
         &mut env,
@@ -1456,12 +1448,10 @@ fn imported_nominal_required_but_absent_from_index_is_compiler_error() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &nominal_map,
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &nominal_map,
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     );
     assert!(
         result.is_err(),
@@ -1478,6 +1468,7 @@ fn imported_nominal_required_but_absent_from_index_is_compiler_error() {
 fn missing_nominal_origin_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let fields = Box::new([field_def("x", int_id, &mut string_table)]);
@@ -1493,12 +1484,10 @@ fn missing_nominal_origin_is_compiler_error() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     );
     assert!(
         result.is_err(),
@@ -1510,6 +1499,7 @@ fn missing_nominal_origin_is_compiler_error() {
 fn missing_signature_slot_type_id_is_compiler_error() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let param = param_declaration("value", int_id, &mut string_table);
@@ -1529,12 +1519,10 @@ fn missing_signature_slot_type_id_is_compiler_error() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     );
     assert!(
         result.is_err(),
@@ -1546,6 +1534,7 @@ fn missing_signature_slot_type_id_is_compiler_error() {
 fn category_mismatch_between_root_and_binding_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let (_nominal_id, type_id) =
         register_struct(&mut env, &mut string_table, "Widget", empty_fields(), None);
@@ -1565,12 +1554,10 @@ fn category_mismatch_between_root_and_binding_is_compiler_error() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &nominal_map,
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &nominal_map,
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     );
     assert!(
         result.is_err(),
@@ -1582,6 +1569,7 @@ fn category_mismatch_between_root_and_binding_is_compiler_error() {
 fn unregistered_generic_parameter_in_signature_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let param_list_id = register_single_param_list(&mut env, &mut string_table, "T");
     let generic_type_id = env
         .type_id_for_generic_parameter(
@@ -1604,12 +1592,10 @@ fn unregistered_generic_parameter_in_signature_is_compiler_error() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     );
     assert!(
         result.is_err(),
@@ -1621,7 +1607,7 @@ fn unregistered_generic_parameter_in_signature_is_compiler_error() {
 fn non_trait_binding_without_matching_root_is_compiler_error() {
     let env = TypeEnvironment::new();
     let string_table = StringTable::new();
-
+    let path_fork = PathInternerFork::empty();
     // A binding with no matching root in the root table.
     let binding = export_binding(
         "orphan",
@@ -1633,12 +1619,10 @@ fn non_trait_binding_without_matching_root_is_compiler_error() {
         Vec::new(),
         vec![binding],
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     );
     assert!(
         result.is_err(),
@@ -1650,6 +1634,7 @@ fn non_trait_binding_without_matching_root_is_compiler_error() {
 fn unmatched_extra_root_is_compiler_error() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     // A root with no matching export binding.
@@ -1660,12 +1645,10 @@ fn unmatched_extra_root_is_compiler_error() {
         Vec::new(),
         Vec::new(),
         FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-        },
+        &DraftRefs { nominal_origins: &FxHashMap::default(),
+        trait_origins: &FxHashMap::default(),
+        env: &env,
+        string_table: &string_table, path_fork: &path_fork, },
     );
     assert!(
         result.is_err(),
@@ -1691,6 +1674,7 @@ fn project_struct_with_receiver_method(
     env: &mut TypeEnvironment,
     string_table: &mut StringTable,
 ) -> crate::compiler_frontend::public_interface::PublicReceiverMethodSemantics {
+    let path_fork = PathInternerFork::empty();
     let receiver_path = path("Counter", string_table);
     let (_, struct_type_id) =
         register_struct_at_path(env, receiver_path.clone(), empty_fields(), None);
@@ -1731,18 +1715,16 @@ fn project_struct_with_receiver_method(
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
     };
     let registry = ExternalPackageRegistry::new();
-    let declarations = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: env,
-        external_registry: &registry,
-        string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let declarations = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: env,
+    external_registry: &registry,
+    string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .map(|result| result.draft.declarations)
     .expect("receiver-method projection should succeed");
@@ -1760,6 +1742,7 @@ fn project_struct_with_receiver_method(
 fn shared_receiver_method_projects_shared_access() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let method = project_struct_with_receiver_method(
         "value",
@@ -1786,6 +1769,7 @@ fn shared_receiver_method_projects_shared_access() {
 fn mutable_receiver_method_projects_mutable_access() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let method = project_struct_with_receiver_method(
         "reset",
@@ -1812,16 +1796,21 @@ fn mutable_receiver_method_projects_mutable_access() {
 //  Receiver-method exact-origin join and mismatch rejection
 // ---------------------------------------------------------------------------
 
-fn module_path(module: &str, name: &str, string_table: &mut StringTable) -> InternedPath {
-    let mut path = InternedPath::from_single_str(module, string_table);
-    path.push_str(name, string_table);
-    path
+fn module_path(module: &str, name: &str, string_table: &mut StringTable) -> PathId {
+    let mut path_fork = PathInternerFork::empty();
+    let module_path = path_fork
+        .try_intern_portable_path(module, string_table)
+        .expect("test path fits");
+    path_fork
+        .try_intern_child(module_path, string_table.intern(name))
+        .expect("test path fits")
 }
 
 #[test]
 fn receiver_methods_join_by_exact_origin_not_rendered_name() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     // Two same-named nominals "Counter" in different modules, with distinct canonical paths.
@@ -1843,7 +1832,7 @@ fn receiver_methods_join_by_exact_origin_not_rendered_name() {
     // A "tick" method on each receiver. Rendered names collide ("Counter::tick"), so only the
     // exact stable origin can join the right entry.
     let make_entry =
-        |method_path: InternedPath, receiver_path: InternedPath, string_table: &mut StringTable| {
+        |method_path: PathId, receiver_path: PathId, string_table: &mut StringTable| {
             let param = param_declaration("delta", int_id, string_table);
             let signature = FunctionSignature {
                 parameters: vec![param],
@@ -1872,6 +1861,7 @@ fn receiver_methods_join_by_exact_origin_not_rendered_name() {
         &table,
         &FxHashMap::default(),
         &string_table,
+        &path_fork,
     )
     .expect("callable seed table should build");
 
@@ -1917,6 +1907,7 @@ fn receiver_methods_join_by_exact_origin_not_rendered_name() {
 fn duplicate_receiver_method_entry_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let receiver_path = path("Counter", &mut string_table);
@@ -1956,6 +1947,7 @@ fn duplicate_receiver_method_entry_is_compiler_error() {
         &table,
         &FxHashMap::default(),
         &string_table,
+        &path_fork,
     );
     assert!(
         result.is_err(),
@@ -1968,6 +1960,7 @@ fn duplicate_receiver_method_entry_is_compiler_error() {
 fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     // Two receivers with distinct origins, but the method entries share the same function_path.
@@ -2015,6 +2008,7 @@ fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
         &table,
         &FxHashMap::default(),
         &string_table,
+        &path_fork,
     );
     assert!(
         result.is_err(),
@@ -2032,6 +2026,7 @@ fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
 fn struct_receiver_key_with_choice_origin_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let receiver_path = path("Counter", &mut string_table);
@@ -2062,6 +2057,7 @@ fn struct_receiver_key_with_choice_origin_is_compiler_error() {
         &table,
         &FxHashMap::default(),
         &string_table,
+        &path_fork,
     );
     assert!(
         result.is_err(),
@@ -2074,6 +2070,7 @@ fn struct_receiver_key_with_choice_origin_is_compiler_error() {
 fn choice_receiver_key_with_struct_origin_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
 
     let receiver_path = path("Counter", &mut string_table);
@@ -2110,6 +2107,7 @@ fn choice_receiver_key_with_struct_origin_is_compiler_error() {
         &table,
         &FxHashMap::default(),
         &string_table,
+        &path_fork,
     );
     assert!(
         result.is_err(),
@@ -2177,6 +2175,7 @@ fn declaration_choice<'a>(
 fn struct_record_rejects_field_count_mismatch() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
     let bool_id = env.builtins().bool;
 
@@ -2201,6 +2200,7 @@ fn struct_record_rejects_field_count_mismatch() {
 fn struct_record_rejects_field_name_or_order_mismatch() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
     let bool_id = env.builtins().bool;
 
@@ -2228,6 +2228,7 @@ fn struct_record_rejects_field_name_or_order_mismatch() {
 fn struct_record_rejects_field_type_id_mismatch() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
     let string_id = env.builtins().string;
 
@@ -2259,6 +2260,7 @@ fn struct_record_rejects_field_type_id_mismatch() {
 fn struct_record_rejects_duplicate_canonical_field_name() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let int_id = env.builtins().int;
     let bool_id = env.builtins().bool;
 

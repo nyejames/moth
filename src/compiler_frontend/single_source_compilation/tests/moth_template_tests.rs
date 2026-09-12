@@ -28,6 +28,7 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -318,6 +319,7 @@ fn prepare_bundle_source(
     };
 
     let options = HeaderParseOptions::default();
+    let mut path_fork = PathInternerFork::empty();
     let context = FrontendFilePrepareContext {
         source_files,
         style_directives,
@@ -335,10 +337,10 @@ fn prepare_bundle_source(
         span_builder,
         result,
         ..
-    } = CompilerFrontend::prepare_file_frontend_local(&context, input, string_table);
+    } = CompilerFrontend::prepare_file_frontend_local(&context, input, string_table, &mut path_fork);
     let mut prepared = result.expect("bundle source preparation should succeed");
     prepared
-        .freeze_path_syntax(string_table)
+        .freeze_path_syntax(string_table, &mut path_fork)
         .expect("bundle source should freeze its path syntax");
     (prepared, span_builder)
 }

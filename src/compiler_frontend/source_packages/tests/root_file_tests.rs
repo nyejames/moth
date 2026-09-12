@@ -4,16 +4,19 @@ use super::root_file::{
     file_name_is_config_file, file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
     file_name_is_normal_module_root_file, file_name_is_support_root_file,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::PathBuf;
 
-fn path(components: &[&str], string_table: &mut StringTable) -> InternedPath {
-    let mut path = InternedPath::new();
-    for component in components {
-        path.push_str(component, string_table);
-    }
-    path
+fn path(
+    components: &[&str],
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> PathId {
+    let spelling = components.join("/");
+    path_fork
+        .try_intern_portable_path(&spelling, string_table)
+        .expect("test path fits")
 }
 
 #[test]
@@ -47,22 +50,28 @@ fn dependency_components_identify_support_roots() {
 #[test]
 fn config_dependency_classification_uses_the_source_component() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
-    let bare_config = path(&["config"], &mut string_table);
+    let bare_config = path(&["config"], &mut string_table, &mut path_fork);
     assert!(dependency_path_references_config_file(
-        &bare_config,
+        bare_config,
+        &path_fork,
         &string_table
     ));
 
-    let nested_config_folder = path(&["config", "settings"], &mut string_table);
+    let nested_config_folder =
+        path(&["config", "settings"], &mut string_table, &mut path_fork);
     assert!(!dependency_path_references_config_file(
-        &nested_config_folder,
+        nested_config_folder,
+        &path_fork,
         &string_table
     ));
 
-    let ordinary_config_folder = path(&["config", "settings", "project"], &mut string_table);
+    let ordinary_config_folder =
+        path(&["config", "settings", "project"], &mut string_table, &mut path_fork);
     assert!(!dependency_path_references_config_file(
-        &ordinary_config_folder,
+        ordinary_config_folder,
+        &path_fork,
         &string_table
     ));
 }
@@ -70,22 +79,29 @@ fn config_dependency_classification_uses_the_source_component() {
 #[test]
 fn support_root_dependency_classification_uses_the_source_component() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
-    let bare_support_root = path(&["modules", "+pkg"], &mut string_table);
+    let bare_support_root =
+        path(&["modules", "+pkg"], &mut string_table, &mut path_fork);
     assert!(dependency_path_references_support_root_file(
-        &bare_support_root,
+        bare_support_root,
+        &path_fork,
         &string_table
     ));
 
-    let ordinary_module = path(&["modules", "+pkg.moth", "symbol"], &mut string_table);
+    let ordinary_module =
+        path(&["modules", "+pkg.moth", "symbol"], &mut string_table, &mut path_fork);
     assert!(!dependency_path_references_support_root_file(
-        &ordinary_module,
+        ordinary_module,
+        &path_fork,
         &string_table
     ));
 
-    let ordinary_plus_extension = path(&["modules", "+pkg.js"], &mut string_table);
+    let ordinary_plus_extension =
+        path(&["modules", "+pkg.js"], &mut string_table, &mut path_fork);
     assert!(!dependency_path_references_support_root_file(
-        &ordinary_plus_extension,
+        ordinary_plus_extension,
+        &path_fork,
         &string_table
     ));
 }

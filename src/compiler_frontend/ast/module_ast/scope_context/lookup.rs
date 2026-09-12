@@ -66,7 +66,7 @@ impl<'a> std::ops::Deref for ScopeDeclarationRef<'a> {
 /// WHY: constructor routing should be driven by semantic TypeId/type-environment facts, while
 /// default expressions still live on AST declarations.
 pub(crate) struct SourceStructConstructor<'a> {
-    pub(crate) struct_path: InternedPath,
+    pub(crate) struct_path: PathId,
     pub(crate) fields: &'a [Declaration],
     pub(crate) struct_value_mode: &'a ValueMode,
     pub(crate) type_id: TypeId,
@@ -132,14 +132,14 @@ impl ScopeContext {
             .lookup(self.current_frame_id, name)
             .is_some()
     }
-
-    /// Return whether a declaration is visible as an authored `#` constant in this context.
-    ///
     /// WHAT: accepts body-local constants recorded during scope growth plus top-level
     /// module constants from either seeded header contexts or completed module lookups.
     /// WHY: fixed-capacity type syntax must reject foldable runtime bindings while still
     /// allowing visible explicit constants before and after the final lookup package exists.
-    pub(crate) fn is_explicit_compile_time_constant(&self, declaration: &Declaration) -> bool {
+    pub(crate) fn is_explicit_compile_time_constant(
+        &self,
+        declaration: &Declaration,
+    ) -> bool {
         if self
             .arena
             .borrow()
@@ -166,7 +166,7 @@ impl ScopeContext {
 
     pub(crate) fn lookup_generic_function_template(
         &self,
-        function_path: &InternedPath,
+        function_path: &PathId,
     ) -> Option<&GenericFunctionTemplate> {
         self.shared
             .lookups
@@ -426,7 +426,7 @@ impl ScopeContext {
     /// WHAT: uses canonical declaration paths instead of source spelling conventions.
     /// WHY: values may violate naming conventions and receive warnings, but namespace diagnostics
     /// must rely on the header/AST type metadata that identifies real type declarations.
-    pub(crate) fn is_nominal_type_declaration_path(&self, path: &InternedPath) -> bool {
+    pub(crate) fn is_nominal_type_declaration_path(&self, path: &PathId) -> bool {
         if self.nominal_type_ids_by_path.contains_key(path) {
             return true;
         }

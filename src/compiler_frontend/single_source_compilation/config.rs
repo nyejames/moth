@@ -55,7 +55,9 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathInternError, PathInternerFork,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -127,15 +129,15 @@ pub(crate) fn compile_config_source(
     string_table: &mut StringTable,
 ) -> ConfigCompilationOutcome {
     let file_id = request.file_id;
+    let mut path_fork = PathInternerFork::empty();
 
-    // Construct the one exact authored `InternedPath` before file preparation and reuse it for
-    // tokenization, AST entry identity and diagnostic ownership.
-    let authored_scope = match InternedPath::try_from_filesystem_path(
-        request.authored_path,
-        string_table,
-    ) {
+    // Construct the authored logical identity in the config service's path domain before
+    // tokenization and header preparation. The service is self-contained, so its fork owns the
+    // complete config path table.
+    let authored_scope = match path_fork.try_intern_filesystem_path(request.authored_path, string_table)
+    {
         Ok(scope) => scope,
-        Err(non_utf8) => {
+        Err(PathInternError::NonUtf8(non_utf8)) => {
             return ConfigCompilationOutcome {
                 result: Err(CompilerMessages::from_error(
                     CompilerError::file_error(
@@ -151,20 +153,42 @@ pub(crate) fn compile_config_source(
                 span_builder: ExtendedSpanBuilder::new(),
             };
         }
+        Err(PathInternError::TableFull) => {
+            return ConfigCompilationOutcome {
+                result: Err(CompilerMessages::from_error(
+                    CompilerError::compiler_error(
+                        "Config path table exhausted while interning the authored path",
+                    ),
+                    string_table.clone(),
+                )),
+                file_id,
+                span_builder: ExtendedSpanBuilder::new(),
+            };
+        }
     };
 
     let mut span_builder = ExtendedSpanBuilder::new();
-    match prepare_config_file(&request, &authored_scope, string_table, &mut span_builder) {
+    match prepare_config_file(
+        &request,
+        authored_scope,
+        string_table,
+        &mut path_fork,
+        &mut span_builder,
+    ) {
         Ok(mut file) => {
-            let result =
-                compile_prepared_config_source(&request, &authored_scope, &mut file, string_table);
+            let result = compile_prepared_config_source(
+                &request,
+                authored_scope,
+                &mut file,
+                string_table,
+                &mut path_fork,
+            );
             ConfigCompilationOutcome {
                 result,
                 file_id,
                 span_builder,
             }
         }
-
         Err(ConfigPreparationFailure::Diagnosed(diagnostics)) => ConfigCompilationOutcome {
             result: Err(CompilerMessages::from_diagnostics(
                 diagnostics,
@@ -173,7 +197,6 @@ pub(crate) fn compile_config_source(
             file_id,
             span_builder,
         },
-
         Err(ConfigPreparationFailure::Infrastructure(error)) => ConfigCompilationOutcome {
             result: Err(CompilerMessages::from_error_ref(error, string_table)),
             file_id,
@@ -187,9 +210,10 @@ pub(crate) fn compile_config_source(
 /// Header aggregation consumes the retained shells while the outer service owns their span builder.
 fn compile_prepared_config_source(
     request: &ConfigCompilationRequest<'_>,
-    authored_scope: &InternedPath,
+    authored_scope: PathId,
     prepared_file: &mut FileFrontendPrepareOutput,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<CompiledConfigSource, CompilerMessages> {
     let prepared = prepare_header_syntax(
         std::slice::from_mut(prepared_file),
@@ -202,6 +226,7 @@ fn compile_prepared_config_source(
             }
             diagnostic.capture_preparation_span(source)
         },
+        path_fork,
     )
     .map_err(|failure| match failure {
         HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
@@ -220,6 +245,7 @@ fn compile_prepared_config_source(
         None,
         &SourceDatabase::empty(),
         string_table,
+        path_fork,
     )
     .map_err(|failure| match failure {
         HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
@@ -233,8 +259,13 @@ fn compile_prepared_config_source(
 
     // Order local declarations.
     let sorted =
-        resolve_module_dependencies(bound_headers, &ContentSourceTargets::empty(), string_table)
-            .map_err(|failure| failure.into_messages(string_table))?;
+        resolve_module_dependencies(
+            bound_headers,
+            &ContentSourceTargets::empty(),
+            string_table,
+            path_fork,
+        )
+        .map_err(|failure| failure.into_messages(string_table))?;
 
     // Preserve key-name spans before AST consumes the headers. The full header path becomes the
     // declaration ID, so every folded declaration can carry its exact authored name span.
@@ -260,7 +291,8 @@ fn compile_prepared_config_source(
             external_package_registry: std::sync::Arc::new(request.binding_packages.clone()),
             style_directives: request.style_directives,
             string_table,
-            entry_dir: authored_scope.clone(),
+            path_fork,
+            entry_dir: authored_scope,
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
             config_resolution: Some(std::rc::Rc::clone(&config_resolution)),
@@ -278,7 +310,8 @@ fn compile_prepared_config_source(
     // Reject authored start-body statements and mutable config bindings. Only top-level
     // compile-time constants are config entries, so these dialect rejections are owned by
     // this service and never reach build-side validation.
-    let config_rejections = reject_authored_config_dialect(&ast, authored_scope, string_table);
+    let config_rejections =
+        reject_authored_config_dialect(&ast, authored_scope, path_fork, string_table);
     if !config_rejections.is_empty() {
         return Err(CompilerMessages::from_diagnostics(
             config_rejections,
@@ -294,6 +327,7 @@ fn compile_prepared_config_source(
         &authored_key_name_provenance,
         request.binding_packages,
         string_table,
+        path_fork,
     )?;
 
     Ok(CompiledConfigSource {
@@ -313,11 +347,13 @@ fn compile_prepared_config_source(
 /// validation consumes folded declarations without walking AST nodes or inspecting value modes.
 fn reject_authored_config_dialect(
     ast: &Ast,
-    authored_scope: &InternedPath,
-    string_table: &mut StringTable,
+    authored_scope: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
 ) -> Vec<CompilerDiagnostic> {
-    let mut rejections = reject_authored_config_start_body(ast, authored_scope, string_table);
-    rejections.extend(reject_mutable_config_bindings(ast, authored_scope));
+    let mut rejections =
+        reject_authored_config_start_body(ast, authored_scope, path_fork, string_table);
+    rejections.extend(reject_mutable_config_bindings(ast, authored_scope, path_fork));
     rejections
 }
 
@@ -328,8 +364,9 @@ fn reject_authored_config_dialect(
 /// config file itself.
 fn reject_authored_config_start_body(
     ast: &Ast,
-    authored_scope: &InternedPath,
-    string_table: &mut StringTable,
+    authored_scope: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
 ) -> Vec<CompilerDiagnostic> {
     let mut rejections = Vec::new();
 
@@ -338,25 +375,23 @@ fn reject_authored_config_start_body(
             continue;
         };
 
-        if path.name_str(string_table) != Some(IMPLICIT_START_FUNC_NAME) {
+        if path_fork.component(*path).map(|name| string_table.resolve(name))
+            != Some(IMPLICIT_START_FUNC_NAME)
+        {
             continue;
         }
 
         for body_node in body {
             // Only consider statements authored in the config file itself.
-            if body_node.scope != *authored_scope {
+            if body_node.scope != authored_scope {
                 continue;
             }
 
             match &body_node.kind {
                 NodeKind::VariableDeclaration(declaration) => {
-                    let key = declaration
-                        .id
-                        .name_str(string_table)
-                        .unwrap_or("")
-                        .to_string();
+                    let key = path_fork.component(declaration.id);
                     rejections.push(config_diagnostic(
-                        Some(string_table.intern(&key)),
+                        key,
                         InvalidConfigReason::PlainBindingUnsupported,
                         declaration.value.span,
                     ));
@@ -381,19 +416,20 @@ fn reject_authored_config_start_body(
 /// Reject mutable top-level bindings that reached the folded module store.
 fn reject_mutable_config_bindings(
     ast: &Ast,
-    authored_scope: &InternedPath,
+    authored_scope: PathId,
+    path_fork: &PathInternerFork,
 ) -> Vec<CompilerDiagnostic> {
     let mut rejections = Vec::new();
 
     for row in ast.const_values.iter_module_constant_views() {
         let (path, metadata) = (row.path, row.metadata);
-        if path.parent().as_ref() != Some(authored_scope) {
+        if path_fork.try_parent(*path) != Some(authored_scope) {
             continue;
         }
 
         if metadata.value_mode.is_mutable() {
             rejections.push(config_diagnostic(
-                path.name(),
+                path_fork.component(*path),
                 InvalidConfigReason::MutableBindingUnsupported,
                 metadata.span,
             ));
@@ -415,10 +451,11 @@ fn reject_mutable_config_bindings(
 ///       consumes; no donor-local AST, const-store or type identity may cross it.
 fn project_authored_config_declarations(
     ast: &Ast,
-    authored_scope: &InternedPath,
-    authored_key_name_provenance: &HashMap<InternedPath, Option<SourceSpan>>,
+    authored_scope: PathId,
+    authored_key_name_provenance: &HashMap<PathId, Option<SourceSpan>>,
     binding_packages: &ExternalPackageRegistry,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<FoldedConfigDeclaration>, CompilerMessages> {
     let nominal_origins = ConfigNominalOriginResolver {
         type_environment: &ast.type_environment,
@@ -434,6 +471,7 @@ fn project_authored_config_declarations(
         string_table,
         projection_context: &projection_context,
         resources: None,
+        path_fork,
     };
 
     let mut declarations = Vec::new();
@@ -441,13 +479,12 @@ fn project_authored_config_declarations(
         let (path, value_id, metadata) = (row.path, row.id, row.metadata);
 
         // A module constant's source file is the parent of its symbol path, so the authored
-        // scope is checked by direct interned equality rather than by converting paths back to
-        // `PathBuf`.
-        if path.parent().as_ref() != Some(authored_scope) {
+        // scope is checked directly in the module-local path table.
+        if path_fork.try_parent(*path) != Some(authored_scope) {
             continue;
         }
 
-        let Some(name) = path.name() else {
+        let Some(name) = path_fork.component(*path) else {
             continue;
         };
 
@@ -574,8 +611,9 @@ enum ConfigPreparationFailure {
 /// builder, which survives success, diagnosed rejection and infrastructure failure alike.
 fn prepare_config_file(
     request: &ConfigCompilationRequest<'_>,
-    authored_scope: &InternedPath,
+    authored_scope: PathId,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, ConfigPreparationFailure> {
     let mut diagnostics = Vec::new();
@@ -587,6 +625,7 @@ fn prepare_config_file(
         TokenizerEntryMode::SourceFile,
         request.style_directives,
         string_table,
+        path_fork,
         request.file_id,
         span_builder,
     ) {
@@ -626,6 +665,7 @@ fn prepare_config_file(
         0,
         0,
         span_builder,
+        path_fork,
     ) {
         Ok(output) => output,
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
@@ -661,7 +701,11 @@ fn prepare_config_file(
             Some(file_reference.span),
         ));
     }
-    diagnostics.extend(validate_authored_config_surface(&output.headers));
+    diagnostics.extend(validate_authored_config_surface(
+        &output.headers,
+        path_fork,
+        string_table,
+    ));
     for diagnostic in &mut diagnostics {
         diagnostic
             .capture_preparation_span(request.file_id)
@@ -684,17 +728,17 @@ fn prepare_config_file(
 /// Imported support declarations are excluded because they are not config entries.
 fn collect_authored_config_key_name_provenance(
     headers: &[Header],
-    authored_scope: &InternedPath,
-) -> HashMap<InternedPath, Option<SourceSpan>> {
+    authored_scope: PathId,
+) -> HashMap<PathId, Option<SourceSpan>> {
     let mut key_name_provenance = HashMap::new();
     for header in headers {
         let HeaderKind::Constant { .. } = &header.kind else {
             continue;
         };
-        if header.source_file != *authored_scope {
+        if header.source_file != authored_scope {
             continue;
         }
-        key_name_provenance.insert(header.tokens.src_path.to_owned(), header.name_span);
+        key_name_provenance.insert(header.tokens.src_path, header.name_span);
     }
     key_name_provenance
 }
@@ -716,7 +760,11 @@ fn collect_authored_config_key_name_provenance(
 /// Dependency clauses are rejected from `FileFrontendPrepareOutput.file_dependency_clauses` before
 /// this declaration validation. Authored start-body statements are rejected after AST folding, in
 /// this service.
-fn validate_authored_config_surface(headers: &[Header]) -> Vec<CompilerDiagnostic> {
+fn validate_authored_config_surface(
+    headers: &[Header],
+    path_fork: &PathInternerFork,
+    _string_table: &StringTable,
+) -> Vec<CompilerDiagnostic> {
     let mut errors = Vec::new();
 
     for header in headers {
@@ -733,7 +781,6 @@ fn validate_authored_config_surface(headers: &[Header]) -> Vec<CompilerDiagnosti
                 Some(InvalidConfigReason::TraitIncompatibilityUnsupported)
             }
             HeaderKind::Constant { .. } | HeaderKind::StartFunction => None,
-
             HeaderKind::Struct { .. }
             | HeaderKind::Choice { .. }
             | HeaderKind::TypeAlias { .. } => Some(InvalidConfigReason::NamedTypeUnsupported),
@@ -741,7 +788,7 @@ fn validate_authored_config_surface(headers: &[Header]) -> Vec<CompilerDiagnosti
 
         if let Some(reason) = reason {
             errors.push(config_diagnostic(
-                header.tokens.src_path.name(),
+                path_fork.component(header.tokens.src_path),
                 reason,
                 header.name_span,
             ));

@@ -248,9 +248,13 @@ fn build_debug_name(
         .hir_module
         .side_table
         .function_name_path(hir_function.id)
-        && let Some(name) = path.name_str(module_context.string_table)
+        && let Some(component) = module_context.path_table.component(path)
     {
-        return format!("fn_{}_{}", name, hir_function.id.0);
+        return format!(
+            "fn_{}_{}",
+            module_context.string_table.resolve(component),
+            hir_function.id.0
+        );
     }
     format!("fn_{}", hir_function.id.0)
 }

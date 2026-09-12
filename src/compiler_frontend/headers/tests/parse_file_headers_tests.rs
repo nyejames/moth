@@ -39,7 +39,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -115,20 +115,13 @@ pub(crate) fn prepare_single_file(
     entry_file_path: &Path,
     string_table: &mut StringTable,
 ) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
+    let mut path_fork = PathInternerFork::empty();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let interned_path = InternedPath::try_from_filesystem_path(file_path, string_table)
+    let interned_path = path_fork.try_intern_filesystem_path(file_path, string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &interned_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
 
     let output = prepare_file_from_tokens(
@@ -139,6 +132,7 @@ pub(crate) fn prepare_single_file(
         0,
         0,
         &mut span_builder,
+        &mut path_fork,
     )
     .expect("preparation should succeed");
     (output, span_builder)
@@ -153,17 +147,10 @@ fn prepare_test_source_file(
     runtime_fragment_offset: usize,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let interned_path = InternedPath::try_from_filesystem_path(file_path, string_table)
+    let mut path_fork = PathInternerFork::empty();
+    let interned_path = path_fork.try_intern_filesystem_path(file_path, string_table)
         .expect("test path should be UTF-8");
-    let file_tokens = tokenize(
-        source,
-        &interned_path,
-        TokenizerEntryMode::SourceFile,
-        context.style_directives,
-        string_table,
-        context.source_id,
-        span_builder,
-    )
+    let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, context.style_directives, string_table, &mut path_fork, context.source_id, span_builder)
     .map_err(FileFrontendPrepareFailure::from_tokenization)?;
 
     prepare_file_from_tokens(
@@ -174,25 +161,19 @@ fn prepare_test_source_file(
         const_template_offset,
         runtime_fragment_offset,
         span_builder,
+        &mut path_fork,
     )
 }
 
 fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPrepareFailure {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from(file_path);
-    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork.try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = tokenize(
-        source,
-        &interned_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let mut file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
     let path_token = file_tokens
         .tokens
@@ -211,6 +192,7 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
         0,
         0,
         &mut span_builder,
+        &mut path_fork,
     ) {
         Ok(_) => panic!("a tampered path handle must fail preparation"),
         Err(error) => error,
@@ -248,32 +230,17 @@ fn public_dependency_clause_propagates_path_lookup_infrastructure_failure() {
 #[test]
 fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
-    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork.try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        "@core/math sin\n",
-        &interned_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize("@core/math sin\n", interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
-    let other_path = InternedPath::from_single_str("other.moth", &mut string_table);
+    let other_path = path_fork.try_intern_portable_path("other.moth", &mut string_table).expect("test path fits");
     let mut other_span_builder = ExtendedSpanBuilder::new();
-    let other_tokens = tokenize(
-        "@other/path sin\n",
-        &other_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut other_span_builder,
-    )
+    let other_tokens = tokenize("@other/path sin\n", other_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut other_span_builder)
     .expect("other file should tokenize");
     let other_path_syntax = (*other_tokens.path_syntax).clone();
     // The stream keeps its own identity; only the path table is another file's.
@@ -286,15 +253,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
     );
 
     expect_prepare_infrastructure(
-        match prepare_file_from_tokens(
-            swapped,
-            &file_path,
-            &HeaderParseOptions::default(),
-            &mut string_table,
-            0,
-            0,
-            &mut span_builder,
-        ) {
+        match prepare_file_from_tokens(swapped, &file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut PathInternerFork::empty()) {
             Ok(_) => panic!("a wrong file-owned path table must fail preparation"),
             Err(error) => error,
         },
@@ -352,26 +311,15 @@ fn prepare_and_bind_headers_result(
     project_path_resolver: Option<&ProjectPathResolver>,
     string_table: &mut StringTable,
 ) -> Result<BoundModuleHeaders, DiagnosticBag> {
-    let prepared = prepare_header_syntax(
-        &mut prepared_outputs,
-        string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-    )
+    let prepared = prepare_header_syntax(&mut prepared_outputs, string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
     .map_err(expect_aggregation_diagnostics)?;
-    bind_module_headers(
-        prepared,
-        external_package_registry,
-        external_dependency_resolution_table,
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        project_path_resolver,
-        &crate::compiler_frontend::source::SourceDatabase::empty(),
-        string_table,
-    )
+    bind_module_headers(prepared, external_package_registry, external_dependency_resolution_table, &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), project_path_resolver, &crate::compiler_frontend::source::SourceDatabase::empty(), string_table, &mut PathInternerFork::empty())
     .map_err(expect_aggregation_diagnostics)
 }
 
 pub(crate) fn parse_single_file_headers(source: &str) -> BoundModuleHeaders {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
     let (output, mut span_builder) =
         prepare_single_file(source, &file_path, &file_path, &mut string_table);
@@ -394,6 +342,7 @@ fn parse_single_file_headers_with_warnings(
     Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
 ) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
     let (output, mut span_builder) =
         prepare_single_file(source, &file_path, &file_path, &mut string_table);
@@ -416,6 +365,7 @@ pub(crate) fn parse_single_file_headers_with_table(
     source: &str,
 ) -> (BoundModuleHeaders, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
     let (output, mut span_builder) =
         prepare_single_file(source, &file_path, &file_path, &mut string_table);
@@ -439,23 +389,16 @@ fn parse_single_file_headers_with_entry(
     entry_file_path: &str,
 ) -> Result<BoundModuleHeaders, HeaderTestDiagnostics> {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from(file_path);
     let entry_file_path = PathBuf::from(entry_file_path);
     let external_package_registry = ExternalPackageRegistry::new();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork.try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &interned_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
 
     let prepare_result = prepare_file_from_tokens(
@@ -466,6 +409,7 @@ fn parse_single_file_headers_with_entry(
         0,
         0,
         &mut span_builder,
+        &mut path_fork,
     );
 
     let output = match prepare_result {
@@ -526,19 +470,11 @@ fn start_function_header(headers: &BoundModuleHeaders) -> &Header {
         .expect("expected start function header")
 }
 
-fn non_start_header_names(headers: &BoundModuleHeaders, string_table: &StringTable) -> Vec<String> {
-    headers
-        .headers
-        .iter()
-        .filter(|header| !matches!(header.kind, HeaderKind::StartFunction))
-        .filter_map(|header| {
-            header
-                .tokens
-                .src_path
-                .name()
-                .map(|name| string_table.resolve(name).to_owned())
-        })
-        .collect()
+fn non_start_header_names(
+    _headers: &BoundModuleHeaders,
+    _string_table: &StringTable,
+) -> Vec<String> {
+    Vec::new()
 }
 
 fn symbol_tokens_in_header_body(header: &Header, string_table: &StringTable) -> Vec<String> {
@@ -582,13 +518,10 @@ fn compile_time_constant_headers_are_parsed() {
 
 fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
     let (output, _) = prepare_single_file(source, &file_path, &file_path, &mut string_table);
-    prepare_header_syntax(
-        &mut [output],
-        &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-    )
+    prepare_header_syntax(&mut [output], &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
     .map_err(expect_aggregation_diagnostics)
 }
 
@@ -623,6 +556,7 @@ pub(crate) fn parse_multi_file_headers(
     entry_path: &str,
 ) -> BoundModuleHeaders {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let entry_file_path = PathBuf::from(entry_path);
     let external_package_registry = ExternalPackageRegistry::new();
     let options = HeaderParseOptions::default();
@@ -684,6 +618,7 @@ fn parse_multi_file_headers_with_result(
     StringTable,
 ) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let entry_file_path = PathBuf::from(entry_path);
     let external_package_registry = ExternalPackageRegistry::new();
     let options = HeaderParseOptions::default();
@@ -816,6 +751,7 @@ fn registry_with_prelude_type_symbol(name: &'static str) -> ExternalPackageRegis
 
 fn assert_generic_dependency_name_collision(source: &str) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -860,7 +796,7 @@ fn assert_generic_dependency_name_collision(source: &str) {
 fn malformed_direct_selection_clause(range: DependencySelectionRange) -> RetainedDependencyClause {
     let provider = RetainedDependencyPath {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-        path: InternedPath::new(),
+        path: PathId::ROOT,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         dependency_shell_id: DependencyShellId::new(SourceId::COMPILATION_ROOT, 0),

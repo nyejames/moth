@@ -29,7 +29,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use rustc_hash::FxHashMap;
@@ -75,12 +75,17 @@ impl ChoiceVariantSyntax {
         self.payload.remap_string_ids(remap);
     }
 
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.payload.remap_path_ids(remap);
+    }
+
     pub fn validate_required_source_prefixes(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
         self.payload
-            .validate_required_source_prefixes(provisional_source_file)
+            .validate_required_source_prefixes(provisional_source_file, path_fork)
     }
 }
 
@@ -99,15 +104,24 @@ impl ChoiceVariantPayloadSyntax {
         }
     }
 
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let Self::Record { fields } = self {
+            for field in fields {
+                field.remap_path_ids(remap);
+            }
+        }
+    }
+
     pub fn validate_required_source_prefixes(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
         match self {
             Self::Unit => Ok(()),
             Self::Record { fields } => {
                 for field in fields {
-                    field.validate_required_source_prefix(provisional_source_file)?;
+                    field.validate_required_source_prefix(provisional_source_file, path_fork)?;
                 }
                 Ok(())
             }
@@ -141,7 +155,8 @@ pub(crate) fn starts_rejected_choice_payload_shorthand(token: &TokenKind) -> boo
 /// (`Variant(...)`), and default values (`Variant = ...`).
 pub(crate) fn parse_choice_shell(
     token_stream: &mut FileTokens,
-    choice_path: &InternedPath,
+    choice_path: PathId,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     span_builder: &mut ExtendedSpanBuilder,
@@ -202,16 +217,6 @@ pub(crate) fn parse_choice_shell(
                 token_stream.advance();
                 token_stream.skip_newlines();
 
-                // The token immediately after a parsed variant decides whether this stays in
-                // alpha-scope syntax or enters richer syntax.
-                if let Some(keyword) = reserved_trait_keyword(token_stream.current_token_kind()) {
-                    return Err(reserved_trait_keyword_error(
-                        keyword,
-                        current_source_span(token_stream),
-                    )
-                    .into());
-                }
-
                 // Determine payload form based on the next token.
                 let payload = match token_stream.current_token_kind() {
                     TokenKind::TypeParameterBracket => {
@@ -222,6 +227,7 @@ pub(crate) fn parse_choice_shell(
                             warnings,
                             SignatureMemberContext::ChoicePayloadField,
                             choice_path,
+                            path_fork,
                             span_builder,
                         )?;
                         if fields.is_empty() {
@@ -243,7 +249,7 @@ pub(crate) fn parse_choice_shell(
                         for field in &fields {
                             if contains_non_generic_choice_self_reference(
                                 &field.type_annotation,
-                                choice_path.name(),
+                                path_fork.component(choice_path),
                             ) {
                                 return Err(CompilerDiagnostic::invalid_choice_variant(
                                     InvalidChoiceVariantReason::RecursiveDeclaration,

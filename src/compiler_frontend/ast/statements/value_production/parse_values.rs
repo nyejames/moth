@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
@@ -42,6 +43,7 @@ pub struct ProducedValuesParseInput<'a, 'b> {
     pub target: &'a ActiveValueProductionTarget,
     pub label: &'a str,
     pub string_table: &'a mut StringTable,
+    pub path_fork: &'a mut PathInternerFork,
 }
 
 /// Returns whether the current token proves that no produced value was authored.
@@ -73,6 +75,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
         target,
         label,
         string_table,
+        path_fork,
     } = input;
 
     if target.result_type_ids.is_empty() {
@@ -82,6 +85,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
                 context,
                 type_interner,
                 string_table,
+                path_fork,
             );
         }
 
@@ -94,6 +98,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
                 string_table,
                 &target.known_slot_types,
                 target.receiver_kind,
+                path_fork,
             );
         }
 
@@ -112,6 +117,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
         label,
         false,
         string_table,
+        path_fork,
     ) {
         Ok(values) => values,
 
@@ -184,6 +190,7 @@ fn parse_single_inferred_declaration_value(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     let expression_context = context.new_child_expression(vec![]);
     let mut expected_type = ExpectedType::Infer;
@@ -197,6 +204,7 @@ fn parse_single_inferred_declaration_value(
             cast_target_context: &mut none_cast_target,
             value_mode: &ValueMode::ImmutableOwned,
             string_table,
+            path_fork,
         },
         ExpressionTrailingPolicy {
             consume_closing_parenthesis: false,
@@ -232,6 +240,7 @@ pub(crate) fn parse_fixed_arity_inferred_values(
     string_table: &mut StringTable,
     slot_expected_types: &[Option<TypeId>],
     receiver_kind: ValueReceiverKind,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     let expression_context = context.new_child_expression(vec![]);
     let mut values = Vec::with_capacity(arity);
@@ -251,6 +260,7 @@ pub(crate) fn parse_fixed_arity_inferred_values(
                 cast_target_context: &mut none_cast_target,
                 value_mode: &ValueMode::ImmutableOwned,
                 string_table,
+                path_fork,
             },
             ExpressionTrailingPolicy {
                 consume_closing_parenthesis: false,

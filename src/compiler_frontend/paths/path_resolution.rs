@@ -17,10 +17,10 @@ use crate::compiler_frontend::paths::dependency_resolution::{
 };
 use crate::compiler_frontend::paths::path_normalization::{
     DependencyCandidate, DependencyCandidateSupport, candidate_dependency_files_for_source_kinds,
-    dependency_contains_dotdot, is_relative_dependency_path, join_and_normalize_path,
+    dependency_contains_dotdot, is_relative_dependency_path, join_and_normalize_components,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -140,10 +140,11 @@ impl ProjectPathResolver {
     ///      for bare module-root-relative source paths.
     pub(crate) fn source_package_root_for_dependency(
         &self,
-        dependency_path: &InternedPath,
+        dependency_path: PathId,
+        path_fork: &PathInternerFork,
         string_table: &StringTable,
     ) -> Option<PathBuf> {
-        self.matches_source_package_prefix(dependency_path, string_table)
+        self.matches_source_package_prefix(dependency_path, path_fork, string_table)
     }
 
     /// Returns each source-backed package's unique normal-root file as its public surface.
@@ -220,12 +221,14 @@ impl ProjectPathResolver {
     ///      scanned or prepared as normal Moth source.
     pub(crate) fn resolve_dependency_to_source_file(
         &self,
-        dependency_path: &InternedPath,
+        dependency_path: PathId,
+        path_fork: &PathInternerFork,
         declaring_file: &Path,
         string_table: &mut StringTable,
     ) -> Result<ResolvedDependencyFile, DependencyPathResolutionError> {
         let (_, canonical) = self.resolve_dependency_as_compile_time_path(
             dependency_path,
+            path_fork,
             declaring_file,
             string_table,
         )?;
@@ -236,7 +239,7 @@ impl ProjectPathResolver {
                     declaring_file,
                     format!(
                         "Resolved dependency '{}' to '{}' but could not determine its source kind.",
-                        dependency_path.to_portable_string(string_table),
+                        path_fork.render_portable(dependency_path, string_table, &mut Vec::new()),
                         canonical.display()
                     ),
                 )
@@ -251,15 +254,14 @@ impl ProjectPathResolver {
     /// WHAT: resolves one dependency path to its semantic base and canonical file path.
     /// WHY: dependency resolution applies `.moth` extension fallback and boundary validation,
     ///      while structural file values consume the resulting Stage 0 facts separately.
-    ///
-    /// NOTE: `string_table` is used for diagnostic path interning and case-mismatch strings.
     pub(crate) fn resolve_dependency_as_compile_time_path(
         &self,
-        dependency_path: &InternedPath,
+        dependency_path: PathId,
+        path_fork: &PathInternerFork,
         declaring_file: &Path,
         string_table: &mut StringTable,
     ) -> Result<(CompileTimePathBase, PathBuf), DependencyPathResolutionError> {
-        if let Some(extension) = explicit_source_extension(dependency_path, string_table) {
+        if let Some(extension) = explicit_source_extension(dependency_path, path_fork, string_table) {
             let diagnostic = if extension == SourceFileKind::Moth.extension() {
                 CompilerDiagnostic::explicit_moth_extension(dependency_path.to_owned(), None)
             } else {
@@ -273,7 +275,7 @@ impl ProjectPathResolver {
             return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
         }
 
-        if dependency_contains_dotdot(dependency_path, string_table) {
+        if dependency_contains_dotdot(dependency_path, path_fork, string_table) {
             let diagnostic = CompilerDiagnostic::invalid_import_path(
                 dependency_path.to_owned(),
                 InvalidImportPathReason::ParentDirectorySegment,
@@ -283,25 +285,25 @@ impl ProjectPathResolver {
         }
 
         let (base_kind, filesystem_base) =
-            self.resolve_path_base(dependency_path, declaring_file, string_table)?;
+            self.resolve_path_base(dependency_path, path_fork, declaring_file, string_table)?;
 
         // Source-backed package roots already include the prefix directory, so skip the first
         // component when joining to avoid double-prefixing (e.g. `lib/helper/helper/...`).
+        let mut components = Vec::new();
+        let components = path_fork.resolve_components(dependency_path, &mut components);
         let normalized = if matches!(base_kind, CompileTimePathBase::SourcePackageRoot) {
-            let components = dependency_path.as_components();
-            let suffix = if components.len() <= 1 {
-                InternedPath::new()
-            } else {
-                InternedPath::from_components(components[1..].to_vec())
-            };
-            join_and_normalize_path(&filesystem_base, &suffix, string_table)
+            join_and_normalize_components(
+                &filesystem_base,
+                components.get(1..).unwrap_or_default(),
+                string_table,
+            )
         } else {
-            join_and_normalize_path(&filesystem_base, dependency_path, string_table)
+            join_and_normalize_components(&filesystem_base, components, string_table)
         };
 
         let candidates = candidate_dependency_files_for_source_kinds(
             &normalized,
-            dependency_path.len(),
+            path_fork.depth(dependency_path) as usize,
             self.source_file_kinds(),
         );
         let existing_candidates = existing_dependency_candidates(&candidates);
@@ -334,14 +336,21 @@ impl ProjectPathResolver {
                 declaring_file,
                 format!(
                     "Failed to canonicalize resolved dependency '{}': {error}",
-                    dependency_path.to_portable_string(string_table)
+                    path_fork.render_portable(dependency_path, string_table, &mut Vec::new())
                 ),
             )
         })?;
 
-        validate_dependency_boundary(&canonical, &base_kind, &filesystem_base, dependency_path)?;
+        validate_dependency_boundary(
+            &canonical,
+            &base_kind,
+            &filesystem_base,
+            dependency_path,
+            path_fork,
+        )?;
         validate_dependency_case_sensitivity(
             dependency_path,
+            path_fork,
             &base_kind,
             &filesystem_base,
             &canonical,
@@ -356,21 +365,22 @@ impl ProjectPathResolver {
     /// WHY: source-backed package dependencies should resolve to the package root, not fall through to entry root.
     fn matches_source_package_prefix(
         &self,
-        dependency_path: &InternedPath,
+        dependency_path: PathId,
+        path_fork: &PathInternerFork,
         string_table: &StringTable,
     ) -> Option<PathBuf> {
-        let first_component = dependency_path.as_components().first()?;
-        let segment = string_table.resolve(*first_component);
+        let first_component = path_fork.component(dependency_path)?;
+        let segment = string_table.resolve(first_component);
         self.source_package_roots.roots().get(segment).cloned()
     }
-
     // -----------------------------------------------------------------------
     // Shared resolution helpers
     // -----------------------------------------------------------------------
 
     fn resolve_path_base(
         &self,
-        path: &InternedPath,
+        path: PathId,
+        path_fork: &PathInternerFork,
         declaring_file: &Path,
         string_table: &mut StringTable,
     ) -> Result<(CompileTimePathBase, PathBuf), CompilerError> {
@@ -380,13 +390,14 @@ impl ProjectPathResolver {
                 "Could not determine parent directory for declaring file.",
             )
         })?;
-
-        if is_relative_dependency_path(path, string_table) {
+        if is_relative_dependency_path(path, path_fork, string_table) {
             Ok((
                 CompileTimePathBase::RelativeToFile,
                 declaring_dir.to_path_buf(),
             ))
-        } else if let Some(package_root) = self.matches_source_package_prefix(path, string_table) {
+        } else if let Some(package_root) =
+            self.matches_source_package_prefix(path, path_fork, string_table)
+        {
             Ok((CompileTimePathBase::SourcePackageRoot, package_root))
         } else {
             Ok((CompileTimePathBase::EntryRoot, self.entry_root.clone()))
@@ -397,13 +408,15 @@ impl ProjectPathResolver {
         let extension = path.extension().and_then(|extension| extension.to_str())?;
         SourceFileKind::from_extension(extension)
     }
-}
 
+}
 fn explicit_source_extension(
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> Option<String> {
-    for component in dependency_path.as_components() {
+    let mut scratch = Vec::new();
+    for component in path_fork.resolve_components(dependency_path, &mut scratch) {
         let segment = string_table.resolve(*component);
         let Some(extension) = Path::new(segment)
             .extension()

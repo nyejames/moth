@@ -37,7 +37,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
@@ -133,9 +133,11 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn test_builtin_error_type_id(
         &mut self,
     ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
-        let error_path = crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
-            self.string_table,
-        );
+        let error_path =
+            crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+                self.path_fork,
+                self.string_table,
+            );
         let nominal_id = self.type_environment.nominal_id_for_path(&error_path)?;
         self.type_environment.type_id_for_nominal_id(nominal_id)
     }
@@ -147,6 +149,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn test_register_builtin_error_type(
         &mut self,
     ) -> crate::compiler_frontend::datatypes::ids::TypeId {
+        let mut path_fork = PathInternerFork::empty();
         use crate::compiler_frontend::builtins::error_type::{
             ERROR_FIELD_CODE, ERROR_FIELD_MESSAGE,
         };
@@ -159,11 +162,19 @@ impl<'a> HirBuilder<'a> {
             return existing;
         }
 
-        let error_path = crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
-            self.string_table,
-        );
-        let message_path = error_path.join_str(ERROR_FIELD_MESSAGE, self.string_table);
-        let code_path = error_path.join_str(ERROR_FIELD_CODE, self.string_table);
+        let error_path =
+            crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+                self.path_fork,
+                self.string_table,
+            );
+        let message_path = self
+            .path_fork
+            .try_intern_child(error_path, self.string_table.intern(ERROR_FIELD_MESSAGE))
+            .expect("test path fits");
+        let code_path = self
+            .path_fork
+            .try_intern_child(error_path, self.string_table.intern(ERROR_FIELD_CODE))
+            .expect("test path fits");
 
         let definition = StructTypeDefinition {
             id: NominalTypeId(0),
@@ -193,11 +204,11 @@ impl<'a> HirBuilder<'a> {
         self.set_current_function_for_tests(function_id);
     }
 
-    pub(crate) fn test_register_local_in_block(&mut self, local: HirLocal, name: InternedPath) {
+    pub(crate) fn test_register_local_in_block(&mut self, local: HirLocal, name: PathId) {
         let current_block = self.current_block_id().unwrap_or(BlockId(0));
         let _ = self.register_local_in_block(current_block, local.clone(), &None);
 
-        self.locals_by_name.insert(name.clone(), local.id);
+        self.locals_by_name.insert(name, local.id);
         self.side_table.bind_local_name(local.id, name);
         self.side_table
             .bind_local_origin(local.id, HirLocalOriginKind::User, None, None);
@@ -205,15 +216,15 @@ impl<'a> HirBuilder<'a> {
         self.reserve_local_id(local.id);
     }
 
-    pub(crate) fn test_register_function_name(&mut self, name: InternedPath, id: FunctionId) {
-        self.functions_by_name.insert(name.clone(), id);
+    pub(crate) fn test_register_function_name(&mut self, name: PathId, id: FunctionId) {
+        self.functions_by_name.insert(name, id);
         self.side_table.bind_function_name(id, name);
         self.reserve_function_id(id);
     }
 
     pub(crate) fn test_register_function_with_return_type(
         &mut self,
-        name: InternedPath,
+        name: PathId,
         id: FunctionId,
         return_type: crate::compiler_frontend::datatypes::ids::TypeId,
     ) {
@@ -245,11 +256,11 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn test_register_struct_with_fields(
         &mut self,
         struct_id: StructId,
-        name: InternedPath,
+        name: PathId,
         frontend_type_id: crate::compiler_frontend::datatypes::ids::TypeId,
         fields: Vec<(
             FieldId,
-            InternedPath,
+            PathId,
             crate::compiler_frontend::datatypes::ids::TypeId,
         )>,
     ) {
@@ -277,7 +288,7 @@ impl<'a> HirBuilder<'a> {
     ///
     /// WHY: production module constants reach HIR as folded store values, never as expression
     /// trees, so a test constant must be a value the store can hold.
-    pub(crate) fn test_register_module_constant(&mut self, name: InternedPath, value: Expression) {
+    pub(crate) fn test_register_module_constant(&mut self, name: PathId, value: Expression) {
         let declaration = Declaration {
             id: name.clone(),
             value,
@@ -295,9 +306,9 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn test_register_nominal_struct_type(
         &mut self,
-        path: InternedPath,
+        path: PathId,
         fields: Vec<(
-            InternedPath,
+            PathId,
             FrontendTypeId,
             Option<crate::compiler_frontend::source::SourceSpan>,
         )>,
@@ -326,7 +337,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn test_register_nominal_choice_type(
         &mut self,
-        path: InternedPath,
+        path: PathId,
         variants: &[crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant],
     ) -> FrontendTypeId {
         let variant_definitions = variants
@@ -374,10 +385,16 @@ impl<'a> HirBuilder<'a> {
 //  by whichever test module needed them first.
 // ---------------------------------------------------------------------------
 
-pub(crate) fn setup_builder(string_table: &'_ mut StringTable) -> HirBuilder<'_> {
-    let test_function_name = InternedPath::from_single_str("__expr_test_fn", string_table);
+pub(crate) fn setup_builder<'a>(
+    string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
+) -> HirBuilder<'a> {
+    let test_function_name = path_fork
+        .try_intern_portable_path("__expr_test_fn", string_table)
+        .expect("test path fits");
     let mut builder = HirBuilder::new(
         string_table,
+        path_fork,
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
     );
@@ -409,7 +426,7 @@ pub(crate) fn setup_builder(string_table: &'_ mut StringTable) -> HirBuilder<'_>
 
 pub(crate) fn register_local(
     builder: &mut HirBuilder<'_>,
-    name: InternedPath,
+    name: PathId,
     local_id: LocalId,
     type_id: TypeId,
     span: Option<crate::compiler_frontend::source::SourceSpan>,

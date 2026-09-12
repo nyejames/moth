@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 /// Diagnostic when two visible bindings in the same file target different symbols.
@@ -29,7 +29,7 @@ pub(super) fn dependency_name_collision(
 /// Diagnostic when a dependency through a public surface resolves to a symbol that the surface does
 /// not expose.
 pub(super) fn not_exported_by_public_surface(
-    dependency_path: &InternedPath,
+    dependency_path: &PathId,
     public_surface_name: StringId,
     public_surface_type: ImportPublicSurfaceType,
     span: Option<SourceSpan>,
@@ -49,7 +49,7 @@ pub(super) fn not_exported_by_public_surface(
 /// WHY: a provider interface is valid compiler state, but an authored selection may still name a
 ///      member that the provider does not expose. That source error retains the selected-name span.
 pub(crate) fn provider_public_surface_diagnostic(
-    requested_path: &InternedPath,
+    requested_path: &PathId,
     interface: &PublicSemanticInterface,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
@@ -74,7 +74,7 @@ pub(crate) fn provider_public_surface_diagnostic(
 
 /// Diagnostic when a dependency path directly references a module-root file or canonical `config.moth`.
 pub(super) fn direct_special_file_dependency(
-    path: &InternedPath,
+    path: &PathId,
     span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::direct_special_file_import(path.clone(), span)
@@ -82,7 +82,7 @@ pub(super) fn direct_special_file_dependency(
 
 /// Diagnostic when a dependency path matches a source file but not a symbol.
 pub(super) fn bare_file_dependency(
-    path: &InternedPath,
+    path: &PathId,
     span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::bare_file_import(path.clone(), span)
@@ -90,7 +90,7 @@ pub(super) fn bare_file_dependency(
 
 /// Diagnostic when a dependency path cannot be resolved to any known source or external symbol.
 pub(super) fn missing_dependency_target(
-    path: &InternedPath,
+    path: &PathId,
     span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::missing_import_target(path.clone(), span)
@@ -98,7 +98,7 @@ pub(super) fn missing_dependency_target(
 
 /// Diagnostic when a direct source dependency targets a symbol that is not exported.
 pub(super) fn not_exported_by_source_file(
-    symbol_path: &InternedPath,
+    symbol_path: &PathId,
     span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::not_exported_by_source_file(symbol_path.clone(), span)
@@ -106,7 +106,7 @@ pub(super) fn not_exported_by_source_file(
 
 /// Diagnostic when a dependency path matches multiple source symbols ambiguously.
 pub(super) fn ambiguous_dependency_target(
-    path: &InternedPath,
+    path: &PathId,
     span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::ambiguous_import_target(path.clone(), span)
@@ -123,7 +123,7 @@ pub(super) fn missing_package_symbol(
 
 /// Diagnostic when a module has no public export and an external consumer tries to bind from it.
 pub(super) fn missing_module_root_public_surface(
-    symbol_path: &InternedPath,
+    symbol_path: &PathId,
     span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::missing_module_root_public_surface(symbol_path.clone(), span)
@@ -131,7 +131,7 @@ pub(super) fn missing_module_root_public_surface(
 
 /// Diagnostic when a dependency targets a symbol in another module root that is not exported by that module's public export.
 pub(super) fn cross_module_dependency_not_exported(
-    symbol_path: &InternedPath,
+    symbol_path: &PathId,
     span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::cross_module_import_not_exported(symbol_path.clone(), span)

@@ -50,7 +50,7 @@ use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::hir_log;
 use crate::return_hir_transformation_error;
 
@@ -120,7 +120,7 @@ impl<'a> HirBuilder<'a> {
                     let value =
                         self.lower_child_expression_for_parent(&mut prelude, &field.value)?;
                     hir_fields.push(HirVariantField {
-                        name: field.id.name(),
+                        name: self.path_fork.component(field.id),
                         value,
                     });
                 }
@@ -1088,7 +1088,7 @@ impl<'a> HirBuilder<'a> {
     fn lower_user_defined_cast_expression(
         &mut self,
         cast: &ResolvedCastExpression,
-        method_path: &InternedPath,
+        method_path: &PathId,
         expr_type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
@@ -1327,6 +1327,7 @@ impl<'a> HirBuilder<'a> {
             BuiltinCastTarget::Error,
             &self.type_environment,
             self.string_table,
+            self.path_fork,
         )
         .ok_or_else(|| {
             CompilerError::new(
@@ -1439,7 +1440,15 @@ impl<'a> HirBuilder<'a> {
 
         let temp_name = format!("__hir_tmp_{}", self.temp_local_counter);
         self.temp_local_counter += 1;
-        let temp_name_id = InternedPath::from_single_str(&temp_name, self.string_table);
+        let temp_component = self.string_table.intern(&temp_name);
+        let temp_name_id = self
+            .path_fork
+            .try_intern_child(PathId::ROOT, temp_component)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "path table exhausted while naming a compiler-generated HIR local",
+                )
+            })?;
 
         // Compiler-introduced temporaries are intentionally excluded from AST symbol resolution.
         // They are named only for diagnostics/debug rendering via the side table.
@@ -1537,7 +1546,7 @@ impl<'a> HirBuilder<'a> {
     ///      path and prevents lazy-creation ordering bugs.
     pub(crate) fn register_choice_id(
         &mut self,
-        nominal_path: &InternedPath,
+        nominal_path: &PathId,
         span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
         if let Some(&choice_id) = self.choices_by_name.get(nominal_path) {
@@ -1551,7 +1560,7 @@ impl<'a> HirBuilder<'a> {
             .ok_or_else(|| {
                 crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
                     "Choice '{}' is not registered in TypeEnvironment during HIR lowering",
-                    nominal_path.to_string(self.string_table)
+                    self.symbol_name_for_diagnostics(nominal_path)
                 ))
             })?;
 
@@ -1584,7 +1593,7 @@ impl<'a> HirBuilder<'a> {
     ///      missing entries indicate an AST → HIR contract violation.
     pub(crate) fn resolve_choice_id(
         &self,
-        nominal_path: &InternedPath,
+        nominal_path: &PathId,
         span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
         let Some(choice_id) = self.choices_by_name.get(nominal_path).copied() else {
@@ -1623,6 +1632,7 @@ impl<'a> HirBuilder<'a> {
             _output.display_with_context(
                 &crate::compiler_frontend::hir::hir_display::HirDisplayContext::new(
                     self.string_table,
+                    self.path_fork,
                 )
                 .with_side_table(&self.side_table)
                 .with_type_environment(&self.type_environment),
@@ -1643,6 +1653,7 @@ impl<'a> HirBuilder<'a> {
             _value.display_with_context(
                 &crate::compiler_frontend::hir::hir_display::HirDisplayContext::new(
                     self.string_table,
+                    self.path_fork,
                 )
                 .with_side_table(&self.side_table)
                 .with_type_environment(&self.type_environment),

@@ -10,7 +10,7 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 /// Parsed trait declaration shell: `TRAIT must: requirements ;`
@@ -88,13 +88,19 @@ impl TraitDeclarationSyntax {
             requirement.remap_string_ids(remap);
         }
     }
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for requirement in &mut self.requirements {
+            requirement.signature.remap_path_ids(remap);
+        }
+    }
 
     pub fn validate_required_source_prefixes(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
         for requirement in &self.requirements {
-            requirement.validate_required_source_prefixes(provisional_source_file)?;
+            requirement.validate_required_source_prefixes(provisional_source_file, path_fork)?;
         }
         Ok(())
     }
@@ -110,10 +116,11 @@ impl TraitRequirementSyntax {
 
     pub fn validate_required_source_prefixes(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
         self.signature
-            .validate_required_source_prefixes(provisional_source_file)
+            .validate_required_source_prefixes(provisional_source_file, path_fork)
     }
 }
 

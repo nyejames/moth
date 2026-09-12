@@ -57,6 +57,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
@@ -134,6 +135,7 @@ fn evaluate_compound_assignment_value(
     input: CompoundAssignmentInput<'_>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let CompoundAssignmentInput {
         variable_declaration,
@@ -147,9 +149,8 @@ fn evaluate_compound_assignment_value(
     //  Parse the RHS operand
     // -----------------------
 
-    let rhs_context = variable_declaration
-        .id
-        .name()
+    let rhs_context = path_fork
+        .component(variable_declaration.id)
         .map(|target_name| context.with_pending_catch_assignment_targets(&[target_name]))
         .unwrap_or_else(|| context.clone());
     let rhs = create_expression(
@@ -160,6 +161,7 @@ fn evaluate_compound_assignment_value(
         &variable_declaration.value.value_mode,
         false,
         string_table,
+        path_fork,
     )?;
 
     // -------------------------------------------
@@ -184,6 +186,7 @@ fn evaluate_compound_assignment_value(
         &mut inferred,
         &variable_declaration.value.value_mode,
         string_table,
+        path_fork,
     )?;
 
     validate_assignment_value_type(target_type_id, &value, type_interner.environment())?;
@@ -207,6 +210,7 @@ fn build_mutation_from_target(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<AstNode, ExpressionParseError> {
     let span = Some(SourceSpan::new(
         token_stream.file_id,
@@ -227,7 +231,7 @@ fn build_mutation_from_target(
     if !place_expression_is_mutable(&target) {
         let (reason, field_name, root_binding_name) = match &target.kind {
             PlaceExpressionKind::Field { field, base } => {
-                let root = root_binding_name_of_place(base);
+                let root = root_binding_name_of_place(base, path_fork);
                 (
                     InvalidAssignmentTargetReason::ImmutableFieldRoot,
                     Some(*field),
@@ -241,7 +245,7 @@ fn build_mutation_from_target(
 
         let diagnostic = CompilerDiagnostic::invalid_assignment_target(
             reason,
-            variable_declaration.id.name(),
+            path_fork.component(variable_declaration.id),
             Some(target_type_id),
             field_name,
             root_binding_name,
@@ -269,10 +273,10 @@ fn build_mutation_from_target(
                 target_type_id,
                 type_interner.environment(),
                 string_table,
+                &*path_fork,
             );
-            let rhs_context = variable_declaration
-                .id
-                .name()
+            let rhs_context = path_fork
+                .component(variable_declaration.id)
                 .map(|target_name| context.with_pending_catch_assignment_targets(&[target_name]))
                 .unwrap_or_else(|| context.clone());
 
@@ -283,6 +287,7 @@ fn build_mutation_from_target(
                 &[target_type_id],
                 ValueReceiverKind::Assignment,
                 string_table,
+                path_fork,
             ) {
                 value_block_result?
             } else {
@@ -295,6 +300,7 @@ fn build_mutation_from_target(
                         cast_target_context: &mut cast_target_context,
                         value_mode: &variable_declaration.value.value_mode,
                         string_table,
+                        path_fork,
                     },
                     false,
                 );
@@ -330,7 +336,7 @@ fn build_mutation_from_target(
             let Some((operator, _label)) = compound_assignment_operator(compound_token) else {
                 return Err(CompilerDiagnostic::invalid_assignment_target(
                     InvalidAssignmentTargetReason::ExpectedAssignmentOperator,
-                    variable_declaration.id.name(),
+                    path_fork.component(variable_declaration.id),
                     Some(target_type_id),
                     None,
                     None,
@@ -353,6 +359,7 @@ fn build_mutation_from_target(
                 },
                 type_interner,
                 string_table,
+                path_fork,
             )?
         }
     };
@@ -378,6 +385,7 @@ pub(crate) fn handle_mutation_target(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<AstNode, ExpressionParseError> {
     build_mutation_from_target(
         token_stream,
@@ -387,6 +395,7 @@ pub(crate) fn handle_mutation_target(
         context,
         type_interner,
         string_table,
+        path_fork,
     )
 }
 
@@ -394,8 +403,6 @@ pub(crate) fn handle_mutation_target(
 ///
 /// WHAT: parses field-access chains on the variable, then builds the mutation
 ///       node through `build_mutation_from_target`.
-/// WHY: this is the entry point used by the statement parser when it sees a
-///      variable reference followed by an assignment operator.
 pub fn handle_mutation(
     token_stream: &mut FileTokens,
     variable_declaration: &Declaration,
@@ -403,6 +410,7 @@ pub fn handle_mutation(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<AstNode, ExpressionParseError> {
     let target_expression = parse_field_access(
         token_stream,
@@ -410,6 +418,7 @@ pub fn handle_mutation(
         context,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     let Some(target) = place_expression_from_expression(&target_expression) else {
@@ -436,6 +445,7 @@ pub fn handle_mutation(
         context,
         type_interner,
         string_table,
+        path_fork,
     )
 }
 

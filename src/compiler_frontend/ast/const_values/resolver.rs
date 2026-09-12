@@ -30,7 +30,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 #[cfg(test)]
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
@@ -46,13 +47,13 @@ use rustc_hash::FxHashMap;
 ///       constant is materialised into an expression only where one is actually referenced.
 #[derive(Clone, Debug, Default)]
 pub struct ConstValueEnvironment {
-    module: Rc<FxHashMap<InternedPath, ConstValueId>>,
-    local: FxHashMap<InternedPath, Expression>,
+    module: Rc<FxHashMap<PathId, ConstValueId>>,
+    local: FxHashMap<PathId, Expression>,
 }
 
 impl ConstValueEnvironment {
     /// Build an environment over a module's authored constants.
-    pub(crate) fn with_module_base(module: FxHashMap<InternedPath, ConstValueId>) -> Self {
+    pub(crate) fn with_module_base(module: FxHashMap<PathId, ConstValueId>) -> Self {
         Self {
             module: Rc::new(module),
             local: FxHashMap::default(),
@@ -63,17 +64,17 @@ impl ConstValueEnvironment {
     ///
     /// A local binding shadows a module constant of the same path, which is what
     /// [`Self::module_constant`] relies on being consulted second.
-    pub fn insert(&mut self, path: InternedPath, expression: Expression) {
+    pub fn insert(&mut self, path: PathId, expression: Expression) {
         self.local.insert(path, expression);
     }
 
     /// Look up a binding introduced by this scope or an enclosing one.
-    pub(crate) fn lookup_local(&self, path: &InternedPath) -> Option<&Expression> {
+    pub(crate) fn lookup_local(&self, path: &PathId) -> Option<&Expression> {
         self.local.get(path)
     }
 
     /// Look up an authored module constant by path.
-    pub(crate) fn module_constant(&self, path: &InternedPath) -> Option<ConstValueId> {
+    pub(crate) fn module_constant(&self, path: &PathId) -> Option<ConstValueId> {
         self.module.get(path).copied()
     }
 
@@ -274,7 +275,7 @@ impl<'a> ConstValueResolver<'a> {
 
     fn resolve_reference(
         &mut self,
-        path: &InternedPath,
+        path: &PathId,
         environment: &ConstValueEnvironment,
     ) -> Result<Expression, ConstResolutionError> {
         // A binding the scope introduced itself shadows a module constant of the same path, so

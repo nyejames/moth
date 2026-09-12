@@ -19,6 +19,8 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReturnShapeReason};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -37,6 +39,7 @@ pub fn create_multiple_expressions(
     _context_label: &str,
     consume_closing_parenthesis: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     create_multiple_expressions_inner(
         token_stream,
@@ -44,6 +47,7 @@ pub fn create_multiple_expressions(
         type_interner,
         consume_closing_parenthesis,
         string_table,
+        path_fork,
     )
 }
 
@@ -53,6 +57,7 @@ fn create_multiple_expressions_inner(
     type_interner: &mut AstTypeInterner<'_>,
     consume_closing_parenthesis: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     let mut expressions: Vec<Expression> = Vec::new();
 
@@ -66,6 +71,7 @@ fn create_multiple_expressions_inner(
             *expected_type,
             type_interner.environment(),
             string_table,
+            &*path_fork,
         );
         let input = ExpressionParseInput::new(
             ExpressionParseResources {
@@ -76,6 +82,7 @@ fn create_multiple_expressions_inner(
                 cast_target_context: &mut cast_target_context,
                 value_mode: &ValueMode::ImmutableOwned,
                 string_table,
+                path_fork,
             },
             ExpressionTrailingPolicy {
                 consume_closing_parenthesis,
@@ -139,6 +146,7 @@ pub fn create_expression(
     value_mode: &ValueMode,
     consume_closing_parenthesis: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let mut cast_target_context = CastTargetContext::None;
     let input = ExpressionParseInput::ordinary(
@@ -150,6 +158,7 @@ pub fn create_expression(
             cast_target_context: &mut cast_target_context,
             value_mode,
             string_table,
+            path_fork,
         },
         consume_closing_parenthesis,
     );
@@ -167,6 +176,7 @@ pub(crate) fn create_expression_without_boundary_catch(
     value_mode: &ValueMode,
     consume_closing_parenthesis: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let mut cast_target_context = CastTargetContext::None;
     let input = ExpressionParseInput::without_boundary_catch(
@@ -178,6 +188,7 @@ pub(crate) fn create_expression_without_boundary_catch(
             cast_target_context: &mut cast_target_context,
             value_mode,
             string_table,
+            path_fork,
         },
         consume_closing_parenthesis,
     );
@@ -222,6 +233,7 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
             input.type_interner,
             &mut dispatch_state,
             input.string_table,
+            input.path_fork,
         )? {
             ExpressionTokenStep::Continue => continue,
             ExpressionTokenStep::Advance => input.token_stream.advance(),
@@ -241,6 +253,7 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         input.expected_type,
         input.value_mode,
         input.string_table,
+        input.path_fork,
     )
     .map_err(ExpressionParseError::from)
 }
@@ -348,6 +361,7 @@ fn create_expression_until_with_policy(
             cast_target_context: input.cast_target_context,
             value_mode: input.value_mode,
             string_table: input.string_table,
+            path_fork: input.path_fork,
         },
         ExpressionTrailingPolicy {
             consume_closing_parenthesis: false,

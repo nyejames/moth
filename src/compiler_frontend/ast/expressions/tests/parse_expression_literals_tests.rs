@@ -19,7 +19,7 @@ use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -108,11 +108,12 @@ fn parse_whole_number_token(
     next_number_negative: bool,
 ) -> Result<LiteralParseOutcome, ExpressionParseError> {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -165,6 +166,7 @@ fn parse_whole_number_token(
             &mut type_interner,
             &mut literal_state,
             &mut string_table,
+            &mut path_fork,
         )?;
     }
 

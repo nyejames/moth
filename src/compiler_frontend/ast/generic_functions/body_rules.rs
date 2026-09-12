@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Generic body validation executes the ordinary body parser and retains its two-lane failure.
@@ -32,6 +33,7 @@ pub(crate) struct GenericFunctionBodyValidationInput<'a, 'environment> {
     pub(crate) type_interner: &'a mut AstTypeInterner<'environment>,
     pub(crate) warnings: &'a mut Vec<CompilerDiagnostic>,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 /// Parses and retains a generic function template body for final frontend validation.
@@ -48,6 +50,7 @@ pub(crate) fn validate_generic_function_body(
         type_interner,
         warnings,
         string_table,
+        path_fork,
     } = input;
 
     context.generic_template_validation = true;
@@ -64,5 +67,6 @@ pub(crate) fn validate_generic_function_body(
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )
 }

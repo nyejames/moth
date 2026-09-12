@@ -71,7 +71,7 @@ fn escape_html_preserves_runtime_head_references() {
         &mut string_table,
     );
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("template should parse");
 
     let store = context.template_ir_store.borrow();

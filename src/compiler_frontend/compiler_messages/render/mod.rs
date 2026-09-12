@@ -55,7 +55,7 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_component_is_config_file, dependency_component_is_support_root_file,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn malformed_template_message(
@@ -726,20 +726,19 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
 /// to avoid binding directly. Normal `@*.moth` root references are caught earlier by
 /// the path parser's `LeadingAtInPathComponent` rejection.
 pub(crate) fn special_file_name_from_path(
-    path: &InternedPath,
-    string_table: &dyn StringTableResolver,
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     // Support-root markers (`+`) are unambiguous even when an earlier folder shares a name.
-    for component in path.as_components() {
-        let segment = string_table.resolve(*component);
+    let path_text = context.render_path(path);
+    for segment in path_text.split('/') {
         if dependency_component_is_support_root_file(segment) {
             let suffix = if segment.contains('.') { "" } else { ".moth" };
             return format!("{segment}{suffix}");
         }
     }
 
-    for component in path.as_components() {
-        let segment = string_table.resolve(*component);
+    for segment in path_text.split('/') {
         if dependency_component_is_config_file(segment) {
             return "config.moth".to_owned();
         }
@@ -764,20 +763,19 @@ fn named_value_or_default(
 ///      paths. Authors who write `@helper/+page symbol` should be told to use
 ///      `@helper symbol` instead.
 pub(crate) fn support_root_import_suggestion(
-    path: &InternedPath,
-    string_table: &dyn StringTableResolver,
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let components = path.as_components();
-    let mut suggestion_path: Vec<String> = Vec::new();
+    let path_text = context.render_path(path);
+    let mut suggestion_path: Vec<&str> = Vec::new();
     let mut found_root_component = false;
 
-    for component in components {
-        let segment = string_table.resolve(*component);
+    for segment in path_text.split('/') {
         if dependency_component_is_support_root_file(segment) {
             found_root_component = true;
             continue;
         }
-        suggestion_path.push(segment.to_owned());
+        suggestion_path.push(segment);
     }
 
     if !found_root_component {

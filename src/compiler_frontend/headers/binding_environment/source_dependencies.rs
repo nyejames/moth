@@ -17,7 +17,7 @@ use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// Result for source dependency registration.
@@ -32,7 +32,7 @@ type SourceDependencyResult<T> = Result<T, BindingEnvironmentError>;
 /// WHY: source registration owns the shape shared by direct, public-export and internal source
 ///      dependencies, leaving callers focused on resolution rather than argument plumbing.
 pub(super) struct SourceDependencyInput<'a> {
-    pub(super) symbol_path: &'a InternedPath,
+    pub(super) symbol_path: &'a PathId,
     pub(super) local_name: StringId,
     pub(super) source_span: Option<SourceSpan>,
     pub(super) local_alias: Option<&'a DependencyAlias>,
@@ -48,11 +48,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     pub(super) fn bind_receiver_methods_for_type(
         &self,
         file_visibility: &mut FileVisibility,
-        nominal_type_path: &InternedPath,
-        target_file: &InternedPath,
+        nominal_type_path: &PathId,
+        target_file: &PathId,
         access: &SourceDependencyAccess,
     ) {
-        let Some(receiver_type_name) = nominal_type_path.name() else {
+        let Some(receiver_type_name) = self.path_fork.component(*nominal_type_path) else {
             return;
         };
 
@@ -73,7 +73,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .canonical_source_by_symbol_path
                 .get(path)
                 .is_some_and(|source_file| source_file == target_file)
-                && let Some(name) = path.name()
+                && let Some(name) = self.path_fork.component(*path)
             {
                 let is_visible =
                     self.receiver_type_visible_for_method_surface(nominal_type_path, access);
@@ -101,8 +101,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// visibility.
     pub(super) fn is_internal_dependency(
         &self,
-        consumer_file: &InternedPath,
-        symbol_path: &InternedPath,
+        consumer_file: &PathId,
+        symbol_path: &PathId,
     ) -> bool {
         let Some(target_file) = self
             .module_symbols
@@ -122,7 +122,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// dependencies through public surfaces must expose the receiver type through that public surface.
     pub(super) fn receiver_type_visible_for_method_surface(
         &self,
-        nominal_type_path: &InternedPath,
+        nominal_type_path: &PathId,
         access: &SourceDependencyAccess,
     ) -> bool {
         match access {
@@ -155,7 +155,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let local_name_span = local_alias.map_or(source_span, |alias| Some(alias.span));
         ensure_not_keyword_shadow_identifier(local_name, local_name_span, self.string_table)?;
 
-        if let Some(symbol_name) = symbol_path.name() {
+        if let Some(symbol_name) = self.path_fork.component(*symbol_path) {
             self.emit_alias_case_warning_if_needed(local_alias, symbol_name);
         }
 

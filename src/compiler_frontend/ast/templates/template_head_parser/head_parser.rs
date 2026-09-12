@@ -65,6 +65,7 @@ pub(crate) struct TemplateHeadParseRequest<'a, 'types> {
     pub(crate) construction_context: &'a mut TemplateConstructionContext,
     pub(crate) control_flow_validation: TemplateControlFlowValidationMode,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -214,6 +215,7 @@ pub fn parse_template_head(
         construction_context,
         control_flow_validation,
         string_table,
+        path_fork,
     } = request;
 
     // Each meaningful head item must be separated with a comma before another
@@ -348,6 +350,7 @@ pub fn parse_template_head(
                     type_interner,
                     control_flow_validation,
                     string_table,
+                    path_fork,
                 )?;
                 return Ok(parsed_template_head(body_mode, &head_state));
             }
@@ -373,6 +376,7 @@ pub fn parse_template_head(
                     type_interner,
                     control_flow_validation,
                     string_table,
+                    path_fork,
                 )?;
                 return Ok(parsed_template_head(body_mode, &head_state));
             }
@@ -400,6 +404,7 @@ pub fn parse_template_head(
                     type_interner.environment(),
                     construction_context,
                     string_table,
+                    path_fork,
                 )?;
                 defer_comma_advance = true;
                 apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
@@ -462,6 +467,7 @@ pub fn parse_template_head(
                         &value_mode,
                         false,
                         string_table,
+                        path_fork,
                     )
                     .map_err(|error| {
                         with_source_span_error(value_span, TemplateError::from(error))
@@ -473,6 +479,7 @@ pub fn parse_template_head(
                             context,
                             type_environment: type_interner.environment(),
                             construction_context,
+                            path_fork: &*path_fork,
                         },
                         value_span,
                         string_table,
@@ -502,6 +509,7 @@ pub fn parse_template_head(
                         &reference.value.value_mode,
                         false,
                         string_table,
+                        path_fork,
                     )
                     .map_err(|error| {
                         with_source_span_error(value_span, TemplateError::from(error))
@@ -512,6 +520,7 @@ pub fn parse_template_head(
                             context,
                             type_environment: type_interner.environment(),
                             construction_context,
+                            path_fork: &*path_fork,
                         },
                         value_span,
                         string_table,
@@ -551,6 +560,7 @@ pub fn parse_template_head(
                     &ValueMode::ImmutableOwned,
                     false,
                     string_table,
+                    path_fork,
                 )
                 .map_err(|error| with_source_span_error(value_span, TemplateError::from(error)))?;
 
@@ -560,6 +570,7 @@ pub fn parse_template_head(
                         context,
                         type_environment: type_interner.environment(),
                         construction_context,
+                        path_fork: &*path_fork,
                     },
                     value_span,
                     string_table,
@@ -582,6 +593,7 @@ pub fn parse_template_head(
                     type_interner,
                     construction_context,
                     string_table,
+                    path_fork,
                 )?;
                 apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
             }
@@ -603,6 +615,7 @@ pub fn parse_template_head(
                     &ValueMode::ImmutableOwned,
                     true,
                     string_table,
+                    path_fork,
                 )
                 .map_err(|error| with_source_span_error(value_span, TemplateError::from(error)))?;
 
@@ -612,6 +625,7 @@ pub fn parse_template_head(
                         context,
                         type_environment: type_interner.environment(),
                         construction_context,
+                        path_fork: &*path_fork,
                     },
                     value_span,
                     string_table,
@@ -658,6 +672,7 @@ pub fn parse_template_head(
                         &directive_name,
                         spec,
                         string_table,
+                        path_fork,
                     )?;
                     apply_head_compatibility(&mut head_state, &spec.head_compatibility);
                 }
@@ -754,6 +769,7 @@ fn parse_style_directive_from_spec(
     directive_name: &str,
     spec: &StyleDirectiveSpec,
     string_table: &mut StringTable,
+    path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> TemplateHeadResult<bool> {
     let directive_result = match &spec.kind {
         StyleDirectiveKind::Core(kind) => parse_core_style_directive(
@@ -764,6 +780,7 @@ fn parse_style_directive_from_spec(
             directive_name,
             *kind,
             string_table,
+            path_fork,
         ),
         StyleDirectiveKind::Handler(handler_spec) => apply_handler_style_directive(
             token_stream,
@@ -773,6 +790,7 @@ fn parse_style_directive_from_spec(
             directive_name,
             handler_spec,
             string_table,
+            path_fork,
         ),
     };
 

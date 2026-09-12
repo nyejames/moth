@@ -11,11 +11,14 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
 fn imported_nominal_paths_preserve_package_origin_and_root_role() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut scratch = Vec::new();
     let project_normal = origin(
         StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "shared"),
         ModuleRootRole::Normal,
@@ -29,30 +32,34 @@ fn imported_nominal_paths_preserve_package_origin_and_root_role() {
         ModuleRootRole::Normal,
     );
 
-    let normal_path = imported_nominal_path(&project_normal, &mut string_table);
-    let support_path = imported_nominal_path(&project_support, &mut string_table);
-    let builder_path = imported_nominal_path(&builder_normal, &mut string_table);
+    let normal_path =
+        imported_nominal_path(&project_normal, &mut string_table, &mut path_fork);
+    let support_path =
+        imported_nominal_path(&project_support, &mut string_table, &mut path_fork);
+    let builder_path =
+        imported_nominal_path(&builder_normal, &mut string_table, &mut path_fork);
 
     assert_eq!(
-        normal_path.to_string(&string_table),
+        path_fork.render_portable(normal_path, &string_table, &mut scratch),
         "<imported>/project/shared/normal/cards/Card"
     );
     assert_eq!(
-        support_path.to_string(&string_table),
+        path_fork.render_portable(support_path, &string_table, &mut scratch),
         "<imported>/project/shared/support/cards/Card"
     );
     assert_eq!(
-        builder_path.to_string(&string_table),
+        path_fork.render_portable(builder_path, &string_table, &mut scratch),
         "<imported>/builder/shared/normal/cards/Card"
     );
 
     let mut formerly_colliding_authored_path =
-        crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
-            "__imported",
-            &mut string_table,
-        );
+        path_fork
+            .try_intern_portable_path("__imported", &mut string_table)
+            .expect("test path fits");
     for component in ["project", "shared", "normal", "cards", "Card"] {
-        formerly_colliding_authored_path.push_str(component, &mut string_table);
+        formerly_colliding_authored_path = path_fork
+            .try_intern_child(formerly_colliding_authored_path, string_table.intern(component))
+            .expect("test path fits");
     }
     assert_ne!(normal_path, formerly_colliding_authored_path);
     assert!(!is_valid_identifier("<imported>"));
@@ -77,6 +84,7 @@ fn imported_nominal_paths_preserve_package_origin_and_root_role() {
     }
 }
 
+
 fn origin(package: StablePackageIdentity, role: ModuleRootRole) -> OriginTypeId {
     OriginTypeId::new(
         StableModuleOriginIdentity::from_portable_path(package, "cards".to_owned(), role),
@@ -87,7 +95,7 @@ fn origin(package: StablePackageIdentity, role: ModuleRootRole) -> OriginTypeId 
 
 fn register_struct(
     type_environment: &mut TypeEnvironment,
-    path: crate::compiler_frontend::symbols::interned_path::InternedPath,
+    path: PathId,
 ) -> crate::compiler_frontend::datatypes::ids::TypeId {
     type_environment
         .register_nominal_struct(StructTypeDefinition {

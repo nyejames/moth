@@ -39,7 +39,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -102,6 +102,7 @@ fn fold_prepared_view(
 #[test]
 fn fold_view_matches_direct_template_fold_for_simple_text() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_text_fixture(&mut string_table, "hello");
     let view = TirView::new(
         &fixture.store,
@@ -123,6 +124,7 @@ fn fold_view_matches_direct_template_fold_for_simple_text() {
 #[test]
 fn fold_view_is_deterministic_with_and_without_active_bindings() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_text_fixture(&mut string_table, "cached");
     let view = TirView::new(
         &fixture.store,
@@ -143,7 +145,7 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
     };
 
     // An active binding stack does not change a view that reads no bindings.
-    let path = InternedPath::from_single_str("value", &mut string_table);
+    let path = path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits");
     let mut active_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
@@ -159,6 +161,7 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
 #[test]
 fn prepared_view_rejects_identity_mismatch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut fixture = build_text_fixture(&mut string_table, "identity");
     let alternate_id = {
         let text_id = string_table.intern("alternate");
@@ -207,6 +210,7 @@ fn prepared_view_rejects_identity_mismatch() {
 #[test]
 fn foldable_preparation_accepts_simple_text() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_text_fixture(&mut string_table, "safe");
     let view = TirView::new(
         &fixture.store,
@@ -226,6 +230,7 @@ fn foldable_preparation_accepts_simple_text() {
 #[test]
 fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let fill_text = string_table.intern("filled");
     let mut builder = TemplateIrBuilder::new(&mut store);
@@ -357,6 +362,7 @@ fn text_template(
 #[test]
 fn fold_prepared_template_rejects_parsed_phase() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let template_id = text_template(&mut store, &mut string_table, "parsed");
     let context = TemplateViewContext::default();
@@ -392,6 +398,7 @@ fn fold_prepared_template_rejects_parsed_phase() {
 #[test]
 fn prepared_fold_rejects_missing_node_in_untaken_branch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let body = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Text {
@@ -446,6 +453,7 @@ fn prepared_fold_rejects_missing_node_in_untaken_branch() {
 #[test]
 fn prepared_fold_emits_each_occurrence_of_a_repeated_composed_child_view() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let child_template_id = text_template(&mut store, &mut string_table, "child");
     let child_reference = TemplateTirChildReference::new(
@@ -490,6 +498,7 @@ fn prepared_fold_emits_each_occurrence_of_a_repeated_composed_child_view() {
 #[test]
 fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let empty_context = TemplateViewContext::default();
 
@@ -623,6 +632,7 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
 #[test]
 fn repeated_prepared_fold_reuses_effective_expression_provenance() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let text = string_table.intern("effective");
     let member = SyntheticInterfaceMemberIdentity::new(
@@ -704,6 +714,7 @@ fn repeated_prepared_fold_reuses_effective_expression_provenance() {
 #[test]
 fn prepared_fold_below_composed_child_ignores_unconsumed_overlay_identity() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let parent_context = TemplateViewContext::default();
     let missing_context = TemplateViewContext {
@@ -780,6 +791,7 @@ fn prepared_fold_below_composed_child_ignores_unconsumed_overlay_identity() {
 #[test]
 fn prepared_runtime_plan_validates_plan_authority_before_handoff() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut fixture = build_text_fixture(&mut string_table, "runtime plan");
     let missing_slot_plan_id = TemplateSlotPlanId::new(999);
     super::super::store::MalformedTirStore::new(&mut fixture.store)
@@ -805,6 +817,7 @@ fn prepared_runtime_plan_validates_plan_authority_before_handoff() {
 /// malformed nested-template authority on the infrastructure lane.
 fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -898,6 +911,7 @@ fn prepared_fold_rejects_direct_sequence_node_cycle_as_infrastructure() {
     let view = TirView::new(&store, template_id, TemplateTirPhase::Composed, context)
         .expect("cyclic view should construct");
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut fold_context = fold_context(&mut string_table);
     let TemplateError::Infrastructure(error) =
         fold_prepared_view(&view, &mut fold_context).expect_err("direct cycle must fail")
@@ -921,6 +935,7 @@ fn prepared_fold_increments_phase1_attribution_counters() {
     let _guard = lock_counter_test();
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_text_fixture(&mut string_table, "counter probe");
     let view = TirView::new(
         &fixture.store,

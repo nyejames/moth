@@ -17,7 +17,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -36,17 +36,17 @@ type TargetResolutionResult<T> = Result<T, CompilerDiagnostic>;
 pub(super) struct ConformanceTarget {
     pub(super) type_id: TypeId,
     pub(super) receiver_key: ReceiverKey,
-    pub(super) path: Option<InternedPath>,
+    pub(super) path: Option<PathId>,
     pub(super) is_generic_constructor: bool,
     pub(super) evidence_kind: TraitEvidenceKind,
 }
 
 pub(super) struct ResolveConformanceTargetContext<'a> {
-    pub(super) conformance_source_file: &'a InternedPath,
+    pub(super) conformance_source_file: &'a PathId,
     pub(super) visibility: &'a FileVisibility,
-    pub(super) nominal_type_ids_by_path: &'a FxHashMap<InternedPath, TypeId>,
-    pub(super) struct_source_by_path: &'a FxHashMap<InternedPath, InternedPath>,
-    pub(super) choice_source_by_path: &'a FxHashMap<InternedPath, InternedPath>,
+    pub(super) nominal_type_ids_by_path: &'a FxHashMap<PathId, TypeId>,
+    pub(super) struct_source_by_path: &'a FxHashMap<PathId, PathId>,
+    pub(super) choice_source_by_path: &'a FxHashMap<PathId, PathId>,
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) string_table: &'a StringTable,
 }
@@ -144,13 +144,13 @@ pub(super) fn resolve_conformance_target(
 
             Ok(ConformanceTarget {
                 type_id,
-                receiver_key: ReceiverKey::Struct(definition.path.clone()),
-                path: Some(definition.path.clone()),
+                receiver_key: ReceiverKey::Struct(definition.path),
+                path: Some(definition.path),
                 is_generic_constructor: definition.generic_parameters.is_some(),
                 evidence_kind: TraitEvidenceKind::Canonical,
             })
-        }
 
+        },
         TypeDefinition::Choice(definition) => {
             let target_is_declared_here = context
                 .choice_source_by_path
@@ -168,13 +168,13 @@ pub(super) fn resolve_conformance_target(
 
             Ok(ConformanceTarget {
                 type_id,
-                receiver_key: ReceiverKey::Choice(definition.path.clone()),
-                path: Some(definition.path.clone()),
+                receiver_key: ReceiverKey::Choice(definition.path),
+                path: Some(definition.path),
                 is_generic_constructor: definition.generic_parameters.is_some(),
                 evidence_kind: TraitEvidenceKind::Canonical,
             })
-        }
 
+        },
         _ => Err(invalid_conformance(
             target.name,
             None,

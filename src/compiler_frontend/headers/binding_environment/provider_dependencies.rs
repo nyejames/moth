@@ -15,7 +15,7 @@ use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::dependency_target::decode_dependency_target;
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencySelection;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// Result for provider-backed dependency resolution.
@@ -38,7 +38,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         registry: &mut VisibleNameRegistry,
         dependency: &RetainedDependencyClause,
         selections: &[DependencySelection],
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> ProviderDependencyResult<Option<()>> {
         let Some((resolved, remaining)) = self
             .find_provider_resolution_from_retained_target(source_file, &dependency.dependency)?
@@ -72,7 +72,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .lookup_external_symbol_id_by_name(&package.path, selection.source_name)
                 .ok_or_else(|| {
                     super::diagnostics::missing_dependency_target(
-                        &dependency.dependency.path.append(selection.source_name),
+                        &self
+                            .path_fork
+                            .try_intern_child(dependency.dependency.path, selection.source_name)
+                            .expect("path interner fork exhausted while building provider diagnostic path"),
                         Some(selection.source_span),
                     )
                 })?;
@@ -105,7 +108,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         file_visibility: &mut FileVisibility,
         registry: &mut VisibleNameRegistry,
         dependency: &RetainedDependencyClause,
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> ProviderDependencyResult<Option<()>> {
         let Some((resolved, remaining)) = self
             .find_provider_resolution_from_retained_target(source_file, &dependency.dependency)?
@@ -169,18 +172,27 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// Look up the Stage 0 provider resolution for the exact retained prefix.
     fn find_provider_resolution_from_retained_target(
         &self,
-        source_file: &InternedPath,
+        source_file: &PathId,
         dependency: &crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath,
     ) -> ProviderDependencyResult<Option<(ResolvedExternalImport, Vec<StringId>)>> {
         let Some(decoded) =
-            decode_dependency_target(&dependency.path, &dependency.target, self.string_table)?
+            decode_dependency_target(
+                dependency.path,
+                &dependency.target,
+                &*self.path_fork,
+                self.string_table,
+            )?
         else {
             return Ok(None);
         };
 
-        let source_str = source_file.to_portable_string(self.string_table);
-        let prefix = decoded.prefix_path();
-        let prefix_str = prefix.to_portable_string(self.string_table);
+        let mut scratch = Vec::new();
+        let source_str = self
+            .path_fork
+            .render_portable(*source_file, self.string_table, &mut scratch);
+        let prefix_str = self
+            .path_fork
+            .render_portable(decoded.prefix_path_id(), self.string_table, &mut scratch);
         let Some(entry) = self
             .external_dependency_resolution_table
             .get(&source_str, &prefix_str)

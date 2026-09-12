@@ -11,7 +11,8 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMatchPatternReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -141,7 +142,7 @@ fn parse_option_present_capture(
     // Binding path is filled in by the caller (branching.rs) once the arm scope is known.
     Ok(MatchPattern::OptionPresentCapture {
         name,
-        binding_path: InternedPath::new(),
+        binding_path: PathId::ROOT,
         inner_type_id,
         span,
         binding_span,

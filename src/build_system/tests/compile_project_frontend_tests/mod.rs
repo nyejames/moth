@@ -42,7 +42,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::public_call_summary::PublicCallMutationEffect;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_diagnostics::assert_exact_infrastructure_error;
 use crate::projects::settings::{Config, ProjectConfigError};

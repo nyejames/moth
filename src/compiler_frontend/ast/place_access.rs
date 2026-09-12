@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpressionK
 use crate::compiler_frontend::ast::expressions::parse_expression_places::{
     place_expression_from_expression, place_expression_is_mutable,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// The receiver source state shared by source methods, collection builtins and map builtins.
@@ -51,12 +52,15 @@ fn place_expression_from_node(node: &AstNode) -> Option<PlaceExpression> {
 /// WHY: shared receiver-access validation for source methods, collection builtins and map
 ///      builtins consumes one classification instead of asking place and mutability separately
 ///      and walking the same receiver twice.
-pub(crate) fn classify_receiver_source_state(node: &AstNode) -> ReceiverSourceState {
+pub(crate) fn classify_receiver_source_state(
+    node: &AstNode,
+    path_fork: &PathInternerFork,
+) -> ReceiverSourceState {
     let Some(place) = place_expression_from_node(node) else {
         return ReceiverSourceState::Temporary;
     };
 
-    let binding_name = root_binding_name(&place);
+    let binding_name = root_binding_name(&place, path_fork);
     if place_expression_is_mutable(&place) {
         ReceiverSourceState::MutablePlace { binding_name }
     } else {
@@ -69,9 +73,10 @@ pub(crate) fn classify_receiver_source_state(node: &AstNode) -> ReceiverSourceSt
 /// WHAT: follows field projections down to their root local and returns its simple name.
 /// WHY: immutable-place receiver diagnostics name the binding the author must declare mutable,
 ///      but only when the root is a simple named binding rather than an unnamed projection.
-fn root_binding_name(place: &PlaceExpression) -> Option<StringId> {
+fn root_binding_name(place: &PlaceExpression, path_fork: &PathInternerFork) -> Option<StringId> {
     match &place.kind {
-        PlaceExpressionKind::Local(path) => path.name(),
-        PlaceExpressionKind::Field { base, .. } => root_binding_name(base),
+        PlaceExpressionKind::Local(path) => path_fork.component(*path),
+        PlaceExpressionKind::Field { base, .. } => root_binding_name(base, path_fork),
     }
 }
+

@@ -7,13 +7,14 @@
 //!      This module parses syntax shells only; semantic trait resolution and evidence validation
 //!      are owned by AST.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidDeclarationReason, InvalidSignatureMemberReason,
 };
 use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::traits::syntax::{
@@ -45,8 +46,15 @@ pub(super) fn parse_trait_declaration(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> TraitHeaderResult<TraitDeclarationSyntax> {
     let mut requirements = Vec::new();
-    let trait_path = context.source_file.append(declaration_name);
     let name_span = SourceSpan::new(token_stream.file_id, declaration_token.span);
+    let trait_path = context
+        .path_fork
+        .try_intern_child(context.source_file, declaration_name)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "path table exhausted while interning trait path",
+            ))
+        })?;
 
     token_stream.skip_newlines();
 
@@ -72,7 +80,7 @@ pub(super) fn parse_trait_declaration(
 
             _ => {
                 let requirement =
-                    parse_trait_requirement(token_stream, &trait_path, context, span_builder)?;
+                    parse_trait_requirement(token_stream, trait_path, context, span_builder)?;
                 requirements.push(requirement);
             }
         }
@@ -89,7 +97,7 @@ pub(super) fn parse_trait_declaration(
 
 fn parse_trait_requirement(
     token_stream: &mut FileTokens,
-    trait_path: &InternedPath,
+    trait_path: PathId,
     context: &mut HeaderBuildContext<'_>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> TraitHeaderResult<TraitRequirementSyntax> {
@@ -112,21 +120,29 @@ fn parse_trait_requirement(
     // Requirement-member identifiers are retained declaration syntax, so they must live below
     // the same source-owned prefix as every other header path. The trait and method suffixes
     // keep members from distinct requirements distinct without inventing a parallel namespace.
-    let method_path = trait_path.append(method_name);
+    let method_path = context
+        .path_fork
+        .try_intern_child(trait_path, method_name)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "path table exhausted while interning trait requirement path",
+            ))
+        })?;
 
     let signature = parse_trait_requirement_signature_syntax(
         token_stream,
         context.warnings,
         context.string_table,
-        &method_path,
+        method_path,
+        context.path_fork,
         span_builder,
     )?;
 
     // Every non-empty requirement must start with `This` or `~This`.
     if let Some(first_param) = signature.parameters.first() {
-        let param_name = first_param
-            .id
-            .name()
+        let param_name = context
+            .path_fork
+            .component(first_param.id)
             .map(|id| context.string_table.resolve(id))
             .unwrap_or("");
         if param_name != "This" {
@@ -358,25 +374,27 @@ pub(super) fn parse_trait_incompatibility(
 }
 
 pub(super) fn conformance_header_path(
-    target_path: &InternedPath,
+    target_path: PathId,
     span: SourceSpan,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> InternedPath {
-    target_path.join_str(
-        &format!("__trait_conformance_{:?}", span.local()),
-        string_table,
-    )
+) -> Result<PathId, CompilerError> {
+    let name = string_table.intern(&format!("__trait_conformance_{:?}", span.local()));
+    path_fork
+        .try_intern_child(target_path, name)
+        .ok_or_else(|| CompilerError::compiler_error("path table exhausted while interning conformance path"))
 }
 
 pub(super) fn incompatibility_header_path(
-    subject_path: &InternedPath,
+    subject_path: PathId,
     span: SourceSpan,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> InternedPath {
-    subject_path.join_str(
-        &format!("__trait_incompatibility_{:?}", span.local()),
-        string_table,
-    )
+) -> Result<PathId, CompilerError> {
+    let name = string_table.intern(&format!("__trait_incompatibility_{:?}", span.local()));
+    path_fork
+        .try_intern_child(subject_path, name)
+        .ok_or_else(|| CompilerError::compiler_error("path table exhausted while interning incompatibility path"))
 }
 
 pub(super) fn ensure_trait_name_is_all_caps(

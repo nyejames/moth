@@ -23,7 +23,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::r#struct::validate_struct_default_values;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -34,7 +34,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 fn body_local_struct_default_preserves_missing_template_authority() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let fields = [Declaration {
-        id: InternedPath::new(),
+        id: PathId::ROOT,
         value: Expression::template(
             Template {
                 tir_reference: TemplateTirReference {
@@ -60,9 +60,9 @@ fn body_local_struct_default_preserves_missing_template_authority() {
 fn authored_runtime_struct_default_remains_a_source_diagnostic() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let fields = [Declaration {
-        id: InternedPath::new(),
+        id: PathId::ROOT,
         value: Expression::reference_with_type_id(
-            InternedPath::new(),
+            PathId::ROOT,
             DataType::Bool,
             builtin_type_ids::BOOL,
             Option::<SourceSpan>::default(),
@@ -87,7 +87,7 @@ fn authored_runtime_struct_default_remains_a_source_diagnostic() {
 
 #[test]
 fn parses_struct_definitions_with_field_defaults() {
-    let (ast, string_table) = parse_single_file_ast("Point = |\n    x Int,\n    y Int = 2,\n|\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int,\n    y Int = 2,\n|\n");
 
     let struct_node = ast
         .nodes
@@ -96,7 +96,10 @@ fn parses_struct_definitions_with_field_defaults() {
             matches!(
                 &node.kind,
                 NodeKind::StructDefinition(path, ..)
-                    if path.name_str(&string_table) == Some("Point")
+                    if path_fork
+                        .component(*path)
+                        .map(|id| string_table.resolve(id))
+                        == Some("Point")
             )
         })
         .expect("expected struct definition");
@@ -105,7 +108,12 @@ fn parses_struct_definitions_with_field_defaults() {
         panic!("expected struct definition node");
     };
 
-    assert_eq!(path.name_str(&string_table), Some("Point"));
+    assert_eq!(
+        path_fork
+            .component(*path)
+            .map(|id| string_table.resolve(id)),
+        Some("Point")
+    );
     assert_eq!(fields.len(), 2);
     assert!(matches!(fields[0].value.kind, ExpressionKind::NoValue));
     assert!(matches!(fields[1].value.kind, ExpressionKind::Int(2)));
@@ -113,8 +121,7 @@ fn parses_struct_definitions_with_field_defaults() {
 
 #[test]
 fn struct_optional_string_default_preserves_canonical_string_type_id() {
-    let (ast, string_table) =
-        parse_single_file_ast("Label = |\n    text String? = \"fallback\",\n|\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("Label = |\n    text String? = \"fallback\",\n|\n");
 
     let struct_node = ast
         .nodes
@@ -123,7 +130,10 @@ fn struct_optional_string_default_preserves_canonical_string_type_id() {
             matches!(
                 &node.kind,
                 NodeKind::StructDefinition(path, ..)
-                    if path.name_str(&string_table) == Some("Label")
+                    if path_fork
+                        .component(*path)
+                        .map(|id| string_table.resolve(id))
+                        == Some("Label")
             )
         })
         .expect("expected Label struct definition");
@@ -137,11 +147,9 @@ fn struct_optional_string_default_preserves_canonical_string_type_id() {
 
 #[test]
 fn parses_struct_construction_and_field_access_in_declarations() {
-    let (ast, string_table) = parse_single_file_ast(
-        "Point = |\n    x Int,\n    y Int,\n|\n\npoint = Point(1, 2)\nvalue = point.x\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int,\n    y Int,\n|\n\npoint = Point(1, 2)\nvalue = point.x\n");
 
-    let body = start_function_body(&ast, &string_table);
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(point_decl) = &body[0].kind else {
         panic!("expected point declaration");
@@ -162,9 +170,9 @@ fn parses_struct_construction_and_field_access_in_declarations() {
 
 #[test]
 fn parses_builtin_error_with_default_code_field() {
-    let (ast, string_table) = parse_single_file_ast("err = Error(\"bad\")\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("err = Error(\"bad\")\n");
 
-    let body = start_function_body(&ast, &string_table);
+    let body = start_function_body(&ast, &path_fork, &string_table);
     let NodeKind::VariableDeclaration(error_decl) = &body[0].kind else {
         panic!("expected error declaration");
     };
@@ -173,12 +181,22 @@ fn parses_builtin_error_with_default_code_field() {
     };
 
     assert_eq!(fields.len(), 2);
-    assert_eq!(fields[0].id.name_str(&string_table), Some("message"));
+    assert_eq!(
+        path_fork
+            .component(fields[0].id)
+            .map(|id| string_table.resolve(id)),
+        Some("message")
+    );
     assert!(matches!(
         fields[0].value.kind,
         ExpressionKind::StringSlice(..)
     ));
-    assert_eq!(fields[1].id.name_str(&string_table), Some("code"));
+    assert_eq!(
+        path_fork
+            .component(fields[1].id)
+            .map(|id| string_table.resolve(id)),
+        Some("code")
+    );
     assert!(matches!(fields[1].value.kind, ExpressionKind::Int(0)));
 }
 

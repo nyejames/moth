@@ -12,7 +12,7 @@ fn markdown_formatter_output_text_uses_authored_tir_spans() {
         template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("markdown template should parse");
     let spans = collect_formatted_body_text_spans_from_tir(&template, &context);
 
@@ -115,7 +115,7 @@ fn markdown_formatter_produces_formatted_tir_output() {
         template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("markdown template should parse");
 
     let formatted_body = collect_formatted_body_text_from_tir(&template, &context, &string_table);

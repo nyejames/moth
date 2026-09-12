@@ -32,9 +32,6 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
-use crate::compiler_frontend::paths::path_normalization::{
-    is_relative_dependency_path, join_and_normalize_path,
-};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_resolution::ResolvedDependencyFile;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -46,7 +43,7 @@ use crate::compiler_frontend::source::{
     SourceRegistrationIndex, SourceSpan, SourceSpanBuilders,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -252,6 +249,7 @@ pub(super) fn collect_reachable_input_files(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     source_file_kinds: &SourceFileKindRegistry,
     resource_inputs: &mut ResourceInputRegistry,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<CollectedReachableInputs, CollectReachableInputsError> {
     let discovery = match discover_reachable_source_files(
@@ -261,6 +259,7 @@ pub(super) fn collect_reachable_input_files(
         external_imports,
         source_file_kinds,
         resource_inputs,
+        path_fork,
         string_table,
     ) {
         Ok(discovery) => discovery,

@@ -20,6 +20,7 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::module::{HirChoice, HirChoiceField, HirChoiceVariant};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
@@ -55,7 +56,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_or_register_generic_struct(
         &mut self,
         key: &crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey,
-        nominal_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
+        nominal_path: &PathId,
         _type_id: crate::compiler_frontend::datatypes::ids::TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::StructId, CompilerError> {
@@ -73,7 +74,7 @@ impl<'a> HirBuilder<'a> {
                     crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
                         format!(
                             "Base struct '{}' not found in HIR TypeEnvironment",
-                            nominal_path.to_string(self.string_table)
+                            self.symbol_name_for_diagnostics(nominal_path)
                         ),
                     )
                 })?;
@@ -85,7 +86,7 @@ impl<'a> HirBuilder<'a> {
                 crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
                     format!(
                         "Generic struct '{}' has an argument that is not registered in HIR TypeEnvironment",
-                        nominal_path.to_string(self.string_table)
+                        self.symbol_name_for_diagnostics(nominal_path)
                     ),
                 )
             })?;
@@ -105,7 +106,7 @@ impl<'a> HirBuilder<'a> {
             .map(|fields| {
                 fields
                     .iter()
-                    .map(|field| (field.name.clone(), field.type_id))
+                    .map(|field| (field.name, field.type_id))
                     .collect()
             })
             .unwrap_or_default();
@@ -114,7 +115,7 @@ impl<'a> HirBuilder<'a> {
             let field_type = self.lower_type_id(field_type_id, span)?;
             let field_id = self.allocate_field_id();
             self.fields_by_struct_and_name
-                .insert((struct_id, field_name.clone()), field_id);
+                .insert((struct_id, field_name), field_id);
             self.side_table.bind_field_name(field_id, field_name);
             hir_fields.push(HirField {
                 id: field_id,
@@ -130,8 +131,7 @@ impl<'a> HirBuilder<'a> {
 
         self.generic_structs_by_key
             .insert(key.to_owned(), struct_id);
-        self.side_table
-            .bind_struct_name(struct_id, nominal_path.to_owned());
+        self.side_table.bind_struct_name(struct_id, *nominal_path);
         self.side_table
             .bind_generic_struct_instance(struct_id, key.to_owned());
         self.push_struct(hir_struct);
@@ -142,7 +142,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_or_register_generic_choice(
         &mut self,
         key: &crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey,
-        nominal_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
+        nominal_path: &PathId,
         _type_id: crate::compiler_frontend::datatypes::ids::TypeId,
         _span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
@@ -160,7 +160,7 @@ impl<'a> HirBuilder<'a> {
                     crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
                         format!(
                             "Base choice '{}' not found in HIR TypeEnvironment",
-                            nominal_path.to_string(self.string_table)
+                            self.symbol_name_for_diagnostics(nominal_path)
                         ),
                     )
                 })?;
@@ -172,7 +172,7 @@ impl<'a> HirBuilder<'a> {
                 crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
                     format!(
                         "Generic choice '{}' has an argument that is not registered in HIR TypeEnvironment",
-                        nominal_path.to_string(self.string_table)
+                        self.symbol_name_for_diagnostics(nominal_path)
                     ),
                 )
             })?;
@@ -185,8 +185,7 @@ impl<'a> HirBuilder<'a> {
 
         self.generic_choices_by_key
             .insert(key.to_owned(), choice_id);
-        self.side_table
-            .bind_choice_name(choice_id, nominal_path.to_owned());
+        self.side_table.bind_choice_name(choice_id, *nominal_path);
         self.side_table
             .bind_generic_choice_instance(choice_id, key.to_owned());
         let index = choice_id.0 as usize;
@@ -222,9 +221,8 @@ impl<'a> HirBuilder<'a> {
 
                 if let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload {
                     lowered_fields.reserve(fields.len());
-
                     for field in fields {
-                        let Some(field_name) = field.name.name() else {
+                        let Some(field_name) = self.path_fork.try_component(field.name) else {
                             return_hir_transformation_error!(
                                 "Choice variant field is missing a name",
                                 self.hir_error_location(span)

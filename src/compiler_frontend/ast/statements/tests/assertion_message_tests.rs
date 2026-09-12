@@ -38,6 +38,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_node, node, test_source_location,
 };
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn propagated_expression(_line: i32) -> Expression {
@@ -86,8 +87,8 @@ check || -> String:
     return "unreachable"
 ;
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
-    let body = function_body_by_name(&ast, &string_table, "check");
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "check");
 
     assert!(
         body.iter()
@@ -201,8 +202,8 @@ check || -> String, Error!:
     return value
 ;
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
-    let body = function_body_by_name(&ast, &string_table, "check");
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "check");
     let declaration = body
         .iter()
         .find_map(|node| match &node.kind {
@@ -230,7 +231,7 @@ check || -> String, Error!:
 fn effect_classifier_respects_function_and_loop_control_boundaries() {
     let span = test_source_location(30);
     let nested_function = function_node(
-        Default::default(),
+        PathId::ROOT,
         FunctionSignature::default(),
         vec![node(NodeKind::Return(vec![]), span)],
         span,
@@ -248,8 +249,8 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
                 condition: Expression::bool(true, span, ValueMode::ImmutableOwned),
                 then_body: vec![nested_function, loop_with_local_break],
                 else_body: vec![],
-                then_scope: Default::default(),
-                else_scope: Default::default(),
+                then_scope: PathId::ROOT,
+                else_scope: PathId::ROOT,
                 span,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![],
@@ -273,8 +274,8 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
                 condition: Expression::bool(true, span, ValueMode::ImmutableOwned),
                 then_body: vec![node(NodeKind::Break, span)],
                 else_body: vec![],
-                then_scope: Default::default(),
-                else_scope: Default::default(),
+                then_scope: PathId::ROOT,
+                else_scope: PathId::ROOT,
                 span,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![],
@@ -296,8 +297,8 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
                 condition: Expression::bool(true, span, ValueMode::ImmutableOwned),
                 then_body: vec![node(NodeKind::Continue, span)],
                 else_body: vec![],
-                then_scope: Default::default(),
-                else_scope: Default::default(),
+                then_scope: PathId::ROOT,
+                else_scope: PathId::ROOT,
                 span,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![],
@@ -320,8 +321,8 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
                 condition: Expression::bool(true, span, ValueMode::ImmutableOwned),
                 then_body: vec![node(NodeKind::Return(vec![]), span)],
                 else_body: vec![],
-                then_scope: Default::default(),
-                else_scope: Default::default(),
+                then_scope: PathId::ROOT,
+                else_scope: PathId::ROOT,
                 span,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![],

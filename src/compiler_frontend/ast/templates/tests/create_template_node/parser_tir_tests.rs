@@ -24,7 +24,7 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarati
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
@@ -38,9 +38,10 @@ fn parse_template(
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
     let mut token_stream = template_tokens_from_source(source, string_table, span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = context.template_ir_store();
 
-    let template = Template::new(&mut token_stream, &context, vec![], string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], string_table, &mut path_fork)
         .expect("template should parse");
 
     (template, template_ir_store)
@@ -53,9 +54,10 @@ fn parse_const_required_template(
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
     let mut token_stream = template_tokens_from_source(source, string_table, span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
+    let mut path_fork = PathInternerFork::empty();
     let template_ir_store = context.template_ir_store();
 
-    let template = Template::new_const_required(&mut token_stream, &context, vec![], string_table)
+    let template = Template::new_const_required(&mut token_stream, &context, vec![], string_table, &mut path_fork)
         .expect("const-required template should parse")
         .template;
 
@@ -125,6 +127,7 @@ fn parser_tir_root_child_origins(
 #[test]
 fn parser_tir_owns_contiguous_literal_body_text() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) =
         parse_template("[:\nalpha\nbeta]", &mut string_table, &mut span_builder);
@@ -140,6 +143,7 @@ fn parser_tir_owns_contiguous_literal_body_text() {
 #[test]
 fn parser_tir_records_quoted_and_raw_markers_as_body_text() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[: \"quoted\" `raw` plain]",
@@ -157,6 +161,7 @@ fn parser_tir_records_quoted_and_raw_markers_as_body_text() {
 #[test]
 fn parser_tir_records_suppressed_child_template_brackets_as_literal_text() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) =
         parse_template("[$doc:\n[: child]\n]", &mut string_table, &mut span_builder);
@@ -175,6 +180,7 @@ fn template_tir_folds_nested_child_as_child_template_boundary() {
     // because the TIR formatter is authoritative for child-template output. The
     // final folded output still matches the old linear-text result.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[: before [: child] after]",
@@ -218,6 +224,7 @@ fn template_tir_folds_nested_child_as_child_template_boundary() {
 #[test]
 fn parser_preserves_foldable_nested_child_as_template_boundary() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_const_required_template(
         "[:before[:child]after]",
@@ -322,6 +329,7 @@ fn tir_subtree_contains_aggregate_output(
 #[test]
 fn parser_tir_records_if_else_if_else_branch_chain() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[if true:\nfirst\n[else if false]\nsecond\n[else]\nthird\n]",
@@ -363,6 +371,7 @@ fn parser_tir_records_if_else_if_else_branch_chain() {
 #[test]
 fn template_tir_records_child_template_in_branch_body() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[if true:before [:child] after]",
@@ -449,6 +458,7 @@ fn branch_chain_from_root(
 #[test]
 fn branch_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[\"prefix\", if true:body]",
@@ -486,6 +496,7 @@ fn branch_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
 #[test]
 fn fallback_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[\"prefix\", if false:\nbranch\n[else]\nfallback\n]",
@@ -522,6 +533,7 @@ fn fallback_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
 #[test]
 fn parser_tir_trims_loop_control_boundary_whitespace() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[loop true:\n    [continue]\n    visible\n]",
@@ -554,6 +566,7 @@ fn parser_tir_trims_loop_control_boundary_whitespace() {
 #[test]
 fn parser_tir_records_loop_node() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) =
         parse_template("[loop true: body]", &mut string_table, &mut span_builder);
@@ -599,6 +612,7 @@ fn parser_tir_records_loop_node() {
 #[test]
 fn template_tir_records_child_template_in_loop_body() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[loop true:before [:child] after]",
@@ -631,6 +645,7 @@ fn template_tir_records_child_template_in_loop_body() {
 #[test]
 fn parser_tir_records_loop_control_markers_inside_loop_body() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[loop true:\n    before\n    [break]\n    after\n]",
@@ -664,6 +679,7 @@ fn parser_tir_records_loop_control_markers_inside_loop_body() {
 #[test]
 fn parser_tir_records_continue_marker_inside_loop_body() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[loop true:\n    before\n    [continue]\n    after\n]",
@@ -711,6 +727,7 @@ fn body_text(
 #[test]
 fn parser_tir_records_default_slot_placeholder() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[: before [$slot] after]",
@@ -750,6 +767,7 @@ fn parser_tir_records_default_slot_placeholder() {
 #[test]
 fn parser_tir_records_named_slot_placeholder() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[: before [$slot(\"name\")] after]",
@@ -777,6 +795,7 @@ fn parser_tir_records_named_slot_placeholder() {
 #[test]
 fn parser_tir_records_positional_slot_placeholder() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[: before [$slot(1)] after]",
@@ -803,6 +822,7 @@ fn parser_tir_records_positional_slot_placeholder() {
 #[test]
 fn parser_tir_records_string_literal_head_before_body_with_head_origin() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) =
         parse_template("[\"head\": body]", &mut string_table, &mut span_builder);
@@ -821,6 +841,7 @@ fn parser_tir_records_string_literal_head_before_body_with_head_origin() {
 #[test]
 fn parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template("[42: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
@@ -844,10 +865,11 @@ fn parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin() {
 #[test]
 fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let source_name = string_table.intern("source");
-    let source_path = scope.append(source_name);
+    let source_path = path_fork.try_intern_child(scope, source_name).expect("test path fits");
     let source_span = None;
     let source = ReactiveSource {
         path: source_path.clone(),
@@ -875,14 +897,14 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
         token_stream.src_path.to_owned(),
-        Rc::new(TopLevelDeclarationTable::new(vec![declaration])),
+        Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::default()),
         vec![],
         0,
     )
     .with_source_file_scope(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("reactive head template should parse");
     let store = context.template_ir_store();
     let store = store.borrow();
@@ -943,6 +965,7 @@ fn root_text_excluding_opaque_anchors(
 #[test]
 fn formatter_inline_code_literal_preserves_code_markup_in_parser_tir() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$md: `literal code`]",
@@ -972,11 +995,14 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
     // `DynamicExpression` anchors, so markdown inline code can pair across the
     // inserted scalar string through the TIR formatter path.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let value_name = string_table.intern("value");
     let declarations = vec![Declaration {
-        id: scope.append(value_name),
+        id: path_fork
+            .try_intern_child(scope, value_name)
+            .expect("test path fits"),
         value: Expression::string_slice(
             string_table.intern("ANCHOR"),
             None,
@@ -992,7 +1018,7 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
         &mut span_builder,
     );
     let context = constant_template_context(&token_stream.src_path, &declarations);
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("markdown inline-code with body reference should parse");
     let store = context.template_ir_store();
     let store = store.borrow();
@@ -1037,6 +1063,7 @@ fn inline_code_head_insert_records_formatted_tir_phase() {
     // insert as a `DynamicExpression` anchor, so the formatted TIR root records
     // the inline-code span.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$md:\nLiteral syntax `[\"[slot]\"]`\n]",
@@ -1074,6 +1101,7 @@ fn head_stringslice_records_formatted_tir_phase() {
     // Head-origin literal text is preserved unchanged by formatters, so the
     // module-local `Formatted` TIR root remains available.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[\"prefix\", $md: body]",
@@ -1099,6 +1127,7 @@ fn style_child_wrapper_no_children_records_formatted_tir_phase() {
     // A `$children(..)` style wrapper with no body child templates is a no-op
     // wrapper; the formatted TIR root remains available.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[$md, $children([:<b>[$slot]</b>]): body text]",
@@ -1125,6 +1154,7 @@ fn style_child_wrapper_with_children_records_formatted_tir_phase() {
     // formatted TIR root remains available because the TIR formatter preserves
     // child-template boundaries for wrapper application.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[$md, $children([:<b>[$slot]</b>]): hello [:child] ]",
@@ -1151,6 +1181,7 @@ fn head_only_literal_text_records_formatted_tir_phase() {
     // for the formatter to contextually alter, so the module-local `Formatted`
     // TIR root remains available.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) =
         parse_template("[\"head\", $md:]", &mut string_table, &mut span_builder);
@@ -1213,10 +1244,8 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
     // body-origin dynamic expression, so the body TIR is constructed directly
     // via `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
-    let context = new_constant_context(InternedPath::from_single_str(
-        "main.moth",
-        &mut string_table,
-    ));
+    let mut path_fork = PathInternerFork::empty();
+    let context = new_constant_context(path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits"));
     let span = None;
     let style = Style {
         formatter: Some(markdown_formatter()),
@@ -1274,13 +1303,11 @@ fn reactive_body_segment_records_formatted_tir_phase() {
     // this body reactive dynamic-expression payload is constructed directly via
     // `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
-    let context = new_constant_context(InternedPath::from_single_str(
-        "main.moth",
-        &mut string_table,
-    ));
+    let mut path_fork = PathInternerFork::empty();
+    let context = new_constant_context(path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits"));
     let span = None;
 
-    let source_path = InternedPath::from_single_str("main.moth/#reactive0", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("main.moth/#reactive0", &mut string_table).expect("test path fits");
     let expected_source_path = source_path.clone();
     let source = ReactiveSource {
         path: source_path.clone(),
@@ -1382,13 +1409,11 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
     // Source parsing only emits reactive head text, so this body reactive text
     // payload is constructed directly via `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
-    let context = new_constant_context(InternedPath::from_single_str(
-        "main.moth",
-        &mut string_table,
-    ));
+    let mut path_fork = PathInternerFork::empty();
+    let context = new_constant_context(path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits"));
     let span = None;
 
-    let source_path = InternedPath::from_single_str("main.moth/#reactive0", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("main.moth/#reactive0", &mut string_table).expect("test path fits");
     let expected_source_path = source_path.clone();
     let subscription = ReactiveSubscription {
         source: ReactiveSource {
@@ -1477,6 +1502,7 @@ fn head_expression_folds_through_tir_formatter() {
     // The TIR formatter now owns that shape directly instead of rebuilding a
     // parser TIR.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template("[42, $md:]", &mut string_table, &mut span_builder);
 
@@ -1504,6 +1530,7 @@ fn raw_directive_preserves_whitespace_and_advances_through_formatter_adapter() {
     // and advances the TIR reference to `Formatted`. The important behavior is
     // that the authored whitespace survives unchanged.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$raw:\n    Hello\n    World\n]",
@@ -1565,6 +1592,7 @@ fn parent_formatter_does_not_leak_into_nested_child_without_formatter() {
     // A `$md` parent must not format the body of a nested child template
     // that has no formatter of its own.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$md: outer [: <b>inner</b> ]]",
@@ -1610,6 +1638,7 @@ fn nested_child_with_own_formatter_is_formatted_independently() {
     // A nested child that redeclares `$md` must be formatted independently
     // through the TIR formatter path, not inherit the parent formatter state.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$md: outer [$md: <b>inner</b>]]",
@@ -1657,6 +1686,7 @@ fn nested_child_with_own_formatter_is_formatted_independently() {
 #[test]
 fn formatted_tir_reference_installs_formatted_output_for_simple_template() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template("[$md: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
@@ -1677,6 +1707,7 @@ fn formatted_tir_reference_installs_formatted_output_for_simple_template() {
 #[test]
 fn formatted_tir_reference_installs_with_opaque_body_child_template() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$md: before [: child] after]",
@@ -1731,13 +1762,14 @@ fn formatted_tir_reference_installs_with_opaque_body_child_template() {
 #[test]
 fn formatter_head_chain_composition_keeps_formatted_reference() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
-        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let wrapper_name = string_table.intern("wrapper");
-    let wrapper_path = wrapper_scope.append(wrapper_name);
+    let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
 
     let mut wrapper_tokens = template_tokens_from_source(
         "[:<article>[$slot]</article>]",
@@ -1746,12 +1778,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
     );
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(
-        &mut wrapper_tokens,
-        &wrapper_context,
-        vec![],
-        &mut string_table,
-    )
+    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("head-chain wrapper should parse");
 
     let declaration = Declaration {
@@ -1765,12 +1792,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
         template_tokens_from_source("[wrapper, $md: body]", &mut string_table, &mut span_builder);
     let parent_context = constant_template_context(&parent_tokens.src_path, &[declaration])
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(
-        &mut parent_tokens,
-        &parent_context,
-        vec![],
-        &mut string_table,
-    )
+    let template = Template::new(&mut parent_tokens, &parent_context, vec![], &mut string_table, &mut path_fork)
     .expect("formatted head-chain template should parse");
 
     let reference = &template.tir_reference;
@@ -1792,13 +1814,14 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
 #[test]
 fn positional_default_slot_children_preserve_separator_whitespace() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
-        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let wrapper_name = string_table.intern("wrapper");
-    let wrapper_path = wrapper_scope.append(wrapper_name);
+    let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
 
     let mut wrapper_tokens = template_tokens_from_source(
         "[:\n    [$children([:H: [$slot]]):[$slot(1)]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
@@ -1807,12 +1830,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     );
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(
-        &mut wrapper_tokens,
-        &wrapper_context,
-        vec![],
-        &mut string_table,
-    )
+    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("slot wrapper should parse");
 
     let declaration = Declaration {
@@ -1829,12 +1847,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     );
     let parent_context = constant_template_context(&parent_tokens.src_path, &[declaration])
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(
-        &mut parent_tokens,
-        &parent_context,
-        vec![],
-        &mut string_table,
-    )
+    let template = Template::new(&mut parent_tokens, &parent_context, vec![], &mut string_table, &mut path_fork)
     .expect("slot application should parse");
 
     let folded = fold_template_in_context(&template, &parent_context, &mut string_table);
@@ -1849,6 +1862,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
 #[test]
 fn formatter_children_wrapper_composition_keeps_formatted_reference() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[$md, $children([:<b>[$slot]</b>]): hello [:child] ]",
@@ -1877,9 +1891,10 @@ fn formatter_children_wrapper_composition_keeps_formatted_reference() {
 #[test]
 fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
     let mut wrapper_tokens = template_tokens_from_source(
         "[$md:title[$slot(\"title\")]body[$slot]]",
@@ -1888,12 +1903,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     );
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(
-        &mut wrapper_tokens,
-        &wrapper_context,
-        vec![],
-        &mut string_table,
-    )
+    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("formatted named-slot wrapper should parse");
 
     let wrapper_reference = &wrapper.tir_reference;
@@ -1910,12 +1920,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     );
     let insert_context = new_constant_context(insert_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
-    let insert = Template::new(
-        &mut insert_tokens,
-        &insert_context,
-        vec![],
-        &mut string_table,
-    )
+    let insert = Template::new(&mut insert_tokens, &insert_context, vec![], &mut string_table, &mut path_fork)
     .expect("formatted named insert should parse");
 
     let insert_reference = &insert.tir_reference;
@@ -1927,13 +1932,17 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
 
     let declarations = vec![
         Declaration {
-            id: scope.append(string_table.intern("wrapper")),
+            id: path_fork
+                .try_intern_child(scope, string_table.intern("wrapper"))
+                .expect("test path fits"),
             value: Expression::template(wrapper, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
         Declaration {
-            id: scope.append(string_table.intern("heading")),
+            id: path_fork
+                .try_intern_child(scope, string_table.intern("heading"))
+                .expect("test path fits"),
             value: Expression::template(insert, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
@@ -1947,12 +1956,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     );
     let parent_context = constant_template_context(&parent_tokens.src_path, &declarations)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(
-        &mut parent_tokens,
-        &parent_context,
-        vec![],
-        &mut string_table,
-    )
+    let template = Template::new(&mut parent_tokens, &parent_context, vec![], &mut string_table, &mut path_fork)
     .expect("formatted named-slot application should parse");
 
     let folded = fold_template_in_context(&template, &parent_context, &mut string_table);
@@ -1966,6 +1970,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
 #[test]
 fn no_formatter_slot_receiver_does_not_claim_formatted_phase() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[:before[$slot]after]",
@@ -1990,6 +1995,7 @@ fn no_formatter_slot_receiver_does_not_claim_formatted_phase() {
 #[test]
 fn no_formatter_child_wrapper_reaches_formatted_phase_through_tir() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[$children([:<b>[$slot]</b>]): hello [:child] ]",
@@ -2013,6 +2019,7 @@ fn no_formatter_child_wrapper_reaches_formatted_phase_through_tir() {
 #[test]
 fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) =
         parse_template("[$md, if true: body]", &mut string_table, &mut span_builder);
@@ -2048,6 +2055,7 @@ fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
 #[test]
 fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$md, if false:\nbody\n[else]\nfallback\n]",
@@ -2123,6 +2131,7 @@ fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
 #[test]
 fn formatted_tir_reference_installs_formatted_loop_body() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$md, loop true: body]",
@@ -2185,6 +2194,7 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
     // / `$raw` preservation). Their owning TIR references should reach the
     // owning `Formatted` phase while preserving normalized body output.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
 
     let (branch_template, store) =
@@ -2277,6 +2287,7 @@ fn default_whitespace_linear_records_formatted_tir_phase() {
     // formatter adapter, so no-formatter linear bodies produce a formatted TIR
     // root.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[:\n    Hello\n    World\n]",
@@ -2300,6 +2311,7 @@ fn default_whitespace_linear_records_formatted_tir_phase() {
 #[test]
 fn parser_tir_records_finalized_child_template_as_child_template_node() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_const_required_template(
         "[:before[:child]after]",
@@ -2346,24 +2358,20 @@ fn parser_tir_records_finalized_child_template_as_child_template_node() {
 #[test]
 fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
-        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let wrapper_name = string_table.intern("wrapper");
-    let wrapper_path = wrapper_scope.append(wrapper_name);
+    let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
 
     let mut wrapper_tokens =
         template_tokens_from_source("[:head]", &mut string_table, &mut span_builder);
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(
-        &mut wrapper_tokens,
-        &wrapper_context,
-        vec![],
-        &mut string_table,
-    )
+    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("wrapper template should parse");
 
     let declaration = Declaration {
@@ -2377,7 +2385,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let parent_context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         parent_tokens.src_path.to_owned(),
-        Rc::new(TopLevelDeclarationTable::new(vec![declaration])),
+        Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
@@ -2401,6 +2409,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
             construction_context: &mut construction_context,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             string_table: &mut string_table,
+            path_fork: &mut path_fork,
         },
     )
     .expect("template-valued head should parse");
@@ -2426,24 +2435,20 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
 #[test]
 fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
-        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let wrapper_name = string_table.intern("wrapper");
-    let wrapper_path = wrapper_scope.append(wrapper_name);
+    let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
 
     let mut wrapper_tokens =
         template_tokens_from_source("[:head]", &mut string_table, &mut span_builder);
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(
-        &mut wrapper_tokens,
-        &wrapper_context,
-        vec![],
-        &mut string_table,
-    )
+    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("wrapper template should parse");
 
     let declaration = Declaration {
@@ -2458,18 +2463,13 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let parent_context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         parent_tokens.src_path.to_owned(),
-        Rc::new(TopLevelDeclarationTable::new(vec![declaration])),
+        Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
     )
     .with_template_ir_store(Rc::clone(&shared_store));
-    let parent = Template::new(
-        &mut parent_tokens,
-        &parent_context,
-        vec![],
-        &mut string_table,
-    )
+    let parent = Template::new(&mut parent_tokens, &parent_context, vec![], &mut string_table, &mut path_fork)
     .expect("parent template should parse");
     let store = shared_store.borrow();
     let parent_child_ids = tir_root_child_ids(&parent, &store);
@@ -2505,6 +2505,7 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
 #[test]
 fn parser_tir_skips_conditional_child_wrappers_for_fresh_control_flow_child() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (parent, store) = parse_template(
         "[$children([:wrap]): [$fresh, if true: body]]",
@@ -2544,6 +2545,7 @@ fn doc_comment_with_formatter_records_comment_kind() {
     // `$doc` applies markdown formatting automatically while retaining the
     // comment directive kind on the module-local TIR root.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) =
         parse_template("[$doc: doc body]", &mut string_table, &mut span_builder);
@@ -2568,6 +2570,7 @@ fn doc_comment_with_formatter_records_comment_kind() {
 #[test]
 fn no_prefix_if_finalizes_with_direct_branch_chain_root() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template("[if true: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
@@ -2586,6 +2589,7 @@ fn no_prefix_if_finalizes_with_direct_branch_chain_root() {
 #[test]
 fn no_prefix_loop_finalizes_with_direct_loop_root() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) =
         parse_template("[loop true: body]", &mut string_table, &mut span_builder);
@@ -2605,6 +2609,7 @@ fn no_prefix_loop_finalizes_with_direct_loop_root() {
 #[test]
 fn linear_template_preserves_sequence_root_shape() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[: before [: child] after]",

@@ -13,7 +13,7 @@ use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use rustc_hash::FxHashSet;
@@ -66,7 +66,7 @@ impl DependencyAlias {
 /// retained shell identity.
 #[derive(Clone, Debug)]
 pub struct ScannedDependencyProvider {
-    pub path: InternedPath,
+    pub path: PathId,
     pub path_syntax: PathSyntaxId,
     pub path_span: SourceSpan,
 }
@@ -75,21 +75,29 @@ pub struct ScannedDependencyProvider {
 #[derive(Clone, Debug)]
 pub struct RetainedDependencyPath {
     pub dependency_shell_id: DependencyShellId,
-    pub path: InternedPath,
+    pub path: PathId,
     pub path_syntax: PathSyntaxId,
     pub target: DependencyTargetKind,
     pub span: SourceSpan,
 }
 
 impl RetainedDependencyPath {
-    /// Remap the path components and target extension into a merged string table.
+    /// Remap the target extension into a merged string table.
+    ///
+    /// The complete-path identity remaps separately through `remap_path_ids` after the
+    /// string delta merges, mirroring the file-owned path-table order (strings first,
+    /// then paths).
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.path.remap_string_ids(remap);
         self.target.remap_string_ids(remap);
     }
 
+    /// Remap the complete-path identity after its path fork merges.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.path = remap.get(self.path);
+    }
+
     /// Commit the final source identity while preserving module-root-relative paths.
-    pub fn commit_source_rebinding(&mut self, file_id: SourceId, _logical_path: &InternedPath) {
+    pub fn commit_source_rebinding(&mut self, file_id: SourceId, _logical_path: PathId) {
         self.span = SourceSpan::new(file_id, self.span.local());
         self.dependency_shell_id.source = file_id;
     }

@@ -28,7 +28,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -42,38 +42,44 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-fn test_scope(string_table: &mut StringTable) -> (InternedPath, ScopeContext) {
-    let scope = InternedPath::from_single_str("test.moth", string_table);
+fn test_scope(string_table: &mut StringTable) -> (PathId, ScopeContext, PathInternerFork) {
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", string_table)
+        .expect("test path fits");
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
-        scope.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        scope,
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
-    (scope, context)
+    (scope, context, path_fork)
 }
 
 fn numeric_token_kind(value: &str, string_table: &mut StringTable) -> TokenKind {
     TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table))
 }
 
-fn numeric_token(value: &str, _scope: &InternedPath, string_table: &mut StringTable) -> Token {
+fn numeric_token(value: &str, _scope: &PathId, string_table: &mut StringTable) -> Token {
     Token::new(
         TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table)),
         LocalSpan::source_start(),
     )
 }
 
-fn token(kind: TokenKind, _scope: &InternedPath) -> Token {
+fn token(kind: TokenKind, _scope: &PathId) -> Token {
     Token::new(kind, LocalSpan::source_start())
 }
 
 #[test]
 fn hash_in_expression_position_rejected() {
     let mut string_table = StringTable::default();
-    let (scope, context) = test_scope(&mut string_table);
+    let (scope, context, mut path_fork) = test_scope(&mut string_table);
     let tokens = vec![
         numeric_token("1", &scope, &mut string_table),
         token(TokenKind::Hash, &scope),
@@ -106,6 +112,7 @@ fn hash_in_expression_position_rejected() {
         &mut type_interner,
         &mut state,
         &mut string_table,
+        &mut path_fork,
     );
     assert!(result.is_ok());
     stream.advance();
@@ -118,6 +125,7 @@ fn hash_in_expression_position_rejected() {
         &mut type_interner,
         &mut state,
         &mut string_table,
+        &mut path_fork,
     );
     assert!(
         result.is_err(),
@@ -128,7 +136,7 @@ fn hash_in_expression_position_rejected() {
 #[test]
 fn hash_before_template_head_allowed() {
     let mut string_table = StringTable::default();
-    let (scope, context) = test_scope(&mut string_table);
+    let (scope, context, mut path_fork) = test_scope(&mut string_table);
     let tokens = vec![
         token(TokenKind::Hash, &scope),
         token(TokenKind::TemplateHead, &scope),
@@ -159,6 +167,7 @@ fn hash_before_template_head_allowed() {
         &mut type_interner,
         &mut state,
         &mut string_table,
+        &mut path_fork,
     );
     assert!(
         result.is_ok(),
@@ -169,7 +178,7 @@ fn hash_before_template_head_allowed() {
 #[test]
 fn negative_token_before_identifier_pushes_unary_negation_operator() {
     let mut string_table = StringTable::default();
-    let (scope, context) = test_scope(&mut string_table);
+    let (scope, context, mut path_fork) = test_scope(&mut string_table);
     let name = string_table.intern("count");
     let tokens = vec![
         token(TokenKind::Negative, &scope),
@@ -201,6 +210,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         &mut type_interner,
         &mut state,
         &mut string_table,
+        &mut path_fork,
     );
 
     assert!(matches!(result, Ok(ExpressionTokenStep::Advance)));
@@ -216,19 +226,12 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
 
 #[test]
 fn hash_from_tokenized_source_rejected() {
+    let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::default();
     let source = "result = 1 # 2";
-    let file_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let file_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &file_path,
-        TokenizerEntryMode::SourceFile,
-        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .unwrap();
 
     // Find the tokens after "result = "
@@ -243,13 +246,13 @@ fn hash_from_tokenized_source_rejected() {
 
     // Slice from after Assign to end
     let expr_tokens: Vec<Token> = file_tokens.tokens[index..].to_vec();
-    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
+    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, expr_tokens);
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -268,6 +271,7 @@ fn hash_from_tokenized_source_rejected() {
         &ValueMode::ImmutableOwned,
         false,
         &mut string_table,
+        &mut path_fork,
     );
 
     assert!(
@@ -294,7 +298,8 @@ fn full_frontend_stray_hash_error() {
 #[test]
 fn constant_identifier_uses_module_store_tir() {
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let constant_name = string_table.intern("wrapper");
 
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -324,18 +329,23 @@ fn constant_identifier_uses_module_store_tir() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         scope.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     )
     .with_template_ir_store(Rc::clone(&store));
-    context.set_local_declarations(vec![Declaration {
-        id: InternedPath::from_components(vec![constant_name]),
-        value: Expression::template(template, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }]);
+    context.set_local_declarations(
+        vec![Declaration {
+            id: path_fork
+                .try_intern_components(&[constant_name])
+                .expect("test path fits"),
+            value: Expression::template(template, ValueMode::ImmutableOwned),
+            binding_span: None,
+            config_qualifier: None,
+        }],
+        &path_fork,
+    );
 
     let tokens = vec![
         token(TokenKind::Symbol(constant_name), &scope),
@@ -355,6 +365,7 @@ fn constant_identifier_uses_module_store_tir() {
         &ValueMode::ImmutableOwned,
         false,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("module-store constant reference should inline through effective TIR");
 

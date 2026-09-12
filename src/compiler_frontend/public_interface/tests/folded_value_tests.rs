@@ -46,7 +46,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginTypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -68,8 +68,9 @@ fn constant_root(
     type_id: crate::compiler_frontend::datatypes::ids::TypeId,
     string_table: &mut StringTable,
 ) -> ResolvedPublicTypeRoot {
+    let mut path_fork = PathInternerFork::empty();
     ResolvedPublicTypeRoot {
-        path: InternedPath::from_single_str(name, string_table),
+        path: path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
         kind: ResolvedPublicTypeRootKind::Constant { type_id },
     }
 }
@@ -91,10 +92,11 @@ fn build_constant_records(
     roots: Vec<ResolvedPublicTypeRoot>,
     bindings: Vec<ExportBinding>,
     module_constants: &[Declaration],
-    nominal_origins: &FxHashMap<InternedPath, OriginTypeId>,
+    nominal_origins: &FxHashMap<PathId, OriginTypeId>,
     env: &TypeEnvironment,
     string_table: &StringTable,
 ) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
+    let path_fork = PathInternerFork::empty();
     let root_table = ResolvedPublicTypeRootTable {
         roots,
         receiver_methods: vec![],
@@ -109,18 +111,16 @@ fn build_constant_records(
     };
     let registry = ExternalPackageRegistry::new();
     let const_values = ConstValueStore::from_test_declarations(module_constants.to_vec(), env)?;
-    PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: nominal_origins,
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: env,
-        external_registry: &registry,
-        string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &const_values,
-        module_resources: None,
-    })
+    PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: nominal_origins,
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: env,
+    external_registry: &registry,
+    string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &const_values,
+    module_resources: None, })
     .build()
     .map(|result| result.draft.declarations)
 }
@@ -132,10 +132,11 @@ fn build_constant_records(
 #[test]
 fn constant_record_owns_scalar_int_folded_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
-    let value_path = InternedPath::from_single_str("value", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: Expression::int(42, None, ValueMode::ImmutableOwned),
@@ -164,8 +165,9 @@ fn constant_record_owns_scalar_int_folded_value() {
 #[test]
 fn public_constant_record_retains_project_context_provenance() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let value_path = InternedPath::from_single_str("project_value", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("project_value", &mut string_table).expect("test path fits");
     let member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
         "project",
@@ -205,12 +207,13 @@ fn public_constant_record_retains_project_context_provenance() {
 #[test]
 fn constant_record_owns_scalar_bool_and_char_folded_values() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let bool_id = env.builtins().bool;
     let char_id = env.builtins().char;
 
-    let bool_path = InternedPath::from_single_str("flag", &mut string_table);
-    let char_path = InternedPath::from_single_str("letter", &mut string_table);
+    let bool_path = path_fork.try_intern_portable_path("flag", &mut string_table).expect("test path fits");
+    let char_path = path_fork.try_intern_portable_path("letter", &mut string_table).expect("test path fits");
     let bool_decl = Declaration {
         id: bool_path,
         value: Expression::bool(true, None, ValueMode::ImmutableOwned),
@@ -252,10 +255,11 @@ fn constant_record_owns_scalar_bool_and_char_folded_values() {
 #[test]
 fn constant_record_owns_scalar_float_folded_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let float_id = env.builtins().float;
 
-    let value_path = InternedPath::from_single_str("pi", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("pi", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: Expression::float(3.5, None, ValueMode::ImmutableOwned),
@@ -286,10 +290,11 @@ fn constant_record_owns_scalar_float_folded_value() {
 #[test]
 fn constant_record_preserves_negative_zero_exact_bits() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let float_id = env.builtins().float;
 
-    let value_path = InternedPath::from_single_str("zero", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("zero", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: Expression::float(-0.0, None, ValueMode::ImmutableOwned),
@@ -328,10 +333,11 @@ fn constant_record_preserves_negative_zero_exact_bits() {
 #[test]
 fn join_rejects_non_finite_float_value_as_internal_invariant() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let float_id = env.builtins().float;
 
-    let value_path = InternedPath::from_single_str("bad", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("bad", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         // The AST constructor accepts any f64; projection must reject non-finite input.
@@ -361,11 +367,12 @@ fn join_rejects_non_finite_float_value_as_internal_invariant() {
 #[test]
 fn constant_record_owns_folded_template_string_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let string_id = env.builtins().string;
 
     let folded_text = string_table.intern("Hello, Moth!");
-    let value_path = InternedPath::from_single_str("heading", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("heading", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: Expression::string_slice(folded_text, None, ValueMode::ImmutableOwned),
@@ -396,11 +403,12 @@ fn constant_record_owns_folded_template_string_value() {
 #[test]
 fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let title_path = InternedPath::from_single_str("title", &mut string_table);
-    let year_path = InternedPath::from_single_str("year", &mut string_table);
-    let struct_path = InternedPath::from_single_str("Defaults", &mut string_table);
+    let title_path = path_fork.try_intern_portable_path("title", &mut string_table).expect("test path fits");
+    let year_path = path_fork.try_intern_portable_path("year", &mut string_table).expect("test path fits");
+    let struct_path = path_fork.try_intern_portable_path("Defaults", &mut string_table).expect("test path fits");
     let string_id = env.builtins().string;
     let int_id = env.builtins().int;
     let (_, struct_type_id) = register_struct(
@@ -425,13 +433,13 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     let title_text = string_table.intern("Moth");
     let fields = vec![
         Declaration {
-            id: InternedPath::from_single_str("title", &mut string_table),
+            id: path_fork.try_intern_portable_path("title", &mut string_table).expect("test path fits"),
             value: Expression::string_slice(title_text, None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
         Declaration {
-            id: InternedPath::from_single_str("year", &mut string_table),
+            id: path_fork.try_intern_portable_path("year", &mut string_table).expect("test path fits"),
             value: Expression::int(2026, None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
@@ -448,7 +456,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
         struct_type_id,
     );
 
-    let value_path = InternedPath::from_single_str("defaults", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("defaults", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: struct_instance,
@@ -490,12 +498,13 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
 #[test]
 fn constant_record_owns_recursive_const_record_fields() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let inner_field_path = InternedPath::from_single_str("inner", &mut string_table);
-    let depth_path = InternedPath::from_single_str("depth", &mut string_table);
-    let outer_path = InternedPath::from_single_str("Outer", &mut string_table);
-    let inner_path = InternedPath::from_single_str("Inner", &mut string_table);
+    let inner_field_path = path_fork.try_intern_portable_path("inner", &mut string_table).expect("test path fits");
+    let depth_path = path_fork.try_intern_portable_path("depth", &mut string_table).expect("test path fits");
+    let outer_path = path_fork.try_intern_portable_path("Outer", &mut string_table).expect("test path fits");
+    let inner_path = path_fork.try_intern_portable_path("Inner", &mut string_table).expect("test path fits");
     let none_id = env.builtins().none;
     let int_id = env.builtins().int;
     let (_, outer_type_id) = register_struct(
@@ -522,7 +531,7 @@ fn constant_record_owns_recursive_const_record_fields() {
     );
 
     let inner_fields = vec![Declaration {
-        id: InternedPath::from_single_str("depth", &mut string_table),
+        id: path_fork.try_intern_portable_path("depth", &mut string_table).expect("test path fits"),
         value: Expression::int(7, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -538,7 +547,7 @@ fn constant_record_owns_recursive_const_record_fields() {
     );
 
     let outer_fields = vec![Declaration {
-        id: InternedPath::from_single_str("inner", &mut string_table),
+        id: path_fork.try_intern_portable_path("inner", &mut string_table).expect("test path fits"),
         value: inner_instance,
         binding_span: None,
         config_qualifier: None,
@@ -553,7 +562,7 @@ fn constant_record_owns_recursive_const_record_fields() {
         outer_type_id,
     );
 
-    let value_path = InternedPath::from_single_str("nested", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("nested", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: outer_instance,
@@ -603,9 +612,10 @@ fn constant_record_owns_recursive_const_record_fields() {
 #[test]
 fn constant_record_owns_choice_with_stable_variant_name() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let choice_path = InternedPath::from_single_str("Status", &mut string_table);
+    let choice_path = path_fork.try_intern_portable_path("Status", &mut string_table).expect("test path fits");
     let variants: Box<[ChoiceVariantDefinition]> = Box::new([
         ChoiceVariantDefinition {
             name: string_table.intern("Active"),
@@ -637,7 +647,7 @@ fn constant_record_owns_choice_with_stable_variant_name() {
         value_mode: ValueMode::ImmutableOwned,
     });
 
-    let value_path = InternedPath::from_single_str("state", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("state", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: choice_expr,
@@ -678,6 +688,7 @@ fn constant_record_owns_choice_with_stable_variant_name() {
 #[test]
 fn constant_record_owns_collection_of_folded_values() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let items = vec![
@@ -694,7 +705,7 @@ fn constant_record_owns_collection_of_folded_values() {
         ValueMode::ImmutableOwned,
     );
 
-    let value_path = InternedPath::from_single_str("scores", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("scores", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: collection_expr,
@@ -732,6 +743,7 @@ fn constant_record_owns_collection_of_folded_values() {
 #[test]
 fn constant_record_owns_option_some_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let int_id = env.builtins().int;
@@ -740,7 +752,7 @@ fn constant_record_owns_option_some_value() {
     let inner = Expression::int(42, None, ValueMode::ImmutableOwned);
     let coerced = Expression::coerced(inner, option_type_id);
 
-    let value_path = InternedPath::from_single_str("maybe_value", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("maybe_value", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: coerced,
@@ -774,6 +786,7 @@ fn constant_record_owns_option_some_value() {
 #[test]
 fn constant_record_owns_nested_option_some_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let int_id = env.builtins().int;
@@ -784,7 +797,7 @@ fn constant_record_owns_nested_option_some_value() {
     let inner_option = Expression::coerced(inner, inner_option_id);
     let outer_option = Expression::coerced(inner_option, outer_option_id);
 
-    let value_path = InternedPath::from_single_str("doubly_maybe", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("doubly_maybe", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: outer_option,
@@ -821,6 +834,7 @@ fn constant_record_owns_nested_option_some_value() {
 #[test]
 fn constant_record_projects_option_none_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let int_id = env.builtins().int;
@@ -831,7 +845,7 @@ fn constant_record_projects_option_none_value() {
     // builder boundary rather than the full parser path.
     let none_expr = Expression::option_none_with_type_id(int_id, DataType::Int, &mut env, None);
 
-    let value_path = InternedPath::from_single_str("absent", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("absent", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: none_expr,
@@ -863,6 +877,7 @@ fn constant_record_projects_option_none_value() {
 #[test]
 fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
@@ -870,11 +885,16 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     // whose exact defining paths differ in the parent component. The public constant root
     // selects the exact public path, so the private same-leaf path is an unmatched extra
     // ignored by the fold.
-    let mut public_path = InternedPath::from_single_str("scope", &mut string_table);
-    public_path.push_str("value", &mut string_table);
-    let mut private_path = InternedPath::from_single_str("other", &mut string_table);
-    private_path.push_str("value", &mut string_table);
-
+    let mut public_path =
+        path_fork.try_intern_portable_path("scope", &mut string_table).expect("test path fits");
+    public_path = path_fork
+        .try_intern_child(public_path, string_table.intern("value"))
+        .expect("test path fits");
+    let mut private_path =
+        path_fork.try_intern_portable_path("other", &mut string_table).expect("test path fits");
+    private_path = path_fork
+        .try_intern_child(private_path, string_table.intern("value"))
+        .expect("test path fits");
     let module_constants = vec![
         Declaration {
             id: public_path.clone(),
@@ -918,6 +938,7 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
 #[test]
 fn join_rejects_constant_binding_without_matching_module_constant() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
@@ -944,19 +965,20 @@ fn join_rejects_constant_binding_without_matching_module_constant() {
 #[test]
 fn join_rejects_duplicate_module_constant_defining_paths() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
     // Two module constant declarations with the exact same defining path: a silent overwrite
     // must not happen.
-    let dup_path = InternedPath::from_single_str("dup", &mut string_table);
+    let dup_path = path_fork.try_intern_portable_path("dup", &mut string_table).expect("test path fits");
     let decl = Declaration {
         id: dup_path,
         value: Expression::int(1, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
-    let duplicate_path = InternedPath::from_single_str("dup", &mut string_table);
+    let duplicate_path = path_fork.try_intern_portable_path("dup", &mut string_table).expect("test path fits");
     let duplicate = Declaration {
         id: duplicate_path,
         value: Expression::int(2, None, ValueMode::ImmutableOwned),
@@ -986,6 +1008,7 @@ fn join_rejects_duplicate_module_constant_defining_paths() {
 #[test]
 fn join_rejects_extra_constant_root_without_export_binding() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
@@ -1012,21 +1035,19 @@ fn join_rejects_extra_constant_root_without_export_binding() {
 #[test]
 fn join_rejects_unsupported_expression_shape_in_folded_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
     let reference_expr = Expression::new(
-        ExpressionKind::Reference(InternedPath::from_single_str(
-            "other_constant",
-            &mut string_table,
-        )),
+        ExpressionKind::Reference(path_fork.try_intern_portable_path("other_constant", &mut string_table).expect("test path fits")),
         None,
         int_id,
         DataType::Int,
         ValueMode::ImmutableOwned,
     );
 
-    let value_path = InternedPath::from_single_str("bad", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("bad", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: reference_expr,
@@ -1055,6 +1076,7 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
 #[test]
 fn public_structural_string_preserves_resource_identity_and_piece_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut resources = ModuleResourceTable::new();
     let origin = StableResourceOriginId::module_owned(
         module_origin(),
@@ -1091,6 +1113,7 @@ fn public_structural_string_preserves_resource_identity_and_piece_order() {
 #[test]
 fn text_is_available_for_a_piece_list_that_carries_only_text() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let resources = ModuleResourceTable::new();
     let head = string_table.intern("docs/");
     let tail = string_table.intern("intro.html");
@@ -1114,13 +1137,14 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
     };
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
 
     // A nested anonymous const record uses the compile-time-only marker type.
     let marker = env.anonymous_const_record_type();
 
     let enabled_fields = vec![Declaration {
-        id: InternedPath::from_single_str("enabled", &mut string_table),
+        id: path_fork.try_intern_portable_path("enabled", &mut string_table).expect("test path fits"),
         value: Expression::bool(true, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -1135,13 +1159,13 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
 
     let fields = vec![
         Declaration {
-            id: InternedPath::from_single_str("year", &mut string_table),
+            id: path_fork.try_intern_portable_path("year", &mut string_table).expect("test path fits"),
             value: Expression::int(2026, None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
         Declaration {
-            id: InternedPath::from_single_str("flags", &mut string_table),
+            id: path_fork.try_intern_portable_path("flags", &mut string_table).expect("test path fits"),
             value: nested_record,
             binding_span: None,
             config_qualifier: None,
@@ -1155,7 +1179,7 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
         ValueMode::ImmutableOwned,
     );
 
-    let value_path = InternedPath::from_single_str("meta", &mut string_table);
+    let value_path = path_fork.try_intern_portable_path("meta", &mut string_table).expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
         value: record,

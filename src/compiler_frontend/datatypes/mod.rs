@@ -38,8 +38,7 @@ pub use environment::TypeEnvironment;
 pub use ids::*;
 
 use crate::compiler_frontend::external_packages::ExternalTypeId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-
+use crate::compiler_frontend::symbols::path_interner::PathId;
 // -----------------------------------------------------------
 //  Method Receivers
 // -----------------------------------------------------------
@@ -55,8 +54,8 @@ pub enum BuiltinScalarReceiver {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ReceiverKey {
-    Struct(InternedPath),
-    Choice(InternedPath),
+    Struct(PathId),
+    Choice(PathId),
     External(ExternalTypeId),
     BuiltinScalar(BuiltinScalarReceiver),
 }

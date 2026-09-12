@@ -647,13 +647,15 @@ impl ModulePreparationContext<'_> {
             // Merge the path delta after the string delta so worker `StringId` components
             // rewrite through this chunk's string remap. Source-prefix `PathId`s stay
             // identity; an empty worker delta is an identity remap with no payload walk.
-            let _path_remap = path_fork
+            let path_remap = path_fork
                 .merge_delta_from(&chunk.local_path_fork, &remap)
                 .map_err(|error| {
                     PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
                         "file preparation path merge failed: {error:?}"
                     )))
                 })?;
+
+            let path_remap_is_identity = path_remap.is_identity();
 
 
             for prepared_file in chunk.results {
@@ -695,7 +697,10 @@ impl ModulePreparationContext<'_> {
                                     );
                                     output.remap_string_ids(&remap)?;
                                 }
-                                output.freeze_path_syntax(string_table)?;
+                                if !path_remap_is_identity {
+                                    output.remap_path_ids(&path_remap)?;
+                                }
+                                output.freeze_path_syntax(string_table, path_fork)?;
                             }
                             PreparedFileStringDomain::AlreadyGlobal => {
                                 if !remap_is_identity {
@@ -711,16 +716,19 @@ impl ModulePreparationContext<'_> {
                         prepared_outputs[prepared_file.file_index] = Some(output);
                     }
                     Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
-                        if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal
-                            && !remap_is_identity
-                        {
-                            add_frontend_counter(FrontendCounter::FilePrepareErrorRemapCalls, 1);
-                            #[cfg(feature = "benchmark_counters")]
-                            add_frontend_counter(
-                                FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
-                                1,
-                            );
-                            error.remap_string_ids(&remap);
+                        if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal {
+                            if !remap_is_identity {
+                                add_frontend_counter(FrontendCounter::FilePrepareErrorRemapCalls, 1);
+                                #[cfg(feature = "benchmark_counters")]
+                                add_frontend_counter(
+                                    FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
+                                    1,
+                                );
+                                error.remap_string_ids(&remap);
+                            }
+                            if !path_remap_is_identity {
+                                error.remap_path_ids(&path_remap);
+                            }
                         }
                         let FileFrontendPrepareError {
                             warnings: file_warnings,
@@ -773,6 +781,7 @@ impl ModulePreparationContext<'_> {
             &mut filled_outputs,
             string_table,
             &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+            path_fork,
         ) {
             Ok(prepared) => prepared,
             Err(bag) => {
@@ -886,7 +895,7 @@ impl ModulePreparationContext<'_> {
         runtime_fragment_offset: usize,
     ) -> FilePreparationChunk {
         let (mut local_string_table, _) = fork_source.fork_for_module().into_parts();
-        let local_path_fork = path_fork_source.fork_for_module();
+        let mut local_path_fork = path_fork_source.fork_for_module();
         let mut results = Vec::with_capacity(plan.file_range.len());
         let mut span_builders = Vec::with_capacity(plan.file_range.len());
 
@@ -919,6 +928,7 @@ impl ModulePreparationContext<'_> {
                                 runtime_fragment_offset,
                             },
                             &mut local_string_table,
+                            &mut local_path_fork,
                         ),
                         Err(error) => SourcePreparationDelta {
                             file_id: source_id,
@@ -956,11 +966,25 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         &mut self.string_table
     }
 
+    pub(super) fn path_fork_mut(&mut self) -> &mut PathInternerFork {
+        &mut self.path_fork
+    }
+
     /// Borrow both mutable selection inputs for one source preparation call.
     pub(super) fn source_preparation_inputs_mut(
         &mut self,
     ) -> (&mut StringTable, &mut SelectedSourceTextMap) {
         (&mut self.string_table, self.selected_source_texts)
+    }
+
+    pub(super) fn source_preparation_inputs_and_path_fork_mut(
+        &mut self,
+    ) -> (&mut StringTable, &mut SelectedSourceTextMap, &mut PathInternerFork) {
+        (
+            &mut self.string_table,
+            self.selected_source_texts,
+            &mut self.path_fork,
+        )
     }
 
     /// Resolve one prepared file-reference row while keeping the source table and its string
@@ -984,6 +1008,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             reference,
             self.context.source_files,
             &mut self.string_table,
+            &self.path_fork,
             discovered_content_sources,
         )
     }
@@ -1059,6 +1084,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 &prepare_context,
                 input,
                 &mut self.string_table,
+                &mut self.path_fork,
             ),
         );
         source_spans.retain_span_builder(file_id, span_builder);
@@ -1119,7 +1145,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             .flatten()
             .collect::<Vec<_>>();
         for output in &mut prepared_outputs {
-            output.freeze_path_syntax(&self.string_table)?;
+            output.freeze_path_syntax(&self.string_table, &mut self.path_fork)?;
         }
         let source_file_count = prepared_outputs.len();
         record_successful_prepared_outputs(&prepared_outputs);
@@ -1130,6 +1156,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 &mut prepared_outputs,
                 &mut self.string_table,
                 &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+                &mut self.path_fork,
             )
         ) {
             Ok(prepared_header_syntax) => prepared_header_syntax,

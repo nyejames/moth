@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn discover_modules_uses_reachable_files_only() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -258,6 +259,7 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
     let resolver = configured_resolver(&config);
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut external_packages = ExternalPackageRegistry::new();
     let external_import_providers =
         crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
@@ -280,6 +282,7 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
         &mut external_imports,
         &crate::builder_surface::SourceFileKindRegistry::default(),
         &mut ResourceInputRegistry::new(),
+        &mut path_fork,
         &mut string_table,
     )
     .expect("synthetic nested traversal should succeed");
@@ -890,6 +893,7 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
     let style_directives = test_style_directives();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut external_packages = ExternalPackageRegistry::new();
     let external_import_providers =
         crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
@@ -913,6 +917,7 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
         &mut external_imports,
         &source_file_kinds,
         &mut resource_inputs,
+        &mut path_fork,
         &mut string_table,
     )
     .expect("synthetic structural references should resolve");
@@ -1027,6 +1032,7 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
 
     let style_directives = test_style_directives();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut external_packages = ExternalPackageRegistry::new();
     let external_import_providers =
         crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
@@ -1049,6 +1055,7 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
         &mut external_imports,
         &source_file_kinds,
         &mut resource_inputs,
+        &mut path_fork,
         &mut string_table,
     )
     .expect("ordinary synthetic Stage 0 should retain boundary diagnostics");

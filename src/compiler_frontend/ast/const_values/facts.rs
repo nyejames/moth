@@ -7,7 +7,8 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use rustc_hash::FxHashMap;
 
 use super::store::ConstValueId;
@@ -18,7 +19,7 @@ use super::store::ConstValueId;
 /// WHY: later stages look up facts by path without re-walking the AST.
 #[derive(Clone, Debug, Default)]
 pub struct AstConstFacts {
-    pub declarations: FxHashMap<InternedPath, AstConstDeclarationFact>,
+    pub declarations: FxHashMap<PathId, AstConstDeclarationFact>,
 }
 
 /// A single resolved const fact for one declaration.
@@ -30,7 +31,7 @@ pub struct AstConstFacts {
 ///      metadata.
 #[derive(Clone, Debug)]
 pub struct AstConstDeclarationFact {
-    pub declaration_path: InternedPath,
+    pub declaration_path: PathId,
     pub scope: ConstBindingScope,
     pub source: ConstBindingSource,
     pub value_kind: ConstFactValueKind,

@@ -42,6 +42,7 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -122,6 +123,7 @@ pub(super) fn prepare_file_value_bundle(
     let mut discovery_files = SourceDatabase::empty();
     let mut resolver =
         SingleFileReferenceResolver::new(module_root.clone(), &source_file_kinds, resource_inputs);
+    let mut path_fork = PathInternerFork::empty();
 
     // The entry is registered before the walk so header preparation can name the entry file by
     // identity. Its first BFS visit re-registers the same path and kind, returning this same ID.
@@ -174,6 +176,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
             None => {
@@ -187,6 +190,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -210,6 +214,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -227,6 +232,7 @@ pub(super) fn prepare_file_value_bundle(
             },
             source_id,
             kind,
+            &mut path_fork,
             source_code,
             string_table,
         ) {
@@ -240,6 +246,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -254,6 +261,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -265,7 +273,7 @@ pub(super) fn prepare_file_value_bundle(
 
             for reference in structural_references {
                 let resolved =
-                    match resolver.resolve(&path, path_syntax_table, reference, string_table) {
+                    match resolver.resolve(&path, path_syntax_table, reference, string_table, &path_fork) {
                         Ok(resolved) => resolved,
                         Err(error) => {
                             failure = Some(error);
@@ -305,6 +313,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -325,6 +334,7 @@ pub(super) fn prepare_file_value_bundle(
         &unit.source_path,
         &path_resolver,
         string_table,
+        &mut path_fork,
     )?;
     let Some(prepared_entry) = prepared_entry else {
         let messages = CompilerMessages::from_error_ref(
@@ -429,6 +439,7 @@ fn finalize_known_sources(
     entry_file_path: &Path,
     path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
+    mut path_fork: &mut PathInternerFork,
 ) -> Result<FinalizedTemplateSources, CompilerMessages> {
     let DiscoveredTemplateSources {
         candidates,
@@ -555,10 +566,14 @@ fn finalize_known_sources(
             let is_entry = path == entry_file_path;
             prepared.rebind_source_identity(
                 source_id,
-                source_builder.sources().legacy_logical_path(source_id),
+                source_builder
+                    .sources()
+                    .source_logical_path(source_id)
+                    .expect("transferred source must retain logical path"),
                 path,
+                &mut path_fork,
             )?;
-            prepared.freeze_path_syntax(string_table)?;
+            prepared.freeze_path_syntax(string_table, &mut path_fork)?;
             if is_entry {
                 prepared_entry = Some(prepared);
             } else {
@@ -615,6 +630,7 @@ fn finalize_discovery_failure(
     entry_file_path: &Path,
     path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CompilerMessages {
     let finalized = match finalize_known_sources(
         sources,
@@ -622,6 +638,7 @@ fn finalize_discovery_failure(
         entry_file_path,
         path_resolver,
         string_table,
+        path_fork,
     ) {
         Ok(finalized) => finalized,
         Err(messages) => return messages,
@@ -824,6 +841,7 @@ fn prepare_one_source(
     context: &FrontendFilePrepareContext<'_>,
     source_id: SourceId,
     kind: SourceFileKind,
+    path_fork: &mut PathInternerFork,
     source_code: &str,
     string_table: &mut StringTable,
 ) -> Result<SourcePreparationDelta, FileFrontendPrepareFailure> {
@@ -857,6 +875,7 @@ fn prepare_one_source(
         context,
         input,
         string_table,
+        path_fork,
     ))
 }
 

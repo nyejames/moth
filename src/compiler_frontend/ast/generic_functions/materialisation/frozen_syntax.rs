@@ -9,7 +9,9 @@ use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFa
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathIdRemap, PathInternerFork,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
 use std::sync::Arc;
@@ -37,7 +39,7 @@ pub(super) struct StableBodySyntax {
     /// This path names the token stream's semantic declaration context. The owning source-file
     /// identity lives in `donor_file_id`, because token and path-row locations are file-scoped
     /// rather than declaration-scoped.
-    pub(super) declaration_path: Box<[String]>,
+    pub(super) declaration_path: PathId,
     /// Exact owning source identity captured from `FileTokens::file_id`.
     ///
     /// Retained verbatim so materialisation can restore a concrete `FileTokens::file_id` and a
@@ -79,20 +81,26 @@ impl std::fmt::Debug for MaterialisedBody {
 }
 
 impl StableBodySyntax {
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.declaration_path = remap.get(self.declaration_path);
+        self.path_syntax.remap_path_ids(remap);
+    }
+
     pub(super) fn capture(
         tokens: &FileTokens,
-        source_file: &InternedPath,
+        source_file: PathId,
+        path_fork: &PathInternerFork,
         string_table: &StringTable,
         stage0_resolution_facts: Option<&Stage0ResolutionFacts>,
         frozen_identity_handle: FrozenIdentityHandle,
         content_value_at_path: &impl Fn(
-            &InternedPath,
+            &PathId,
         ) -> Result<
             crate::compiler_frontend::folded_value::PublicFoldedValue,
             CompilerError,
         >,
     ) -> Result<Self, CompilerError> {
-        if !tokens.src_path.starts_with(source_file) {
+        if !path_fork.starts_with(tokens.src_path, source_file) {
             return Err(CompilerError::compiler_error(
                 "frozen generic body declaration path is outside its owning source file",
             ));
@@ -143,28 +151,28 @@ impl StableBodySyntax {
                 Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
             })?;
         }
-        path_syntax.try_remap_string_ids(&mut |id| {
-            Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
-        })?;
+        // Path rows already use the build-wide path identity domain; only token string payloads
+        // enter the frozen pool here.
 
         Ok(Self {
-            declaration_path: stable_path(&tokens.src_path, string_table),
+            declaration_path: tokens.src_path,
             donor_file_id: tokens.file_id,
             frozen_identity_handle,
             pool: pool.finish(),
-            tokens: frozen_tokens.into_boxed_slice(),
             path_syntax,
+            tokens: frozen_tokens.into_boxed_slice(),
             resolved_file_references: resolved_file_references.into_boxed_slice(),
         })
     }
 
     pub(super) fn materialise(
         &self,
-        source_file: &InternedPath,
+        source_file: PathId,
+        path_fork: &PathInternerFork,
         string_table: &mut StringTable,
     ) -> Result<MaterialisedBody, CompilerError> {
-        let declaration_path = materialise_path(&self.declaration_path, string_table);
-        if !declaration_path.starts_with(source_file) {
+        let declaration_path = self.declaration_path;
+        if !path_fork.starts_with(declaration_path, source_file) {
             return Err(CompilerError::compiler_error(
                 "frozen generic body declaration path is outside its materialised source file",
             ));
@@ -187,8 +195,7 @@ impl StableBodySyntax {
             })?;
             tokens.push(materialised);
         }
-        let mut path_syntax = self.path_syntax.clone();
-        path_syntax.try_remap_string_ids(&mut |id| pool_remap(id, &remap))?;
+        let path_syntax = self.path_syntax.clone();
         path_syntax.validate_file_owned_locations(self.donor_file_id)?;
         path_syntax.validate_file_tokens(&tokens, self.donor_file_id, "frozen generic body")?;
 
@@ -220,20 +227,8 @@ impl StableBodySyntax {
     }
 }
 
-pub(super) fn stable_path(path: &InternedPath, string_table: &StringTable) -> Box<[String]> {
-    path.as_components()
-        .iter()
-        .map(|component| string_table.resolve(*component).to_owned())
-        .collect()
-}
-
-pub(super) fn materialise_path(path: &[String], string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_components(
-        path.iter()
-            .map(|component| string_table.intern(component))
-            .collect(),
-    )
-}
+// Path IDs are build-wide identities. The frozen artefact retains them directly rather than
+// rendering to text and interning a second logical path tree at materialisation time.
 
 #[derive(Default)]
 pub(super) struct FrozenStringPool {

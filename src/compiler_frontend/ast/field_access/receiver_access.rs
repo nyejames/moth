@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverCallReason, ReceiverCallKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 /// Which receiver-call surface owns a receiver-access diagnostic, plus the method name.
 ///
@@ -64,6 +65,7 @@ type ReceiverAccessResult = Result<(), CompilerDiagnostic>;
 
 pub(super) fn validate_receiver_access(
     receiver_node: &AstNode,
+    path_fork: &PathInternerFork,
     access_mode: ReceiverAccessMode,
     method_boundary_span: Option<SourceSpan>,
     authored_marker_span: Option<SourceSpan>,
@@ -82,7 +84,7 @@ pub(super) fn validate_receiver_access(
         return Ok(());
     }
 
-    let source_state = classify_receiver_source_state(receiver_node);
+    let source_state = classify_receiver_source_state(receiver_node, path_fork);
 
     match (access_mode, source_state) {
         // An existing mutable place needs the explicit `~` marker. The method boundary is the

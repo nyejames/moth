@@ -732,8 +732,8 @@ fn prepare_check_only_module(
             })?;
         let current_file_path = current_source.canonical_path().to_path_buf();
         let input_result = {
-            let (syntax_string_table, selected_source_texts) =
-                syntax.source_preparation_inputs_mut();
+            let (syntax_string_table, selected_source_texts, syntax_path_fork) =
+                syntax.source_preparation_inputs_and_path_fork_mut();
             prepare_owned_source_input(
                 current_source_index,
                 source_tree_index,
@@ -741,6 +741,7 @@ fn prepare_check_only_module(
                 source_spans,
                 style_directives,
                 syntax_string_table,
+                syntax_path_fork,
                 selected_source_texts,
             )
         };
@@ -750,15 +751,21 @@ fn prepare_check_only_module(
         let prepared_output = syntax.prepare_source(input, source_spans)?;
         for dependency in &prepared_output.file_dependency_clauses {
             let provider = &dependency.dependency;
-            let action = match resolve_structural_provider_reference(
-                provider,
-                dependency.binding.clause_kind(),
-                &current_file_path,
-                project_path_resolver,
-                &mut isolated_external_imports,
-                directory_dependency_resolution,
-                syntax.string_table_mut(),
-            ) {
+            let action = {
+                let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
+                    syntax.source_preparation_inputs_and_path_fork_mut();
+                resolve_structural_provider_reference(
+                    provider,
+                    dependency.binding.clause_kind(),
+                    &current_file_path,
+                    project_path_resolver,
+                    syntax_path_fork,
+                    &mut isolated_external_imports,
+                    directory_dependency_resolution,
+                    syntax_string_table,
+                )
+            };
+            let action = match action {
                 Ok(action) => action,
                 Err(error) => return Err(error.into_failure(syntax.string_table_mut())),
             };
@@ -886,8 +893,8 @@ fn prepare_check_only_module(
             ))
         })?;
         let target_input_result = {
-            let (syntax_string_table, selected_source_texts) =
-                syntax.source_preparation_inputs_mut();
+            let (syntax_string_table, selected_source_texts, syntax_path_fork) =
+                syntax.source_preparation_inputs_and_path_fork_mut();
             prepare_owned_source_input(
                 target_source_index,
                 source_tree_index,
@@ -895,6 +902,7 @@ fn prepare_check_only_module(
                 source_spans,
                 style_directives,
                 syntax_string_table,
+                syntax_path_fork,
                 selected_source_texts,
             )
         };
@@ -1214,8 +1222,8 @@ fn discover_modules_serial_provider_capable(
                 crate::timing::TimingMetric::FrontendPrepare,
                 timing_context,
                 {
-                    let (syntax_string_table, selected_source_texts) =
-                        syntax.source_preparation_inputs_mut();
+                    let (syntax_string_table, selected_source_texts, syntax_path_fork) =
+                        syntax.source_preparation_inputs_and_path_fork_mut();
                     prepare_owned_source_input(
                         source_index,
                         source_tree_index,
@@ -1223,6 +1231,7 @@ fn discover_modules_serial_provider_capable(
                         source_spans,
                         style_directives,
                         syntax_string_table,
+                        syntax_path_fork,
                         selected_source_texts,
                     )
                 },
@@ -1235,15 +1244,21 @@ fn discover_modules_serial_provider_capable(
             let prepared_output = syntax.prepare_source(input, source_spans)?;
             for dependency in &prepared_output.file_dependency_clauses {
                 let provider = &dependency.dependency;
-                let action = match resolve_structural_provider_reference(
-                    provider,
-                    dependency.binding.clause_kind(),
-                    &source_path,
-                    project_path_resolver,
-                    external_imports,
-                    directory_dependency_resolution,
-                    syntax.string_table_mut(),
-                ) {
+                let action = {
+                    let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
+                        syntax.source_preparation_inputs_and_path_fork_mut();
+                    resolve_structural_provider_reference(
+                        provider,
+                        dependency.binding.clause_kind(),
+                        &source_path,
+                        project_path_resolver,
+                        syntax_path_fork,
+                        external_imports,
+                        directory_dependency_resolution,
+                        syntax_string_table,
+                    )
+                };
+                let action = match action {
                     Ok(action) => action,
                     Err(error) => return Err(error.into_failure(syntax.string_table_mut())),
                 };

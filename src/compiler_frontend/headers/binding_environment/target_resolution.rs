@@ -13,7 +13,7 @@ use crate::compiler_frontend::external_packages::{ExternalPackageRegistry, Exter
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::module_symbols::PublicExportEntry;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::FxHashSet;
 
@@ -22,7 +22,7 @@ use rustc_hash::FxHashSet;
 /// WHY: explicit enums make the resolution path visible in type names and match arms.
 pub(crate) enum ResolvedDependencyTarget {
     Source {
-        symbol_path: InternedPath,
+        symbol_path: PathId,
         access: SourceDependencyAccess,
     },
     External {
@@ -49,12 +49,13 @@ pub(crate) enum SourceDependencyAccess {
 ///
 /// WHY: avoids threading many state references as separate function parameters.
 pub(crate) struct DependencyTargetResolutionInput<'a> {
-    pub(crate) dependency_path: &'a InternedPath,
+    pub(crate) dependency_path: &'a PathId,
     pub(crate) span: Option<SourceSpan>,
-    pub(crate) module_file_paths: &'a FxHashSet<InternedPath>,
-    pub(crate) dependency_bindable_symbol_paths: &'a FxHashSet<InternedPath>,
+    pub(crate) module_file_paths: &'a FxHashSet<PathId>,
+    pub(crate) dependency_bindable_symbol_paths: &'a FxHashSet<PathId>,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a PathInternerFork,
 }
 
 /// Result of resolving a dependency path against virtual external-package metadata.
@@ -77,9 +78,10 @@ pub(crate) enum ExternalPackageSymbolLookup {
 /// This deliberately does not include source files or source symbols, so callers cannot use it
 /// to bypass source-backed package or module-root public export checks.
 pub(crate) struct ExternalPackageSymbolResolutionInput<'a> {
-    pub(crate) dependency_path: &'a InternedPath,
+    pub(crate) dependency_path: &'a PathId,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a PathInternerFork,
 }
 
 /// Resolve `@package/path/symbol` against virtual external package metadata only.
@@ -90,6 +92,7 @@ pub(crate) fn resolve_external_package_symbol(
         input.dependency_path,
         input.external_package_registry,
         input.string_table,
+        input.path_fork,
     ) {
         VirtualPackageMatch::Found { symbol_id, .. } => {
             ExternalPackageSymbolLookup::Found { symbol_id }
@@ -120,6 +123,7 @@ pub(crate) fn resolve_dependency_target(
         input.dependency_path,
         input.dependency_bindable_symbol_paths,
         input.string_table,
+        input.path_fork,
     ) {
         DependencyPathMatch::Resolved(symbol_path) => Ok(ResolvedDependencyTarget::Source {
             symbol_path,
@@ -132,17 +136,18 @@ pub(crate) fn resolve_dependency_target(
         DependencyPathMatch::Missing => {
             // File→symbol inference: if the path matches a source file but not a symbol,
             // try appending the path's last component to the file path as the symbol name.
-            if let DependencyPathMatch::Resolved(ref file_path) = resolve_dependency_target_path(
+            if let DependencyPathMatch::Resolved(file_path) = resolve_dependency_target_path(
                 input.dependency_path,
                 input.module_file_paths,
                 input.string_table,
-            ) && let Some(inferred_name) = input.dependency_path.name()
+                input.path_fork,
+            ) && let Some(inferred_name) = input.path_fork.component(*input.dependency_path)
             {
-                let inferred_path = file_path.append(inferred_name);
-                match resolve_dependency_target_path(
-                    &inferred_path,
+                match resolve_inferred_dependency_target(
+                    file_path,
+                    inferred_name,
                     input.dependency_bindable_symbol_paths,
-                    input.string_table,
+                    input.path_fork,
                 ) {
                     DependencyPathMatch::Resolved(symbol_path) => {
                         return Ok(ResolvedDependencyTarget::Source {
@@ -152,7 +157,7 @@ pub(crate) fn resolve_dependency_target(
                     }
                     DependencyPathMatch::Ambiguous => {
                         return Err(diagnostics::ambiguous_dependency_target(
-                            &inferred_path,
+                            input.dependency_path,
                             input.span,
                         ));
                     }
@@ -168,6 +173,7 @@ pub(crate) fn resolve_dependency_target(
                 dependency_path: input.dependency_path,
                 external_package_registry: input.external_package_registry,
                 string_table: input.string_table,
+                path_fork: input.path_fork,
             }) {
                 ExternalPackageSymbolLookup::Found { symbol_id } => {
                     return Ok(ResolvedDependencyTarget::External { symbol_id });
@@ -191,6 +197,7 @@ pub(crate) fn resolve_dependency_target(
                     input.dependency_path,
                     input.module_file_paths,
                     input.string_table,
+                    input.path_fork,
                 )
             {
                 return Err(diagnostics::bare_file_dependency(
@@ -211,7 +218,7 @@ pub(crate) fn resolve_dependency_target(
 enum DependencyPathMatch {
     Missing,
     Ambiguous,
-    Resolved(InternedPath),
+    Resolved(PathId),
 }
 
 /// Match a requested path against a set of candidate paths.
@@ -222,49 +229,72 @@ enum DependencyPathMatch {
 /// such as `@path/to/file.mtf/content` or `@path/to/file.md/content` while user dependency syntax stays
 /// extensionless.
 fn resolve_dependency_target_path(
-    requested_path: &InternedPath,
-    candidates: &FxHashSet<InternedPath>,
+    requested_path: &PathId,
+    candidates: &FxHashSet<PathId>,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> DependencyPathMatch {
     let exact_matches: Vec<_> = candidates
         .iter()
-        .filter(|candidate| exact_path_matches_candidate(candidate, requested_path, string_table))
-        .cloned()
+        .filter(|candidate| {
+            exact_path_matches_candidate(candidate, requested_path, string_table, path_fork)
+        })
+        .copied()
         .collect();
 
     match exact_matches.len() {
-        1 => {
-            if let Some(path) = exact_matches.into_iter().next() {
-                return DependencyPathMatch::Resolved(path);
-            }
-            return DependencyPathMatch::Missing;
-        }
-        2.. => return DependencyPathMatch::Ambiguous,
-        _ => {}
-    }
-
-    let matches: Vec<_> = candidates
-        .iter()
-        .filter(|candidate| {
-            candidate.ends_with(requested_path)
-                || suffix_matches_with_optional_source_extension(
-                    candidate,
-                    requested_path,
-                    string_table,
-                )
-        })
-        .cloned()
-        .collect();
-
-    match matches.len() {
-        0 => DependencyPathMatch::Missing,
-        1 => matches
+        1 => exact_matches
             .into_iter()
             .next()
             .map(DependencyPathMatch::Resolved)
             .unwrap_or(DependencyPathMatch::Missing),
-        _ => DependencyPathMatch::Ambiguous,
+        2.. => DependencyPathMatch::Ambiguous,
+        _ => {
+            let matches: Vec<_> = candidates
+                .iter()
+                .filter(|candidate| {
+                    path_fork.ends_with(**candidate, *requested_path)
+                        || suffix_matches_with_optional_source_extension(
+                            candidate,
+                            requested_path,
+                            string_table,
+                            path_fork,
+                        )
+                })
+                .copied()
+                .collect();
+            match matches.len() {
+                0 => DependencyPathMatch::Missing,
+                1 => matches
+                    .into_iter()
+                    .next()
+                    .map(DependencyPathMatch::Resolved)
+                    .unwrap_or(DependencyPathMatch::Missing),
+                _ => DependencyPathMatch::Ambiguous,
+            }
+        }
     }
+}
+fn resolve_inferred_dependency_target(
+    file_path: PathId,
+    inferred_name: StringId,
+    candidates: &FxHashSet<PathId>,
+    path_fork: &PathInternerFork,
+) -> DependencyPathMatch {
+    let mut found = None;
+    for candidate in candidates {
+        if path_fork.parent(*candidate) == Some(file_path)
+            && path_fork.component(*candidate) == Some(inferred_name)
+        {
+            if found.is_some() {
+                return DependencyPathMatch::Ambiguous;
+            }
+            found = Some(*candidate);
+        }
+    }
+    found
+        .map(DependencyPathMatch::Resolved)
+        .unwrap_or(DependencyPathMatch::Missing)
 }
 
 /// Result of attempting to resolve a dependency path as a virtual package symbol.
@@ -286,22 +316,26 @@ enum VirtualPackageMatch {
 /// WHY: virtual package dependencies share the same `@`-prefixed path syntax as file dependencies,
 /// so they are distinguished at resolution time rather than tokenization time.
 fn resolve_virtual_package_dependency(
-    requested_path: &InternedPath,
+    requested_path: &PathId,
     registry: &ExternalPackageRegistry,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> VirtualPackageMatch {
     let Some(package_match) =
-        registry.longest_package_prefix_for_dependency(requested_path, string_table)
+        registry.longest_package_prefix_for_dependency(
+            *requested_path,
+            path_fork,
+            string_table,
+        )
     else {
         return VirtualPackageMatch::NoMatch;
     };
 
     let package_path = string_table.intern(&package_match.package_path);
 
-    // The remaining components are the symbol path within the package.
-    // For now, we only support a single symbol name after the package path.
-    let symbol_components =
-        &requested_path.as_components()[package_match.matched_component_count..];
+    let mut components = Vec::new();
+    let requested_components = path_fork.resolve_components(*requested_path, &mut components);
+    let symbol_components = &requested_components[package_match.matched_component_count..];
     let symbol_name = symbol_components
         .last()
         .copied()
@@ -331,30 +365,34 @@ fn resolve_virtual_package_dependency(
 }
 
 fn exact_path_matches_candidate(
-    candidate: &InternedPath,
-    requested: &InternedPath,
+    candidate: &PathId,
+    requested: &PathId,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> bool {
+    let mut candidate_components = Vec::new();
+    let mut requested_components = Vec::new();
     source_components_match(
-        candidate.as_components(),
-        requested.as_components(),
+        path_fork.resolve_components(*candidate, &mut candidate_components),
+        path_fork.resolve_components(*requested, &mut requested_components),
         string_table,
     )
 }
 
 pub(super) fn suffix_matches_with_optional_source_extension(
-    candidate: &InternedPath,
-    requested: &InternedPath,
+    candidate: &PathId,
+    requested: &PathId,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> bool {
-    if requested.len() > candidate.len() {
+    if path_fork.depth(*requested) > path_fork.depth(*candidate) {
         return false;
     }
-
-    let candidate_components = candidate.as_components();
-    let requested_components = requested.as_components();
+    let mut candidate_components = Vec::new();
+    let mut requested_components = Vec::new();
+    let candidate_components = path_fork.resolve_components(*candidate, &mut candidate_components);
+    let requested_components = path_fork.resolve_components(*requested, &mut requested_components);
     let start_index = candidate_components.len() - requested_components.len();
-
     source_components_match(
         &candidate_components[start_index..],
         requested_components,
@@ -434,16 +472,17 @@ fn components_match_with_optional_content_file_extension(
 /// WHAT: a namespace dependency resolves to either a source file surface or an external package
 /// surface, producing a shallow field-access-only record in the depending file.
 pub(crate) enum ResolvedNamespaceTarget {
-    SourceFile(InternedPath),
+    SourceFile(PathId),
     ExternalPackage { package_path: StringId },
 }
 
 /// Input bundle for resolving one namespace dependency target.
 pub(crate) struct NamespaceTargetResolutionInput<'a> {
-    pub(crate) dependency_path: &'a InternedPath,
-    pub(crate) module_file_paths: &'a FxHashSet<InternedPath>,
+    pub(crate) dependency_path: &'a PathId,
+    pub(crate) module_file_paths: &'a FxHashSet<PathId>,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a PathInternerFork,
 }
 
 /// Resolve a bare `@path` dependency to its namespace target.
@@ -460,6 +499,7 @@ pub(crate) fn resolve_namespace_target(
         input.dependency_path,
         input.module_file_paths,
         input.string_table,
+        input.path_fork,
     );
 
     if let DependencyPathMatch::Resolved(file_path) = file_match {
@@ -469,8 +509,13 @@ pub(crate) fn resolve_namespace_target(
     // 2. Try to match as an external package (exact path only).
     if let Some(package_match) = input
         .external_package_registry
-        .longest_package_prefix_for_dependency(input.dependency_path, input.string_table)
-        && package_match.matched_component_count == input.dependency_path.len()
+        .longest_package_prefix_for_dependency(
+            *input.dependency_path,
+            input.path_fork,
+            input.string_table,
+        )
+        && package_match.matched_component_count
+            == input.path_fork.depth(*input.dependency_path) as usize
     {
         let package_path = input.string_table.intern(&package_match.package_path);
         return Some(ResolvedNamespaceTarget::ExternalPackage { package_path });
@@ -481,10 +526,14 @@ pub(crate) fn resolve_namespace_target(
 
 /// True when any component of the dependency path ends with `.moth`.
 ///
-/// WHAT: Moth dependencies must not include the `.moth` extension. This helper detects
-/// explicit `.moth` usage so callers can emit `ExplicitMothExtension`.
-pub(crate) fn has_explicit_moth_extension(path: &InternedPath, string_table: &StringTable) -> bool {
-    path.as_components()
+pub(crate) fn has_explicit_moth_extension(
+    path: &PathId,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> bool {
+    let mut components = Vec::new();
+    path_fork
+        .resolve_components(*path, &mut components)
         .iter()
         .any(|&component| string_table.resolve(component).ends_with(".moth"))
 }

@@ -28,335 +28,315 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
-fn if_branch_local_alias_does_not_escape_merge() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut string_table);
-    let external_package_registry = default_external_package_registry(&mut string_table);
+fn if_branch_local_alias_does_not_escape_merge() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+let external_package_registry = default_external_package_registry(&mut string_table);
 
-    let x = symbol("x", &mut string_table);
-    let y = symbol("y", &mut string_table);
+let x = symbol("x", &mut path_fork, &mut string_table);
+let y = symbol("y", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
-                )),
-                test_source_location(1),
-            ),
-            node(
-                NodeKind::If(
-                    runtime_expr(
-                        vec![runtime_operand_item(Expression::bool(
-                            true,
-                            test_source_location(2),
-                            ValueMode::ImmutableOwned,
-                        ))],
-                        BOOL,
-                        test_source_location(2),
-                        ValueMode::ImmutableOwned,
-                    ),
-                    vec![node(
-                        NodeKind::VariableDeclaration(make_test_variable(
-                            y,
-                            reference_expr_with_datatype(
-                                x.clone(),
-                                DataType::Int,
-                                BOOL,
-                                test_source_location(3),
-                            ),
-                        )),
-                        test_source_location(3),
-                    )],
-                    Some(vec![]),
-                    test_if_branch_metadata(true),
-                ),
-                test_source_location(2),
-            ),
-            node(
-                NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
-                },
-                test_source_location(4),
-            ),
-        ],
-        None,
-    );
-
-    let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
-        &mut string_table,
-    );
-    run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect("branch-local alias should not be visible after merge");
-}
-
-#[test]
-fn match_arm_local_alias_does_not_escape_merge() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut string_table);
-    let external_package_registry = default_external_package_registry(&mut string_table);
-
-    let x = symbol("x", &mut string_table);
-    let y = symbol("y", &mut string_table);
-
-    let arm = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
-        guard: None,
-        body: vec![node(
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![
+        node(
             NodeKind::VariableDeclaration(make_test_variable(
-                y,
-                reference_expr_with_datatype(
-                    x.clone(),
-                    DataType::Int,
-                    BOOL,
-                    test_source_location(4),
-                ),
+                x.clone(),
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
+            test_source_location(1),
+        ),
+        node(
+            NodeKind::If(
+                runtime_expr(
+                    vec![runtime_operand_item(Expression::bool(
+                        true,
+                        test_source_location(2),
+                        ValueMode::ImmutableOwned,
+                    ))],
+                    BOOL,
+                    test_source_location(2),
+                    ValueMode::ImmutableOwned,
+                ),
+                vec![node(
+                    NodeKind::VariableDeclaration(make_test_variable(
+                        y,
+                        reference_expr_with_datatype(
+                            x.clone(),
+                            DataType::Int,
+                            BOOL,
+                            test_source_location(3),
+                        ),
+                    )),
+                    test_source_location(3),
+                )],
+                Some(vec![]),
+                test_if_branch_metadata(true),
+            ),
+            test_source_location(2),
+        ),
+        node(
+            NodeKind::Assignment {
+                target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
+                value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+            },
             test_source_location(4),
-        )],
-    };
+        ),
+    ],
+    None,
+);
 
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
-                )),
-                test_source_location(1),
-            ),
-            node(
-                NodeKind::Match {
-                    scrutinee: Expression::int(
-                        1,
-                        test_source_location(2),
-                        ValueMode::ImmutableOwned,
-                    ),
-                    arms: vec![arm],
-                    default: Some(vec![]),
-                    exhaustiveness: MatchExhaustiveness::HasDefault,
-                },
-                test_source_location(2),
-            ),
-            node(
-                NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, BOOL, test_source_location(5)),
-                    value: Expression::int(2, test_source_location(5), ValueMode::ImmutableOwned),
-                },
-                test_source_location(5),
-            ),
-        ],
-        None,
-    );
-
-    let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
-        &mut string_table,
-    );
-    run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect("match-arm local alias should not be visible after merge");
-}
+let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
+run_borrow_checker(&hir, &external_package_registry, &string_table)
+    .expect("branch-local alias should not be visible after merge"); }
 
 #[test]
-fn while_body_local_alias_does_not_escape_exit() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut string_table);
-    let external_package_registry = default_external_package_registry(&mut string_table);
+fn match_arm_local_alias_does_not_escape_merge() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+let external_package_registry = default_external_package_registry(&mut string_table);
 
-    let x = symbol("x", &mut string_table);
-    let y = symbol("y", &mut string_table);
+let x = symbol("x", &mut path_fork, &mut string_table);
+let y = symbol("y", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
-                )),
-                test_source_location(1),
-            ),
-            node(
-                NodeKind::WhileLoop(
-                    Expression::bool(false, test_source_location(2), ValueMode::ImmutableOwned),
-                    vec![node(
-                        NodeKind::VariableDeclaration(make_test_variable(
-                            y,
-                            reference_expr_with_datatype(
-                                x.clone(),
-                                DataType::Int,
-                                BOOL,
-                                test_source_location(3),
-                            ),
-                        )),
-                        test_source_location(3),
-                    )],
-                ),
-                test_source_location(2),
-            ),
-            node(
-                NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
-                },
+let arm = MatchArm {
+    pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
+    guard: None,
+    body: vec![node(
+        NodeKind::VariableDeclaration(make_test_variable(
+            y,
+            reference_expr_with_datatype(
+                x.clone(),
+                DataType::Int,
+                BOOL,
                 test_source_location(4),
             ),
-        ],
-        None,
-    );
-
-    let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
-        &mut string_table,
-    );
-    run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect("while-body local alias should not be visible in exit block");
-}
-
-#[test]
-fn dead_local_access_reports_borrow_error() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut string_table);
-    let external_package_registry = default_external_package_registry(&mut string_table);
-
-    let x = symbol("x", &mut string_table);
-    let y = symbol("y", &mut string_table);
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
-                )),
-                test_source_location(1),
-            ),
-            node(
-                NodeKind::If(
-                    runtime_expr(
-                        vec![runtime_operand_item(Expression::bool(
-                            true,
-                            test_source_location(2),
-                            ValueMode::ImmutableOwned,
-                        ))],
-                        BOOL,
-                        test_source_location(2),
-                        ValueMode::ImmutableOwned,
-                    ),
-                    vec![node(
-                        NodeKind::VariableDeclaration(make_test_variable(
-                            y.clone(),
-                            reference_expr_with_datatype(
-                                x.clone(),
-                                DataType::Int,
-                                BOOL,
-                                test_source_location(3),
-                            ),
-                        )),
-                        test_source_location(3),
-                    )],
-                    Some(vec![]),
-                    test_if_branch_metadata(true),
-                ),
-                test_source_location(2),
-            ),
-            node(
-                NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
-                },
-                test_source_location(4),
-            ),
-        ],
-        None,
-    );
-
-    let mut hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
-        &mut string_table,
-    );
-
-    let start = &hir.functions[hir
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let entry = &hir.blocks[start.entry.0 as usize];
-    let (then_block, _) = match &entry.terminator {
-        crate::compiler_frontend::hir::terminators::HirTerminator::If {
-            then_block,
-            else_block,
-            ..
-        } => (*then_block, *else_block),
-        other => panic!("expected if terminator, found {other:?}"),
-    };
-
-    let merge_block = match &hir.blocks[then_block.0 as usize].terminator {
-        crate::compiler_frontend::hir::terminators::HirTerminator::Jump { target, .. } => *target,
-        other => panic!("expected then jump, found {other:?}"),
-    };
-
-    let then_local = hir.blocks[then_block.0 as usize]
-        .locals
-        .iter()
-        .find_map(|local| {
-            hir.side_table
-                .resolve_local_name(local.id, &string_table)
-                .filter(|name| *name == y.name_str(&string_table).unwrap_or_default())
-                .map(|_| local.clone())
-        })
-        .expect("then local should exist");
-
-    let synthetic_value = HirExpression {
-        id: HirValueId(77_001),
-        kind: HirExpressionKind::Load(crate::compiler_frontend::hir::places::HirPlace::Local(
-            then_local.id,
         )),
-        ty: then_local.ty,
-        value_kind: ValueKind::Place,
-        region: hir.blocks[merge_block.0 as usize].region,
-        span: None,
-    };
-    let synthetic_statement = HirStatement {
-        id: HirNodeId(77_000),
-        kind: HirStatementKind::Expr(synthetic_value),
-        span: None,
-    };
-    hir.blocks[merge_block.0 as usize]
-        .statements
-        .insert(0, synthetic_statement.clone());
-    hir.side_table
-        .map_statement(synthetic_statement.span, &synthetic_statement);
-    hir.side_table.map_value(
-        synthetic_statement.span,
-        HirValueId(77_001),
-        synthetic_statement.span,
-    );
+        test_source_location(4),
+    )],
+};
 
-    let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect_err("dead local access should fail");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
-}
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![
+        node(
+            NodeKind::VariableDeclaration(make_test_variable(
+                x.clone(),
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+            )),
+            test_source_location(1),
+        ),
+        node(
+            NodeKind::Match {
+                scrutinee: Expression::int(
+                    1,
+                    test_source_location(2),
+                    ValueMode::ImmutableOwned,
+                ),
+                arms: vec![arm],
+                default: Some(vec![]),
+                exhaustiveness: MatchExhaustiveness::HasDefault,
+            },
+            test_source_location(2),
+        ),
+        node(
+            NodeKind::Assignment {
+                target: assignment_target(x, DataType::Int, BOOL, test_source_location(5)),
+                value: Expression::int(2, test_source_location(5), ValueMode::ImmutableOwned),
+            },
+            test_source_location(5),
+        ),
+    ],
+    None,
+);
+
+let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
+run_borrow_checker(&hir, &external_package_registry, &string_table)
+    .expect("match-arm local alias should not be visible after merge"); }
+
+#[test]
+fn while_body_local_alias_does_not_escape_exit() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+let external_package_registry = default_external_package_registry(&mut string_table);
+
+let x = symbol("x", &mut path_fork, &mut string_table);
+let y = symbol("y", &mut path_fork, &mut string_table);
+
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![
+        node(
+            NodeKind::VariableDeclaration(make_test_variable(
+                x.clone(),
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+            )),
+            test_source_location(1),
+        ),
+        node(
+            NodeKind::WhileLoop(
+                Expression::bool(false, test_source_location(2), ValueMode::ImmutableOwned),
+                vec![node(
+                    NodeKind::VariableDeclaration(make_test_variable(
+                        y,
+                        reference_expr_with_datatype(
+                            x.clone(),
+                            DataType::Int,
+                            BOOL,
+                            test_source_location(3),
+                        ),
+                    )),
+                    test_source_location(3),
+                )],
+            ),
+            test_source_location(2),
+        ),
+        node(
+            NodeKind::Assignment {
+                target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
+                value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+            },
+            test_source_location(4),
+        ),
+    ],
+    None,
+);
+
+let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
+run_borrow_checker(&hir, &external_package_registry, &string_table)
+    .expect("while-body local alias should not be visible in exit block"); }
+
+#[test]
+fn dead_local_access_reports_borrow_error() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+let external_package_registry = default_external_package_registry(&mut string_table);
+
+let x = symbol("x", &mut path_fork, &mut string_table);
+let y = symbol("y", &mut path_fork, &mut string_table);
+
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![
+        node(
+            NodeKind::VariableDeclaration(make_test_variable(
+                x.clone(),
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+            )),
+            test_source_location(1),
+        ),
+        node(
+            NodeKind::If(
+                runtime_expr(
+                    vec![runtime_operand_item(Expression::bool(
+                        true,
+                        test_source_location(2),
+                        ValueMode::ImmutableOwned,
+                    ))],
+                    BOOL,
+                    test_source_location(2),
+                    ValueMode::ImmutableOwned,
+                ),
+                vec![node(
+                    NodeKind::VariableDeclaration(make_test_variable(
+                        y.clone(),
+                        reference_expr_with_datatype(
+                            x.clone(),
+                            DataType::Int,
+                            BOOL,
+                            test_source_location(3),
+                        ),
+                    )),
+                    test_source_location(3),
+                )],
+                Some(vec![]),
+                test_if_branch_metadata(true),
+            ),
+            test_source_location(2),
+        ),
+        node(
+            NodeKind::Assignment {
+                target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
+                value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+            },
+            test_source_location(4),
+        ),
+    ],
+    None,
+);
+
+let mut hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
+
+let start = &hir.functions[hir
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let entry = &hir.blocks[start.entry.0 as usize];
+let (then_block, _) = match &entry.terminator {
+    crate::compiler_frontend::hir::terminators::HirTerminator::If {
+        then_block,
+        else_block,
+        ..
+    } => (*then_block, *else_block),
+    other => panic!("expected if terminator, found {other:?}"),
+};
+
+let merge_block = match &hir.blocks[then_block.0 as usize].terminator {
+    crate::compiler_frontend::hir::terminators::HirTerminator::Jump { target, .. } => *target,
+    other => panic!("expected then jump, found {other:?}"),
+};
+
+let then_local = hir.blocks[then_block.0 as usize]
+    .locals
+    .iter()
+    .find_map(|local| {
+        hir.side_table.resolve_local_name(local.id, &path_fork, &string_table)
+            .filter(|name| path_fork.component(y).is_some_and(|component| string_table.resolve(component) == *name))
+            .map(|_| local.clone())
+    })
+    .expect("then local should exist");
+
+let synthetic_value = HirExpression {
+    id: HirValueId(77_001),
+    kind: HirExpressionKind::Load(crate::compiler_frontend::hir::places::HirPlace::Local(
+        then_local.id,
+    )),
+    ty: then_local.ty,
+    value_kind: ValueKind::Place,
+    region: hir.blocks[merge_block.0 as usize].region,
+    span: None,
+};
+let synthetic_statement = HirStatement {
+    id: HirNodeId(77_000),
+    kind: HirStatementKind::Expr(synthetic_value),
+    span: None,
+};
+hir.blocks[merge_block.0 as usize]
+    .statements
+    .insert(0, synthetic_statement.clone());
+hir.side_table
+    .map_statement(synthetic_statement.span, &synthetic_statement);
+hir.side_table.map_value(
+    synthetic_statement.span,
+    HirValueId(77_001),
+    synthetic_statement.span,
+);
+
+let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+    .expect_err("dead local access should fail");
+assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal); }

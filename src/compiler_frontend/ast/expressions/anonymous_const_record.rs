@@ -20,7 +20,9 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -98,6 +100,7 @@ pub(super) fn parse_anonymous_const_record_expression(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let record_span = current_span(token_stream);
     token_stream.advance(); // past the opening `|`
@@ -135,6 +138,7 @@ pub(super) fn parse_anonymous_const_record_expression(
                     &mut fields,
                     &mut seen_field_names,
                     string_table,
+                    path_fork,
                 )?;
             }
 
@@ -201,6 +205,7 @@ fn parse_record_field(
     fields: &mut Vec<Declaration>,
     seen_field_names: &mut FxHashMap<StringId, Option<SourceSpan>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let binding_span = current_span(token_stream);
     ensure_not_keyword_shadow_identifier(field_name, binding_span, string_table)
@@ -282,7 +287,7 @@ fn parse_record_field(
                 ValueMode::ImmutableOwned,
             )
         } else {
-            parse_record_field_value(token_stream, context, type_interner, string_table)?
+            parse_record_field_value(token_stream, context, type_interner, string_table, path_fork)?
         }
     } else {
         // A qualified required field may omit its initializer so explicit inputs or builder
@@ -299,7 +304,9 @@ fn parse_record_field(
     };
 
     fields.push(Declaration {
-        id: InternedPath::from_components(vec![field_name]),
+        id: path_fork
+            .try_intern_child(PathId::ROOT, field_name)
+            .expect("anonymous record field path table exhausted"),
         value,
         binding_span,
         config_qualifier: qualifier,
@@ -317,6 +324,7 @@ fn parse_record_field_value(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let mut expected_type = ExpectedType::Infer;
     let mut field_context = context.clone();
@@ -329,6 +337,7 @@ fn parse_record_field_value(
         &ValueMode::ImmutableOwned,
         false,
         string_table,
+        path_fork,
     )
 }
 

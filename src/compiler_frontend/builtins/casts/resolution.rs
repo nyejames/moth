@@ -23,6 +23,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -41,7 +42,6 @@ type CastResolutionResult<T> = Result<T, CompilerDiagnostic>;
 ///      AST expression.
 /// WHY: cast resolution is a stage-owned operation with several required
 ///      collaborators. Keeping them named prevents another long parser-to-AST
-///      argument list from becoming the public shape of this boundary.
 pub(crate) struct CastResolutionInput<'a> {
     pub(crate) source: Expression,
     pub(crate) target_type_id: TypeId,
@@ -52,6 +52,7 @@ pub(crate) struct CastResolutionInput<'a> {
     pub(crate) trait_evidence_environment: &'a TraitEvidenceEnvironment,
     pub(crate) type_environment: &'a mut TypeEnvironment,
     pub(crate) string_table: &'a StringTable,
+    pub(crate) path_fork: &'a PathInternerFork,
     pub(crate) active_generic_type_context: Option<&'a ActiveGenericTypeContext>,
     pub(crate) span: Option<SourceSpan>,
 }
@@ -77,6 +78,7 @@ pub(crate) fn resolve_cast_expression(
         trait_evidence_environment,
         type_environment,
         string_table,
+        path_fork,
         active_generic_type_context,
         span,
     } = input;
@@ -102,7 +104,7 @@ pub(crate) fn resolve_cast_expression(
     }
 
     let source_target =
-        builtin_cast_target_for_type(source_type_id, type_environment, string_table);
+        builtin_cast_target_for_type(source_type_id, type_environment, string_table, path_fork);
 
     let selection = select_cast_evidence(
         source_type_id,

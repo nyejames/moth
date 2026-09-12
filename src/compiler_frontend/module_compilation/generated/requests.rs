@@ -25,7 +25,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::semantic_identity::{GeneratedFunctionIdentity, OriginTypeId};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use rustc_hash::FxHashMap;
@@ -67,7 +67,7 @@ impl NominalOriginResolver for GeneratedRequestNominalOrigins<'_> {
 
 struct GeneratedRequestGenericParameters<'a> {
     type_environment: &'a TypeEnvironment,
-    templates: &'a FxHashMap<InternedPath, GenericFunctionTemplate>,
+    templates: &'a FxHashMap<PathId, GenericFunctionTemplate>,
     string_table: &'a StringTable,
 }
 
@@ -134,8 +134,9 @@ pub(crate) struct CanonicalGeneratedRequest {
 pub(crate) fn install_generated_request_contracts(
     requests: &[GenericFunctionInstantiationRequest],
     materialisation_context: &ModuleMaterialisationPreparation,
-    templates: &FxHashMap<InternedPath, GenericFunctionTemplate>,
+    templates: &FxHashMap<PathId, GenericFunctionTemplate>,
     external_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
     module_ast: &mut Ast,
 ) -> Result<Vec<CanonicalGeneratedRequest>, CompilerError> {
     let mut identities = Vec::with_capacity(requests.len());
@@ -219,7 +220,7 @@ pub(crate) fn install_generated_request_contracts(
         });
         identities.push(CanonicalGeneratedRequest {
             identity: identity.clone(),
-            function_name: request.key.function_path.name(),
+            function_name: path_fork.component(request.key.function_path),
             call_span: request.call_span,
         });
         let summary = bootstrap_call_summary_from_signature(&signature);

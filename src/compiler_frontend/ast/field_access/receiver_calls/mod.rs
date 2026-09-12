@@ -9,6 +9,7 @@ use super::{MemberStepContext, ReceiverAccessMode};
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
@@ -21,6 +22,7 @@ pub(super) fn parse_receiver_method_call_typed(
     member_step_context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Option<AstNode>, ExpressionParseError> {
     let MemberStepContext {
         receiver_node,
@@ -51,6 +53,7 @@ pub(super) fn parse_receiver_method_call_typed(
                 source_method: source_methods::SourceReceiverMethodTarget::Declared(method_entry),
                 type_interner,
                 string_table,
+                path_fork,
             },
         )?;
         return Ok(Some(node));
@@ -65,6 +68,7 @@ pub(super) fn parse_receiver_method_call_typed(
         member_span,
         type_interner.environment(),
         string_table,
+        path_fork,
     )? {
         let node = source_methods::parse_source_receiver_method_target_call_typed(
             source_methods::SourceReceiverMethodCallInput {
@@ -80,6 +84,7 @@ pub(super) fn parse_receiver_method_call_typed(
                 ),
                 type_interner,
                 string_table,
+                path_fork,
             },
         )?;
         return Ok(Some(node));

@@ -21,161 +21,152 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
-fn emits_advisory_return_drop_sites() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut string_table);
-    let external_package_registry = default_external_package_registry(&mut string_table);
+fn emits_advisory_return_drop_sites() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+let external_package_registry = default_external_package_registry(&mut string_table);
 
-    let value = symbol("value", &mut string_table);
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(
+let value = symbol("value", &mut path_fork, &mut string_table);
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![node(
+        NodeKind::VariableDeclaration(make_test_variable(
+            value,
+            Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+        )),
+        test_source_location(1),
+    )],
+    None,
+);
+
+let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
+let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+    .expect("borrow checking should succeed");
+
+let has_return_site = report
+    .analysis
+    .advisory_drop_sites
+    .values()
+    .flatten()
+    .any(|site| matches!(site.kind, BorrowDropSiteKind::Return));
+assert!(
+    has_return_site,
+    "expected at least one advisory return drop site"
+);
+
+for site in report.analysis.advisory_drop_sites.values().flatten() {
+    let mut sorted = site.locals.clone();
+    sorted.sort_by_key(|local| local.0);
+    assert_eq!(
+        site.locals, sorted,
+        "drop-site locals should be in deterministic local-id order"
+    );
+} }
+
+#[test]
+fn emits_advisory_break_and_region_exit_drop_sites() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+let external_package_registry = default_external_package_registry(&mut string_table);
+
+let x = symbol("x", &mut path_fork, &mut string_table);
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![
+        node(
             NodeKind::VariableDeclaration(make_test_variable(
-                value,
+                x.clone(),
                 Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
-        )],
-        None,
-    );
-
-    let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
-        &mut string_table,
-    );
-    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect("borrow checking should succeed");
-
-    let has_return_site = report
-        .analysis
-        .advisory_drop_sites
-        .values()
-        .flatten()
-        .any(|site| matches!(site.kind, BorrowDropSiteKind::Return));
-    assert!(
-        has_return_site,
-        "expected at least one advisory return drop site"
-    );
-
-    for site in report.analysis.advisory_drop_sites.values().flatten() {
-        let mut sorted = site.locals.clone();
-        sorted.sort_by_key(|local| local.0);
-        assert_eq!(
-            site.locals, sorted,
-            "drop-site locals should be in deterministic local-id order"
-        );
-    }
-}
-
-#[test]
-fn emits_advisory_break_and_region_exit_drop_sites() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut string_table);
-    let external_package_registry = default_external_package_registry(&mut string_table);
-
-    let x = symbol("x", &mut string_table);
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
-                )),
-                test_source_location(1),
-            ),
-            node(
-                NodeKind::If(
-                    runtime_expr(
-                        vec![runtime_operand_item(Expression::bool(
-                            true,
-                            test_source_location(2),
-                            ValueMode::ImmutableOwned,
-                        ))],
-                        builtin_type_ids::BOOL,
+        ),
+        node(
+            NodeKind::If(
+                runtime_expr(
+                    vec![runtime_operand_item(Expression::bool(
+                        true,
                         test_source_location(2),
                         ValueMode::ImmutableOwned,
-                    ),
-                    vec![node(
-                        NodeKind::Assignment {
-                            target: assignment_target(
-                                x.clone(),
-                                DataType::Int,
-                                builtin_type_ids::INT,
-                                test_source_location(3),
-                            ),
-                            value: Expression::int(
-                                2,
-                                test_source_location(3),
-                                ValueMode::ImmutableOwned,
-                            ),
-                        },
-                        test_source_location(3),
-                    )],
-                    Some(vec![node(
-                        NodeKind::Assignment {
-                            target: assignment_target(
-                                x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
-                                test_source_location(4),
-                            ),
-                            value: Expression::int(
-                                3,
-                                test_source_location(4),
-                                ValueMode::ImmutableOwned,
-                            ),
-                        },
-                        test_source_location(4),
-                    )]),
-                    test_if_branch_metadata(true),
+                    ))],
+                    builtin_type_ids::BOOL,
+                    test_source_location(2),
+                    ValueMode::ImmutableOwned,
                 ),
-                test_source_location(2),
+                vec![node(
+                    NodeKind::Assignment {
+                        target: assignment_target(
+                            x.clone(),
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(3),
+                        ),
+                        value: Expression::int(
+                            2,
+                            test_source_location(3),
+                            ValueMode::ImmutableOwned,
+                        ),
+                    },
+                    test_source_location(3),
+                )],
+                Some(vec![node(
+                    NodeKind::Assignment {
+                        target: assignment_target(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(4),
+                        ),
+                        value: Expression::int(
+                            3,
+                            test_source_location(4),
+                            ValueMode::ImmutableOwned,
+                        ),
+                    },
+                    test_source_location(4),
+                )]),
+                test_if_branch_metadata(true),
             ),
-            node(
-                NodeKind::WhileLoop(
-                    Expression::bool(true, test_source_location(5), ValueMode::ImmutableOwned),
-                    vec![node(NodeKind::Break, test_source_location(6))],
-                ),
-                test_source_location(5),
+            test_source_location(2),
+        ),
+        node(
+            NodeKind::WhileLoop(
+                Expression::bool(true, test_source_location(5), ValueMode::ImmutableOwned),
+                vec![node(NodeKind::Break, test_source_location(6))],
             ),
-        ],
-        None,
-    );
+            test_source_location(5),
+        ),
+    ],
+    None,
+);
 
-    let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
-        &mut string_table,
-    );
-    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
-        .expect("borrow checking should succeed");
+let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
+let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+    .expect("borrow checking should succeed");
 
-    let has_break_site = report
-        .analysis
-        .advisory_drop_sites
-        .values()
-        .flatten()
-        .any(|site| matches!(site.kind, BorrowDropSiteKind::Break));
-    assert!(has_break_site, "expected advisory break drop sites");
+let has_break_site = report
+    .analysis
+    .advisory_drop_sites
+    .values()
+    .flatten()
+    .any(|site| matches!(site.kind, BorrowDropSiteKind::Break));
+assert!(has_break_site, "expected advisory break drop sites");
 
-    let has_region_exit_site = report
-        .analysis
-        .advisory_drop_sites
-        .values()
-        .flatten()
-        .any(|site| matches!(site.kind, BorrowDropSiteKind::BlockExit));
-    assert!(
-        has_region_exit_site,
-        "expected advisory region-exit (block-exit) drop sites"
-    );
-}
+let has_region_exit_site = report
+    .analysis
+    .advisory_drop_sites
+    .values()
+    .flatten()
+    .any(|site| matches!(site.kind, BorrowDropSiteKind::BlockExit));
+assert!(
+    has_region_exit_site,
+    "expected advisory region-exit (block-exit) drop sites"
+); }

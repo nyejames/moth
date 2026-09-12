@@ -198,14 +198,19 @@ pub(crate) fn compile_module(
         Ok(SemanticStageOutput::Boracle(_)) => Err(CompilerError::compiler_error(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
         )),
-        Err(PremergeFailure::Diagnosed(batch)) => match ModuleDiagnostics::from_batch(batch) {
-            Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
-            Err(error) => Err(error),
+        Err(mut failure) => {
+            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()));
+            match failure {
+                PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
+                    Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
+                    Err(error) => Err(error),
+                },
+                PremergeFailure::Infrastructure(error) => Err(error),
+                // Mixed double-failures only arise at source-finalization tails and never reach
+                // module compilation; abort through the typed lane if one ever does.
+                PremergeFailure::Mixed { error, .. } => Err(error),
+            }
         },
-        Err(PremergeFailure::Infrastructure(error)) => Err(error),
-        // Mixed double-failures only arise at source-finalization tails and never reach
-        // module compilation; abort through the typed lane if one ever does.
-        Err(PremergeFailure::Mixed { error, .. }) => Err(error),
     }
 }
 
@@ -285,7 +290,10 @@ pub(crate) fn compile_module_for_boracle(
                 "Boracle compiler service unexpectedly completed the normal semantic pipeline",
             ),
         )),
-        Err(failure) => Err(failure),
+        Err(mut failure) => {
+            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()));
+            Err(failure)
+        }
     }
 }
 
@@ -458,6 +466,7 @@ fn run_semantic_stages(
         context.source_provider_dependencies,
         compiler.external_package_registry.as_ref(),
         &compiler.string_table,
+        &compiler.path_fork,
     )?;
 
     // Build the transient expanded public source-nominal origin index before `sorted`
@@ -476,6 +485,7 @@ fn run_semantic_stages(
         &sorted.headers,
         &sorted.module_symbols,
         &compiler.string_table,
+        &compiler.path_fork,
     )?;
 
     // Build the transient expanded public source-trait origin index before `sorted`
@@ -490,6 +500,7 @@ fn run_semantic_stages(
         &sorted.headers,
         &sorted.module_symbols,
         &compiler.string_table,
+        &compiler.path_fork,
     )?;
 
     // 3. Build the Abstract Syntax Tree (AST).
@@ -559,6 +570,7 @@ fn run_semantic_stages(
             type_environment: &module_ast.type_environment,
             external_registry: compiler.external_package_registry.as_ref(),
             string_table: &compiler.string_table,
+            path_fork: &compiler.path_fork,
             generic_function_templates: materialisation_context_builder
                 .context()
                 .generic_function_templates(),
@@ -583,6 +595,7 @@ fn run_semantic_stages(
             &public_origins_by_path,
             &public_source_nominal_type_origins,
             &module_resources.borrow(),
+            &compiler.path_fork,
         )?
         .into_iter()
         .map(|(path, origin)| PrivateFunctionOriginSeed { path, origin })
@@ -595,6 +608,7 @@ fn run_semantic_stages(
             .context()
             .generic_function_templates(),
         compiler.external_package_registry.as_ref(),
+        &compiler.path_fork,
         &mut module_ast,
     )?;
     let generated_request_ids =
@@ -750,7 +764,11 @@ fn run_semantic_stages(
         }
     )?;
     let materialisation_context = materialisation_context_builder
-        .freeze(&public_interface, &module_resources.borrow())?
+        .freeze(
+            &public_interface,
+            &module_resources.borrow(),
+            &compiler.path_fork,
+        )?
         .map(Arc::new);
     let resource_table = Rc::try_unwrap(module_resources)
         .map(|cell| cell.into_inner())
@@ -796,6 +814,10 @@ fn run_semantic_stages(
                     resource_table,
                     type_environment,
                     borrow_analysis,
+                    path_table: Arc::new(
+                        crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
+                            .freeze(),
+                    ),
                 },
                 link_facts: ModuleLinkFacts {
                     external_package_registry: Arc::clone(compiler.external_package_registry),
@@ -840,6 +862,7 @@ fn bind_retained_headers(
         compiler.project_path_resolver,
         compiler.source_files.as_ref(),
         &mut compiler.string_table,
+        &mut compiler.path_fork,
     )
     .map_err(|failure| {
         // Move the compiler table into the batch; binding failed, so the compiler owner

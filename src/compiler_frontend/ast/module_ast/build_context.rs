@@ -27,7 +27,7 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 #[cfg(feature = "timers")]
 use crate::timing::TimingMetric;
@@ -146,9 +146,11 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Mutable string table for interning paths, symbols, and diagnostic strings.
     pub string_table: &'a mut StringTable,
 
-    /// Canonical path of the module entry directory.
-    pub entry_dir: InternedPath,
+    /// Module-local path fork that owns every `PathId` in this build.
+    pub path_fork: &'a mut PathInternerFork,
 
+    /// Canonical path of the module entry directory.
+    pub entry_dir: PathId,
     /// Graph-owned semantic role of the active module root.
     pub root_role: ModuleRootRole,
 
@@ -190,11 +192,10 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
 /// WHAT: allows a phase to borrow the `StringTable` mutably while retaining access to all
 ///       other shared build services.
 /// WHY: prevents simultaneous mutable borrows of the string table and the context struct
-///      when both are passed through recursive parsing calls.
 pub(crate) struct AstPhaseContext<'a> {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
-    pub(crate) entry_dir: InternedPath,
+    pub(crate) entry_dir: PathId,
     pub(crate) file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
@@ -222,21 +223,22 @@ pub(crate) struct AstPhaseContext<'a> {
 }
 
 impl<'a> AstPhaseContext<'a> {
-    /// Split the full build context into its phase-local view and the mutable string table.
+    /// Split the full build context into its phase-local view and the mutable tables.
     ///
-    /// WHAT: extracts all fields except `string_table` into `AstPhaseContext` and returns
-    ///       the table as a separate mutable reference.
-    /// WHY: lets the caller pass the phase context and string table independently,
+    /// WHAT: extracts all fields except `string_table`/`path_fork` into `AstPhaseContext` and
+    ///       returns the tables as separate mutable references.
+    /// WHY: lets the caller pass the phase context and tables independently,
     ///      resolving Rust's borrow checker constraints across phase boundaries.
     pub(in crate::compiler_frontend) fn from_build_context(
         context: AstBuildContext<'a>,
         source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
-    ) -> (Self, &'a mut StringTable) {
+    ) -> (Self, &'a mut StringTable, &'a mut PathInternerFork) {
         let AstBuildContext {
             build_profile,
             external_package_registry,
             style_directives,
             string_table,
+            path_fork,
             entry_dir,
             root_role,
             file_value_resolution,
@@ -273,6 +275,7 @@ impl<'a> AstPhaseContext<'a> {
                 timing_metric_family,
             },
             string_table,
+            path_fork,
         )
     }
 }

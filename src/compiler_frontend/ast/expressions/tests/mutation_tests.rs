@@ -49,8 +49,8 @@ fn immutable_assignment_retains_exact_operator_span() {
 
 #[test]
 fn allows_int_to_float_assignment_via_contextual_coercion() {
-    let (ast, string_table) = parse_single_file_ast("total ~= 1.5\ntotal = 2\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("total ~= 1.5\ntotal = 2\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -66,8 +66,8 @@ fn rejects_int_divide_assign_when_regular_division_returns_float() {
 
 #[test]
 fn allows_int_integer_divide_assign() {
-    let (ast, string_table) = parse_single_file_ast("value ~Int = 10\nvalue //= 4\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("value ~Int = 10\nvalue //= 4\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -78,8 +78,8 @@ fn allows_int_integer_divide_assign() {
 
 #[test]
 fn allows_float_divide_assign_int_rhs() {
-    let (ast, string_table) = parse_single_file_ast("value ~Float = 10\nvalue /= 4\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("value ~Float = 10\nvalue /= 4\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -103,8 +103,8 @@ fn rejects_float_integer_divide_assign_rhs() {
 
 #[test]
 fn allows_int_modulus_assign() {
-    let (ast, string_table) = parse_single_file_ast("value ~Int = 10\nvalue %= 4\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("value ~Int = 10\nvalue %= 4\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -115,8 +115,8 @@ fn allows_int_modulus_assign() {
 
 #[test]
 fn allows_int_exponent_assign() {
-    let (ast, string_table) = parse_single_file_ast("value ~Int = 2\nvalue ^= 3\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("value ~Int = 2\nvalue ^= 3\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");

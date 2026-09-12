@@ -10,7 +10,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
@@ -34,15 +34,24 @@ mod loop_lowering_tests;
 mod reachability_tests;
 mod value_block_lowering_tests;
 
-pub(super) fn symbol(name: &str, string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str(name, string_table)
+pub(super) fn symbol(
+    name: &str,
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> PathId {
+    path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits")
 }
 
 pub(super) fn entry_path_and_start_name(
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> (InternedPath, InternedPath) {
-    let entry_path = InternedPath::from_single_str("main.moth", string_table);
-    let start_name = entry_path.join_str(IMPLICIT_START_FUNC_NAME, string_table);
+) -> (PathId, PathId) {
+    let entry_path = symbol("main.moth", path_fork, string_table);
+    let start_name = path_fork
+        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
+        .expect("test path fits");
     (entry_path, start_name)
 }
 

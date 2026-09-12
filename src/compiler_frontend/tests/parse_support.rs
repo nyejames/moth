@@ -37,7 +37,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
@@ -117,8 +117,9 @@ fn test_file_value_resolution_services(
 
 pub(crate) fn parse_single_file_ast_build_result(
     source: &str,
-) -> Result<(AstBuildResult, StringTable), CompilerDiagnostic> {
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), CompilerDiagnostic> {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let file_path = std::path::PathBuf::from("@page.moth");
@@ -131,15 +132,17 @@ pub(crate) fn parse_single_file_ast_build_result(
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
 
-    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork
+        .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
-        &interned_path,
+        interned_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
+        &mut path_fork,
         SourceId::COMPILATION_ROOT,
         &mut span_builder,
     )
@@ -158,6 +161,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         0,
         0,
         &mut span_builder,
+        &mut path_fork,
     )
     .map_err(|error| match error {
                 crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
@@ -183,6 +187,7 @@ pub(crate) fn parse_single_file_ast_build_result(
             assert_eq!(source, source_file_id);
             diagnostic.capture_preparation_span(source)
         },
+        &mut path_fork,
     )
     .map_err(|failure| {
         let bag = match failure {
@@ -205,6 +210,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         options.project_path_resolver,
         &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
+        &mut path_fork,
     )
     .map_err(|failure| {
         let bag = match failure {
@@ -220,7 +226,7 @@ pub(crate) fn parse_single_file_ast_build_result(
     })?;
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut path_fork)
             .map_err(|failure| {
                 failure
                     .into_messages(&string_table)
@@ -230,7 +236,9 @@ pub(crate) fn parse_single_file_ast_build_result(
                     .expect("dependency sorting failed without a diagnostic")
             })?;
 
-    let entry_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test entry path fits");
     let build_result = Ast::new(
         AstBuildInput {
             headers: sorted.headers,
@@ -243,6 +251,7 @@ pub(crate) fn parse_single_file_ast_build_result(
             root_role: ModuleRootRole::Normal,
             external_package_registry,
             style_directives: &style_directives,
+            path_fork: &mut path_fork,
             string_table: &mut string_table,
             entry_dir: entry_path,
             build_profile: FrontendBuildProfile::Dev,
@@ -270,17 +279,17 @@ pub(crate) fn parse_single_file_ast_build_result(
         }
     })?;
 
-    Ok((build_result, string_table))
+    Ok((build_result, path_fork, string_table))
 }
 
 pub(crate) fn parse_single_file_ast_result(
     source: &str,
-) -> Result<(Ast, StringTable), CompilerDiagnostic> {
+) -> Result<(Ast, PathInternerFork, StringTable), CompilerDiagnostic> {
     parse_single_file_ast_build_result(source)
-        .map(|(build_result, string_table)| (build_result.ast, string_table))
+        .map(|(build_result, path_fork, string_table)| (build_result.ast, path_fork, string_table))
 }
 
-pub(crate) fn parse_single_file_ast(source: &str) -> (Ast, StringTable) {
+pub(crate) fn parse_single_file_ast(source: &str) -> (Ast, PathInternerFork, StringTable) {
     parse_single_file_ast_result(source).expect("source should parse into AST")
 }
 
@@ -312,6 +321,7 @@ pub(crate) fn tokenize_source_for_test(
         module_path,
         tokenizer_entry_mode,
         &mut frontend.string_table,
+        &mut frontend.path_fork,
         span_builder,
     )
     .map_err(|error| match error {

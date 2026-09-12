@@ -15,7 +15,7 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -30,29 +30,14 @@ fn prepare_source(
     ExtendedSpanBuilder,
 ) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = Path::new("@page.moth");
-    let interned_path = InternedPath::try_from_filesystem_path(file_path, &mut string_table)
+    let interned_path = path_fork.try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &interned_path,
-        TokenizerEntryMode::SourceFile,
-        &StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
-    let output = prepare_file_from_tokens(
-        file_tokens,
-        file_path,
-        &HeaderParseOptions::default(),
-        &mut string_table,
-        0,
-        0,
-        &mut span_builder,
-    )
+    let output = prepare_file_from_tokens(file_tokens, file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut PathInternerFork::empty())
     .expect("preparation should succeed");
     (output, string_table, span_builder)
 }
@@ -62,12 +47,13 @@ fn content_hint(
     occurrence: PathSyntaxId,
     strings: &mut StringTable,
 ) -> LocalDeclarationOrderingHint {
+    let mut path_fork = PathInternerFork::empty();
     let components = path_text
         .split('/')
         .map(|component| strings.intern(component))
         .collect::<Vec<_>>();
     LocalDeclarationOrderingHint::content_source(
-        InternedPath::from_components(components),
+        path_fork.try_intern_components(&components).expect("test path fits"),
         occurrence,
     )
 }
@@ -274,9 +260,9 @@ fn struct_field_resource_default_records_no_content_hint() {
     );
     assert!(
         struct_header.local_ordering_hints.is_empty(),
-        "a resource-only field default needs no content ordering edge, got {:?} in {}",
+        "a resource-only field default needs no content ordering edge, got {:?} in {:?}",
         struct_header.local_ordering_hints,
-        struct_header.tokens.src_path.to_portable_string(&strings)
+        struct_header.tokens.src_path
     );
 }
 
@@ -290,9 +276,9 @@ fn dependency_clause_rows_record_no_content_hint() {
     for header in &output.headers {
         assert!(
             header.local_ordering_hints.is_empty(),
-            "clause-consumed and resource rows must record no hints, got {:?} on {}",
+            "clause-consumed and resource rows must record no hints, got {:?} on {:?}",
             header.local_ordering_hints,
-            header.tokens.src_path.to_portable_string(&strings)
+            header.tokens.src_path
         );
     }
 }
@@ -316,6 +302,7 @@ fn recollecting_content_hints_deduplicates_into_the_hint_set() {
         &output.structural_file_references,
         output.path_syntax.table(),
         &mut strings,
+        &mut PathInternerFork::empty(),
     )
     .expect("re-collecting valid path rows should succeed");
     let after: Vec<usize> = output

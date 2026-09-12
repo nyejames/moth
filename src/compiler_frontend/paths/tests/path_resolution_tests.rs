@@ -14,7 +14,7 @@ use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolu
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::PathBuf;
@@ -24,6 +24,7 @@ struct TestHarness {
     project_root: PathBuf,
     resolver: ProjectPathResolver,
     string_table: StringTable,
+    path_fork: PathInternerFork,
     _temp_dir: tempfile::TempDir,
 }
 
@@ -31,6 +32,7 @@ fn prepared_source_package_roots(
     source_packages: &SourcePackageRegistry,
 ) -> PreparedSourcePackageRoots {
     let mut prep_string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     crate::build_system::create_project_modules::source_package_discovery::
         build_source_package_boundary_indexes(
             source_packages,
@@ -94,14 +96,19 @@ impl TestHarness {
             project_root,
             resolver,
             string_table: StringTable::new(),
+            path_fork: PathInternerFork::empty(),
             _temp_dir: temp_dir,
         }
     }
 
-    fn make_path(&mut self, components: &[&str]) -> InternedPath {
-        let mut path = InternedPath::new();
-        for c in components {
-            path.push_str(c, &mut self.string_table);
+    fn make_path(&mut self, components: &[&str]) -> PathId {
+        let mut path = PathId::ROOT;
+        for component in components {
+            let component_id = self.string_table.intern(component);
+            path = self
+                .path_fork
+                .try_intern_child(path, component_id)
+                .expect("test path fits");
         }
         path
     }
@@ -174,13 +181,13 @@ fn source_package_dependency_resolves_to_package_root() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-    path.push_str("utils", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("helper/utils", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(result.0, CompileTimePathBase::SourcePackageRoot);
@@ -224,13 +231,13 @@ fn source_package_prefix_takes_priority_over_entry_root() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-    path.push_str("utils", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("helper/utils", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(result.0, CompileTimePathBase::SourcePackageRoot);
@@ -253,7 +260,12 @@ fn extensionless_dependency_resolves_supported_moth_template_candidate() {
 
     let result = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect("supported .mtf dependency should resolve");
 
     assert_eq!(result.kind, SourceFileKind::MothTemplate);
@@ -271,7 +283,12 @@ fn recognized_unsupported_moth_template_candidate_reports_source_kind_diagnostic
 
     let error = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect_err("unsupported .mtf dependency should fail");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -298,7 +315,12 @@ fn direct_moth_template_extension_dependency_is_rejected_as_source_extension() {
 
     let error = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect_err("direct .mtf dependency should fail");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -326,7 +348,12 @@ fn moth_template_and_moth_same_stem_are_ambiguous() {
 
     let error = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect_err("same-stem .moth and .mtf should be ambiguous");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -349,7 +376,12 @@ fn moth_template_and_folder_same_stem_are_ambiguous() {
 
     let error = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect_err(".mtf and folder with same stem should be ambiguous");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -383,13 +415,19 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("docs", &mut string_table);
-    path.push_str("intro", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("docs/intro", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
     let error = resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect_err("source resolution must not hide .mtf/folder ambiguity");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -476,13 +514,13 @@ fn package_scan_root_name_is_not_package_prefix() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("lib", &mut string_table);
-    path.push_str("thing", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("lib/thing", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect("entry-root fallback dependency should resolve");
 
     assert_eq!(
@@ -522,13 +560,13 @@ fn package_direct_child_is_package_prefix() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-    path.push_str("utils", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("helper/utils", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(
@@ -560,13 +598,13 @@ fn entry_root_dependency_fallback_success() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("pages", &mut string_table);
-    path.push_str("about", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("pages/about", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect("entry-root fallback dependency should resolve");
 
     assert_eq!(
@@ -609,13 +647,13 @@ fn source_package_prefix_wins_consistently() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-    path.push_str("utils", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("helper/utils", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(
@@ -653,14 +691,13 @@ fn dependency_dotdot_rejected() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("..", &mut string_table);
-    path.push_str("shared", &mut string_table);
-    path.push_str("math", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("../shared/math", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let err = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect_err("'..' in dependencies should be rejected");
     let rendered_msg = rendered_error_msg(&err, &string_table);
 
@@ -691,13 +728,13 @@ fn missing_dependency_target_is_typed_diagnostic() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("missing", &mut string_table);
-    path.push_str("target", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("missing/target", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let err = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect_err("missing dependency should be rejected");
     let diagnostic = typed_dependency_diagnostic(&err);
 
@@ -731,15 +768,13 @@ fn dependency_escape_project_root_rejected() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str(".", &mut string_table);
-    path.push_str("..", &mut string_table);
-    path.push_str("..", &mut string_table);
-    path.push_str("escape", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("./../../escape", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let err = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect_err("dependency escaping project root should be rejected");
     assert!(matches!(
         dependency_diagnostic_payload(&err),
@@ -786,14 +821,13 @@ fn dependency_escape_package_root_rejected() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-    path.push_str("..", &mut string_table);
-    path.push_str("escape", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("helper/../escape", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let err = resolver
-        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+    let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect_err("dependency escaping package root should be rejected");
     assert!(matches!(
         dependency_diagnostic_payload(&err),
@@ -834,13 +868,20 @@ fn concrete_file_dependency_inside_module_root_is_accepted() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("helper", &mut string_table);
-    path.push_str("thing", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("helper/thing", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
     let result =
-        resolver.resolve_dependency_to_source_file(&path, &declaring_source, &mut string_table);
+        resolver.resolve_dependency_to_source_file(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
+        ;
 
     assert!(
         result.is_ok(),
@@ -911,16 +952,13 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
     .expect("resolver creation should succeed");
 
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("pages", &mut string_table);
-    path.push_str("About", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("pages/About", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver.resolve_dependency_as_compile_time_path(
-        &path,
-        &declaring_source,
-        &mut string_table,
-    );
+    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table);
 
     #[cfg(target_os = "macos")]
     {
@@ -967,7 +1005,12 @@ fn markdown_dependency_resolves_when_registered() {
 
     let result = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect("registered .md dependency should resolve");
 
     assert_eq!(result.kind, SourceFileKind::PlainMarkdown);
@@ -985,7 +1028,12 @@ fn markdown_dependency_rejected_when_unsupported() {
 
     let error = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect_err("unregistered .md dependency should be rejected");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -1009,7 +1057,12 @@ fn markdown_and_moth_same_stem_are_ambiguous() {
 
     let error = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect_err("same-stem .moth and .md should be ambiguous");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -1032,7 +1085,12 @@ fn markdown_and_folder_same_stem_are_ambiguous() {
 
     let error = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect_err(".md and folder with same stem should be ambiguous");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -1057,7 +1115,12 @@ fn markdown_and_moth_template_same_stem_are_ambiguous() {
 
     let error = h
         .resolver
-        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
         .expect_err("same-stem .mtf and .md should be ambiguous");
     let diagnostic = typed_dependency_diagnostic(&error);
 

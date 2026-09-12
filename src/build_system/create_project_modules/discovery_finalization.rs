@@ -4,6 +4,8 @@ use super::discovery_identity_rebind::{
 };
 use super::discovery_missing_source_load::load_missing_sources;
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use std::sync::Arc;
 /// Finish only retained work on an aborted walk. Queued sources remain unloaded.
 ///
 /// The final source owner already contains every known snapshot and original span builder. This
@@ -101,15 +103,14 @@ pub(super) fn finalize_failed_discovery(
             );
         }
     };
-    let terminal_failure = match terminal_error {
+    let mut terminal_failure = match terminal_error {
         SourceDiscoveryError::Diagnostic(diagnostic) => {
             let table = std::mem::take(string_table);
             let mut diagnostics = warnings;
             diagnostics.push(diagnostic);
-            PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostics(
-                diagnostics,
-                table,
-            ))
+            let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
+            batch.attach_path_table_if_missing(Arc::new(source_builder.sources().paths().clone()));
+            PremergeFailure::Diagnosed(batch)
         }
         SourceDiscoveryError::Premerge(mut failure) => {
             match &mut failure {
@@ -125,6 +126,8 @@ pub(super) fn finalize_failed_discovery(
             unreachable!("discovery failure cannot already carry a finalized source owner")
         }
     };
+    let path_table = Arc::new(source_builder.sources().paths().clone());
+    terminal_failure.attach_path_table_if_missing(path_table);
     finish_discovery_source_owner(terminal_failure, source_builder)
 }
 
@@ -307,6 +310,7 @@ pub(super) fn finalize_reachable_files(
     entry_file_path: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     failure: Option<TraversalFailure>,
     resolved_file_references: &mut [SingleFileResolvedReference],
 ) -> Result<(SourceDatabaseBuilder, Vec<PreparedSourceInput>), SourceDiscoveryError> {
@@ -316,12 +320,14 @@ pub(super) fn finalize_reachable_files(
             SourceKind::Compiler(source_file.kind),
         )
     }));
-    let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
-        &registration_index,
-        entry_file_path,
-        Some(project_path_resolver),
-        string_table,
-    )?;
+    let source_files =
+        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
+            &registration_index,
+            entry_file_path,
+            Some(project_path_resolver),
+            string_table,
+            path_fork.clone_path_builder(),
+        )?;
     let mut source_files = SourceDatabaseBuilder::new(source_files);
 
     if let Err(error) = retain_known_discovery_sources(&files, &mut source_cache, &mut source_files)
@@ -441,10 +447,11 @@ pub(super) fn finalize_reachable_files(
                     .expect("diagnosed preparation exits through failed discovery finalization");
                 output.rebind_source_identity(
                     final_source_id,
-                    source_files.sources().legacy_logical_path(final_source_id),
+                    final_record.logical_path,
                     source_file.path.clone(),
+                    path_fork,
                 )?;
-                output.freeze_path_syntax(string_table)?;
+                output.freeze_path_syntax(string_table, path_fork)?;
                 match source_kind {
                     SourceKind::Compiler(SourceFileKind::Moth) => {
                         PreparedSourceKind::MothPrepared {

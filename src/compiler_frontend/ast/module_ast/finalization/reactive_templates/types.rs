@@ -11,7 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ReactiveTemplateMetadata,
 };
 
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug)]
@@ -30,7 +30,7 @@ impl Eq for FunctionTemplateFlow {}
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct ReactiveTemplateValueEnvironment {
-    values: FxHashMap<InternedPath, Option<ReactiveTemplateMetadata>>,
+    values: FxHashMap<PathId, Option<ReactiveTemplateMetadata>>,
 }
 
 impl ReactiveTemplateValueEnvironment {
@@ -51,14 +51,14 @@ impl ReactiveTemplateValueEnvironment {
         );
     }
 
-    pub(super) fn record_assignment(&mut self, path: &InternedPath, value: &Expression) {
+    pub(super) fn record_assignment(&mut self, path: &PathId, value: &Expression) {
         self.values
             .insert(path.clone(), value.reactive_template.clone());
     }
 
     pub(super) fn record_binding_metadata(
         &mut self,
-        path: &InternedPath,
+        path: &PathId,
         metadata: Option<ReactiveTemplateMetadata>,
     ) {
         self.values.insert(path.clone(), metadata);
@@ -66,7 +66,7 @@ impl ReactiveTemplateValueEnvironment {
 
     pub(super) fn metadata_for_path(
         &self,
-        path: &InternedPath,
+        path: &PathId,
     ) -> Option<ReactiveTemplateMetadata> {
         self.values.get(path).cloned().flatten()
     }
@@ -88,7 +88,7 @@ pub(super) fn merge_optional_metadata(
 
 pub(super) fn reference_path_for_place_expression(
     place: &crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpression,
-) -> Option<&InternedPath> {
+) -> Option<&PathId> {
     use crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpressionKind;
 
     match &place.kind {

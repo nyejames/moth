@@ -14,6 +14,7 @@ use crate::compiler_frontend::headers::types::{
     FileRole, HeaderBuildContext, HeaderParseContext, HeaderParseFailure, TopLevelConstFragment,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 
 pub(super) fn handle_hash_item(
@@ -104,18 +105,18 @@ fn handle_top_level_const_template(
     let template_token = token_stream.current_token();
     token_stream.advance();
 
-    let source_file = token_stream.src_path.to_owned();
-
+    let source_file = token_stream.src_path;
     let mut build_context = HeaderBuildContext {
         warnings: &mut state.warnings,
-        source_file: &source_file,
+        source_file,
         file_dependency_clauses: &state.file_dependency_clauses,
         dependency_selections: &state.dependency_selections,
         string_table: context.string_table,
+        path_fork: context.path_fork,
         file_role: context.file_role,
     };
     let header = create_top_level_const_template(
-        token_stream.src_path.to_owned(),
+        source_file,
         template_token,
         context.const_template_offset + state.const_template_count,
         token_stream,
@@ -127,12 +128,13 @@ fn handle_top_level_const_template(
 
     // Record placement metadata: runtime_insertion_index is the count of runtime fragments
     // seen before this const fragment in source order.
+    let fragment_path = header.tokens.src_path;
     let fragment = TopLevelConstFragment {
         runtime_insertion_index: context.runtime_fragment_offset + state.runtime_fragment_count,
         span: header
             .name_span
             .expect("authored const-template headers carry a source span"),
-        header_path: header.tokens.src_path.clone(),
+        header_path: fragment_path,
     };
     state.register_top_level_const_fragment(fragment, header);
 

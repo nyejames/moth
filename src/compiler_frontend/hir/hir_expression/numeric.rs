@@ -428,6 +428,7 @@ impl<'a> HirBuilder<'a> {
             BuiltinCastTarget::Error,
             &self.type_environment,
             self.string_table,
+            self.path_fork,
         )
     }
 

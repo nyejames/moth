@@ -2,7 +2,7 @@ use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
@@ -11,6 +11,7 @@ use std::rc::Rc;
 #[test]
 fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut span_builder = ExtendedSpanBuilder::new();
     let declarations =
@@ -31,7 +32,7 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
     let context = constant_template_context(&token_stream.src_path, &declarations)
         .with_template_ir_store(shared_store);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("docs-style table with many rows should parse");
 
     let reference = &template.tir_reference;
@@ -61,7 +62,8 @@ fn docs_style_table_and_data_declarations(
     shared_store: &Rc<RefCell<TemplateIrStore>>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Vec<Declaration> {
-    let wrapper_scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let wrapper_scope = path_fork.try_intern_portable_path("main.moth/#const_template0", string_table).expect("test path fits");
 
     let mut header_row_tokens = template_tokens_from_source(
         "[$children([:\n            <th style=\"border: 1px solid; padding: 0.5em; text-align: left;\">[$slot]</th>\n        ]):[$slot]]",
@@ -70,12 +72,7 @@ fn docs_style_table_and_data_declarations(
     );
     let header_row_context = new_constant_context(header_row_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(shared_store));
-    let header_row = Template::new(
-        &mut header_row_tokens,
-        &header_row_context,
-        vec![],
-        string_table,
-    )
+    let header_row = Template::new(&mut header_row_tokens, &header_row_context, vec![], string_table, &mut path_fork)
     .expect("docs-style header row wrapper should parse");
 
     let mut table_tokens = template_tokens_from_source(
@@ -85,7 +82,7 @@ fn docs_style_table_and_data_declarations(
     );
     let table_context = new_constant_context(table_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(shared_store));
-    let table = Template::new(&mut table_tokens, &table_context, vec![], string_table)
+    let table = Template::new(&mut table_tokens, &table_context, vec![], string_table, &mut path_fork)
         .expect("docs-style table wrapper should parse");
 
     let mut data_tokens = template_tokens_from_source(
@@ -95,24 +92,30 @@ fn docs_style_table_and_data_declarations(
     );
     let data_context = new_constant_context(data_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(shared_store));
-    let data = Template::new(&mut data_tokens, &data_context, vec![], string_table)
+    let data = Template::new(&mut data_tokens, &data_context, vec![], string_table, &mut path_fork)
         .expect("docs-style data wrapper should parse");
 
     vec![
         Declaration {
-            id: wrapper_scope.append(string_table.intern("header_row")),
+            id: path_fork
+                .try_intern_child(wrapper_scope, string_table.intern("header_row"))
+                .expect("test path fits"),
             value: Expression::template(header_row, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
         Declaration {
-            id: wrapper_scope.append(string_table.intern("table")),
+            id: path_fork
+                .try_intern_child(wrapper_scope, string_table.intern("table"))
+                .expect("test path fits"),
             value: Expression::template(table, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
         Declaration {
-            id: wrapper_scope.append(string_table.intern("data")),
+            id: path_fork
+                .try_intern_child(wrapper_scope, string_table.intern("data"))
+                .expect("test path fits"),
             value: Expression::template(data, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
@@ -123,6 +126,7 @@ fn docs_style_table_and_data_declarations(
 #[test]
 fn child_wrapper_composition_marks_template_tir_reference_composed() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[$children([:<b>[$slot]</b>]): hello [:child] ]",
@@ -131,7 +135,7 @@ fn child_wrapper_composition_marks_template_tir_reference_composed() {
     );
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("child-wrapper composition should parse");
 
     let reference = &template.tir_reference;

@@ -30,7 +30,7 @@ fn html_directive_sets_formatter_via_handler_behavior() {
         &style_directives,
     );
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("html template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -54,7 +54,7 @@ fn css_directive_sets_style_and_formatter_identity() {
         &style_directives,
     );
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("css template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -70,7 +70,7 @@ fn markdown_directive_sets_style_and_formatter_identity() {
         template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("markdown template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -86,7 +86,7 @@ fn code_directive_sets_style_and_formatter_identity() {
         template_tokens_from_source("[$code:\nloop x\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("code template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -110,7 +110,7 @@ fn escape_html_directive_sets_style_and_formatter_identity() {
         &style_directives,
     );
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("escape_html template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -192,7 +192,7 @@ fn runtime_templates_format_static_body_strings_only() {
     );
     let context = runtime_template_context(&token_stream.src_path, &mut string_table);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("template should parse");
 
     assert!(matches!(

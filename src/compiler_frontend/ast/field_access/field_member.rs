@@ -28,7 +28,8 @@ use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -55,10 +56,11 @@ struct FieldMemberResolution<'a> {
     receiver_type_id: TypeId,
     field_name: StringId,
     type_environment: &'a TypeEnvironment,
-    resolved_struct_fields_by_path: Option<&'a FxHashMap<InternedPath, Vec<Declaration>>>,
+    resolved_struct_fields_by_path: Option<&'a FxHashMap<PathId, Vec<Declaration>>>,
     receiver_is_const_record: bool,
     template_ir_store: Option<&'a Rc<RefCell<TemplateIrStore>>>,
     scope_context: Option<&'a ScopeContext>,
+    path_fork: &'a PathInternerFork,
 }
 
 // --------------------------
@@ -69,7 +71,8 @@ fn const_field_value<'a>(
     receiver_type_id: TypeId,
     field_name: StringId,
     type_environment: &TypeEnvironment,
-    resolved_struct_fields_by_path: Option<&'a FxHashMap<InternedPath, Vec<Declaration>>>,
+    resolved_struct_fields_by_path: Option<&'a FxHashMap<PathId, Vec<Declaration>>>,
+    path_fork: &PathInternerFork,
 ) -> Option<&'a Expression> {
     if type_environment
         .generic_instance_key(receiver_type_id)
@@ -82,7 +85,7 @@ fn const_field_value<'a>(
     let fields = resolved_struct_fields_by_path.and_then(|map| map.get(nominal_path))?;
     let field = fields
         .iter()
-        .find(|field| field.id.name() == Some(field_name))?;
+        .find(|field| path_fork.component(field.id) == Some(field_name))?;
 
     Some(&field.value)
 }
@@ -115,12 +118,13 @@ fn const_inline_field_value(
     receiver_type_id: TypeId,
     field_name: StringId,
     type_environment: &TypeEnvironment,
-    resolved_struct_fields_by_path: Option<&FxHashMap<InternedPath, Vec<Declaration>>>,
+    resolved_struct_fields_by_path: Option<&FxHashMap<PathId, Vec<Declaration>>>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
 ) -> Result<Option<Expression>, ExpressionParseError> {
     if let Some(field_value) =
-        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context)
+        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context, path_fork)
     {
         return clone_inlined_const_field(&field_value, template_ir_store);
     }
@@ -130,6 +134,7 @@ fn const_inline_field_value(
         field_name,
         type_environment,
         resolved_struct_fields_by_path,
+        path_fork,
     ) else {
         return Ok(None);
     };
@@ -143,9 +148,10 @@ fn const_inline_field_value_from_receiver(
     field_name: StringId,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
 ) -> Result<Option<Expression>, ExpressionParseError> {
     let Some(field_value) =
-        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context)
+        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context, path_fork)
     else {
         return Ok(None);
     };
@@ -161,15 +167,16 @@ fn receiver_value_expression(receiver_node: &AstNode) -> Option<&Expression> {
 }
 
 fn with_const_record_declaration<T>(
-    path: &InternedPath,
+    path: &PathId,
     scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
     visit: impl FnOnce(&Declaration) -> Option<T>,
 ) -> Option<T> {
     let scope = scope_context?;
     if let Some(declaration) = scope.top_level_declarations.get_by_path(path) {
         return visit(declaration);
     }
-    let name = path.name()?;
+    let name = path_fork.component(*path)?;
     visit(scope.get_reference(&name)?.as_declaration())
 }
 
@@ -197,16 +204,18 @@ fn with_const_record_field<T>(
     receiver_value: &Expression,
     field_name: StringId,
     scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
     visit: impl FnOnce(&Expression) -> T,
 ) -> Option<T> {
     let (root, fields) = const_record_root_and_field_path(receiver_value, field_name);
-    project_const_record_fields(root, &fields, scope_context, visit)
+    project_const_record_fields(root, &fields, scope_context, path_fork, visit)
 }
 
 fn project_const_record_fields<T>(
     current: &Expression,
     fields: &[StringId],
     scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
     visit: impl FnOnce(&Expression) -> T,
 ) -> Option<T> {
     if fields.is_empty() {
@@ -220,13 +229,19 @@ fn project_const_record_fields<T>(
         } => {
             let field_value = record_fields
                 .iter()
-                .find(|field| field.id.name() == Some(fields[0]))
+                .find(|field| path_fork.component(field.id) == Some(fields[0]))
                 .map(|field| &field.value)?;
-            project_const_record_fields(field_value, &fields[1..], scope_context, visit)
+            project_const_record_fields(field_value, &fields[1..], scope_context, path_fork, visit)
         }
         ExpressionKind::Reference(path) => {
-            with_const_record_declaration(path, scope_context, |declaration| {
-                project_const_record_fields(&declaration.value, fields, scope_context, visit)
+            with_const_record_declaration(path, scope_context, path_fork, |declaration| {
+                project_const_record_fields(
+                    &declaration.value,
+                    fields,
+                    scope_context,
+                    path_fork,
+                    visit,
+                )
             })
         }
         _ => None,
@@ -237,25 +252,32 @@ fn const_record_field_facts(
     receiver_value: &Expression,
     field_name: StringId,
     scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
 ) -> Option<ConstRecordFieldFacts> {
-    with_const_record_field(receiver_value, field_name, scope_context, |field_value| {
-        ConstRecordFieldFacts {
+    with_const_record_field(
+        receiver_value,
+        field_name,
+        scope_context,
+        path_fork,
+        |field_value| ConstRecordFieldFacts {
             type_id: field_value.type_id,
             diagnostic_type: field_value.diagnostic_type.clone(),
             is_const_record: field_value.is_const_record_value(),
-        }
-    })
+        },
+    )
 }
 
 fn clone_const_record_field_from_receiver(
     receiver_node: &AstNode,
     field_name: StringId,
     scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
 ) -> Option<Expression> {
     with_const_record_field(
         receiver_value_expression(receiver_node)?,
         field_name,
         scope_context,
+        path_fork,
         Expression::to_owned,
     )
 }
@@ -302,10 +324,12 @@ fn resolve_field_member(
         receiver_is_const_record,
         template_ir_store,
         scope_context,
+        path_fork,
     } = input;
 
-    let projected_field = receiver_value_expression(receiver_node)
-        .and_then(|receiver| const_record_field_facts(receiver, field_name, scope_context));
+    let projected_field = receiver_value_expression(receiver_node).and_then(|receiver| {
+        const_record_field_facts(receiver, field_name, scope_context, path_fork)
+    });
 
     let const_inline_value = if let Some(template_ir_store) = template_ir_store {
         const_inline_field_value(
@@ -316,6 +340,7 @@ fn resolve_field_member(
             resolved_struct_fields_by_path,
             template_ir_store,
             scope_context,
+            path_fork,
         )?
     } else {
         None
@@ -350,12 +375,14 @@ fn resolve_field_member(
     // identity-only registration (e.g. during constant resolution before final
     // field types are resolved).
     let Some(field_type_id) = type_environment
-        .field_for(receiver_type_id, field_name)
+        .field_for(receiver_type_id, field_name, path_fork)
         .map(|field| field.type_id)
         .or_else(|| {
             let nominal_path = type_environment.nominal_path(receiver_type_id)?;
             let fields = resolved_struct_fields_by_path?.get(nominal_path)?;
-            let declaration = fields.iter().find(|f| f.id.name() == Some(field_name))?;
+            let declaration = fields
+                .iter()
+                .find(|f| path_fork.component(f.id) == Some(field_name))?;
             Some(declaration.value.type_id)
         })
     else {
@@ -367,6 +394,7 @@ fn resolve_field_member(
         field_name,
         type_environment,
         resolved_struct_fields_by_path,
+        path_fork,
     );
 
     let field_value_is_const_record = const_field_value
@@ -435,6 +463,7 @@ pub(super) fn parse_field_member_access_typed(
     token_stream: &mut FileTokens,
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
+    path_fork: &PathInternerFork,
 ) -> Result<Option<AstNode>, ExpressionParseError> {
     let MemberStepContext {
         receiver_node,
@@ -451,7 +480,6 @@ pub(super) fn parse_field_member_access_typed(
         } else {
             None
         };
-
         resolve_field_member(FieldMemberResolution {
             receiver_node,
             receiver_type_id,
@@ -461,6 +489,7 @@ pub(super) fn parse_field_member_access_typed(
             receiver_is_const_record,
             template_ir_store: template_ir_store.as_ref(),
             scope_context: Some(scope_context),
+            path_fork,
         })?
     };
 

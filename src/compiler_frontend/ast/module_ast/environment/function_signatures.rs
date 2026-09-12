@@ -30,6 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
@@ -40,7 +41,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -81,7 +82,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )?;
             if header.export_mode.is_public() {
-                let function_name = header.tokens.src_path.name().ok_or_else(|| {
+                let function_name = self.path_fork.component(header.tokens.src_path).ok_or_else(|| {
                     self.error_messages(
                         CompilerError::compiler_error(
                             "Public generic function header had no source-path name.",
@@ -142,6 +143,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &mut type_interner,
                     string_table,
                     SignatureTypeFallbackPolicy::StrictCapacity,
+                    self.path_fork,
                 )
                 .map_err(|error| self.expression_error_messages(error, string_table))?;
                 self.warnings
@@ -152,6 +154,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             //  Resolve and validate signature
             // -------------------------------
 
+            // Keep the immutable path reader independent from the mutable type-environment borrow.
+            let path_fork = self.path_fork as *const PathInternerFork;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
                 header.tokens.file_id,
@@ -165,6 +169,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .as_ref()
                     .map(|parameters| parameters.list_id),
                 &mut type_resolution_context,
+                // `type_resolution_context_for_with_traits` mutably borrows the builder only
+                // for its type environment; the path fork is not mutated by signature resolution.
+                unsafe { &*path_fork },
                 string_table,
             )
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
@@ -277,6 +284,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             struct_source_by_path: &self.struct_source_by_path,
             choice_source_by_path: &self.choice_source_by_path,
             source_file_by_symbol_path: &self.module_symbols.canonical_source_by_symbol_path,
+            path_fork: &*self.path_fork,
             string_table,
         })
         .map_err(|error| match error {
@@ -304,7 +312,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let Some(receiver) = resolved.receiver.as_ref() else {
                 continue;
             };
-            let Some(method_name) = function_path.name() else {
+            let Some(method_name) = self.path_fork.component(*function_path) else {
                 return Err(self.error_messages(
                     CompilerError::compiler_error(
                         "Imported receiver method path has no final method-name component",
@@ -313,9 +321,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 ));
             };
             let entry = ReceiverMethodEntry {
-                function_path: function_path.clone(),
+                function_path: *function_path,
                 receiver: receiver.clone(),
-                source_file: function_path.parent().unwrap_or_else(InternedPath::new),
+                source_file: self.path_fork.parent(*function_path).unwrap_or(PathId::ROOT),
                 receiver_mutable: resolved
                     .signature
                     .parameters
@@ -350,9 +358,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         for entries in catalog.by_method_name.values_mut() {
             entries.sort_by(|left, right| {
-                left.function_path
-                    .to_string(string_table)
-                    .cmp(&right.function_path.to_string(string_table))
+                self.path_fork
+                    .render_portable(left.function_path, string_table, &mut Vec::new())
+                    .cmp(&self.path_fork.render_portable(
+                        right.function_path,
+                        string_table,
+                        &mut Vec::new(),
+                    ))
             });
         }
         add_ast_counter(

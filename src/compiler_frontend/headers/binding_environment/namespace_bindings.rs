@@ -27,7 +27,7 @@ use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -44,11 +44,11 @@ type NamespaceBindingResult<T> = Result<T, BindingEnvironmentError>;
 /// WHY: declaration-backed and binding-backed provider members share the same namespace owner;
 /// a named input keeps that ownership explicit without a boolean or positional argument list.
 struct ProviderNamespaceMemberInput<'a> {
-    root_file: &'a InternedPath,
+    root_file: &'a PathId,
     export_name: StringId,
     selection: crate::compiler_frontend::symbols::identity::DependencySelectionId,
     source_name: StringId,
-    diagnostic_path: &'a InternedPath,
+    diagnostic_path: &'a PathId,
     value_members: &'a mut FxHashMap<StringId, NamespaceValueMember>,
     type_members: &'a mut FxHashMap<StringId, NamespaceTypeMember>,
     span: Option<SourceSpan>,
@@ -69,6 +69,7 @@ enum SymbolKind {
 /// detection in one place.
 struct ExternalNamespaceRecordInserter<'a> {
     string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
     span: Option<SourceSpan>,
 }
 
@@ -78,7 +79,7 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
         record: &mut NamespaceRecord,
         symbol_path: &ExternalSymbolPath,
         symbol_id: ExternalSymbolId,
-        surface_path: &InternedPath,
+        surface_path: &PathId,
     ) -> NamespaceBindingResult<()> {
         self.insert_at(record, symbol_path.components(), 0, symbol_id, surface_path)
     }
@@ -89,11 +90,14 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
         components: &[String],
         index: usize,
         symbol_id: ExternalSymbolId,
-        surface_path: &InternedPath,
+        surface_path: &PathId,
     ) -> NamespaceBindingResult<()> {
         let component = &components[index];
         let name_id = self.string_table.intern(component);
-        let child_surface_path = surface_path.join_str(component, self.string_table);
+        let child_surface_path = self
+            .path_fork
+            .try_intern_child(*surface_path, name_id)
+            .expect("path interner fork exhausted while building namespace diagnostic path");
         let is_leaf = index == components.len() - 1;
 
         if is_leaf {
@@ -173,7 +177,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         file_visibility: &mut FileVisibility,
         registry: &mut VisibleNameRegistry,
         clause: &RetainedDependencyClause,
-        source_file: &InternedPath,
+        source_file: &PathId,
         namespace_target: ResolvedNamespaceTarget,
     ) -> NamespaceBindingResult<()> {
         let local_name = self.derive_namespace_name(clause)?;
@@ -255,7 +259,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn add_source_namespace_receiver_methods(
         &self,
         file_visibility: &mut FileVisibility,
-        namespace_file: &InternedPath,
+        namespace_file: &PathId,
         access: &SourceDependencyAccess,
         span: Option<SourceSpan>,
     ) {
@@ -295,7 +299,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 {
                     for path in declared_paths {
                         if self.module_symbols.receiver_method_paths.contains(path)
-                            && let Some(name) = path.name()
+                            && let Some(name) = self.path_fork.component(*path)
                         {
                             Self::add_visible_receiver_method(file_visibility, name, path, span);
                         }
@@ -312,8 +316,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// explicit method fields.
     fn source_namespace_receiver_access(
         &self,
-        namespace_file: &InternedPath,
-        consumer_file: &InternedPath,
+        namespace_file: &PathId,
+        consumer_file: &PathId,
     ) -> Option<SourceDependencyAccess> {
         if self.source_files_share_dependency_boundary(consumer_file, namespace_file) {
             return Some(SourceDependencyAccess::Internal);
@@ -326,7 +330,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// Public export entries for a concrete root source file, if this source is a root.
     fn public_export_entries_for_source_file(
         &self,
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> Option<FxHashSet<PublicExportEntry>> {
         for (package_prefix, root_file) in &self.module_symbols.source_package_root_files {
             if root_file == source_file {
@@ -356,9 +360,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     pub(super) fn resolve_public_export_namespace_target(
         &mut self,
         clause: &RetainedDependencyClause,
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> Option<ResolvedNamespaceTarget> {
-        let components = clause.dependency.path.as_components();
+        let mut components = Vec::new();
+        let components = self
+            .path_fork
+            .resolve_components(clause.dependency.path, &mut components);
         if components.is_empty() {
             return None;
         }
@@ -373,7 +380,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn resolve_source_package_public_export(
         &mut self,
         components: &[StringId],
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> Option<ResolvedNamespaceTarget> {
         if components.len() != 1 {
             return None;
@@ -407,14 +414,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     fn resolve_module_root_public_export(
         &mut self,
-        dependency_path: &InternedPath,
-        source_file: &InternedPath,
+        dependency_path: &PathId,
+        source_file: &PathId,
     ) -> Option<ResolvedNamespaceTarget> {
         let effective_path = effective_module_boundary_path(
             source_file,
             dependency_path,
             &self.module_symbols.file_module_membership,
             &self.module_symbols.module_root_boundaries,
+            &mut *self.path_fork,
         );
 
         for boundary in &self.module_symbols.module_root_boundaries {
@@ -444,9 +452,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// Enforce public export privacy for concrete source-file namespace bindings.
     fn validate_namespace_source_boundary(
         &mut self,
-        target_file: &InternedPath,
+        target_file: &PathId,
         clause: &RetainedDependencyClause,
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> NamespaceBindingResult<()> {
         if let Some(target_package) = self
             .module_symbols
@@ -513,7 +521,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         .into())
     }
 
-    fn module_root_public_surface_file(&self, module_root: &InternedPath) -> Option<InternedPath> {
+    fn module_root_public_surface_file(&self, module_root: &PathId) -> Option<PathId> {
         self.module_symbols
             .module_root_boundaries
             .iter()
@@ -531,7 +539,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             DependencyBindingSyntax::Namespace { alias: None } => Some(clause.dependency.span),
             DependencyBindingSyntax::DirectSelections { .. } => None,
         };
-        let Some(local_name) = clause.effective_namespace_local_name(self.string_table) else {
+        let Some(local_name) =
+            clause.effective_namespace_local_name(self.string_table, &*self.path_fork)
+        else {
             return Err(CompilerDiagnostic::invalid_namespace_default_name(
                 clause.dependency.path.clone(),
                 namespace_span,
@@ -555,7 +565,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// Build a namespace record from a source file's visible declarations.
     fn build_source_namespace_record(
         &self,
-        file_path: &InternedPath,
+        file_path: &PathId,
         span: Option<SourceSpan>,
     ) -> NamespaceBindingResult<NamespaceRecord> {
         let mut value_members = FxHashMap::default();
@@ -589,10 +599,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 continue;
             }
 
-            let Some(name) = symbol_path.name() else {
+            let Some(name) = self.path_fork.component(symbol_path) else {
                 continue;
             };
-
             let kind = self.classify_symbol_kind(&symbol_path);
             match kind {
                 SymbolKind::Type => {
@@ -632,7 +641,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn build_public_export_namespace_record(
         &mut self,
         file_visibility: &mut FileVisibility,
-        root_file: &InternedPath,
+        root_file: &PathId,
         exported_entries: &FxHashSet<PublicExportEntry>,
         span: Option<SourceSpan>,
     ) -> NamespaceBindingResult<NamespaceRecord> {
@@ -779,7 +788,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     provider_id, origin
                 ))
             })?;
-            let local_path = root_file.append(export_name);
+            let local_path = self
+                .path_fork
+                .try_intern_child(*root_file, export_name)
+                .expect("path interner fork exhausted while binding provider namespace member");
             let target = SourceDeclarationTarget::Imported {
                 origin: origin.clone(),
                 local_path: local_path.clone(),
@@ -903,10 +915,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         else {
             return Ok(record);
         };
-
-        let surface_path = InternedPath::from_components(vec![package_path]);
+        let surface_path = self
+            .path_fork
+            .try_intern_child(PathId::ROOT, package_path)
+            .expect("path interner fork exhausted while building package namespace path");
         let mut inserter = ExternalNamespaceRecordInserter {
             string_table: self.string_table,
+            path_fork: self.path_fork,
             span,
         };
 
@@ -941,7 +956,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     }
 
     /// Classify a symbol path as a type or value member for namespace records.
-    fn classify_symbol_kind(&self, symbol_path: &InternedPath) -> SymbolKind {
+    fn classify_symbol_kind(&self, symbol_path: &PathId) -> SymbolKind {
         if self.module_symbols.type_alias_paths.contains(symbol_path) {
             return SymbolKind::Type;
         }
@@ -972,7 +987,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// collisions while building the tree.
     fn check_duplicate_namespace_members(
         &self,
-        surface_path: &InternedPath,
+        surface_path: &PathId,
         value_members: &FxHashMap<StringId, NamespaceValueMember>,
         type_members: &FxHashMap<StringId, NamespaceTypeMember>,
         span: Option<SourceSpan>,

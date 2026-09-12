@@ -16,7 +16,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, OriginDeclarationId, OriginFunctionId,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
@@ -42,10 +42,9 @@ pub(crate) enum NamespaceTypeMember {
     ExternalSymbol(ExternalSymbolId),
 }
 
-/// Where a namespace record originated, for diagnostics and HIR boundary checks.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum NamespaceRecordSource {
-    SourceFile(InternedPath),
+    SourceFile(PathId),
     ExternalPackage(StringId),
 }
 
@@ -163,15 +162,15 @@ pub(crate) struct ReceiverMethodVisibility {
 /// used only to index projected AST facts.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SourceDeclarationTarget {
-    Local(InternedPath),
+    Local(PathId),
     Imported {
         origin: OriginDeclarationId,
-        local_path: InternedPath,
+        local_path: PathId,
     },
 }
 
 impl SourceDeclarationTarget {
-    pub(crate) fn local_path(&self) -> &InternedPath {
+    pub(crate) fn local_path(&self) -> &PathId {
         match self {
             Self::Local(path)
             | Self::Imported {
@@ -182,7 +181,7 @@ impl SourceDeclarationTarget {
 }
 
 impl std::ops::Deref for SourceDeclarationTarget {
-    type Target = InternedPath;
+    type Target = PathId;
 
     fn deref(&self) -> &Self::Target {
         self.local_path()
@@ -191,23 +190,23 @@ impl std::ops::Deref for SourceDeclarationTarget {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SourceFunctionTarget {
-    Local(InternedPath),
+    Local(PathId),
     Imported {
         origin: OriginFunctionId,
-        local_path: InternedPath,
+        local_path: PathId,
     },
     Generated {
         identity: crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
-        local_path: InternedPath,
+        local_path: PathId,
     },
     ModulePrivate {
         identity: ModulePrivateExecutableIdentity,
-        local_path: InternedPath,
+        local_path: PathId,
     },
 }
 
 impl SourceFunctionTarget {
-    pub(crate) fn local_path(&self) -> &InternedPath {
+    pub(crate) fn local_path(&self) -> &PathId {
         match self {
             Self::Local(path)
             | Self::Imported {
@@ -224,7 +223,7 @@ impl SourceFunctionTarget {
 }
 
 impl std::ops::Deref for SourceFunctionTarget {
-    type Target = InternedPath;
+    type Target = PathId;
 
     fn deref(&self) -> &Self::Target {
         self.local_path()
@@ -239,7 +238,7 @@ pub(crate) struct FileVisibility {
     /// WHY: AST scopes gate every name lookup through this set and a body scope that declares a
     /// local needs its own copy. Sharing the header-built set by handle means only a scope that
     /// actually mutates it pays for one, instead of every scope copying the whole module's paths.
-    pub(crate) visible_declaration_paths: Arc<FxHashSet<InternedPath>>,
+    pub(crate) visible_declaration_paths: Arc<FxHashSet<PathId>>,
 
     /// Source-visible names → canonical declaration path.
     /// Includes same-file declarations and imported source symbols (aliased or not).
@@ -296,13 +295,13 @@ pub(crate) struct HeaderBindingEnvironment {
     /// WHY: every AST pass that walks headers needs the visibility of the file each header came
     /// from. Handing out a handle keeps that lookup free, so a module with many declarations in
     /// one file does not copy its whole visibility package once per declaration.
-    pub(crate) file_visibility_by_source: FxHashMap<InternedPath, Arc<FileVisibility>>,
+    pub(crate) file_visibility_by_source: FxHashMap<PathId, Arc<FileVisibility>>,
     /// Consumer-local declaration paths mapped to their stable provider origins.
     ///
     /// WHAT: aliases and namespace members reference the one record stored under
     ///       [`HeaderBindingEnvironment::imported_declarations_by_origin`] instead of cloning the
     ///       complete declaration payload per local path.
-    pub(crate) imported_declarations_by_local_path: FxHashMap<InternedPath, OriginDeclarationId>,
+    pub(crate) imported_declarations_by_local_path: FxHashMap<PathId, OriginDeclarationId>,
     /// Stable declaration closure supplied by completed provider interfaces.
     ///
     /// AST projects these records into consumer-local semantic handles. Keeping the stable
@@ -325,7 +324,7 @@ pub(crate) struct HeaderBindingEnvironment {
     /// Local function contracts reference these summaries by origin instead of cloning the
     /// summary payload per alias or receiver method.
     pub(crate) imported_call_summaries_by_origin: FxHashMap<OriginFunctionId, PublicCallSummary>,
-    pub(crate) imported_functions_by_local_path: FxHashMap<InternedPath, ImportedFunctionContract>,
+    pub(crate) imported_functions_by_local_path: FxHashMap<PathId, ImportedFunctionContract>,
     pub(crate) warnings: Vec<CompilerDiagnostic>,
 }
 
@@ -339,7 +338,7 @@ impl FileVisibility {
     ///
     /// WHY: the gate is published as a shared handle, but only binding construction writes to
     /// it and it holds the sole reference at that point, so this never copies the set.
-    pub(crate) fn visible_declaration_paths_mut(&mut self) -> &mut FxHashSet<InternedPath> {
+    pub(crate) fn visible_declaration_paths_mut(&mut self) -> &mut FxHashSet<PathId> {
         Arc::make_mut(&mut self.visible_declaration_paths)
     }
 }
@@ -352,7 +351,7 @@ impl HeaderBindingEnvironment {
     /// binding environment construction.
     pub(crate) fn visibility_for(
         &self,
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> Result<&Arc<FileVisibility>, CompilerError> {
         self.file_visibility_by_source.get(source_file).ok_or_else(|| {
             CompilerError::compiler_error(format!(

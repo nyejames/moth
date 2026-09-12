@@ -7,7 +7,7 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 mod reason_keys;
@@ -63,72 +63,72 @@ macro_rules! emit_diagnostic_payload_enum {
             },
 
             MissingImportTarget {
-                path: InternedPath,
+                path: PathId,
             },
             AmbiguousImportTarget {
-                path: InternedPath,
+                path: PathId,
             },
             BareFileImport {
-                path: InternedPath,
+                path: PathId,
             },
             DirectSpecialFileImport {
-                path: InternedPath,
+                path: PathId,
             },
             ImportNameCollision {
                 name: StringId,
             },
             NotExportedBySourceFile {
-                symbol_path: InternedPath,
+                symbol_path: PathId,
             },
             NotExportedByPublicSurface {
-                requested_path: InternedPath,
+                requested_path: PathId,
                 public_surface_name: StringId,
                 public_surface_type: ImportPublicSurfaceType,
             },
             MissingModuleRootPublicSurface {
-                symbol_path: InternedPath,
+                symbol_path: PathId,
             },
             MissingPackageSymbol {
                 symbol: StringId,
                 package_path: StringId,
             },
             CrossModuleImportNotExported {
-                symbol_path: InternedPath,
+                symbol_path: PathId,
             },
             DirectSymbolPathImport {
-                path: InternedPath,
+                path: PathId,
             },
             InvalidNamespaceDefaultName {
-                path: InternedPath,
+                path: PathId,
             },
             DuplicateImportSurfaceMember {
-                surface_path: InternedPath,
+                surface_path: PathId,
                 member_name: StringId,
             },
             ExplicitMothExtension {
-                path: InternedPath,
+                path: PathId,
             },
             ExplicitSourceExtension {
-                path: InternedPath,
+                path: PathId,
                 extension: StringId,
             },
             UnsupportedSourceFileKind {
-                path: InternedPath,
+                path: PathId,
                 extension: StringId,
             },
             InvalidSourceFileEntry {
-                path: InternedPath,
+                path: PathId,
                 extension: StringId,
             },
             MothTemplateInputsShareNoCommonAncestor {
-                first_path: InternedPath,
-                second_path: InternedPath,
+                first_path: PathId,
+                second_path: PathId,
             },
             DuplicateMothTemplateInputPath {
-                path: InternedPath,
+                path: PathId,
             },
             UnsupportedExternalExtension {
-                path: InternedPath,
+                path: PathId,
                 extension: StringId,
             },
 
@@ -205,7 +205,7 @@ macro_rules! emit_diagnostic_payload_enum {
                 name: StringId,
             },
             CircularDependency {
-                path: InternedPath,
+                path: PathId,
             },
             NamespaceMisuse {
                 name: StringId,

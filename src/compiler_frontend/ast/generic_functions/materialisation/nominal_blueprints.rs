@@ -37,7 +37,7 @@ use crate::compiler_frontend::semantic_identity::OriginTypeCategory;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
 #[cfg(test)]
 use crate::compiler_frontend::semantic_identity::{OriginTypeId, StableModuleOriginIdentity};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -215,7 +215,7 @@ impl MaterialisationTypeBlueprint {
     }
 }
 pub(super) fn materialised_nominal_declaration(
-    local_path: InternedPath,
+    local_path: PathId,
     type_id: TypeId,
     type_environment: &TypeEnvironment,
 ) -> Result<Declaration, CompilerError> {
@@ -258,6 +258,7 @@ pub(super) fn materialised_struct_fields(
     nominal_source: &impl MaterialisationNominalSource,
     services: &GeneratedValueMaterialisationServices<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Option<Vec<Declaration>>, CompilerError> {
     if !matches!(
         type_environment.get(type_id),
@@ -284,7 +285,10 @@ pub(super) fn materialised_struct_fields(
     }
     let mut declarations = Vec::with_capacity(fields.len());
     for (field, blueprint_field) in fields.iter().zip(blueprint_fields) {
-        if field.name.name_str(string_table) != Some(blueprint_field.name.as_str()) {
+        let field_name_matches = path_fork
+            .component(field.name)
+            .is_some_and(|name| string_table.resolve(name) == blueprint_field.name);
+        if !field_name_matches {
             return Err(CompilerError::compiler_error(
                 "Materialised struct field name disagrees with its stable blueprint",
             ));
@@ -297,6 +301,7 @@ pub(super) fn materialised_struct_fields(
                 nominal_source,
                 template_ir_store: Rc::clone(services.template_ir_store),
                 module_resources: Rc::clone(&services.module_resources),
+                path_fork,
             };
             materialize_public_folded_value(
                 &mut materialiser,
@@ -333,6 +338,7 @@ impl ModuleMaterialisationPreparation {
     pub(super) fn install_nominal_blueprints(
         &mut self,
         resources: &ModuleResourceTable,
+        path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Result<(), CompilerError> {
         let mut nominal_type_ids = FxHashMap::default();
         for (identity, type_id) in self.type_environment.canonical_type_identities() {
@@ -350,7 +356,7 @@ impl ModuleMaterialisationPreparation {
 
         let mut blueprints = FxHashMap::default();
         for (identity, type_id) in nominal_type_ids {
-            let blueprint = self.nominal_blueprint(&identity, type_id, resources)?;
+            let blueprint = self.nominal_blueprint(&identity, type_id, resources, path_fork)?;
             blueprints.insert(identity, blueprint);
         }
         self.nominal_blueprints = blueprints;
@@ -362,6 +368,7 @@ impl ModuleMaterialisationPreparation {
         identity: &CanonicalTypeIdentity,
         type_id: TypeId,
         resources: &ModuleResourceTable,
+        path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Result<NominalMaterialisationBlueprint, CompilerError> {
         let generic_parameter_list_id = match self.type_environment.get(type_id) {
             Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
@@ -471,6 +478,7 @@ impl ModuleMaterialisationPreparation {
                     &parameter_slots,
                     self.type_environment.nominal_path(type_id),
                     resources,
+                    path_fork,
                 )?,
                 const_record: definition.const_record,
             },
@@ -480,9 +488,19 @@ impl ModuleMaterialisationPreparation {
                     &parameter_slots,
                     self.type_environment.nominal_path(type_id),
                     resources,
+                    path_fork,
                 )?,
             },
-            _ => unreachable!("nominal kind was validated before generic blueprint extraction"),
+            None => {
+                return Err(CompilerError::compiler_error(
+                    "Materialisation nominal blueprint target is not a registered type",
+                ));
+            }
+            Some(_) => {
+                return Err(CompilerError::compiler_error(
+                    "Materialisation nominal blueprint target is not a struct or choice",
+                ));
+            }
         };
 
         Ok(NominalMaterialisationBlueprint {
@@ -523,26 +541,35 @@ impl ModuleMaterialisationPreparation {
 
     fn field_declaration(
         &self,
-        nominal_path: &InternedPath,
+        nominal_path: &PathId,
         field_name: StringId,
     ) -> Option<&Declaration> {
+        let identity = self.frozen_identity_handle.get()?;
+        let paths = identity.paths();
         self.resolved_struct_fields_by_path
             .get(nominal_path)?
             .iter()
-            .find(|declaration| declaration.id.name() == Some(field_name))
+            .find(|declaration| paths.component(declaration.id) == Some(field_name))
     }
 
     fn nominal_field_blueprints(
         &self,
         fields: &[FieldDefinition],
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
-        nominal_path: Option<&InternedPath>,
+        nominal_path: Option<&PathId>,
         resources: &ModuleResourceTable,
+        path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Result<Box<[NominalFieldBlueprint]>, CompilerError> {
+        let identity = self.frozen_identity_handle.get().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "materialisation preparation has no frozen identity context",
+            )
+        })?;
+        let paths = identity.paths();
         fields
             .iter()
             .map(|field| {
-                let name = field.name.name().ok_or_else(|| {
+                let name = paths.component(field.name).ok_or_else(|| {
                     CompilerError::compiler_error(
                         "Materialisation nominal field path has no defining name",
                     )
@@ -557,6 +584,7 @@ impl ModuleMaterialisationPreparation {
                             &declaration.id,
                             &declaration.value,
                             resources,
+                            path_fork,
                         )?)
                     }
                     _ => None,
@@ -579,8 +607,9 @@ impl ModuleMaterialisationPreparation {
         &self,
         variants: &[ChoiceVariantDefinition],
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
-        nominal_path: Option<&InternedPath>,
+        nominal_path: Option<&PathId>,
         resources: &ModuleResourceTable,
+        path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Result<Box<[NominalChoiceVariantBlueprint]>, CompilerError> {
         variants
             .iter()
@@ -593,6 +622,7 @@ impl ModuleMaterialisationPreparation {
                             parameter_slots,
                             nominal_path,
                             resources,
+                            path_fork,
                         )?,
                 };
                 Ok(NominalChoiceVariantBlueprint {
@@ -795,6 +825,7 @@ pub(super) fn intern_generated_canonical_type(
     external_registry: &ExternalPackageRegistry,
     nominal_source: &impl MaterialisationNominalSource,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<TypeId, CompilerError> {
     if let Some(type_id) = type_environment.type_id_for_canonical_identity(identity) {
         return Ok(type_id);
@@ -823,6 +854,7 @@ pub(super) fn intern_generated_canonical_type(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             type_environment.intern_option(inner)
         }
@@ -833,6 +865,7 @@ pub(super) fn intern_generated_canonical_type(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             type_environment.intern_collection(element, collection.fixed_capacity())
         }
@@ -843,6 +876,7 @@ pub(super) fn intern_generated_canonical_type(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             let value = intern_generated_canonical_type(
                 map.value(),
@@ -850,6 +884,7 @@ pub(super) fn intern_generated_canonical_type(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             type_environment.intern_map(key, value)
         }
@@ -860,6 +895,7 @@ pub(super) fn intern_generated_canonical_type(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             let error = intern_generated_canonical_type(
                 carrier.error(),
@@ -867,6 +903,7 @@ pub(super) fn intern_generated_canonical_type(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             type_environment.intern_fallible_carrier(success, error)
         }
@@ -877,6 +914,7 @@ pub(super) fn intern_generated_canonical_type(
             type_environment,
             external_registry,
             string_table,
+            path_fork,
         )?,
         CanonicalTypeIdentity::ExternalOpaque(external) => {
             let (external_type_id, _) = external_registry
@@ -894,6 +932,7 @@ pub(super) fn intern_generated_canonical_type(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             let nominal_id = match type_environment.get(base_type_id) {
                 Some(TypeDefinition::Struct(definition)) => definition.id,
@@ -912,6 +951,7 @@ pub(super) fn intern_generated_canonical_type(
                     external_registry,
                     nominal_source,
                     string_table,
+                    path_fork,
                 )?);
             }
             type_environment.intern_generic_instance(nominal_id, arguments.into_boxed_slice())
@@ -925,6 +965,7 @@ pub(super) fn intern_generated_canonical_type(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             let nominal_id = match type_environment.get(base_type_id) {
                 Some(TypeDefinition::Struct(definition)) => definition.id,
@@ -943,6 +984,7 @@ pub(super) fn intern_generated_canonical_type(
                     external_registry,
                     nominal_source,
                     string_table,
+                    path_fork,
                 )?);
             }
             type_environment.intern_generic_instance(nominal_id, arguments.into_boxed_slice())
@@ -952,9 +994,6 @@ pub(super) fn intern_generated_canonical_type(
                 "Generated request retained an unresolved generic parameter",
             ));
         }
-
-        // The anonymous const-record marker interns back to this environment's one
-        // compile-time-only marker TypeId; it has no origin to resolve.
         CanonicalTypeIdentity::AnonymousConstRecord => {
             type_environment.anonymous_const_record_type()
         }
@@ -962,7 +1001,6 @@ pub(super) fn intern_generated_canonical_type(
     type_environment.register_canonical_identity(identity.clone(), type_id)?;
     Ok(type_id)
 }
-
 pub(super) fn intern_materialisation_type_blueprint(
     blueprint: &MaterialisationTypeBlueprint,
     generic_parameter_type_ids: &[TypeId],
@@ -970,6 +1008,7 @@ pub(super) fn intern_materialisation_type_blueprint(
     type_environment: &mut TypeEnvironment,
     external_registry: &ExternalPackageRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<TypeId, CompilerError> {
     match blueprint {
         MaterialisationTypeBlueprint::Canonical(identity) => intern_generated_canonical_type(
@@ -978,6 +1017,7 @@ pub(super) fn intern_materialisation_type_blueprint(
             external_registry,
             nominal_source,
             string_table,
+            path_fork,
         ),
         MaterialisationTypeBlueprint::GenericParameter(slot) => generic_parameter_type_ids
             .get(*slot)
@@ -998,6 +1038,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                 type_environment,
                 external_registry,
                 string_table,
+                path_fork,
             )?;
             Ok(type_environment.intern_collection(element, *fixed_capacity))
         }
@@ -1009,6 +1050,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                 type_environment,
                 external_registry,
                 string_table,
+                path_fork,
             )?;
             let value = intern_materialisation_type_blueprint(
                 value,
@@ -1017,6 +1059,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                 type_environment,
                 external_registry,
                 string_table,
+                path_fork,
             )?;
             Ok(type_environment.intern_map(key, value))
         }
@@ -1028,6 +1071,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                 type_environment,
                 external_registry,
                 string_table,
+                path_fork,
             )?;
             Ok(type_environment.intern_option(inner))
         }
@@ -1039,6 +1083,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                 type_environment,
                 external_registry,
                 string_table,
+                path_fork,
             )?;
             let error = intern_materialisation_type_blueprint(
                 error,
@@ -1047,6 +1092,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                 type_environment,
                 external_registry,
                 string_table,
+                path_fork,
             )?;
             Ok(type_environment.intern_fallible_carrier(success, error))
         }
@@ -1061,6 +1107,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                         type_environment,
                         external_registry,
                         string_table,
+                        path_fork,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1073,6 +1120,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                 external_registry,
                 nominal_source,
                 string_table,
+                path_fork,
             )?;
             let nominal_id = match type_environment.get(base_type_id) {
                 Some(TypeDefinition::Struct(definition)) => definition.id,
@@ -1109,6 +1157,7 @@ pub(super) fn intern_materialisation_type_blueprint(
                         type_environment,
                         external_registry,
                         string_table,
+                        path_fork,
                     )
                 })
                 .collect::<Result<Box<[_]>, _>>()?;
@@ -1120,20 +1169,38 @@ pub(super) fn intern_materialisation_type_blueprint(
 fn materialisation_nominal_path(
     identity: &CanonicalTypeIdentity,
     string_table: &mut StringTable,
-) -> Result<InternedPath, CompilerError> {
-    let mut path = InternedPath::from_single_str("<materialised>", string_table);
+    path_fork: &mut PathInternerFork,
+) -> Result<PathId, CompilerError> {
+    let mut path = PathId::ROOT;
+    let mut push_component = |component: &str| -> Result<(), CompilerError> {
+        path = path_fork
+            .try_intern_child(path, string_table.intern(component))
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "path table exhausted while interning materialised nominal path",
+                )
+            })?;
+        Ok(())
+    };
+    push_component("<materialised>")?;
     match identity {
         CanonicalTypeIdentity::SourceNominal(origin) => {
-            path.push_str("source", string_table);
-            append_materialisation_module_origin(&mut path, origin.module_origin(), string_table);
-            path.push_str(origin.defining_name(), string_table);
-            path.push_str(origin_type_category_name(origin.category()), string_table);
+            push_component("source")?;
+            append_materialisation_module_origin(
+                origin.module_origin(),
+                &mut push_component,
+            )?;
+            push_component(origin.defining_name())?;
+            push_component(origin_type_category_name(origin.category()))?;
         }
         CanonicalTypeIdentity::ModulePrivateNominal(identity) => {
-            path.push_str("private", string_table);
-            append_materialisation_module_origin(&mut path, identity.module_origin(), string_table);
-            path.push_str(identity.defining_path(), string_table);
-            path.push_str(origin_type_category_name(identity.category()), string_table);
+            push_component("private")?;
+            append_materialisation_module_origin(
+                identity.module_origin(),
+                &mut push_component,
+            )?;
+            push_component(identity.defining_path())?;
+            push_component(origin_type_category_name(identity.category()))?;
         }
         _ => {
             return Err(CompilerError::compiler_error(
@@ -1145,10 +1212,9 @@ fn materialisation_nominal_path(
 }
 
 fn append_materialisation_module_origin(
-    path: &mut InternedPath,
     origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
-    string_table: &mut StringTable,
-) {
+    push_component: &mut impl FnMut(&str) -> Result<(), CompilerError>,
+) -> Result<(), CompilerError> {
     let package_origin = match origin.package().origin() {
         crate::builder_surface::PackageOrigin::Core => "core",
         crate::builder_surface::PackageOrigin::Builder => "builder",
@@ -1160,14 +1226,15 @@ fn append_materialisation_module_origin(
         ModuleRootRole::Support => "support",
         ModuleRootRole::ProjectPackageFacade => "facade",
     };
-    path.push_str(package_origin, string_table);
-    path.push_str(origin.package().name(), string_table);
-    path.push_str(root_role, string_table);
+    push_component(package_origin)?;
+    push_component(origin.package().name())?;
+    push_component(root_role)?;
     for component in origin.logical_module_path().split('/') {
         if !component.is_empty() {
-            path.push_str(component, string_table);
+            push_component(component)?;
         }
     }
+    Ok(())
 }
 
 fn origin_type_category_name(category: OriginTypeCategory) -> &'static str {
@@ -1184,6 +1251,7 @@ fn intern_materialisation_nominal(
     type_environment: &mut TypeEnvironment,
     external_registry: &ExternalPackageRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<TypeId, CompilerError> {
     if let Some(type_id) = type_environment.type_id_for_canonical_identity(identity) {
         return Ok(type_id);
@@ -1217,7 +1285,7 @@ fn intern_materialisation_nominal(
     let generic_parameter_list_id = generic_parameter_registration
         .as_ref()
         .map(|registration| registration.list_id);
-    let generated_path = materialisation_nominal_path(identity, string_table)?;
+    let generated_path = materialisation_nominal_path(identity, string_table, path_fork)?;
     let type_id = match &blueprint.definition {
         NominalMaterialisationDefinition::Struct { const_record, .. } => {
             type_environment
@@ -1280,20 +1348,26 @@ fn intern_materialisation_nominal(
 
     match &blueprint.definition {
         NominalMaterialisationDefinition::Struct { fields, .. } => {
-            let nominal_path =
-                type_environment
-                    .nominal_path(type_id)
-                    .cloned()
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Generated struct nominal shell has no local path",
-                        )
-                    })?;
+            let nominal_path = type_environment
+                .nominal_path(type_id)
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Generated struct nominal shell has no local path",
+                    )
+                })?;
             let fields = fields
                 .iter()
                 .map(|field| {
+                    let name = path_fork
+                        .try_intern_child(nominal_path, string_table.intern(&field.name))
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "path table exhausted while interning materialised field",
+                            )
+                        })?;
                     Ok(FieldDefinition {
-                        name: nominal_path.join_str(&field.name, string_table),
+                        name,
                         type_id: intern_materialisation_type_blueprint(
                             &field.field_type,
                             &parameter_type_ids,
@@ -1301,6 +1375,7 @@ fn intern_materialisation_nominal(
                             type_environment,
                             external_registry,
                             string_table,
+                            path_fork,
                         )?,
                         span: None,
                     })
@@ -1309,15 +1384,14 @@ fn intern_materialisation_nominal(
             type_environment.update_struct_fields(type_id, fields);
         }
         NominalMaterialisationDefinition::Choice { variants } => {
-            let nominal_path =
-                type_environment
-                    .nominal_path(type_id)
-                    .cloned()
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Generated choice nominal shell has no local path",
-                        )
-                    })?;
+            let nominal_path = type_environment
+                .nominal_path(type_id)
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Generated choice nominal shell has no local path",
+                    )
+                })?;
             let variants = variants
                 .iter()
                 .map(|variant| {
@@ -1328,8 +1402,18 @@ fn intern_materialisation_nominal(
                             .payload_fields
                             .iter()
                             .map(|field| {
+                                let name = path_fork
+                                    .try_intern_child(
+                                        nominal_path,
+                                        string_table.intern(&field.name),
+                                    )
+                                    .ok_or_else(|| {
+                                        CompilerError::compiler_error(
+                                            "path table exhausted while interning materialised field",
+                                        )
+                                    })?;
                                 Ok(FieldDefinition {
-                                    name: nominal_path.join_str(&field.name, string_table),
+                                    name,
                                     type_id: intern_materialisation_type_blueprint(
                                         &field.field_type,
                                         &parameter_type_ids,
@@ -1337,6 +1421,7 @@ fn intern_materialisation_nominal(
                                         type_environment,
                                         external_registry,
                                         string_table,
+                                        path_fork,
                                     )?,
                                     span: None,
                                 })

@@ -35,7 +35,7 @@ use crate::compiler_frontend::paths::resource_identity::{
     StableResourceOwnerId,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::integration_test_runner::assertions::html_shell_violation;
 use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_identity;
@@ -84,21 +84,20 @@ pub(crate) fn create_test_hir_module() -> HirModule {
 /// WHAT: binds the test module's names into the caller-owned shared string table.
 /// WHY: HTML builder tests now need the same one-table diagnostic model as production builds.
 pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut StringTable) -> Module {
+    let mut path_fork = PathInternerFork::empty();
     let mut hir_module = create_test_hir_module();
     hir_module.side_table.bind_function_name(
         FunctionId(0),
-        InternedPath::from_single_str("start_entry", string_table),
+        path_fork.try_intern_portable_path("start_entry", string_table).expect("test path fits"),
     );
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
 
     Module {
-        executable: ModuleExecutable {
-            hir: hir_module,
-            resource_table: ModuleResourceTable::new(),
-            type_environment: TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(),
-        },
+        executable: ModuleExecutable { hir: hir_module,
+        resource_table: ModuleResourceTable::new(),
+        type_environment: TypeEnvironment::new(),
+        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],

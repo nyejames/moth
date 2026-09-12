@@ -10,7 +10,7 @@
 //! - Intern source locations to save memory and allow O(1) identity checks.
 
 #[cfg(any(test, feature = "show_hir"))]
-use crate::compiler_frontend::datatypes::generic_identity_bridge::display_generic_instantiation_key;
+use crate::compiler_frontend::datatypes::generic_identity_bridge::display_generic_instantiation_key_with_fork;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     GenericInstantiationKey, TypeIdentityKey,
 };
@@ -24,7 +24,9 @@ use crate::compiler_frontend::hir::reactivity::{
 };
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathIdRemap, PathInternerFork,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use rustc_hash::FxHashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
@@ -172,13 +174,13 @@ pub(crate) struct HirSideTable {
     //  Name side-tables. Store canonical path identity.
     //  Rendering and diagnostics derive leaf names from these.
     // -------------------------------------------------------------------------
-    local_names: FxHashMap<LocalId, InternedPath>,
+    local_names: FxHashMap<LocalId, PathId>,
     local_origins: FxHashMap<LocalId, HirLocalOrigin>,
-    function_names: FxHashMap<FunctionId, InternedPath>,
-    struct_names: FxHashMap<StructId, InternedPath>,
+    function_names: FxHashMap<FunctionId, PathId>,
+    struct_names: FxHashMap<StructId, PathId>,
     generic_struct_instances: FxHashMap<StructId, GenericInstantiationKey>,
-    field_names: FxHashMap<FieldId, InternedPath>,
-    choice_names: FxHashMap<ChoiceId, InternedPath>,
+    field_names: FxHashMap<FieldId, PathId>,
+    choice_names: FxHashMap<ChoiceId, PathId>,
     generic_choice_instances: FxHashMap<ChoiceId, GenericInstantiationKey>,
 
     // -------------------------------------------------------------------------
@@ -187,7 +189,7 @@ pub(crate) struct HirSideTable {
     next_reactive_source_id: u32,
     reactive_sources: FxHashMap<ReactiveSourceId, HirReactiveSource>,
     reactive_source_by_local: FxHashMap<LocalId, ReactiveSourceId>,
-    reactive_source_by_path: FxHashMap<InternedPath, ReactiveSourceId>,
+    reactive_source_by_path: FxHashMap<PathId, ReactiveSourceId>,
     next_reactive_template_id: u32,
     reactive_templates: FxHashMap<ReactiveTemplateId, HirReactiveTemplate>,
     reactive_template_by_value: FxHashMap<HirValueId, ReactiveTemplateId>,
@@ -221,30 +223,51 @@ impl HirSideTable {
         self.reactive_template_by_value.clear();
     }
 
-    /// Remaps all `StringId`s within name and reactive metadata.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+    /// Remap every path identity retained by HIR side metadata after a module-local path merge.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if remap.is_identity() {
+            return;
+        }
+
         for path in self.local_names.values_mut() {
-            path.remap_string_ids(remap);
+            *path = remap.get(*path);
         }
-
         for path in self.function_names.values_mut() {
-            path.remap_string_ids(remap);
+            *path = remap.get(*path);
         }
-
         for path in self.struct_names.values_mut() {
-            path.remap_string_ids(remap);
+            *path = remap.get(*path);
+        }
+        for path in self.field_names.values_mut() {
+            *path = remap.get(*path);
+        }
+        for path in self.choice_names.values_mut() {
+            *path = remap.get(*path);
+        }
+        for key in self.generic_struct_instances.values_mut() {
+            key.remap_path_ids(remap);
+        }
+        for key in self.generic_choice_instances.values_mut() {
+            key.remap_path_ids(remap);
+        }
+        for source in self.reactive_sources.values_mut() {
+            source.path = remap.get(source.path);
         }
 
+        let mut reactive_source_by_path = FxHashMap::default();
+        for (source_id, source) in &self.reactive_sources {
+            reactive_source_by_path.insert(source.path, *source_id);
+        }
+        self.reactive_source_by_path = reactive_source_by_path;
+    }
+
+    /// Remaps string IDs retained by side-table metadata.
+    ///
+    /// Generic identity keys own both string-backed and path-backed components; only the string
+    /// components change during a string-table merge.
+    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for key in self.generic_struct_instances.values_mut() {
             remap_generic_instantiation_key(key, remap);
-        }
-
-        for path in self.field_names.values_mut() {
-            path.remap_string_ids(remap);
-        }
-
-        for path in self.choice_names.values_mut() {
-            path.remap_string_ids(remap);
         }
 
         for key in self.generic_choice_instances.values_mut() {
@@ -258,7 +281,7 @@ impl HirSideTable {
         self.reactive_source_by_path.clear();
         for (source_id, source) in &self.reactive_sources {
             self.reactive_source_by_path
-                .insert(source.path.clone(), *source_id);
+                .insert(source.path, *source_id);
         }
 
         for template in self.reactive_templates.values_mut() {
@@ -362,7 +385,7 @@ impl HirSideTable {
 
     /// Binds a human-readable name to a local variable.
     #[inline]
-    pub(crate) fn bind_local_name(&mut self, local_id: LocalId, name: InternedPath) {
+    pub(crate) fn bind_local_name(&mut self, local_id: LocalId, name: PathId) {
         self.local_names.insert(local_id, name);
     }
 
@@ -386,13 +409,13 @@ impl HirSideTable {
 
     /// Binds a human-readable name to a function.
     #[inline]
-    pub(crate) fn bind_function_name(&mut self, function_id: FunctionId, name: InternedPath) {
+    pub(crate) fn bind_function_name(&mut self, function_id: FunctionId, name: PathId) {
         self.function_names.insert(function_id, name);
     }
 
     /// Binds a human-readable name to a struct.
     #[inline]
-    pub(crate) fn bind_struct_name(&mut self, struct_id: StructId, name: InternedPath) {
+    pub(crate) fn bind_struct_name(&mut self, struct_id: StructId, name: PathId) {
         self.struct_names.insert(struct_id, name);
     }
 
@@ -408,13 +431,13 @@ impl HirSideTable {
 
     /// Binds a human-readable name to a field.
     #[inline]
-    pub(crate) fn bind_field_name(&mut self, field_id: FieldId, name: InternedPath) {
+    pub(crate) fn bind_field_name(&mut self, field_id: FieldId, name: PathId) {
         self.field_names.insert(field_id, name);
     }
 
     /// Binds a human-readable name to a choice.
     #[inline]
-    pub(crate) fn bind_choice_name(&mut self, choice_id: ChoiceId, name: InternedPath) {
+    pub(crate) fn bind_choice_name(&mut self, choice_id: ChoiceId, name: PathId) {
         self.choice_names.insert(choice_id, name);
     }
 
@@ -443,8 +466,7 @@ impl HirSideTable {
             }
 
             source.id = existing;
-            self.reactive_source_by_path
-                .insert(source.path.clone(), existing);
+            self.reactive_source_by_path.insert(source.path, existing);
             self.reactive_sources.insert(existing, source);
             return existing;
         }
@@ -454,9 +476,8 @@ impl HirSideTable {
         source.id = id;
 
         self.reactive_source_by_local.insert(source.local_id, id);
-        self.reactive_source_by_path.insert(source.path.clone(), id);
+        self.reactive_source_by_path.insert(source.path, id);
         self.reactive_sources.insert(id, source);
-
         id
     }
 
@@ -531,8 +552,8 @@ impl HirSideTable {
 
     /// Returns the interned path for a local variable.
     #[inline]
-    pub(crate) fn local_name_path(&self, local_id: LocalId) -> Option<&InternedPath> {
-        self.local_names.get(&local_id)
+    pub(crate) fn local_name_path(&self, local_id: LocalId) -> Option<PathId> {
+        self.local_names.get(&local_id).copied()
     }
 
     /// Returns origin metadata for a local variable.
@@ -549,8 +570,8 @@ impl HirSideTable {
 
     /// Returns the interned path for a function.
     #[inline]
-    pub(crate) fn function_name_path(&self, function_id: FunctionId) -> Option<&InternedPath> {
-        self.function_names.get(&function_id)
+    pub(crate) fn function_name_path(&self, function_id: FunctionId) -> Option<PathId> {
+        self.function_names.get(&function_id).copied()
     }
 
     #[inline]
@@ -562,11 +583,8 @@ impl HirSideTable {
     }
 
     #[inline]
-    pub(crate) fn reactive_source_id_for_path(
-        &self,
-        path: &InternedPath,
-    ) -> Option<ReactiveSourceId> {
-        self.reactive_source_by_path.get(path).copied()
+    pub(crate) fn reactive_source_id_for_path(&self, path: PathId) -> Option<ReactiveSourceId> {
+        self.reactive_source_by_path.get(&path).copied()
     }
 
     #[inline]
@@ -604,35 +622,33 @@ impl HirSideTable {
         self.reactive_templates.values()
     }
 
-    /// Returns the interned path for a struct.
     #[inline]
-    pub(crate) fn struct_name_path(&self, struct_id: StructId) -> Option<&InternedPath> {
-        self.struct_names.get(&struct_id)
+    pub(crate) fn struct_name_path(&self, struct_id: StructId) -> Option<PathId> {
+        self.struct_names.get(&struct_id).copied()
+    }
+    #[inline]
+    pub(crate) fn field_name_path(&self, field_id: FieldId) -> Option<PathId> {
+        self.field_names.get(&field_id).copied()
+    }
+
+    #[inline]
+    pub(crate) fn choice_name_path(&self, choice_id: ChoiceId) -> Option<PathId> {
+        self.choice_names.get(&choice_id).copied()
     }
 
     /// Returns the interned path for a field.
-    #[inline]
-    pub(crate) fn field_name_path(&self, field_id: FieldId) -> Option<&InternedPath> {
-        self.field_names.get(&field_id)
-    }
-
-    /// Returns the interned path for a choice.
-    #[inline]
-    #[cfg(any(test, feature = "show_hir"))]
-    pub(crate) fn choice_name_path(&self, choice_id: ChoiceId) -> Option<&InternedPath> {
-        self.choice_names.get(&choice_id)
-    }
-
-    /// Resolves a choice name to a string.
+    /// Resolves a choice name to its leaf component.
     #[inline]
     #[cfg(any(test, feature = "show_hir"))]
     pub(crate) fn resolve_choice_name<'a>(
         &self,
         choice_id: ChoiceId,
+        path_fork: &PathInternerFork,
         string_table: &'a StringTable,
     ) -> Option<&'a str> {
         self.choice_name_path(choice_id)
-            .and_then(|path| path.name_str(string_table))
+            .and_then(|path| path_fork.component(path))
+            .map(|component| string_table.resolve(component))
     }
 
     /// Returns a human-readable display name for a choice, including generic arguments if applicable.
@@ -640,48 +656,59 @@ impl HirSideTable {
     pub(crate) fn display_choice_name(
         &self,
         choice_id: ChoiceId,
+        path_fork: &PathInternerFork,
         string_table: &StringTable,
     ) -> Option<String> {
         if let Some(key) = self.generic_choice_instances.get(&choice_id) {
-            return Some(display_generic_instantiation_key(key, string_table));
+            return Some(display_generic_instantiation_key_with_fork(
+                key,
+                path_fork,
+                string_table,
+            ));
         }
 
-        self.resolve_choice_name(choice_id, string_table)
+        self.resolve_choice_name(choice_id, path_fork, string_table)
             .map(str::to_owned)
     }
 
-    /// Resolves a local variable name to a string.
+    /// Resolves a local variable name to its leaf component.
     #[inline]
     pub(crate) fn resolve_local_name<'a>(
         &self,
         local_id: LocalId,
+        path_fork: &PathInternerFork,
         string_table: &'a StringTable,
     ) -> Option<&'a str> {
         self.local_name_path(local_id)
-            .and_then(|path| path.name_str(string_table))
+            .and_then(|path| path_fork.component(path))
+            .map(|component| string_table.resolve(component))
     }
 
-    /// Resolves a function name to a string.
+    /// Resolves a function name to its leaf component.
     #[inline]
     pub(crate) fn resolve_function_name<'a>(
         &self,
         function_id: FunctionId,
+        path_fork: &PathInternerFork,
         string_table: &'a StringTable,
     ) -> Option<&'a str> {
         self.function_name_path(function_id)
-            .and_then(|path| path.name_str(string_table))
+            .and_then(|path| path_fork.component(path))
+            .map(|component| string_table.resolve(component))
     }
 
-    /// Resolves a struct name to a string.
+    /// Resolves a struct name to its leaf component.
     #[inline]
     #[cfg(any(test, feature = "show_hir"))]
     pub(crate) fn resolve_struct_name<'a>(
         &self,
         struct_id: StructId,
+        path_fork: &PathInternerFork,
         string_table: &'a StringTable,
     ) -> Option<&'a str> {
         self.struct_name_path(struct_id)
-            .and_then(|path| path.name_str(string_table))
+            .and_then(|path| path_fork.component(path))
+            .map(|component| string_table.resolve(component))
     }
 
     /// Returns a human-readable display name for a struct, including generic arguments if applicable.
@@ -689,46 +716,50 @@ impl HirSideTable {
     pub(crate) fn display_struct_name(
         &self,
         struct_id: StructId,
+        path_fork: &PathInternerFork,
         string_table: &StringTable,
     ) -> Option<String> {
         if let Some(key) = self.generic_struct_instances.get(&struct_id) {
-            return Some(display_generic_instantiation_key(key, string_table));
+            return Some(display_generic_instantiation_key_with_fork(
+                key,
+                path_fork,
+                string_table,
+            ));
         }
 
-        self.resolve_struct_name(struct_id, string_table)
+        self.resolve_struct_name(struct_id, path_fork, string_table)
             .map(str::to_owned)
     }
 
-    /// Resolves a field name to a string.
+    /// Resolves a field name to its leaf component.
     #[inline]
     #[cfg(any(test, feature = "show_hir"))]
     pub(crate) fn resolve_field_name<'a>(
         &self,
         field_id: FieldId,
+        path_fork: &PathInternerFork,
         string_table: &'a StringTable,
     ) -> Option<&'a str> {
         self.field_name_path(field_id)
-            .and_then(|path| path.name_str(string_table))
+            .and_then(|path| path_fork.component(path))
+            .map(|component| string_table.resolve(component))
     }
 }
-// -------------------------
-//  Helper Functions
-// -------------------------
 
-/// Remaps all `StringId`s within a `GenericInstantiationKey`.
+/// Recursively visits string-backed generic identity payloads.
+///
+/// Path identities themselves are stable `PathId`s and therefore do not participate in string
+/// table remapping.
 fn remap_generic_instantiation_key(key: &mut GenericInstantiationKey, remap: &StringIdRemap) {
-    key.base_path.remap_string_ids(remap);
-
     for argument in &mut key.arguments {
         remap_type_identity_key(argument, remap);
     }
 }
 
-/// Remaps all `StringId`s within a `TypeIdentityKey`.
+/// Recursively visits string-backed generic identity payloads.
 fn remap_type_identity_key(key: &mut TypeIdentityKey, remap: &StringIdRemap) {
     match key {
-        TypeIdentityKey::Nominal(path) => path.remap_string_ids(remap),
-
+        TypeIdentityKey::Nominal(_) => {}
         TypeIdentityKey::Collection { element: inner, .. } | TypeIdentityKey::Option(inner) => {
             remap_type_identity_key(inner, remap)
         }

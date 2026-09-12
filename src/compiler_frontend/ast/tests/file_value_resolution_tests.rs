@@ -49,9 +49,8 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -64,14 +63,15 @@ use std::sync::Arc;
 
 #[test]
 fn moth_file_value_from_module_root_folds_to_target_content_constant() {
-    let (ast, string_table) = compile_fixture(&[("@page.moth", "intro #= @docs/intro.mtf\n")], &[]);
+    let (ast, string_table, path_fork) =
+        compile_fixture(&[("@page.moth", "intro #= @docs/intro.mtf\n")], &[]);
 
-    assert_file_value_reuses_content(&ast, &string_table, "docs/intro.mtf/content");
+    assert_file_value_reuses_content(&ast, &string_table, &path_fork, "docs/intro.mtf/content");
 }
 
 #[test]
 fn moth_file_value_from_same_module_source_folds_to_target_content_constant() {
-    let (ast, string_table) = compile_fixture(
+    let (ast, string_table, path_fork) = compile_fixture(
         &[
             ("@page.moth", ""),
             ("helper.moth", "intro #= @docs/intro.mtf\n"),
@@ -79,17 +79,17 @@ fn moth_file_value_from_same_module_source_folds_to_target_content_constant() {
         &[],
     );
 
-    assert_file_value_reuses_content(&ast, &string_table, "docs/intro.mtf/content");
+    assert_file_value_reuses_content(&ast, &string_table, &path_fork, "docs/intro.mtf/content");
 }
 
 #[test]
 fn markdown_file_value_folds_to_target_content_constant() {
-    let (ast, string_table) = compile_fixture(
+    let (ast, string_table, path_fork) = compile_fixture(
         &[("@page.moth", "intro #= @docs/intro.md\n")],
         &[("docs/intro.md", "# Intro\n\nRendered markdown body.\n")],
     );
 
-    assert_file_value_reuses_content(&ast, &string_table, "docs/intro.md/content");
+    assert_file_value_reuses_content(&ast, &string_table, &path_fork, "docs/intro.md/content");
 }
 
 #[test]
@@ -165,17 +165,10 @@ fn moth_file_value_reports_typed_no_value_diagnostic() {
 #[test]
 fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let error = match tokenize(
-        "@/logo.svg",
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    ) {
+    let error = match tokenize("@/logo.svg", source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, &mut span_builder) {
         Ok(_) => panic!("a public root path cannot have a suffix"),
         Err(TokenizeFailure::Diagnosed(diagnostic)) => diagnostic,
         Err(TokenizeFailure::Infrastructure(error)) => {
@@ -197,7 +190,7 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
 
 #[test]
 fn resource_file_value_in_struct_field_default_resolves_to_one_resource_piece() {
-    let (ast, string_table) = compile_fixture(
+    let (ast, string_table, path_fork) = compile_fixture(
         &[(
             "@page.moth",
             "Drawing = |\n    drawing_url String = @vendor/drawing.js,\n|\nvalue #= Drawing()\n",
@@ -208,7 +201,12 @@ fn resource_file_value_in_struct_field_default_resolves_to_one_resource_piece() 
     let value_row = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path.name_str(&string_table) == Some("value"))
+        .find(|row| {
+            path_fork
+                .component(*row.path)
+                .map(|id| string_table.resolve(id))
+                == Some("value")
+        })
         .expect("struct constructor constant should exist");
     let ConstValuePayload::Record(fields) = ast
         .const_values
@@ -219,7 +217,12 @@ fn resource_file_value_in_struct_field_default_resolves_to_one_resource_piece() 
     };
     let field = fields
         .iter()
-        .find(|field| field.name.name_str(&string_table) == Some("drawing_url"))
+        .find(|field| {
+            path_fork
+                .component(field.name)
+                .map(|id| string_table.resolve(id))
+                == Some("drawing_url")
+        })
         .expect("resource field should be present in struct constructor");
     let ConstValuePayload::String(ConstStringValue::Pieces(pieces)) = ast
         .const_values
@@ -236,7 +239,7 @@ fn resource_file_value_in_struct_field_default_resolves_to_one_resource_piece() 
 
 #[test]
 fn resource_file_value_in_function_parameter_default_resolves_through_stage_zero() {
-    let (ast, string_table) = compile_fixture(
+    let (ast, string_table, path_fork) = compile_fixture(
         &[(
             "@page.moth",
             "draw |drawing_url String = @vendor/drawing.js| -> String:\n    return \"ok\"\n;\n",
@@ -244,7 +247,11 @@ fn resource_file_value_in_function_parameter_default_resolves_through_stage_zero
         &[],
     );
     let function = ast.nodes.iter().find_map(|node| match &node.kind {
-        NodeKind::Function(path, signature, _) if path.name_str(&string_table) == Some("draw") => {
+        NodeKind::Function(path, signature, _) if path_fork
+            .component(*path)
+            .map(|id| string_table.resolve(id))
+            == Some("draw") =>
+        {
             Some(signature)
         }
         _ => None,
@@ -254,8 +261,13 @@ fn resource_file_value_in_function_parameter_default_resolves_through_stage_zero
             signature
                 .parameters
                 .iter()
-                .find(|parameter| parameter.id.name_str(&string_table) == Some("drawing_url"))
-        })
+                    .find(|parameter| {
+                        path_fork
+                            .component(parameter.id)
+                            .map(|id| string_table.resolve(id))
+                            == Some("drawing_url")
+                    })
+                })
         .expect("function parameter default should be retained in the AST signature");
     let ExpressionKind::StructuralString { pieces } = &parameter.value.kind else {
         panic!("function parameter default should fold to a structural string");
@@ -272,11 +284,12 @@ fn content_file_value_behind_child_module_boundary_surfaces_stage0_diagnostic() 
     // rejection row directly. The value site must surface Stage 0's diagnostic verbatim instead
     // of resolving the path or inventing a target.
     let mut boundary_strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let result = resolve_file_value_fixture(
         "@child/existing.mtf",
         PreparedFileReferenceClass::ContentSource,
         ResolvedFileReferenceOutcome::Diagnostic(CompilerDiagnostic::invalid_compile_time_path(
-            InternedPath::from_single_str("child/existing.mtf", &mut boundary_strings),
+            path_fork.try_intern_portable_path("child/existing.mtf", &mut boundary_strings).expect("test path fits"),
             InvalidCompileTimePathReason::EscapesModuleBoundary,
             None,
         )),
@@ -291,11 +304,12 @@ fn content_file_value_behind_child_module_boundary_surfaces_stage0_diagnostic() 
 #[test]
 fn resource_file_value_behind_support_facade_surfaces_stage0_diagnostic() {
     let mut boundary_strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let result = resolve_file_value_fixture(
         "@support/existing.svg",
         PreparedFileReferenceClass::ResourceFile,
         ResolvedFileReferenceOutcome::Diagnostic(CompilerDiagnostic::invalid_compile_time_path(
-            InternedPath::from_single_str("support/existing.svg", &mut boundary_strings),
+            path_fork.try_intern_portable_path("support/existing.svg", &mut boundary_strings).expect("test path fits"),
             InvalidCompileTimePathReason::EscapesModuleBoundary,
             None,
         )),
@@ -314,7 +328,7 @@ fn resource_file_value_behind_support_facade_surfaces_stage0_diagnostic() {
 fn compile_fixture(
     moth_files: &[(&str, &str)],
     markdown_files: &[(&str, &str)],
-) -> (Ast, StringTable) {
+) -> (Ast, StringTable, PathInternerFork) {
     let templates = [("docs/intro.mtf", "shared body")];
     let entry_path = PathBuf::from("@page.moth");
 
@@ -326,6 +340,7 @@ fn compile_fixture(
         .collect::<Vec<_>>();
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let source_files = Arc::new(
         SourceDatabase::build(all_paths.iter(), &entry_path, None, &mut string_table)
             .expect("fixture source identities should build"),
@@ -349,18 +364,10 @@ fn compile_fixture(
 
     for (path, source) in moth_files {
         let path_buf = PathBuf::from(path);
-        let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
+        let interned_path = path_fork.try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
-            source,
-            &interned_path,
-            TokenizerEntryMode::SourceFile,
-            &style_directives,
-            &mut string_table,
-            file_id_for(path),
-            &mut span_builder,
-        )
+        let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, file_id_for(path), &mut span_builder)
         .expect("Moth tokenization should succeed");
         let output = prepare_file_from_tokens(
             file_tokens,
@@ -370,6 +377,7 @@ fn compile_fixture(
             0,
             0,
             &mut span_builder,
+            &mut path_fork,
         )
         .expect("Moth header preparation should succeed");
 
@@ -378,63 +386,58 @@ fn compile_fixture(
 
     for (path, source) in templates {
         let path_buf = PathBuf::from(path);
-        let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
+        let interned_path = path_fork.try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
-            source,
-            &interned_path,
-            entry_mode,
-            &style_directives,
-            &mut string_table,
-            file_id_for(path),
-            &mut span_builder,
-        )
+        let file_tokens = tokenize(source, interned_path, entry_mode, &style_directives, &mut string_table, &mut path_fork, file_id_for(path), &mut span_builder)
         .expect("Moth template tokenization should succeed");
 
-        let mut output =
-            prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
-                .expect("Moth template preparation should succeed");
+        let mut output = prepare_moth_template_file(
+            file_tokens,
+            &mut string_table,
+            &mut path_fork,
+            &mut span_builder,
+        )
+        .expect("Moth template preparation should succeed");
         output
-            .freeze_path_syntax(&string_table)
+            .freeze_path_syntax(&string_table, &mut path_fork)
             .expect("prepared template should satisfy the path invariant");
-        prepared_outputs.push(output);
-    }
-
-    for (path, source) in markdown_files {
-        let path_buf = PathBuf::from(path);
         let mut output = prepare_plain_markdown_file(
             PlainMarkdownPrepareInput {
                 source_code: source,
-                source_file: InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
+                source_file: path_fork
+                    .try_intern_filesystem_path(&path_buf, &mut string_table)
                     .expect("test path should be UTF-8"),
                 file_id: file_id_for(path),
                 canonical_os_path: None,
             },
             &mut string_table,
-        );
+            &mut path_fork,
+        )
+        .expect("plain Markdown preparation should succeed");
         output
-            .freeze_path_syntax(&string_table)
+            .freeze_path_syntax(&string_table, &mut path_fork)
             .expect("prepared markdown should satisfy the path invariant");
         prepared_outputs.push(output);
     }
 
-    // This is the Stage 0 fact consumed by AST file-value semantics. Every content path in this
-    // fixture names the one prepared template, so there is exactly one target identity to publish.
     let mut resolved_references = ResolvedFileReferenceTable::new();
     let mut resource_source_index = 0;
+
     for output in &prepared_outputs {
         for reference in output.structural_file_references.iter() {
             let source_file = reference.source_file;
-            let authored_path = output
+            let authored_path_id = output
                 .path_syntax
                 .table()
                 .try_path(reference.path_syntax)
                 .expect("prepared reference should point into its path table")
-                .root
-                .to_portable_string(&string_table);
+                .root;
+            let mut path_scratch = Vec::new();
+            let authored_path =
+                path_fork.render_portable(authored_path_id, &string_table, &mut path_scratch);
             let outcome = match reference.class {
                 PreparedFileReferenceClass::ContentSource => {
                     let target_path = PathBuf::from(&authored_path);
@@ -474,28 +477,16 @@ fn compile_fixture(
         }
     }
 
-    let prepared_syntax = prepare_header_syntax(
-        &mut prepared_outputs,
-        &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-    )
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
     .expect("header syntax preparation should succeed");
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
-    let headers = bind_module_headers(
-        prepared_syntax,
-        &external_package_registry,
-        &ExternalImportResolutionTable::default(),
-        &SourceProviderDependencySet::default(),
-        None,
-        source_files.as_ref(),
-        &mut string_table,
-    )
+    let headers = bind_module_headers(prepared_syntax, &external_package_registry, &ExternalImportResolutionTable::default(), &SourceProviderDependencySet::default(), None, source_files.as_ref(), &mut string_table, &mut PathInternerFork::empty())
     .expect("header binding should succeed");
 
     let mut frontend = CompilerFrontend::new(
         FrontendOptions::default(),
         string_table,
-        PathInternerFork::empty(),
+        path_fork,
         &style_directives,
         &external_package_registry,
         None,
@@ -522,22 +513,26 @@ fn compile_fixture(
         .expect("AST construction should succeed")
         .ast;
 
-    (ast, frontend.string_table)
+    (ast, frontend.string_table, frontend.path_fork)
 }
 
 fn assert_file_value_reuses_content(
     ast: &Ast,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
     content_constant_suffix: &str,
 ) {
+    let mut path_scratch = Vec::new();
     let content_id = ast
         .const_values
         .iter_module_constant_views()
         .find(|row| {
-            row.path.name_str(string_table) == Some("content")
-                && row
-                    .path
-                    .to_portable_string(string_table)
+            path_fork
+                .component(*row.path)
+                .map(|id| string_table.resolve(id))
+                == Some("content")
+                && path_fork
+                    .render_portable(*row.path, string_table, &mut path_scratch)
                     .ends_with(content_constant_suffix)
         })
         .expect("synthetic content constant should exist")
@@ -545,7 +540,12 @@ fn assert_file_value_reuses_content(
     let file_value_id = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path.name_str(string_table) == Some("intro"))
+        .find(|row| {
+            path_fork
+                .component(*row.path)
+                .map(|id| string_table.resolve(id))
+                == Some("intro")
+        })
         .expect("file-value constant should exist")
         .id;
 
@@ -576,6 +576,7 @@ fn resolve_file_value_fixture(
     ExpressionParseError,
 > {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let source_path_buf = PathBuf::from("@page.moth");
     let source_files = Arc::new(
         SourceDatabase::build(
@@ -590,19 +591,11 @@ fn resolve_file_value_fixture(
         .get_by_canonical_path(&source_path_buf)
         .expect("fixture source identity should be present")
         .id;
-    let source_path = InternedPath::try_from_filesystem_path(&source_path_buf, &mut string_table)
+    let source_path = path_fork.try_intern_filesystem_path(&source_path_buf, &mut string_table)
         .expect("fixture source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        source_file,
-        &mut span_builder,
-    )
+    let mut token_stream = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, source_file, &mut span_builder)
     .expect("file-value fixture should tokenize");
     token_stream.freeze_path_syntax_for_test();
     let path_token_index = token_stream
@@ -631,7 +624,7 @@ fn resolve_file_value_fixture(
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         source_path,
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -657,6 +650,7 @@ fn resolve_file_value_fixture(
         &type_interner,
         &ValueMode::ImmutableOwned,
         &mut string_table,
+        &mut path_fork,
     )?;
 
     Ok((expression, module_resources, module_origin))

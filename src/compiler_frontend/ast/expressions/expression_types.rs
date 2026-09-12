@@ -8,7 +8,8 @@
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::ids::GenericParameterId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 
 /// Value-level classification for const-record semantics.
@@ -76,7 +77,7 @@ pub(crate) enum ResolvedCastEvidence {
     /// User-defined same-file nominal evidence with the selected method path.
     UserDefined {
         evidence_id: TraitEvidenceId,
-        method_path: InternedPath,
+        method_path: PathId,
     },
 
     /// Validation-only evidence supplied by a declaration-site generic bound.
@@ -151,7 +152,7 @@ pub enum FallibleHandling {
 /// Name and path binding for a caught error in a `catch` handler.
 #[derive(Clone, Debug)]
 pub struct CatchErrorBinding {
-    pub error_binding: InternedPath,
+    pub error_binding: PathId,
 }
 
 /// Success or error variant for fallible carrier construction.

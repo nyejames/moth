@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Input for the inline single-predicate body parser after `if` has been consumed.
 pub(super) struct InlineSinglePredicateParseInput<'a, 'b> {
@@ -39,13 +40,12 @@ pub(super) struct InlineSinglePredicateParseInput<'a, 'b> {
     pub(super) header_index: usize,
     pub(super) span: Option<SourceSpan>,
     pub(super) classification: IfHeaderClassification,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Attempts to parse an inline single-predicate value match after `if`.
 ///
 /// WHAT: consumes the shared header parser, then requires same-line `then`.
-/// Returns `None` if the header is not a committed option/choice predicate so
-/// the caller can fall back to Bool condition parsing.
 pub(super) fn try_parse_inline_single_predicate_value_match(
     input: InlineSinglePredicateParseInput<'_, '_>,
 ) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
@@ -58,6 +58,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         header_index,
         span,
         classification,
+        path_fork,
     } = input;
 
     let header = match try_parse_single_predicate_header(SinglePredicateHeaderInput {
@@ -66,6 +67,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         type_interner,
         string_table,
         classification,
+        path_fork,
     }) {
         Some(Ok(header)) => header,
         Some(Err(error)) => return Some(Err(error)),
@@ -100,6 +102,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         scrutinee: header.scrutinee,
         pattern: header.pattern,
         span,
+        path_fork,
     }))
 }
 
@@ -113,6 +116,7 @@ struct InlineValueMatchParseInput<'a, 'b> {
     scrutinee: Expression,
     pattern: MatchPattern,
     span: Option<SourceSpan>,
+    path_fork: &'a mut PathInternerFork,
 }
 
 /// The speculative outer parser may discard only authored diagnostics. Once a match shape is
@@ -132,6 +136,7 @@ fn parse_inline_value_match(
         scrutinee,
         pattern,
         span,
+        path_fork,
     } = input;
 
     let output = parse_inline_then_else(InlineThenElseInput {
@@ -141,6 +146,7 @@ fn parse_inline_value_match(
         type_interner,
         target,
         string_table,
+        path_fork,
     })?;
 
     let then_body = vec![then_value_node(

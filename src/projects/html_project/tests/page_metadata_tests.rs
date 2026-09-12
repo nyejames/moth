@@ -24,21 +24,24 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
 };
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use std::path::{Path, PathBuf};
 
-fn test_module(string_table: &mut StringTable) -> HirModule {
+fn test_module(
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> HirModule {
     let mut module = HirModule::new();
-    let start_path = InternedPath::try_from_filesystem_path(
-        PathBuf::from("docs/@page.moth").as_path(),
-        string_table,
-    )
-    .expect("test path should be UTF-8")
-    .join_str("start", string_table);
+    let source_path = path_fork
+        .try_intern_filesystem_path(PathBuf::from("docs/@page.moth").as_path(), string_table)
+        .expect("test path should be UTF-8");
+    let start_path = path_fork
+        .try_intern_child(source_path, string_table.intern("start"))
+        .expect("test path should fit");
     let mut side_table = HirSideTable::default();
     side_table.bind_function_name(FunctionId(0), start_path);
     module.start_function = Some(FunctionId(0));
@@ -61,7 +64,8 @@ fn add_const_fact(
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) {
-    let declaration_path = InternedPath::from_single_str(name, string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let declaration_path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
     module.const_facts.declarations.insert(
         declaration_path.clone(),
         HirConstDeclarationFact {
@@ -97,11 +101,11 @@ fn metadata_error_message(
     let render_context = DiagnosticRenderContext::new(string_table);
     terminal::format_payload_guidance(payload, render_context).join("\n")
 }
-
 #[test]
 fn extracts_reserved_entry_metadata() {
     let mut string_table = StringTable::new();
-    let mut module = test_module(&mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let mut module = test_module(&mut string_table, &mut path_fork);
     module.module_constants = vec![
         string_constant("docs/@page.moth/page_title", "Home"),
         string_constant(
@@ -116,6 +120,7 @@ fn extracts_reserved_entry_metadata() {
         module
             .start_function
             .expect("entry module should have start"),
+        &path_fork.snapshot_table(),
         &ModuleResourceTable::new(),
         &mut string_table,
     )
@@ -138,7 +143,8 @@ fn extracts_reserved_entry_metadata() {
 #[test]
 fn ignores_non_entry_constants() {
     let mut string_table = StringTable::new();
-    let mut module = test_module(&mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let mut module = test_module(&mut string_table, &mut path_fork);
     module.module_constants = vec![
         string_constant("docs/@page.moth/page_title", "Home"),
         string_constant("docs/shared.moth/page_title", "Shared"),
@@ -149,6 +155,7 @@ fn ignores_non_entry_constants() {
         module
             .start_function
             .expect("entry module should have start"),
+        &path_fork.snapshot_table(),
         &ModuleResourceTable::new(),
         &mut string_table,
     )
@@ -158,11 +165,11 @@ fn ignores_non_entry_constants() {
         Some(OwnedFoldedString::Text(String::from("Home")))
     );
 }
-
 #[test]
 fn rejects_non_string_reserved_values() {
     let mut string_table = StringTable::new();
-    let mut module = test_module(&mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let mut module = test_module(&mut string_table, &mut path_fork);
     module.module_constants = vec![HirModuleConst {
         id: HirConstId(0),
         name: String::from("page_title"),
@@ -175,6 +182,7 @@ fn rejects_non_string_reserved_values() {
         module
             .start_function
             .expect("entry module should have start"),
+        &path_fork.snapshot_table(),
         &ModuleResourceTable::new(),
         &mut string_table,
     )
@@ -202,11 +210,11 @@ fn rejects_non_string_reserved_values() {
         "unexpected message: {message}"
     );
 }
-
 #[test]
 fn renders_structural_string_reserved_values() {
     let mut string_table = StringTable::new();
-    let mut module = test_module(&mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let mut module = test_module(&mut string_table, &mut path_fork);
     let mut resources = ModuleResourceTable::new();
     let resource_id = fixture_resource_id(&mut resources, "static/favicon.png");
     let origin = resources
@@ -228,6 +236,7 @@ fn renders_structural_string_reserved_values() {
         module
             .start_function
             .expect("entry module should have start"),
+        &path_fork.snapshot_table(),
         &resources,
         &mut string_table,
     )
@@ -261,11 +270,11 @@ fn renders_structural_string_reserved_values() {
         .expect("structural favicon should render");
     assert_eq!(rendered, "./static/favicon.png");
 }
-
 #[test]
 fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
     let mut string_table = StringTable::new();
-    let mut module = test_module(&mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let mut module = test_module(&mut string_table, &mut path_fork);
     let mut resources = ModuleResourceTable::new();
     let resource_id = fixture_resource_id(&mut resources, "static/favicon.png");
     let origin = resources
@@ -301,6 +310,7 @@ fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
         module
             .start_function
             .expect("entry module should have start"),
+        &path_fork.snapshot_table(),
         &resources,
         &mut string_table,
     )
@@ -315,11 +325,11 @@ fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
     );
     assert!(plan.uses_site_root);
 }
-
 #[test]
 fn rejects_duplicate_reserved_values() {
     let mut string_table = StringTable::new();
-    let mut module = test_module(&mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let mut module = test_module(&mut string_table, &mut path_fork);
     module.module_constants = vec![
         string_constant("page_title", "Home"),
         string_constant("docs/@page.moth/page_title", "Another"),
@@ -330,6 +340,7 @@ fn rejects_duplicate_reserved_values() {
         module
             .start_function
             .expect("entry module should have start"),
+        &path_fork.snapshot_table(),
         &ModuleResourceTable::new(),
         &mut string_table,
     )

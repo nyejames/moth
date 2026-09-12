@@ -1,5 +1,6 @@
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
@@ -24,6 +25,7 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
@@ -141,15 +143,13 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
 
     // Derive the expected retained token volume outside the production counter window.
     let mut expected_token_string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let expected_token_count = [entry_source, intro_source, child_source]
         .into_iter()
         .enumerate()
         .map(|(index, source)| {
             let scope =
-                crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
-                    &format!("counter-fixture-{index}.moth"),
-                    &mut expected_token_string_table,
-                );
+                path_fork.try_intern_portable_path(&format!("counter-fixture-{index}.moth"), &mut expected_token_string_table).expect("test path fits");
             let mut counter_span_builder = ExtendedSpanBuilder::new();
             crate::compiler_frontend::tokenizer::lexer::tokenize(
                 source,

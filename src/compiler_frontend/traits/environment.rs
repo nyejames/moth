@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
@@ -75,8 +75,8 @@ pub(crate) enum CoreTraitKind {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TraitEnvironment {
     definitions: Vec<ResolvedTraitDefinition>,
-    ids_by_path: FxHashMap<InternedPath, TraitId>,
-    paths_by_id: FxHashMap<TraitId, Vec<InternedPath>>,
+    ids_by_path: FxHashMap<PathId, TraitId>,
+    paths_by_id: FxHashMap<TraitId, Vec<PathId>>,
     ids_by_canonical_identity: FxHashMap<CanonicalTraitIdentity, TraitId>,
     core_traits_by_name: FxHashMap<&'static str, TraitId>,
     core_trait_kinds: FxHashMap<TraitId, CoreTraitKind>,
@@ -130,8 +130,8 @@ impl TraitEnvironment {
         let name = string_table.intern(trait_name);
         let requirement_name = string_table.intern(requirement_name);
         let this_name = string_table.intern(TRAIT_THIS_NAME);
-        let path = InternedPath::from_single_str(trait_name, string_table);
-        let source_file = InternedPath::new();
+        let path = PathId::ROOT;
+        let source_file = PathId::ROOT;
         let this_type = type_environment.register_synthetic_generic_parameter(this_name);
 
         let id = self.allocate_trait_id();
@@ -361,7 +361,7 @@ impl TraitEnvironment {
     /// target without treating an alias as another trait definition.
     pub(crate) fn register_path(
         &mut self,
-        path: InternedPath,
+        path: PathId,
         trait_id: TraitId,
     ) -> Result<(), CompilerError> {
         if let Some(existing_id) = self.ids_by_path.get(&path) {
@@ -379,13 +379,13 @@ impl TraitEnvironment {
         Ok(())
     }
 
-    pub(crate) fn has_path(&self, trait_id: TraitId, path: &InternedPath) -> bool {
+    pub(crate) fn has_path(&self, trait_id: TraitId, path: &PathId) -> bool {
         self.paths_by_id
             .get(&trait_id)
             .is_some_and(|paths| paths.contains(path))
     }
 
-    pub(crate) fn paths_for(&self, trait_id: TraitId) -> &[InternedPath] {
+    pub(crate) fn paths_for(&self, trait_id: TraitId) -> &[PathId] {
         self.paths_by_id
             .get(&trait_id)
             .map(Vec::as_slice)
@@ -436,7 +436,7 @@ impl TraitEnvironment {
         self.definitions.iter()
     }
 
-    pub(crate) fn id_for_path(&self, path: &InternedPath) -> Option<TraitId> {
+    pub(crate) fn id_for_path(&self, path: &PathId) -> Option<TraitId> {
         self.ids_by_path.get(path).copied()
     }
 
@@ -510,7 +510,7 @@ pub(crate) fn trait_this_name(string_table: &mut StringTable) -> StringId {
 }
 
 pub(crate) fn requirement_parameter_from_type(
-    name: InternedPath,
+    name: PathId,
     value_mode: ValueMode,
     type_id: TypeId,
     span: Option<SourceSpan>,

@@ -16,10 +16,12 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
 use crate::compiler_frontend::ast::generic_bounds::evidence_for_type;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReceiverCallReason};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement,
@@ -144,6 +146,7 @@ pub(super) fn lookup_generic_bound_receiver_method(
     member_span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Option<TraitSurfaceReceiverMethod>, ExpressionParseError> {
     let mut parameter_ids = Vec::new();
     let receiver_is_unresolved_generic = if let Some(parameter_id) =
@@ -190,10 +193,16 @@ pub(super) fn lookup_generic_bound_receiver_method(
                 // Validation-only generic bodies have no concrete evidence method yet. The
                 // synthetic path is discarded with the validation AST nodes; concrete instances
                 // reparse the same call and select the evidence method below.
-                candidate
-                    .trait_definition
-                    .canonical_path
-                    .append(candidate.requirement.name)
+                path_fork
+                    .try_intern_child(
+                        candidate.trait_definition.canonical_path,
+                        candidate.requirement.name,
+                    )
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "path table exhausted while interning synthetic trait method",
+                        )
+                    })?
             } else {
                 let Some(evidence) = evidence_for_bound_method(
                     candidate.trait_definition.id,
@@ -219,6 +228,7 @@ pub(super) fn lookup_generic_bound_receiver_method(
                 receiver_type_id,
                 type_environment,
                 string_table,
+                path_fork,
             );
 
             Ok(Some(TraitSurfaceReceiverMethod {

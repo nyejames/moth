@@ -59,7 +59,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -79,9 +79,8 @@ pub(crate) struct DirectExportSeed {
     export_bindings: Vec<ExportBinding>,
     export_diagnostic_provenance: Vec<PublicExportDiagnosticProvenance>,
     binding_exports: Vec<PublicBindingExport>,
-    public_nominal_type_origins: FxHashMap<InternedPath, OriginTypeId>,
+    public_nominal_type_origins: FxHashMap<PathId, OriginTypeId>,
 }
-
 pub(crate) struct DirectExportSeedParts {
     pub(crate) module_origin: StableModuleOriginIdentity,
     pub(crate) export_bindings: Vec<ExportBinding>,
@@ -99,7 +98,7 @@ impl DirectExportSeed {
     pub(crate) fn new(
         module_origin: StableModuleOriginIdentity,
         export_bindings: Vec<ExportBinding>,
-        public_nominal_type_origins: FxHashMap<InternedPath, OriginTypeId>,
+        public_nominal_type_origins: FxHashMap<PathId, OriginTypeId>,
     ) -> Self {
         Self {
             module_origin,
@@ -141,9 +140,7 @@ impl DirectExportSeed {
         &self.export_diagnostic_provenance
     }
 
-    /// The transient public nominal-type origin index used by the post-AST callable seed table
-    /// builder to resolve receiver paths to stable [`OriginTypeId`] values.
-    pub(crate) fn public_nominal_type_origins(&self) -> &FxHashMap<InternedPath, OriginTypeId> {
+    pub(crate) fn public_nominal_type_origins(&self) -> &FxHashMap<PathId, OriginTypeId> {
         &self.public_nominal_type_origins
     }
 
@@ -192,10 +189,10 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     external_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<DirectExportSeed, CompilerError> {
     let active_origin =
         resolve_active_module_origin(source_module_origins, active_root_file_id, sorted_headers)?;
-
     let (export_bindings, export_diagnostic_provenance) = collect_free_export_bindings(
         source_module_origins,
         &active_origin,
@@ -203,6 +200,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
         module_symbols,
         source_provider_dependencies,
         string_table,
+        path_fork,
     )?;
     let public_nominal_type_origins = index_public_nominal_type_origins(
         &active_origin,
@@ -210,6 +208,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
         sorted_headers,
         module_symbols,
         string_table,
+        path_fork,
     )?;
     let binding_exports = collect_binding_exports(
         &active_origin,
@@ -400,7 +399,8 @@ fn index_public_nominal_type_origins(
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
     string_table: &StringTable,
-) -> Result<FxHashMap<InternedPath, OriginTypeId>, CompilerError> {
+    path_fork: &PathInternerFork,
+) -> Result<FxHashMap<PathId, OriginTypeId>, CompilerError> {
     let mut nominal_type_origins = FxHashMap::default();
     let active_module_root = resolve_optional_active_module_root_membership(module_symbols)?;
 
@@ -408,8 +408,7 @@ fn index_public_nominal_type_origins(
         // A directly-defined public declaration always has a defining name: the header parser
         // records one for every authored declaration shell. A missing name here is an impossible
         // metadata gap, not an intentional exclusion, so it must surface as an internal failure
-        // rather than silently omitting a public nominal type from the seed.
-        let Some(name) = header.tokens.src_path.name_str(string_table) else {
+        let Some(name) = path_name(header.tokens.src_path, path_fork, string_table) else {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a directly-defined public nominal type header has no resolvable defining name (path: {:?})",
                 header.tokens.src_path
@@ -486,8 +485,9 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
     string_table: &StringTable,
-) -> Result<FxHashMap<InternedPath, OriginTypeId>, CompilerError> {
-    let mut origins: FxHashMap<InternedPath, OriginTypeId> = FxHashMap::default();
+    path_fork: &PathInternerFork,
+) -> Result<FxHashMap<PathId, OriginTypeId>, CompilerError> {
+    let mut origins: FxHashMap<PathId, OriginTypeId> = FxHashMap::default();
 
     for header in sorted_headers {
         if !is_public_export_targeted_nominal_declaration(header, module_symbols) {
@@ -496,8 +496,7 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
 
         // A public export-targeted declaration always carries a defining name recorded by the
         // header parser. A missing name is an impossible metadata gap that must not silently
-        // omit a public nominal type from the transient resolver.
-        let Some(name) = header.tokens.src_path.name_str(string_table) else {
+        let Some(name) = path_name(header.tokens.src_path, path_fork, string_table) else {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a public export-targeted nominal type header has no resolvable defining name (path: {:?})",
                 header.tokens.src_path
@@ -552,15 +551,15 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
     string_table: &StringTable,
-) -> Result<FxHashMap<InternedPath, OriginTraitId>, CompilerError> {
-    let mut origins: FxHashMap<InternedPath, OriginTraitId> = FxHashMap::default();
+    path_fork: &PathInternerFork,
+) -> Result<FxHashMap<PathId, OriginTraitId>, CompilerError> {
+    let mut origins: FxHashMap<PathId, OriginTraitId> = FxHashMap::default();
 
     for header in sorted_headers {
         if !is_public_export_targeted_trait_declaration(header, module_symbols) {
             continue;
         }
-
-        let Some(name) = header.tokens.src_path.name_str(string_table) else {
+        let Some(name) = path_name(header.tokens.src_path, path_fork, string_table) else {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a public export-targeted trait header has no resolvable defining name (path: {:?})",
                 header.tokens.src_path
@@ -606,7 +605,7 @@ fn is_public_export_targeted_nominal_declaration(
     matches!(
         &header.kind,
         HeaderKind::Struct { .. } | HeaderKind::Choice { .. }
-    ) && any_retained_public_export_targets_source_path(module_symbols, &header.tokens.src_path)
+    ) && any_retained_public_export_targets_source_path(module_symbols, header.tokens.src_path)
 }
 
 /// Whether a header is a trait declaration whose canonical source path is targeted by a
@@ -621,7 +620,7 @@ fn is_public_export_targeted_trait_declaration(
     module_symbols: &ModuleSymbols,
 ) -> bool {
     matches!(&header.kind, HeaderKind::Trait { .. })
-        && any_retained_public_export_targets_source_path(module_symbols, &header.tokens.src_path)
+        && any_retained_public_export_targets_source_path(module_symbols, header.tokens.src_path)
 }
 
 /// Whether any retained module-root or source-package public export entry targets the given
@@ -633,7 +632,7 @@ fn is_public_export_targeted_trait_declaration(
 ///       shared [`PublicExportTarget::is_source_path`] predicate for the entry-target match.
 fn any_retained_public_export_targets_source_path(
     module_symbols: &ModuleSymbols,
-    path: &InternedPath,
+    path: PathId,
 ) -> bool {
     module_symbols
         .module_root_public_exports
@@ -641,7 +640,7 @@ fn any_retained_public_export_targets_source_path(
         .any(|entries| {
             entries
                 .iter()
-                .any(|entry| entry.target.is_source_path(path))
+                .any(|entry| entry.target.is_source_path(&path))
         })
         || module_symbols
             .source_package_public_exports
@@ -649,7 +648,7 @@ fn any_retained_public_export_targets_source_path(
             .any(|entries| {
                 entries
                     .iter()
-                    .any(|entry| entry.target.is_source_path(path))
+                    .any(|entry| entry.target.is_source_path(&path))
             })
 }
 
@@ -671,6 +670,7 @@ fn collect_free_export_bindings(
     module_symbols: &ModuleSymbols,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(Vec<ExportBinding>, Vec<PublicExportDiagnosticProvenance>), CompilerError> {
     let mut export_bindings = Vec::new();
     let mut export_diagnostic_provenance = Vec::new();
@@ -684,7 +684,7 @@ fn collect_free_export_bindings(
         // A directly-defined public authored declaration always has a defining name. A missing
         // name is an impossible metadata gap that must not silently omit a public export from the
         // seed.
-        let Some(name) = header.tokens.src_path.name_str(string_table) else {
+        let Some(name) = path_name(header.tokens.src_path, path_fork, string_table) else {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a directly-defined public declaration header has no resolvable defining name (path: {:?})",
                 header.tokens.src_path
@@ -722,8 +722,8 @@ fn collect_free_export_bindings(
         module_symbols,
         source_provider_dependencies,
         string_table,
+        path_fork,
     )?;
-
     for reexport in reexport_bindings {
         if seen_public_names.insert(reexport.binding.public_name().to_owned()) {
             let public_name = reexport.binding.public_name().to_owned();
@@ -766,6 +766,7 @@ fn collect_reexport_bindings(
     module_symbols: &ModuleSymbols,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<ReexportBinding>, CompilerError> {
     if module_symbols.file_module_membership.is_empty() {
         return Ok(Vec::new());
@@ -775,7 +776,7 @@ fn collect_reexport_bindings(
         return Ok(Vec::new());
     };
     // declaration header without iterating the full header list for each entry.
-    let mut header_by_path: FxHashMap<&InternedPath, &Header> = FxHashMap::default();
+    let mut header_by_path: FxHashMap<&PathId, &Header> = FxHashMap::default();
     for header in sorted_headers {
         header_by_path.insert(&header.tokens.src_path, header);
     }
@@ -789,6 +790,7 @@ fn collect_reexport_bindings(
         header_by_path: &header_by_path,
         source_provider_dependencies,
         string_table,
+        path_fork,
     };
 
     // Collect re-exports from module root public exports. Only entries targeting declarations
@@ -805,15 +807,15 @@ fn collect_reexport_bindings(
 
     Ok(bindings)
 }
-
 struct ReexportBindingContext<'a> {
     source_module_origins: &'a SourceModuleOriginTable,
     module_origin: &'a StableModuleOriginIdentity,
-    active_module_root: &'a InternedPath,
+    active_module_root: &'a PathId,
     module_symbols: &'a ModuleSymbols,
-    header_by_path: &'a FxHashMap<&'a InternedPath, &'a Header>,
+    header_by_path: &'a FxHashMap<&'a PathId, &'a Header>,
     source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     string_table: &'a StringTable,
+    path_fork: &'a PathInternerFork,
 }
 
 struct ReexportBinding {
@@ -823,8 +825,8 @@ struct ReexportBinding {
 
 fn resolve_active_root_source<'a>(
     module_symbols: &'a ModuleSymbols,
-    active_module_root: &InternedPath,
-) -> Result<&'a InternedPath, CompilerError> {
+    active_module_root: &PathId,
+) -> Result<&'a PathId, CompilerError> {
     module_symbols
         .file_roles_by_source
         .iter()
@@ -842,7 +844,7 @@ fn resolve_active_root_source<'a>(
 
 fn resolve_optional_active_module_root_membership(
     module_symbols: &ModuleSymbols,
-) -> Result<Option<&InternedPath>, CompilerError> {
+) -> Result<Option<&PathId>, CompilerError> {
     let mut active_module_root = None;
 
     for (source, role) in &module_symbols.file_roles_by_source {
@@ -951,9 +953,11 @@ fn collect_one_reexport_binding<'a>(
     if target_origin != context.module_origin {
         return Ok(());
     }
-
-    // The target declaration must have a defining name to build a stable origin.
-    let Some(name) = header.tokens.src_path.name_str(context.string_table) else {
+    let Some(name) = context
+        .path_fork
+        .component(header.tokens.src_path)
+        .map(|component| context.string_table.resolve(component))
+    else {
         return Err(CompilerError::compiler_error(format!(
             "re-export binding construction: a re-export target declaration has no resolvable defining name (path: {:?})",
             target_path
@@ -1109,4 +1113,13 @@ fn declaration_category_rank(origin: &OriginDeclarationId) -> u8 {
         OriginDeclarationId::Constant(_) => 2,
         OriginDeclarationId::Trait(_) => 3,
     }
+}
+fn path_name<'a>(
+    path: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &'a StringTable,
+) -> Option<&'a str> {
+    path_fork
+        .component(path)
+        .map(|component| string_table.resolve(component))
 }

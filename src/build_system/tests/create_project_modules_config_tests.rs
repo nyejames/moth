@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 #[test]
 fn parses_config_constant_declarations() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -72,6 +73,7 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
             build_config_inputs: &build_config_inputs,
         };
         let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
         let mut source_files = SourceDatabase::empty();
 
         let result = compile_project_config_file(
@@ -185,6 +187,7 @@ fn loads_canonical_config_file_from_project_root() {
         build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
 
     let validated_output_settings = load_project_config(
@@ -355,6 +358,7 @@ fn directory_projects_require_config_moth() {
         build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
 
     let messages = load_project_config(
@@ -379,43 +383,42 @@ fn directory_projects_require_config_moth() {
 #[test]
 fn rejects_direct_canonical_config_dependency_paths() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     for dependency_path in ["config", "config.moth"] {
-        let path = crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
-            dependency_path,
-            &mut string_table,
-        );
+        let path = path_fork
+            .try_intern_portable_path(dependency_path, &mut string_table)
+            .expect("test path fits");
 
         assert!(
             crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file(
-                &path,
+                path,
+                &path_fork,
                 &string_table,
             ),
             "direct config import should be treated as a special file: {dependency_path}"
         );
     }
 
-    let mut nested_source_path =
-        crate::compiler_frontend::symbols::interned_path::InternedPath::new();
-    nested_source_path.push_str("config", &mut string_table);
-    nested_source_path.push_str("init_config", &mut string_table);
-
+    let nested_source_path = path_fork
+        .try_intern_portable_path("config/init_config", &mut string_table)
+        .expect("test path fits");
     assert!(
         !crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file(
-            &nested_source_path,
+            nested_source_path,
+            &path_fork,
             &string_table,
         ),
         "a folder named config must remain a valid source path prefix"
     );
 
-    let mut ordinary_config_path =
-        crate::compiler_frontend::symbols::interned_path::InternedPath::new();
-    ordinary_config_path.push_str("config", &mut string_table);
-    ordinary_config_path.push_str("project", &mut string_table);
-
+    let ordinary_config_path = path_fork
+        .try_intern_portable_path("config/project", &mut string_table)
+        .expect("test path fits");
     assert!(
         !crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file(
-            &ordinary_config_path,
+            ordinary_config_path,
+            &path_fork,
             &string_table,
         ),
         "a nested path with a non-config final component remains a valid source path"
@@ -779,6 +782,7 @@ fn project_local_package_folder_does_not_register_source_metadata() {
     config.entry_root = PathBuf::from("src");
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let resolver = super::project_roots::build_project_path_resolver(
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -817,6 +821,7 @@ fn ordinary_package_folder_does_not_collide_with_entry_root() {
     .expect("config should parse");
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let result = super::project_roots::build_project_path_resolver(
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1345,6 +1350,7 @@ fn project_local_lib_directory_is_ignored_as_source_package_root() {
 
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let resolver = super::project_roots::build_project_path_resolver(
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1359,14 +1365,19 @@ fn project_local_lib_directory_is_ignored_as_source_package_root() {
     );
 
     // Dependency path `@helper/utils` must not resolve through the legacy lib folder.
-    let mut path = crate::compiler_frontend::symbols::interned_path::InternedPath::new();
-    path.push_str("helper", &mut string_table);
-    path.push_str("utils", &mut string_table);
+    let path = path_fork
+        .try_intern_portable_path("helper/utils", &mut string_table)
+        .expect("test path fits");
 
     let declaring_source = root.join("src/@page.moth");
     assert!(
         resolver
-            .resolve_dependency_to_source_file(&path, &declaring_source, &mut string_table)
+            .resolve_dependency_to_source_file(
+                path,
+                &path_fork,
+                &declaring_source,
+                &mut string_table,
+            )
             .is_err(),
         "legacy lib folders must not resolve as source packages"
     );
@@ -1392,6 +1403,7 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
 
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let mut builder_frontend_surface = crate::builder_surface::SourcePackageRegistry::new();
     builder_frontend_surface.register_filesystem_root(

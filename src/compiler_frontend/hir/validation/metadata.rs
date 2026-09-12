@@ -43,7 +43,7 @@ impl<'a> HirValidator<'a> {
                 ));
             }
 
-            if self.module.side_table.local_name_path(source.local_id) != Some(&source.path) {
+            if self.module.side_table.local_name_path(source.local_id) != Some(source.path) {
                 return Err(self.error_with_hir(
                     format!(
                         "Reactive source {:?} path does not match local {:?}'s side-table name",
@@ -71,7 +71,7 @@ impl<'a> HirValidator<'a> {
             if self
                 .module
                 .side_table
-                .reactive_source_id_for_path(&source.path)
+                .reactive_source_id_for_path(source.path)
                 != Some(source.id)
             {
                 return Err(self.error_with_hir(

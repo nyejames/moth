@@ -45,7 +45,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node, symbol};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -81,7 +81,7 @@ fn string_return_slot() -> ReturnSlot {
 }
 
 fn no_value_declaration(
-    path: InternedPath,
+    path: PathId,
     data_type: DataType,
     type_id: crate::compiler_frontend::datatypes::TypeId,
 ) -> Declaration {
@@ -99,7 +99,7 @@ fn no_value_declaration(
 }
 
 fn reference_expression(
-    path: InternedPath,
+    path: PathId,
     data_type: DataType,
     type_id: crate::compiler_frontend::datatypes::TypeId,
 ) -> Expression {
@@ -113,7 +113,7 @@ fn reference_expression(
     )
 }
 
-fn reactive_source(path: InternedPath, kind: ReactiveSourceKind) -> ReactiveSource {
+fn reactive_source(path: PathId, kind: ReactiveSourceKind) -> ReactiveSource {
     ReactiveSource { path, kind }
 }
 
@@ -202,7 +202,7 @@ fn root_overlay_expression_metadata<'a>(
     expression.reactive_template.as_ref()
 }
 
-fn call_expression(function_path: InternedPath, arguments: Vec<CallArgument>) -> Expression {
+fn call_expression(function_path: PathId, arguments: Vec<CallArgument>) -> Expression {
     let mut type_environment = TypeEnvironment::new();
     Expression::function_call_with_typed_arguments(
         function_path,
@@ -240,7 +240,8 @@ fn template_from_expression_statement(ast: &[AstNode]) -> &Template {
 #[test]
 fn propagates_metadata_from_a_template() {
     let mut strings = StringTable::new();
-    let source_path = symbol("count", &mut strings);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = symbol("count", &mut path_fork, &mut strings);
     let mut store = TemplateIrStore::new();
     let expression = template_with_subscription(
         &mut store,
@@ -265,7 +266,8 @@ fn propagates_metadata_from_a_template() {
 #[test]
 fn annotates_linear_tir_root_metadata_through_overlay() {
     let mut strings = StringTable::new();
-    let count_path = symbol("count", &mut strings);
+    let mut path_fork = PathInternerFork::empty();
+    let count_path = symbol("count", &mut path_fork, &mut strings);
     let location = None;
     let mut store = TemplateIrStore::new();
 
@@ -303,11 +305,12 @@ fn annotates_linear_tir_root_metadata_through_overlay() {
 #[test]
 fn runtime_string_operations_do_not_inherit_nested_template_metadata() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let template = template_with_subscription(
         &mut store,
         reactive_source(
-            symbol("count", &mut string_table),
+            symbol("count", &mut path_fork, &mut string_table),
             ReactiveSourceKind::Declaration,
         ),
     );
@@ -343,6 +346,7 @@ fn runtime_string_operations_do_not_inherit_nested_template_metadata() {
 fn plain_string_expression_does_not_gain_template_metadata() {
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let expression =
         Expression::string_slice(strings.intern("plain"), None, ValueMode::ImmutableOwned);
     let mut ast = vec![node(NodeKind::ExpressionStatement(expression), None)];
@@ -363,10 +367,11 @@ fn plain_string_expression_does_not_gain_template_metadata() {
 #[test]
 fn rebases_reactive_parameter_subscription_to_call_argument_source() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
-    let function_path = symbol("render_count", &mut string_table);
-    let parameter_path = symbol("source", &mut string_table);
-    let count_path = symbol("count", &mut string_table);
+    let function_path = symbol("render_count", &mut path_fork, &mut string_table);
+    let parameter_path = symbol("source", &mut path_fork, &mut string_table);
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
 
     let mut parameter =
         no_value_declaration(parameter_path.clone(), DataType::Int, builtin_type_ids::INT);
@@ -425,10 +430,11 @@ fn rebases_reactive_parameter_subscription_to_call_argument_source() {
 #[test]
 fn substitutes_string_parameter_template_value_from_call_argument() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
-    let function_path = symbol("wrap", &mut string_table);
-    let parameter_path = symbol("content", &mut string_table);
-    let count_path = symbol("count", &mut string_table);
+    let function_path = symbol("wrap", &mut path_fork, &mut string_table);
+    let parameter_path = symbol("content", &mut path_fork, &mut string_table);
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
 
     let mut parameter = no_value_declaration(
         parameter_path.clone(),
@@ -486,11 +492,12 @@ fn substitutes_string_parameter_template_value_from_call_argument() {
 #[test]
 fn references_use_metadata_computed_for_prior_declarations() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
-    let function_path = symbol("render_count", &mut string_table);
-    let parameter_path = symbol("source", &mut string_table);
-    let count_path = symbol("count", &mut string_table);
-    let view_path = symbol("view", &mut string_table);
+    let function_path = symbol("render_count", &mut path_fork, &mut string_table);
+    let parameter_path = symbol("source", &mut path_fork, &mut string_table);
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
+    let view_path = symbol("view", &mut path_fork, &mut string_table);
 
     let mut parameter =
         no_value_declaration(parameter_path.clone(), DataType::Int, builtin_type_ids::INT);
@@ -564,7 +571,8 @@ fn references_use_metadata_computed_for_prior_declarations() {
 #[test]
 fn annotates_branch_body_tir_root_metadata() {
     let mut string_table = StringTable::new();
-    let count_path = symbol("count", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
     let location = None;
     let mut store = TemplateIrStore::new();
 
@@ -620,7 +628,8 @@ fn annotates_branch_body_tir_root_metadata() {
 #[test]
 fn annotates_fallback_body_tir_root_metadata() {
     let mut string_table = StringTable::new();
-    let fallback_path = symbol("fallback_count", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let fallback_path = symbol("fallback_count", &mut path_fork, &mut string_table);
     let location = None;
     let mut store = TemplateIrStore::new();
 
@@ -685,7 +694,8 @@ fn annotates_fallback_body_tir_root_metadata() {
 #[test]
 fn annotates_loop_body_tir_root_metadata() {
     let mut string_table = StringTable::new();
-    let count_path = symbol("count", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
     let location = None;
     let mut store = TemplateIrStore::new();
 
@@ -739,8 +749,9 @@ fn annotates_loop_body_tir_root_metadata() {
 #[test]
 fn annotates_branch_selector_and_body_through_one_root_overlay() {
     let mut string_table = StringTable::new();
-    let count_path = symbol("count", &mut string_table);
-    let show_path = symbol("show", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
+    let show_path = symbol("show", &mut path_fork, &mut string_table);
     let location = None;
     let mut store = TemplateIrStore::new();
 
@@ -831,9 +842,10 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
 #[test]
 fn option_capture_body_uses_scrutinee_reactive_metadata() {
     let mut string_table = StringTable::new();
-    let count_path = symbol("count", &mut string_table);
-    let optional_path = symbol("optional", &mut string_table);
-    let capture_path = symbol("captured", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
+    let optional_path = symbol("optional", &mut path_fork, &mut string_table);
+    let capture_path = symbol("captured", &mut path_fork, &mut string_table);
     let capture_name = string_table.intern("captured");
     let location = None;
     let mut store = TemplateIrStore::new();
@@ -930,8 +942,9 @@ fn option_capture_body_uses_scrutinee_reactive_metadata() {
 #[test]
 fn annotates_existing_effective_expression_override_instead_of_structural_payload() {
     let mut string_table = StringTable::new();
-    let count_path = symbol("count", &mut string_table);
-    let show_path = symbol("show", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
+    let show_path = symbol("show", &mut path_fork, &mut string_table);
     let location = None;
     let mut store = TemplateIrStore::new();
 
@@ -1021,8 +1034,9 @@ fn annotates_existing_effective_expression_override_instead_of_structural_payloa
 #[test]
 fn annotates_existing_child_expression_override() {
     let mut string_table = StringTable::new();
-    let count_path = symbol("count", &mut string_table);
-    let show_path = symbol("show", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
+    let show_path = symbol("show", &mut path_fork, &mut string_table);
     let location = None;
     let mut store = TemplateIrStore::new();
 
@@ -1137,8 +1151,9 @@ fn annotates_existing_child_expression_override() {
 #[test]
 fn sink_operand_expressions_keep_reactive_template_metadata() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
-    let count_path = symbol("count", &mut string_table);
+    let count_path = symbol("count", &mut path_fork, &mut string_table);
     let fragment_template = template_with_subscription(
         &mut store,
         reactive_source(count_path.clone(), ReactiveSourceKind::Declaration),
@@ -1190,7 +1205,8 @@ fn sink_operand_expressions_keep_reactive_template_metadata() {
 #[test]
 fn propagates_metadata_through_runtime_slot_site_render_piece() {
     let mut strings = StringTable::new();
-    let source_path = symbol("count", &mut strings);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = symbol("count", &mut path_fork, &mut strings);
     let location = None;
     let mut store = TemplateIrStore::new();
 

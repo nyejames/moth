@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression::{
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_loop_condition;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -89,6 +90,7 @@ struct LoopHeaderParser<'a, 'types> {
     type_interner: &'a mut AstTypeInterner<'types>,
     warnings: &'a mut Vec<CompilerDiagnostic>,
     string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
 }
 
 /// Loop-header parsing preserves the AST body error lane because range and iterable expressions
@@ -109,6 +111,7 @@ pub(crate) fn parse_loop_header_tokens(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<(ParsedLoopHeader, ScopeContext)> {
     let source_id = context.shared.declaring_file_id;
     let mut header_tokens = header_tokens.to_vec();
@@ -120,6 +123,7 @@ pub(crate) fn parse_loop_header_tokens(
             type_interner,
             warnings,
             string_table,
+            path_fork,
         };
 
         // Range markers are syntax-defining for loop kind, so we dispatch range parsing first.
@@ -152,6 +156,7 @@ fn parse_range_loop_header(
             parser.scope_context,
             parser.type_interner,
             parser.string_table,
+            parser.path_fork,
         )?;
         let binding_type = range_binding_type(&range, parser.type_interner.environment())?;
         let bindings =
@@ -169,6 +174,7 @@ fn parse_range_loop_header(
         parser.scope_context,
         parser.type_interner,
         parser.string_table,
+        parser.path_fork,
     )
     .is_ok()
     {
@@ -181,6 +187,7 @@ fn parse_range_loop_header(
         parser.scope_context,
         parser.type_interner,
         parser.string_table,
+        parser.path_fork,
     )?;
     let binding_type = range_binding_type(&range, parser.type_interner.environment())?;
     let bindings = declare_loop_bindings(None, binding_type, parser)?;
@@ -206,6 +213,7 @@ fn parse_non_range_loop_header(
             parser.scope_context,
             parser.type_interner,
             parser.string_table,
+            parser.path_fork,
         )?;
         let bindings = declare_loop_bindings(Some(pipe_binding_split.bindings), item_type, parser)?;
 
@@ -221,6 +229,7 @@ fn parse_non_range_loop_header(
         parser.scope_context,
         parser.type_interner,
         parser.string_table,
+        parser.path_fork,
     ) {
         return bare_loop_binding_syntax_error(&bare_binding_suffix);
     }
@@ -232,6 +241,7 @@ fn parse_non_range_loop_header(
         parser.type_interner,
         &ValueMode::ImmutableOwned,
         parser.string_table,
+        parser.path_fork,
     )?;
 
     let item_type_id = parser
@@ -491,6 +501,7 @@ fn parses_as_collection_iterable(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> bool {
     let Ok(iterable_expression) = parse_expression_from_tokens(
         iterable_tokens,
@@ -499,6 +510,7 @@ fn parses_as_collection_iterable(
         type_interner,
         &ValueMode::ImmutableReference,
         string_table,
+        path_fork,
     ) else {
         return false;
     };
@@ -561,6 +573,7 @@ fn parse_collection_iterable_from_tokens(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<(Expression, TypeId)> {
     let collection_expression = parse_expression_from_tokens(
         iterable_tokens,
@@ -569,6 +582,7 @@ fn parse_collection_iterable_from_tokens(
         type_interner,
         &ValueMode::ImmutableReference,
         string_table,
+        path_fork,
     )?;
 
     let type_environment = type_interner.environment();
@@ -591,6 +605,7 @@ fn parse_range_loop_spec_from_tokens(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<RangeLoopSpec> {
     let mut stream = token_stream_with_eof(range_tokens, path_syntax, context)?;
 
@@ -616,6 +631,7 @@ fn parse_range_loop_spec_from_tokens(
                 cast_target_context: &mut cast_target_context,
                 value_mode: &ValueMode::ImmutableReference,
                 string_table,
+                path_fork,
             },
             false,
         );
@@ -663,6 +679,7 @@ fn parse_range_loop_spec_from_tokens(
             cast_target_context: &mut cast_target_context,
             value_mode: &ValueMode::ImmutableReference,
             string_table,
+            path_fork,
         },
         false,
     );
@@ -691,6 +708,7 @@ fn parse_range_loop_spec_from_tokens(
                 cast_target_context: &mut cast_target_context,
                 value_mode: &ValueMode::ImmutableReference,
                 string_table,
+                path_fork,
             },
             false,
         );
@@ -854,8 +872,6 @@ fn declare_loop_binding(
     type_id: TypeId,
     parser: &mut LoopHeaderParser<'_, '_>,
 ) -> LoopHeaderResult<Declaration> {
-    ensure_not_keyword_shadow_identifier(binding_name.id, binding_name.span, parser.string_table)?;
-
     if parser
         .scope_context
         .has_visible_local_declaration(&binding_name.id)
@@ -879,10 +895,9 @@ fn declare_loop_binding(
     let binding_span = binding_name.span;
     let declaration = Declaration {
         id: parser
-            .scope_context
-            .scope
-            .to_owned()
-            .append(binding_name.id),
+            .path_fork
+            .try_intern_child(parser.scope_context.scope, binding_name.id)
+            .expect("path table exhausted while declaring loop binding"),
         value: Expression::new(
             ExpressionKind::NoValue,
             binding_span,
@@ -893,11 +908,10 @@ fn declare_loop_binding(
         binding_span,
         config_qualifier: None,
     };
-
     let binding_span = declaration.value.span;
     parser
         .scope_context
-        .add_var(declaration.to_owned(), binding_span);
+        .add_var(declaration.to_owned(), binding_span, parser.path_fork);
 
     Ok(declaration)
 }
@@ -909,6 +923,7 @@ fn parse_expression_from_tokens(
     type_interner: &mut AstTypeInterner<'_>,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<Expression> {
     let mut expression_stream = token_stream_with_eof(expression_tokens, path_syntax, context)?;
     let mut inferred_type = ExpectedType::Infer;
@@ -921,6 +936,7 @@ fn parse_expression_from_tokens(
         value_mode,
         false,
         string_table,
+        path_fork,
     )?;
 
     Ok(expression)

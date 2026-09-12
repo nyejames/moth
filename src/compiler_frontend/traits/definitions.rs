@@ -9,7 +9,7 @@
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::traits::ids::{TraitId, TraitRequirementId};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -46,7 +46,7 @@ pub(crate) enum TraitReceiverRequirement {
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // Parameter names and spans remain available for precise diagnostics.
 pub(crate) struct ResolvedTraitParameter {
-    pub(crate) name: InternedPath,
+    pub(crate) name: PathId,
     pub(crate) value_mode: ValueMode,
     pub(crate) type_id: TypeId,
     pub(crate) span: Option<SourceSpan>,
@@ -67,8 +67,8 @@ pub(crate) struct ResolvedTraitReturn {
 pub(crate) struct ResolvedTraitDefinition {
     pub(crate) id: TraitId,
     pub(crate) name: StringId,
-    pub(crate) canonical_path: InternedPath,
-    pub(crate) source_file: InternedPath,
+    pub(crate) canonical_path: PathId,
+    pub(crate) source_file: PathId,
     pub(crate) this_type: TypeId,
     pub(crate) requirements: Vec<ResolvedTraitRequirement>,
     pub(crate) declaration_span: Option<SourceSpan>,

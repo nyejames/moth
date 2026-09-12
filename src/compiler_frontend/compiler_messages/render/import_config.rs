@@ -375,45 +375,45 @@ fn invalid_output_folder_message(
 }
 
 pub(crate) fn invalid_import_path_message(
-    path: &InternedPath,
+    path: PathId,
     reason: InvalidImportPathReason,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
+    let path_text = context.render_path(path);
     match reason {
         InvalidImportPathReason::PublicRoot => {
             "Dependency paths must name a provider under the owning module root; '@/' cannot be used as a dependency.".to_owned()
         }
         InvalidImportPathReason::CurrentDirectorySegment => format!(
             "Dependency paths resolve from the owning module root, so '@./{}' is not supported. Remove './'.",
-            path.to_portable_string(string_table)
-                .trim_start_matches("./")
+            path_text.trim_start_matches("./")
         ),
         InvalidImportPathReason::ParentDirectorySegment => format!(
             "Dependency paths containing '..' are not supported: '{}'",
-            path.to_portable_string(string_table)
+            path_text
         ),
         InvalidImportPathReason::EscapesProjectRoot => format!(
             "Dependency path escapes the project root and is not allowed: '{}'",
-            path.to_portable_string(string_table)
+            path_text
         ),
         InvalidImportPathReason::EscapesSourcePackageRoot => format!(
             "Dependency path escapes the source-backed package root and is not allowed: '{}'",
-            path.to_portable_string(string_table)
+            path_text
         ),
         InvalidImportPathReason::CaseMismatch { provided, expected } => format!(
             "Dependency path case mismatch: '{}' should be '{}'.",
-            string_table.resolve(provided),
-            string_table.resolve(expected),
+            context.string_table.resolve(provided),
+            context.string_table.resolve(expected),
         ),
     }
 }
 
 pub(crate) fn invalid_compile_time_path_message(
-    path: &InternedPath,
+    path: PathId,
     reason: InvalidCompileTimePathReason,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path_text = path.to_portable_string(string_table);
+    let path_text = context.render_path(path);
 
     match reason {
         InvalidCompileTimePathReason::MissingTarget => format!(
@@ -433,8 +433,8 @@ pub(crate) fn invalid_compile_time_path_message(
         ),
         InvalidCompileTimePathReason::CaseMismatch { provided, expected } => format!(
             "Compile-time path '{path_text}' has a case mismatch: '{}' should be '{}'.",
-            string_table.resolve(provided),
-            string_table.resolve(expected),
+            context.string_table.resolve(provided),
+            context.string_table.resolve(expected),
         ),
         InvalidCompileTimePathReason::EscapesModuleBoundary => format!(
             "Compile-time path '{path_text}' crosses a module boundary. Use a file owned by this module."
@@ -487,10 +487,10 @@ pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
 }
 
 pub(crate) fn direct_symbol_path_import_message(
-    path: &InternedPath,
-    string_table: &dyn StringTableResolver,
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path_text = path.to_portable_string(string_table);
+    let path_text = context.render_path(path);
     format!(
         "Direct symbol dependency paths are not supported: `@{path_text}`.\n\
          Select the symbol from its containing surface, such as `@path/to/file symbol`, \
@@ -499,11 +499,11 @@ pub(crate) fn direct_symbol_path_import_message(
 }
 
 pub(crate) fn invalid_namespace_default_name_message(
-    path: &InternedPath,
-    string_table: &dyn StringTableResolver,
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path_text = path.to_portable_string(string_table);
-    let stem = path.name().map(|n| string_table.resolve(n)).unwrap_or("");
+    let path_text = context.render_path(path);
+    let stem = path_text.rsplit('/').next().unwrap_or("");
     // Ensure the rendered example includes the @ prefix that dependency paths require.
     let at_prefix = if path_text.starts_with('@') { "" } else { "@" };
     format!(
@@ -513,12 +513,12 @@ pub(crate) fn invalid_namespace_default_name_message(
 }
 
 pub(crate) fn duplicate_import_surface_member_message(
-    surface_path: &InternedPath,
+    surface_path: PathId,
     member_name: StringId,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path_text = surface_path.to_portable_string(string_table);
-    let member = string_table.resolve(member_name);
+    let path_text = context.render_path(surface_path);
+    let member = context.string_table.resolve(member_name);
     format!(
         "Dependency surface `{path_text}` exposes more than one member named `{member}`.\n\
          Moth dependency namespace records require unique member names, even across value and type contexts.\n\
@@ -527,10 +527,10 @@ pub(crate) fn duplicate_import_surface_member_message(
 }
 
 pub(crate) fn explicit_moth_extension_message(
-    path: &InternedPath,
-    string_table: &dyn StringTableResolver,
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path_text = path.to_portable_string(string_table);
+    let path_text = context.render_path(path);
     let extensionless_path = path_text.strip_suffix(".moth").unwrap_or(&path_text);
     format!(
         "Dependency paths must not include the `.moth` extension: `@{path_text}`.\n\
@@ -539,12 +539,12 @@ pub(crate) fn explicit_moth_extension_message(
 }
 
 pub(crate) fn explicit_source_extension_message(
-    path: &InternedPath,
+    path: PathId,
     extension: StringId,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path_text = path.to_portable_string(string_table);
-    let extension = string_table.resolve(extension);
+    let path_text = context.render_path(path);
+    let extension = context.string_table.resolve(extension);
     let suffix = format!(".{extension}");
     let extensionless_path = path_text.strip_suffix(&suffix).unwrap_or(&path_text);
     format!(
@@ -554,48 +554,48 @@ pub(crate) fn explicit_source_extension_message(
 }
 
 pub(crate) fn unsupported_source_file_kind_message(
-    path: &InternedPath,
+    path: PathId,
     extension: StringId,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path = path.to_portable_string(string_table);
-    let extension = string_table.resolve(extension);
+    let path_text = context.render_path(path);
+    let extension = context.string_table.resolve(extension);
     format!(
-        "Dependency `{path}` resolves to a recognized source file kind `.{extension}`, but this builder does not support it.\n\
+        "Dependency `{path_text}` resolves to a recognized source file kind `.{extension}`, but this builder does not support it.\n\
          Use a builder that supports `.{extension}` files or depend on a Moth source file instead.",
     )
 }
 
 pub(crate) fn invalid_source_file_entry_message(
-    path: &InternedPath,
+    path: PathId,
     extension: StringId,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path = path.to_portable_string(string_table);
-    let extension = string_table.resolve(extension);
+    let path_text = context.render_path(path);
+    let extension = context.string_table.resolve(extension);
     format!(
-        "Entry file `{path}` uses the `.{extension}` source-file kind, but source assets cannot be compiled as page or module entries.\n\
+        "Entry file `{path_text}` uses the `.{extension}` source-file kind, but source assets cannot be compiled as page or module entries.\n\
          Depend on this file from a `.moth` entry file using extensionless dependency syntax, or use a `.moth`/`@page.moth` file as the build entry.",
     )
 }
 
 pub(crate) fn duplicate_moth_template_input_path_message(
-    path: &InternedPath,
-    string_table: &dyn StringTableResolver,
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path = path.to_portable_string(string_table);
+    let path_text = context.render_path(path);
     format!(
-        "Moth template input path `{path}` was provided more than once. Each file or in-memory display path in one direct compile request must be unique."
+        "Moth template input path `{path_text}` was provided more than once. Each file or in-memory display path in one direct compile request must be unique."
     )
 }
 
 pub(crate) fn moth_template_inputs_share_no_common_ancestor_message(
-    first_path: &InternedPath,
-    second_path: &InternedPath,
-    string_table: &dyn StringTableResolver,
+    first_path: PathId,
+    second_path: PathId,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let first_path = first_path.to_portable_string(string_table);
-    let second_path = second_path.to_portable_string(string_table);
+    let first_path = context.render_path(first_path);
+    let second_path = context.render_path(second_path);
     format!(
         "Moth template inputs `{first_path}` and `{second_path}` share no common ancestor \
          directory, so their portable module identities cannot be derived.\n\
@@ -605,24 +605,25 @@ pub(crate) fn moth_template_inputs_share_no_common_ancestor_message(
 }
 
 pub(crate) fn unsupported_external_extension_message(
-    path: &InternedPath,
+    path: PathId,
     extension: StringId,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path = path.to_portable_string(string_table);
-    let ext = string_table.resolve(extension);
+    let path_text = context.render_path(path);
+    let extension = context.string_table.resolve(extension);
     format!(
-        "External file import `{path}` uses extension `.{ext}`, which is not supported by this builder.\n\
-         Register an external import provider for `.{ext}` or depend on a Moth source file instead.",
+        "External file import `{path_text}` uses extension `.{extension}`, which is not supported by this builder.\n\
+         Register an external import provider for `.{extension}` or depend on a Moth source file instead.",
     )
 }
 
 pub(crate) fn invalid_external_module_message(
-    path: &InternedPath,
+    path: PathId,
     reason: &InvalidExternalModuleReason,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let path = path.to_portable_string(string_table);
+    let path_text = context.render_path(path);
+    let string_table = context.string_table;
     let detail = match reason {
         InvalidExternalModuleReason::ReceiverMethod { moth_name } => format!(
             "JS module signature for '{}' uses a 'this' receiver parameter. Project-local JS imports must expose free functions and opaque types only.",
@@ -632,7 +633,7 @@ pub(crate) fn invalid_external_module_message(
             string_table.resolve(*parser_detail).to_owned()
         }
     };
-    format!("External JS module `{path}` is invalid.\n{detail}")
+    format!("External JS module `{path_text}` is invalid.\n{detail}")
 }
 
 pub(crate) fn dependency_namespace_used_as_value_message(

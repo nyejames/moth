@@ -12,7 +12,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode, HeaderKind};
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
@@ -23,7 +23,8 @@ fn prepare(
     StringTable,
 ) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("docs/intro.md", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("docs/intro.md", &mut string_table).expect("test path fits");
 
     let output = prepare_plain_markdown_file(
         PlainMarkdownPrepareInput {
@@ -33,7 +34,9 @@ fn prepare(
             canonical_os_path: None,
         },
         &mut string_table,
-    );
+        &mut path_fork,
+    )
+    .expect("plain Markdown preparation should succeed");
 
     (output, string_table)
 }
@@ -57,7 +60,7 @@ fn generated_header_path_ends_with_content() {
     let (output, string_table) = prepare("# Heading");
 
     let header = &output.headers[0];
-    let header_path = header.tokens.src_path.to_portable_string(&string_table);
+    let header_path = format!("{:?}", header.tokens.src_path);
     assert!(
         header_path.ends_with("content"),
         "expected header path to end with content, got {header_path}"

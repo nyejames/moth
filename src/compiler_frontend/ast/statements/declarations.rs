@@ -56,7 +56,8 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, Token, TokenKind};
@@ -131,6 +132,7 @@ fn initializer_is_compile_time_constant_with_config_placeholders(
 /// placement boundary: each declaration/record parser owns the metadata it parsed.
 fn reject_config_qualifiers_on_record_fields(
     initializer: &Expression,
+    path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let ExpressionKind::AnonymousConstRecord { fields } = &initializer.kind else {
         return Ok(());
@@ -139,7 +141,7 @@ fn reject_config_qualifiers_on_record_fields(
     for field in fields {
         if let Some(qualifier) = &field.config_qualifier {
             let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
-                field.id.name(),
+                path_fork.component(field.id),
                 InvalidConfigReason::ConfigQualifierInvalidPlacement,
                 qualifier.qualifier_span,
             );
@@ -160,7 +162,7 @@ fn reject_config_qualifiers_on_record_fields(
 fn apply_reactive_declaration_metadata(
     value: &mut Expression,
     is_reactive_binding: bool,
-    qualified_name: &InternedPath,
+    qualified_name: &PathId,
 ) {
     if is_reactive_binding {
         value.reactive_source = Some(ReactiveSource {
@@ -209,6 +211,7 @@ pub(crate) fn new_declaration(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> DeclarationResult<ResolvedDeclaration> {
     let declaration_name = string_table.resolve(symbol_id).to_owned();
     ensure_not_keyword_shadow_identifier(
@@ -232,7 +235,9 @@ pub(crate) fn new_declaration(
     // Move past the name
     token_stream.advance();
 
-    let qualified_name = context.scope.to_owned().append(symbol_id);
+    let qualified_name = path_fork
+        .try_intern_child(context.scope, symbol_id)
+        .expect("path table exhausted while creating declaration scope");
 
     // ----------------------------
     //  Function declaration fast-path
@@ -256,9 +261,14 @@ pub(crate) fn new_declaration(
             &qualified_name,
             context,
             type_interner,
+            path_fork,
         )?;
-        let function_context =
-            context.new_child_function(symbol_id, function_signature.to_owned(), string_table);
+        let function_context = context.new_child_function(
+            symbol_id,
+            function_signature.to_owned(),
+            string_table,
+            path_fork,
+        );
 
         let function_body = function_body_to_ast(
             token_stream,
@@ -266,8 +276,9 @@ pub(crate) fn new_declaration(
             type_interner,
             warnings,
             string_table,
+            path_fork,
         )?;
-        let receiver = function_signature_receiver(&function_signature, string_table);
+        let receiver = function_signature_receiver(&function_signature, string_table, path_fork);
         let function_data_type =
             DataType::Function(Box::new(receiver.clone()), function_signature.clone());
         let function_type_id = resolve_diagnostic_type_to_type_id_checked(
@@ -338,6 +349,7 @@ pub(crate) fn new_declaration(
         &mut *context,
         type_interner,
         string_table,
+        path_fork,
     )?;
     // The binding anchor is the declaration-name token captured on entry, not the
     // initializer value span. `resolve_declaration_syntax` leaves it empty for this
@@ -361,12 +373,13 @@ pub(crate) fn new_declaration(
 fn function_signature_receiver(
     signature: &FunctionSignature,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Option<ReceiverKey> {
     let this_name = string_table.intern("this");
     signature
         .parameters
         .first()
-        .filter(|parameter| parameter.id.name() == Some(this_name))
+        .filter(|parameter| path_fork.component(parameter.id) == Some(this_name))
         .and_then(|parameter| parameter.value.diagnostic_type.receiver_key_from_type())
 }
 
@@ -379,19 +392,20 @@ fn function_signature_receiver(
 ///
 pub fn resolve_declaration_syntax(
     declaration_syntax: DeclarationSyntax,
-    qualified_name: InternedPath,
+    qualified_name: PathId,
     path_syntax: &FilePathSyntax,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> DeclarationResult<Declaration> {
     let mut span_builder = ExtendedSpanBuilder::new();
     let config_qualifier = declaration_syntax.config_qualifier.clone();
     let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
     let has_config_resolution = context.shared.config_resolution.is_some();
     let config_resolution_context = config_constant_context && has_config_resolution;
-    let source_build_config_contract_name = qualified_name
-        .name()
+    let source_build_config_contract_name = path_fork
+        .component(qualified_name)
         .and_then(|name| BuildInputName::new(string_table.resolve(name)).ok());
     let has_source_build_config_contract = context
         .shared
@@ -408,7 +422,7 @@ pub fn resolve_declaration_syntax(
         && !source_build_config_context
     {
         let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
-            qualified_name.name(),
+            path_fork.component(qualified_name),
             InvalidConfigReason::ConfigQualifierInvalidPlacement,
             qualifier.qualifier_span,
         );
@@ -448,6 +462,7 @@ pub fn resolve_declaration_syntax(
             declaration_syntax.initializer_tokens.clone(),
             path_syntax,
             context,
+            path_fork,
         )?;
 
         // Shorthand requires an immediate collection literal initializer.
@@ -469,6 +484,7 @@ pub fn resolve_declaration_syntax(
             type_interner,
             &value_mode,
             string_table,
+            path_fork,
         )?;
 
         // The collection literal parser stops at the closing `}` without consuming it.
@@ -492,7 +508,7 @@ pub fn resolve_declaration_syntax(
         {
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
-                qualified_name.name(),
+                path_fork.component(qualified_name),
                 declaration_syntax.span,
             )
             .into());
@@ -564,7 +580,7 @@ pub fn resolve_declaration_syntax(
         )?
     };
     if source_build_config_context && declaration_syntax.config_qualifier.is_some() {
-        let name = qualified_name.name().ok_or_else(|| {
+        let name = path_fork.component(qualified_name).ok_or_else(|| {
             CompilerError::compiler_error(
                 "source #Config declaration has no terminal declaration name",
             )
@@ -607,6 +623,7 @@ pub fn resolve_declaration_syntax(
         declaration_syntax.initializer_tokens,
         path_syntax,
         context,
+        path_fork,
     )?;
 
     // Check the first token before dispatching so we don't wastefully call
@@ -634,7 +651,8 @@ pub fn resolve_declaration_syntax(
                 &mut initializer_stream,
                 string_table,
                 &mut field_warnings,
-                &owner_path,
+                owner_path,
+                path_fork,
                 &mut span_builder,
             )?;
             for warning in field_warnings {
@@ -650,6 +668,7 @@ pub fn resolve_declaration_syntax(
                     type_interner,
                     string_table,
                     SignatureTypeFallbackPolicy::StrictCapacity,
+                    path_fork,
                 )?);
             }
 
@@ -678,6 +697,7 @@ pub fn resolve_declaration_syntax(
                         type_id,
                         type_interner.environment(),
                         string_table,
+                        &*path_fork,
                     )
                 })
                 .unwrap_or(CastTargetContext::None);
@@ -711,6 +731,7 @@ pub fn resolve_declaration_syntax(
                 &expression_context.expected_result_type_ids,
                 ValueReceiverKind::Declaration,
                 string_table,
+                path_fork,
             ) {
                 value_block_result?
             } else {
@@ -723,6 +744,7 @@ pub fn resolve_declaration_syntax(
                         cast_target_context: &mut cast_target_context,
                         value_mode: &value_mode,
                         string_table,
+                        path_fork,
                     },
                     false,
                 );
@@ -746,7 +768,7 @@ pub fn resolve_declaration_syntax(
     };
 
     if !config_resolution_context {
-        reject_config_qualifiers_on_record_fields(&parsed_initializer)?;
+        reject_config_qualifiers_on_record_fields(&parsed_initializer, path_fork)?;
     }
 
     // Body-local compile-time constants must fully fold after parsing and coercion.
@@ -759,7 +781,7 @@ pub fn resolve_declaration_syntax(
     if declaration_syntax.binding_mode.is_compile_time() && !initializer_is_compile_time_constant {
         return Err(CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
-            qualified_name.name(),
+            path_fork.component(qualified_name),
             declaration_syntax.span,
         )
         .into());
@@ -836,12 +858,7 @@ pub fn resolve_declaration_syntax(
         &qualified_name,
     );
 
-    ast_log!(
-        "Created new ",
-        Cyan #value_mode,
-        " ",
-        resolved_annotation.diagnostic_type.display_with_table(string_table)
-    );
+    ast_log!("Created new ", Cyan #value_mode);
     Ok(Declaration {
         id: qualified_name,
         value: parsed_initializer,
@@ -855,11 +872,12 @@ pub fn resolve_declaration_syntax(
 /// WHY the context: the initializer was lexed from the file that declared it, so the substream
 /// takes that scope's source identity rather than an identity a caller could pass wrongly.
 fn declaration_initializer_stream(
-    qualified_name: &InternedPath,
+    qualified_name: &PathId,
     declaration_span: Option<SourceSpan>,
     mut initializer_tokens: Vec<Token>,
     path_syntax: &FilePathSyntax,
     context: &ScopeContext,
+    path_fork: &PathInternerFork,
 ) -> DeclarationResult<FileTokens> {
     let Some(eof_span) = declaration_span
         .map(SourceSpan::local)
@@ -867,14 +885,14 @@ fn declaration_initializer_stream(
     else {
         return Err(CompilerDiagnostic::invalid_declaration(
             InvalidDeclarationReason::MissingInitializerExpression,
-            qualified_name.name(),
+            path_fork.component(*qualified_name),
             None,
         )
         .into());
     };
     initializer_tokens.push(Token::new(TokenKind::Eof, eof_span));
     FileTokens::new_from_slice(
-        qualified_name.to_owned(),
+        *qualified_name,
         context.shared.declaring_file_id,
         None,
         initializer_tokens,

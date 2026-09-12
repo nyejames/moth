@@ -64,7 +64,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::path::PathBuf;
@@ -91,7 +91,7 @@ fn fixture_lane_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsset
 
 /// Build the smallest valid HIR module with one entry start function, binding its name to a
 /// caller-supplied interned path in the caller-owned string table.
-fn minimal_hir_module(start_name_path: InternedPath) -> HirModule {
+fn minimal_hir_module(start_name_path: PathId) -> HirModule {
     let mut module = HirModule::new();
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.blocks = vec![HirBlock {
@@ -135,7 +135,8 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     //      their owned StringIds must not retain worker-local values.
 
     let mut local_string_table = StringTable::new();
-    let start_name_path = InternedPath::from_single_str("start_entry", &mut local_string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let start_name_path = path_fork.try_intern_portable_path("start_entry", &mut local_string_table).expect("test path fits");
 
     let option_value_name = local_string_table.intern("value");
     let mut hir_module = minimal_hir_module(start_name_path);
@@ -181,6 +182,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     // Seed the merged table so the local "start_entry" id shifts during merge, proving the remap
     // is actually applied rather than being an identity no-op.
     let mut merged_string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     merged_string_table.intern("prefix");
     let remap = merged_string_table.merge_from(&local_string_table);
     assert!(
@@ -214,12 +216,10 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     );
 
     let mut module = Module {
-        executable: ModuleExecutable {
-            hir: hir_module,
-            resource_table: ModuleResourceTable::new(),
-            type_environment: TypeEnvironment::new(),
-            borrow_analysis,
-        },
+        executable: ModuleExecutable { hir: hir_module,
+        resource_table: ModuleResourceTable::new(),
+        type_environment: TypeEnvironment::new(),
+        borrow_analysis, path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
         link_facts,
         metadata: ModuleCompilerMetadata {
             entry_point: entry_point.clone(),
@@ -231,16 +231,17 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         },
     };
 
-    module.remap_string_ids(&remap);
-
-    // The executable lane remapped the bound HIR name into the merged table exactly once.
     let resolved_name = module
         .executable
         .hir
         .side_table
         .function_name_path(FunctionId(0))
-        .expect("start function name should be bound")
-        .name_str(&merged_string_table);
+        .expect("start function name should be bound");
+    let resolved_name = module
+        .executable
+        .path_table
+        .component(resolved_name)
+        .map(|id| merged_string_table.resolve(id));
     assert_eq!(resolved_name, Some("start_entry"));
 
     let statement = &module.executable.hir.blocks[0].statements[0];
@@ -285,7 +286,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
 
 #[test]
 fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
-    let mut hir_module = minimal_hir_module(InternedPath::new());
+    let mut hir_module = minimal_hir_module(PathId::ROOT);
     hir_module.blocks[0].statements.push(HirStatement {
         id: HirNodeId(99),
         kind: HirStatementKind::Call {
@@ -298,12 +299,10 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
     let module = Module {
-        executable: ModuleExecutable {
-            hir: hir_module,
-            resource_table: ModuleResourceTable::new(),
-            type_environment: TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(),
-        },
+        executable: ModuleExecutable { hir: hir_module,
+        resource_table: ModuleResourceTable::new(),
+        type_environment: TypeEnvironment::new(),
+        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],
@@ -817,6 +816,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
 #[test]
 fn boundary_outcome_sorting_is_independent_of_wave_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut boundary = CompiledGraphBoundary {
         structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
         modules: ModuleArtifactStore::new(0),
@@ -881,6 +881,7 @@ fn test_module_diagnostics(
 #[test]
 fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
     let messages = frontend
         .into_render_messages_with_frozen_identity(&mut string_table, None, None)
@@ -1313,7 +1314,8 @@ fn lane_module_with_generated_and_cross_module_calls(
     generated_call: Option<GeneratedFunctionIdentity>,
     cross_module_calls: &[OriginFunctionId],
 ) -> Module {
-    let start_name_path = InternedPath::from_single_str("start_entry", &mut StringTable::new());
+    let mut path_fork = PathInternerFork::empty();
+    let start_name_path = path_fork.try_intern_portable_path("start_entry", &mut StringTable::new()).expect("test path fits");
     let mut hir_module = minimal_hir_module(start_name_path);
     if let Some(identity) = generated_call {
         hir_module.blocks[0].statements.push(HirStatement {
@@ -1340,12 +1342,10 @@ fn lane_module_with_generated_and_cross_module_calls(
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
     Module {
-        executable: ModuleExecutable {
-            hir: hir_module,
-            resource_table: ModuleResourceTable::new(),
-            type_environment: TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(),
-        },
+        executable: ModuleExecutable { hir: hir_module,
+        resource_table: ModuleResourceTable::new(),
+        type_environment: TypeEnvironment::new(),
+        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],
@@ -1486,6 +1486,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         .expect("blocked slot should transition");
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let boundary = CompiledGraphBoundary {
         structure: graph,
         modules: store,
@@ -1634,17 +1635,16 @@ fn generated_test_summary() -> PublicCallSummary {
 }
 
 fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
-    let start_name_path = InternedPath::from_single_str("start_entry", &mut StringTable::new());
+    let mut path_fork = PathInternerFork::empty();
+    let start_name_path = path_fork.try_intern_portable_path("start_entry", &mut StringTable::new()).expect("test path fits");
     let hir_module = minimal_hir_module(start_name_path);
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
     Module {
-        executable: ModuleExecutable {
-            hir: hir_module,
-            resource_table: ModuleResourceTable::new(),
-            type_environment: TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(),
-        },
+        executable: ModuleExecutable { hir: hir_module,
+        resource_table: ModuleResourceTable::new(),
+        type_environment: TypeEnvironment::new(),
+        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],
@@ -1684,6 +1684,7 @@ fn single_node_graph() -> ProjectModuleGraph {
 fn boundary_validation_rejects_diagnosed_lane_mismatch_in_both_directions() {
     // Record present but the slot is successful.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut boundary = test_graph_boundary(
         vec![minimal_lane_module(PathBuf::from("@single.moth"), false)],
         "test",
@@ -1763,6 +1764,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
 #[test]
 fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut store = ModuleArtifactStore::new(2);
     store
         .mark_diagnosed(ModuleId::from_index(0))

@@ -11,7 +11,7 @@ use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 use crate::token_log;
@@ -246,7 +246,13 @@ pub struct FileTokens {
     ///
     /// WHAT: the one file-owned path table lifecycle shared by retained token substreams.
     pub path_syntax: FilePathSyntax,
-    pub src_path: InternedPath,
+    /// Complete logical identity of the owning source file in the active path table.
+    ///
+    /// WHAT: the `PathId` interned for this stream's file through the owning
+    ///       `PathInternerFork`. Path rows in `path_syntax` address the same fork.
+    /// WHY: tokenizer and dependency owners share one compact path domain; filesystem
+    ///      `canonical_os_path` remains the only `PathBuf` identity for IO.
+    pub src_path: PathId,
     /// Required owning source identity for every token stream, including materialised generics.
     ///
     /// WHAT: the exact `SourceId` that owns this stream's token spans and path-table rows.
@@ -268,13 +274,13 @@ pub struct FileTokens {
 
 impl FileTokens {
     #[cfg(test)]
-    pub fn new(src_path: InternedPath, file_id: SourceId, tokens: Vec<Token>) -> FileTokens {
+    pub fn new(src_path: PathId, file_id: SourceId, tokens: Vec<Token>) -> FileTokens {
         Self::new_with_identity(src_path, file_id, None, tokens, PathSyntaxTable::new())
     }
 
     /// Construct the sole mutable path-table owner for a newly tokenized source file.
     pub fn new_with_identity(
-        src_path: InternedPath,
+        src_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
@@ -297,7 +303,7 @@ impl FileTokens {
     /// captured in `StableBodySyntax`; materialisation never fabricates a magic identity, uses
     /// `None`, or remaps the donor range onto the requester call-site source.
     pub(crate) fn new_frozen(
-        src_path: InternedPath,
+        src_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
@@ -315,7 +321,7 @@ impl FileTokens {
     /// Construct a retained token stream that will receive its table from the completed
     /// prepared-file owner.
     pub fn new_deferred_with_identity(
-        src_path: InternedPath,
+        src_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
@@ -330,7 +336,7 @@ impl FileTokens {
     }
 
     fn with_path_syntax(
-        src_path: InternedPath,
+        src_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
@@ -354,7 +360,7 @@ impl FileTokens {
     /// Later AST substreams clone only the immutable table handle.
     pub fn new_substream(
         source: &FileTokens,
-        src_path: InternedPath,
+        src_path: PathId,
         file_id: SourceId,
         tokens: Vec<Token>,
     ) -> FileTokens {
@@ -376,7 +382,7 @@ impl FileTokens {
     ///      mutable table would add a fallible lifecycle edge and temporarily prevent the real
     ///      file owner from remapping or rebinding its one table.
     pub(crate) fn new_path_free_substream(
-        src_path: InternedPath,
+        src_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
@@ -397,7 +403,7 @@ impl FileTokens {
     /// The caller supplies the owning `SourceId` (for generated bodies, the retained donor/owner
     /// identity); no `None` or magic identity is accepted.
     pub fn new_from_slice(
-        src_path: InternedPath,
+        src_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
@@ -524,12 +530,14 @@ impl FileTokens {
         }
     }
 
-    /// WHAT: updates `src_path` and every token's kind after a string-table merge.
+    /// WHAT: updates every token's kind after a string-table merge.
     /// WHY: tokenization produces per-file local string IDs that must be rewritten before
     ///      module-wide stages consume the token stream.
     ///
     /// NOTE: `canonical_os_path` is intentionally NOT remapped; it is a filesystem identity
-    ///       (`PathBuf`), not an interned string identity.
+    ///       (`PathBuf`), not an interned string identity. `src_path` is a `PathId` owned
+    ///       by the active path fork and remaps through `remap_path_ids`, never through the
+    ///       string table.
     // This is wired when file-level frontend outputs are merged before module-wide header
     // aggregation. Keeping it beside token remapping makes the traversal owner explicit.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
@@ -539,16 +547,24 @@ impl FileTokens {
         // remap, so substreams remap only their local token and semantic-path payloads here.
     }
 
-    fn remap_token_payload_string_ids(&mut self, remap: &StringIdRemap) {
-        self.src_path.remap_string_ids(remap);
+    /// Remap this stream's complete-path identity after its path fork merges.
+    ///
+    /// WHAT: rewrites `src_path` through the worker-local merge remap.
+    /// WHY: the file identity is interned against a chunk-local fork; the canonical chunk
+    ///      merge re-interns those nodes into the module fork. Token payload strings remap
+    ///      separately through `remap_string_ids`; path-table rows remap through the
+    ///      prepared-file output that owns the sole mutable table.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.src_path = remap.get(self.src_path);
+    }
 
+    fn remap_token_payload_string_ids(&mut self, remap: &StringIdRemap) {
         for token in &mut self.tokens {
             token.remap_string_ids(remap);
         }
     }
 
     /// Remap a token stream while it still owns its mutable path table.
-    #[allow(dead_code)]
     pub(crate) fn remap_preparing_string_ids(
         &mut self,
         remap: &StringIdRemap,
@@ -557,9 +573,19 @@ impl FileTokens {
         // safe because the first borrow ends before the payload traversal begins.
         self.path_syntax.preparing_table_mut()?;
         self.remap_token_payload_string_ids(remap);
+        Ok(())
+    }
+
+    /// Remap a preparing stream's file identity and its mutable path table.
+    pub(crate) fn remap_preparing_path_ids(
+        &mut self,
+        remap: &PathIdRemap,
+    ) -> Result<(), CompilerError> {
+        self.path_syntax.preparing_table_mut()?;
+        self.src_path = remap.get(self.src_path);
         self.path_syntax
             .preparing_table_mut()?
-            .remap_string_ids(remap);
+            .remap_path_ids(remap);
         Ok(())
     }
 
@@ -569,13 +595,13 @@ impl FileTokens {
     /// are restamped, so every global path span continues to name the same byte range.
     pub fn rebind_source_identity(
         &mut self,
-        logical_path: InternedPath,
+        logical_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
     ) -> Result<(), CompilerError> {
         self.path_syntax.preparing_table_mut()?;
         self.src_path = logical_path;
-        self.rebind_file_identity(self.src_path.clone(), file_id, canonical_os_path);
+        self.rebind_file_identity(self.src_path, file_id, canonical_os_path);
         self.path_syntax
             .preparing_table_mut()?
             .rebind_source_identity(file_id);
@@ -588,7 +614,7 @@ impl FileTokens {
     /// once on `FileTokens`; path rows are restamped by `rebind_source_identity` before publication.
     pub fn rebind_file_identity(
         &mut self,
-        _logical_path: InternedPath,
+        _logical_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
     ) {

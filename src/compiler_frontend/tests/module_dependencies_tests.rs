@@ -32,12 +32,14 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::path::PathBuf;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 fn parse_module_headers(
     files: &[(&str, &str)],
     entry_path: &str,
 ) -> (BoundModuleHeaders, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let external_package_registry = ExternalPackageRegistry::new();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -63,29 +65,13 @@ fn parse_module_headers(
 
     for (path, source) in files {
         let path_buf = PathBuf::from(path);
-        let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
+        let interned_path = path_fork.try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
-            source,
-            &interned_path,
-            TokenizerEntryMode::SourceFile,
-            &style_directives,
-            &mut string_table,
-            file_id_for(path),
-            &mut span_builder,
-        )
+        let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, file_id_for(path), &mut span_builder)
         .expect("tokenization should succeed");
 
-        let output = prepare_file_from_tokens(
-            file_tokens,
-            &entry_path_buf,
-            &options,
-            &mut string_table,
-            const_template_offset,
-            runtime_fragment_offset,
-            &mut span_builder,
-        )
+        let output = prepare_file_from_tokens(file_tokens, &entry_path_buf, &options, &mut string_table, const_template_offset, runtime_fragment_offset, &mut span_builder, &mut PathInternerFork::empty())
         .expect("preparation should succeed");
         // Keep every source's span builder alive for the whole fixture so retained header
         // spans keep their owner table across the binding stage.
@@ -96,21 +82,9 @@ fn parse_module_headers(
         prepared_outputs.push(output);
     }
 
-    let prepared_syntax = prepare_header_syntax(
-        &mut prepared_outputs,
-        &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-    )
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
     .expect("header syntax preparation should succeed");
-    let headers = bind_module_headers(
-        prepared_syntax,
-        &external_package_registry,
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver,
-        &source_files,
-        &mut string_table,
-    )
+    let headers = bind_module_headers(prepared_syntax, &external_package_registry, &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), options.project_path_resolver, &source_files, &mut string_table, &mut PathInternerFork::empty())
     .expect("header binding should succeed");
 
     (headers, string_table)
@@ -118,14 +92,9 @@ fn parse_module_headers(
 
 fn header_name(
     header: &crate::compiler_frontend::headers::parse_file_headers::Header,
-    string_table: &StringTable,
+    _string_table: &StringTable,
 ) -> String {
-    header
-        .tokens
-        .src_path
-        .name_str(string_table)
-        .unwrap_or_default()
-        .to_string()
+    format!("{:?}", header.tokens.src_path)
 }
 
 #[test]
@@ -139,9 +108,13 @@ fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last(
         "src/a.moth",
     );
 
-    let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .expect("dependency sort should pass");
+    let sorted = resolve_module_dependencies(
+        headers,
+        &ContentSourceTargets::empty(),
+        &mut string_table,
+        &mut PathInternerFork::empty(),
+    )
+    .expect("dependency sort should pass");
 
     let non_start_order = sorted
         .headers
@@ -151,19 +124,16 @@ fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last(
         .collect::<Vec<_>>();
 
     assert_eq!(non_start_order, vec!["Thing", "Middle", "Top"]);
-    assert!(
-        matches!(
-            sorted.headers.last().map(|header| &header.kind),
-            Some(HeaderKind::StartFunction)
-        ),
-        "entry start header must be appended after sorted top-level declarations"
-    );
+    assert!(matches!(
+        sorted.headers.last().map(|header| &header.kind),
+        Some(HeaderKind::StartFunction)
+    ));
 
     let start_order = sorted
         .headers
         .iter()
         .filter(|header| matches!(header.kind, HeaderKind::StartFunction))
-        .map(|header| header.source_file.to_portable_string(&string_table))
+        .map(|header| format!("{:?}", header.source_file))
         .collect::<Vec<_>>();
 
     assert_eq!(start_order, vec!["src/a.moth"]);
@@ -175,7 +145,7 @@ fn dependency_sort_preserves_root_activity_metadata() {
         parse_module_headers(&[("src/a.moth", "#[static]\n[runtime]\n")], "src/a.moth");
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("dependency sorting should preserve root activity metadata");
 
     assert!(sorted.has_non_trivial_root_body);
@@ -200,7 +170,7 @@ fn reports_circular_dependencies() {
         .expect("cycle fixture must contain the Middle header");
 
     let messages =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect_err("cycle should fail dependency sorting")
             .into_messages(&string_table);
     let diagnostic_string_table = &messages.string_table;
@@ -213,7 +183,7 @@ fn reports_circular_dependencies() {
                 return false;
             };
 
-            let path = path.to_portable_string(diagnostic_string_table);
+            let path = format!("{:?}", path);
             path.contains("Top") || path.contains("Middle")
         })
         .unwrap_or_else(|| panic!("expected a cycle diagnostic, got: {messages:?}"));
@@ -240,7 +210,7 @@ fn constant_initializer_creates_dependency_sort_edge() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("sort must succeed — constant initializer edges are resolved by headers");
 
     let non_start_names: Vec<_> = sorted
@@ -268,7 +238,7 @@ fn same_file_backward_constant_reference_is_accepted() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("same-file backward constant reference should be accepted");
 
     let non_start_names: Vec<_> = sorted
@@ -299,7 +269,7 @@ fn function_body_references_do_not_influence_header_provided_sort_order() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("dependency sort should ignore body-only references");
 
     let non_start_names: Vec<_> = sorted
@@ -332,7 +302,7 @@ fn function_error_return_dependency_orders_error_type_before_function() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("error return dependency should be sortable");
 
     let non_start_names: Vec<_> = sorted
@@ -365,7 +335,7 @@ fn capacity_reference_in_collection_type_orders_constant_before_user() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("sort must succeed — capacity reference edges are resolved by headers");
 
     let non_start_names: Vec<_> = sorted
@@ -387,6 +357,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
     // WHY: a capacity constant declared after a typed declaration in the same file is a
     // same-file forward constant reference and must be rejected.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let external_package_registry = ExternalPackageRegistry::new();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -403,45 +374,17 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         .get_by_canonical_path(&file_path)
         .expect("fixture source identity should be present")
         .id;
-    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork.try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        "make |items ~{capacity Int}| -> Int:\n    return 1\n;\ncapacity #Int = 64\n",
-        &interned_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        file_id,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize("make |items ~{capacity Int}| -> Int:\n    return 1\n;\ncapacity #Int = 64\n", interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, file_id, &mut span_builder)
     .expect("tokenization should succeed");
 
-    let output = prepare_file_from_tokens(
-        file_tokens,
-        &entry_path,
-        &options,
-        &mut string_table,
-        0,
-        0,
-        &mut span_builder,
-    )
+    let output = prepare_file_from_tokens(file_tokens, &entry_path, &options, &mut string_table, 0, 0, &mut span_builder, &mut PathInternerFork::empty())
     .expect("preparation should succeed");
-    let prepared_syntax = prepare_header_syntax(
-        &mut [output],
-        &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-    )
+    let prepared_syntax = prepare_header_syntax(&mut [output], &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
     .expect("header syntax preparation should succeed");
-    let result = bind_module_headers(
-        prepared_syntax,
-        &external_package_registry,
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver,
-        &source_files,
-        &mut string_table,
-    );
+    let result = bind_module_headers(prepared_syntax, &external_package_registry, &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), options.project_path_resolver, &source_files, &mut string_table, &mut PathInternerFork::empty());
 
     let failure = match result {
         Err(failure) => failure,
@@ -481,7 +424,7 @@ fn capacity_reference_in_function_signature_creates_dependency_edge() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("sort must succeed");
 
     let non_start_names: Vec<_> = sorted
@@ -509,7 +452,7 @@ fn capacity_reference_in_type_alias_creates_dependency_edge() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("sort must succeed");
 
     let non_start_names: Vec<_> = sorted
@@ -549,7 +492,7 @@ fn capacity_references_across_header_type_surfaces_create_dependency_edges() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("sort must succeed");
 
     let non_start_names: Vec<_> = sorted
@@ -580,7 +523,7 @@ fn qualified_alias_target_orders_provider_declaration_before_alias() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("qualified alias target should create a sortable dependency edge");
     let non_start_names: Vec<_> = sorted
         .headers
@@ -613,7 +556,7 @@ fn qualified_type_hint_ignores_colliding_structural_provider_path() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("qualified type spelling must not collide with a structural provider path");
     let positions = sorted
         .headers
@@ -650,7 +593,7 @@ fn qualified_alias_in_struct_field_orders_provider_declaration_before_struct() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("qualified struct field type should create a sortable dependency edge");
     let non_start_names: Vec<_> = sorted
         .headers
@@ -680,7 +623,7 @@ fn qualified_alias_transitively_waits_for_fixed_capacity_constant() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("qualified fixed-capacity alias should create sortable dependency edges");
     let non_start_names: Vec<_> = sorted
         .headers
@@ -713,7 +656,7 @@ fn qualified_aliases_with_duplicate_terminal_names_keep_distinct_edges() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("qualified duplicate terminal names should remain sortable");
     let positions: Vec<_> = sorted
         .headers
@@ -754,7 +697,7 @@ fn qualified_alias_cycle_reports_circular_dependency() {
     );
 
     let messages =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect_err("qualified aliases that reference each other must form a cycle")
             .into_messages(&string_table);
     assert!(
@@ -786,7 +729,7 @@ fn trait_requirement_type_dependencies_order_required_type_before_trait() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("sort must succeed");
 
     let non_start_names: Vec<_> = sorted
@@ -824,7 +767,7 @@ fn trait_conformance_references_do_not_create_dependency_sort_edges() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("sort must succeed");
 
     let conformance_position = sorted
@@ -862,7 +805,7 @@ fn trait_incompatibility_references_do_not_create_dependency_sort_edges() {
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("sort must succeed");
 
     let incompatibility_position = sorted
@@ -885,6 +828,7 @@ fn trait_incompatibility_references_do_not_create_dependency_sort_edges() {
 
 #[test]
 fn source_package_public_export_dependency_edges_do_not_require_concrete_header_paths() {
+    let mut path_fork = PathInternerFork::empty();
     let (mut headers, mut string_table) = parse_module_headers(
         &[("src/page.moth", "NeedsWidget #String = \"ok\"\n")],
         "src/page.moth",
@@ -892,12 +836,13 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
 
     let helper_prefix = string_table.intern("helper");
     let widget_name = string_table.intern("Widget");
-    let public_export_path = InternedPath::from_components(vec![helper_prefix, widget_name]);
-    let concrete_target = InternedPath::try_from_filesystem_path(
-        &PathBuf::from("lib/helper/internal/Widget"),
-        &mut string_table,
-    )
-    .expect("test path should be UTF-8");
+    let public_export_path = path_fork.try_intern_components(&[helper_prefix, widget_name]).expect("test path fits");
+    let concrete_target = path_fork
+        .try_intern_filesystem_path(
+            &PathBuf::from("lib/helper/internal/Widget"),
+            &mut string_table,
+        )
+        .expect("test path should be UTF-8");
 
     let dependent_header = headers
         .headers
@@ -923,7 +868,7 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
         });
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("public export dependency path should be accepted without a graph header");
 
     let non_start_names: Vec<_> = sorted
@@ -963,7 +908,7 @@ fn external_package_dependency_type_hint_does_not_survive_binding_as_graph_parti
     );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("dropped external hints must not perturb Stage 3 sorting");
 
     let non_start_names: Vec<_> = sorted
@@ -997,6 +942,7 @@ fn parse_module_headers_with_content_sources(
     entry_path: &str,
 ) -> (BoundModuleHeaders, ContentSourceTargets, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let external_package_registry = ExternalPackageRegistry::new();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -1025,28 +971,12 @@ fn parse_module_headers_with_content_sources(
 
     for (path, source) in moth_files {
         let path_buf = PathBuf::from(path);
-        let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
+        let interned_path = path_fork.try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
-            source,
-            &interned_path,
-            TokenizerEntryMode::SourceFile,
-            &style_directives,
-            &mut string_table,
-            file_id_for(path),
-            &mut span_builder,
-        )
+        let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, file_id_for(path), &mut span_builder)
         .expect("tokenization should succeed");
-        let output = prepare_file_from_tokens(
-            file_tokens,
-            &entry_path_buf,
-            &options,
-            &mut string_table,
-            0,
-            0,
-            &mut span_builder,
-        )
+        let output = prepare_file_from_tokens(file_tokens, &entry_path_buf, &options, &mut string_table, 0, 0, &mut span_builder, &mut PathInternerFork::empty())
         .expect("preparation should succeed");
 
         // Keep every source's builder alive through the sorting and binding assertions below.
@@ -1056,34 +986,31 @@ fn parse_module_headers_with_content_sources(
 
     for (path, source) in templates {
         let path_buf = PathBuf::from(path);
-        let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
+        let interned_path = path_fork.try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
-            source,
-            &interned_path,
-            entry_mode,
-            &style_directives,
-            &mut string_table,
-            file_id_for(path),
-            &mut span_builder,
-        )
+        let file_tokens = tokenize(source, interned_path, entry_mode, &style_directives, &mut string_table, &mut path_fork, file_id_for(path), &mut span_builder)
         .expect("template tokenization should succeed");
         // The template's retained tokens index the builder's table; prepare while the builder
         // remains available, then retain it for the remainder of this fixture.
-        let output = prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
-            .expect("template preparation should succeed");
+        let output = prepare_moth_template_file(
+            file_tokens,
+            &mut string_table,
+            &mut path_fork,
+            &mut span_builder,
+        )
+        .expect("template preparation should succeed");
         retained_span_builders.push((file_id_for(path), span_builder));
         prepared_outputs.push(output);
     }
 
     for (path, source) in markdown_files {
         let path_buf = PathBuf::from(path);
-        let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
+        let interned_path = path_fork.try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
-        prepared_outputs.push(prepare_plain_markdown_file(
+        let output = prepare_plain_markdown_file(
             PlainMarkdownPrepareInput {
                 source_code: source,
                 source_file: interned_path,
@@ -1091,7 +1018,10 @@ fn parse_module_headers_with_content_sources(
                 canonical_os_path: None,
             },
             &mut string_table,
-        ));
+            &mut path_fork,
+        )
+        .expect("plain Markdown preparation should succeed");
+        prepared_outputs.push(output);
     }
 
     // Simulate Stage 0: every content-class occurrence resolves to the fixture file its authored
@@ -1105,13 +1035,12 @@ fn parse_module_headers_with_content_sources(
             }
 
             let target_path = PathBuf::from(
-                output
+                format!("{:?}", output
                     .path_syntax
                     .table()
                     .try_path(reference.path_syntax)
                     .expect("prepared reference should point into its path table")
-                    .root
-                    .to_portable_string(&string_table),
+                    .root),
             );
             let Some(target) = source_files
                 .get_by_canonical_path(&target_path)
@@ -1136,23 +1065,13 @@ fn parse_module_headers_with_content_sources(
         &resolved_references,
         &source_files,
         &mut string_table,
-    );
+        &mut path_fork,
+    )
+    .expect("content targets should prepare");
 
-    let prepared_syntax = prepare_header_syntax(
-        &mut prepared_outputs,
-        &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-    )
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
     .expect("header syntax preparation should succeed");
-    let headers = bind_module_headers(
-        prepared_syntax,
-        &external_package_registry,
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver,
-        &source_files,
-        &mut string_table,
-    )
+    let headers = bind_module_headers(prepared_syntax, &external_package_registry, &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), options.project_path_resolver, &source_files, &mut string_table, &mut PathInternerFork::empty())
     .expect("header binding should succeed");
 
     (headers, content_source_targets, string_table)
@@ -1166,7 +1085,7 @@ fn sorted_header_index(
     sorted
         .headers
         .iter()
-        .position(|header| header.tokens.src_path.to_portable_string(string_table) == path_text)
+        .position(|header| format!("{:?}", header.tokens.src_path) == path_text)
         .unwrap_or_else(|| panic!("expected a sorted header at {path_text}"))
 }
 
@@ -1188,7 +1107,12 @@ fn content_value_in_parameter_and_field_defaults_orders_before_consumers() {
             "@page.moth",
         );
 
-    let sorted = resolve_module_dependencies(headers, &content_source_targets, &mut string_table)
+    let sorted = resolve_module_dependencies(
+        headers,
+        &content_source_targets,
+        &mut string_table,
+        &mut PathInternerFork::empty(),
+    )
         .expect("content ordering should resolve without cycles");
 
     let render_index = sorted_header_index(&sorted, "@page.moth/render", &string_table);
@@ -1209,12 +1133,13 @@ fn content_value_in_parameter_and_field_defaults_orders_before_consumers() {
 
 #[test]
 fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
-    let (parsed, content_source_targets, string_table) = parse_module_headers_with_content_sources(
-        &[("@page.moth", "#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n")],
-        &[("docs/intro.mtf", "intro template body")],
-        &[],
-        "@page.moth",
-    );
+    let (parsed, content_source_targets, string_table) =
+        parse_module_headers_with_content_sources(
+            &[("@page.moth", "#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n")],
+            &[("docs/intro.mtf", "intro template body")],
+            &[],
+            "@page.moth",
+        );
 
     let BoundModuleHeaders {
         headers,
@@ -1227,7 +1152,6 @@ fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
         &module_symbols.source_package_public_exports,
         &binding_environment.imported_declarations_by_local_path,
         &content_source_targets,
-        &string_table,
     );
     let consumer = graph
         .headers_by_path
@@ -1236,7 +1160,11 @@ fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
         .expect("the repeated content shell should retain both authored hints");
 
     let edges = graph
-        .sorted_dependency_edges_for_header(consumer, &string_table)
+        .sorted_dependency_edges_for_header(
+            consumer,
+            &string_table,
+            &PathInternerFork::empty(),
+        )
         .expect("prepared content headers have registered source identities");
     let content_edges = edges
         .iter()
@@ -1248,13 +1176,9 @@ fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
         1,
         "repeated authored paths should deduplicate at the resolved graph edge"
     );
-    assert_eq!(
-        content_edges[0]
-            .resolved_path
-            .as_ref()
-            .expect("content edge should resolve to a graph header")
-            .to_portable_string(&string_table),
-        "docs/intro.mtf/content"
+    assert!(
+        content_edges[0].resolved_path.is_some(),
+        "content edge should resolve to a graph header"
     );
 }
 #[test]
@@ -1277,9 +1201,14 @@ fn content_dependency_cycle_is_diagnosed_by_the_ordering_authority() {
             "@page.moth",
         );
 
-    let messages = resolve_module_dependencies(headers, &content_source_targets, &mut string_table)
-        .expect_err("a real content dependency cycle should fail dependency sorting")
-        .into_messages(&string_table);
+    let messages = resolve_module_dependencies(
+        headers,
+        &content_source_targets,
+        &mut string_table,
+        &mut PathInternerFork::empty(),
+    )
+    .expect_err("a real content dependency cycle should fail dependency sorting")
+    .into_messages(&string_table);
     let diagnostic_string_table = &messages.string_table;
 
     let cycle_diagnostic = messages
@@ -1290,7 +1219,7 @@ fn content_dependency_cycle_is_diagnosed_by_the_ordering_authority() {
                 return false;
             };
 
-            let path = path.to_portable_string(diagnostic_string_table);
+            let path = format!("{:?}", path);
             path.contains("docs/intro.mtf/content") || path.contains("legal/license.mtf/content")
         })
         .unwrap_or_else(|| panic!("expected a content cycle diagnostic, got: {messages:?}"));
@@ -1308,6 +1237,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     // the content edge through the Stage 0 resolved target, so the ordering edge still lands on
     // the canonical content constant instead of deferring on a spelling mismatch.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = ExternalPackageRegistry::new();
     let options = HeaderParseOptions::default();
@@ -1340,33 +1270,23 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         .get_by_canonical_path(&icon_template)
         .expect("icon identity")
         .id;
-    let root_logical = source_files.legacy_logical_path(root_file_id);
-    let icon_logical = source_files.legacy_logical_path(icon_file_id);
+    let root_logical = source_files
+        .get(root_file_id)
+        .expect("root source identity")
+        .logical_path;
+    let icon_logical = source_files
+        .get(icon_file_id)
+        .expect("icon source identity")
+        .logical_path;
 
-    let entry_path_buf = root_logical.to_path_buf(&string_table);
+    let entry_path_buf = root_file.clone();
     let mut prepared_outputs = Vec::new();
     let mut retained_span_builders = Vec::new();
 
     let mut root_span_builder = ExtendedSpanBuilder::new();
-    let root_tokens = tokenize(
-        "icon #= @icon.mtf\n",
-        &root_logical,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        root_file_id,
-        &mut root_span_builder,
-    )
+    let root_tokens = tokenize("icon #= @icon.mtf\n", root_logical, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, root_file_id, &mut root_span_builder)
     .expect("root file should tokenize");
-    let root_output = prepare_file_from_tokens(
-        root_tokens,
-        &entry_path_buf,
-        &options,
-        &mut string_table,
-        0,
-        0,
-        &mut root_span_builder,
-    )
+    let root_output = prepare_file_from_tokens(root_tokens, &entry_path_buf, &options, &mut string_table, 0, 0, &mut root_span_builder, &mut PathInternerFork::empty())
     .expect("root file should prepare");
 
     // The prepared root file keeps its source identity, but its retained tokens still index
@@ -1375,20 +1295,16 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     prepared_outputs.push(root_output);
 
     let mut icon_span_builder = ExtendedSpanBuilder::new();
-    let icon_tokens = tokenize(
-        "[: icon body]",
-        &icon_logical,
-        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
-            .expect("Moth template has a tokenizer entry mode"),
-        &style_directives,
+    let icon_tokens = tokenize("[: icon body]", icon_logical, TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+        .expect("Moth template has a tokenizer entry mode"), &style_directives, &mut string_table, &mut path_fork, icon_file_id, &mut icon_span_builder)
+    .expect("icon template should tokenize");
+    let icon_output = prepare_moth_template_file(
+        icon_tokens,
         &mut string_table,
-        icon_file_id,
+        &mut path_fork,
         &mut icon_span_builder,
     )
-    .expect("icon template should tokenize");
-    let icon_output =
-        prepare_moth_template_file(icon_tokens, &mut string_table, &mut icon_span_builder)
-            .expect("icon template should prepare");
+    .expect("icon template should prepare");
     retained_span_builders.push((icon_file_id, icon_span_builder));
     prepared_outputs.push(icon_output);
 
@@ -1416,26 +1332,21 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &resolved_references,
         &source_files,
         &mut string_table,
-    );
+        &mut path_fork,
+    )
+    .expect("content targets should prepare");
 
-    let prepared_syntax = prepare_header_syntax(
-        &mut prepared_outputs,
-        &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-    )
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
     .expect("nested header syntax should prepare");
-    let headers = bind_module_headers(
-        prepared_syntax,
-        &external_package_registry,
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        None,
-        &source_files,
-        &mut string_table,
-    )
+    let headers = bind_module_headers(prepared_syntax, &external_package_registry, &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), None, &source_files, &mut string_table, &mut PathInternerFork::empty())
     .expect("nested headers should bind");
 
-    let sorted = resolve_module_dependencies(headers, &content_source_targets, &mut string_table)
+    let sorted = resolve_module_dependencies(
+        headers,
+        &content_source_targets,
+        &mut string_table,
+        &mut PathInternerFork::empty(),
+    )
         .expect(
             "a nested module-relative content reference must order through the resolved target",
         );
@@ -1465,7 +1376,7 @@ fn missing_content_target_defers_to_the_stage0_diagnostic_lane() {
         );
 
     let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table, &mut PathInternerFork::empty())
             .expect("a missing content target must defer, not fail dependency sorting");
 
     assert!(

@@ -21,7 +21,7 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::newline_handling::normalize_consumed_carriage_return_newline;
 use crate::compiler_frontend::tokenizer::numeric::tokenize_numeric_literal;
@@ -510,10 +510,11 @@ fn greater_than_is_template_tag_end(
 /// WHY: later frontend stages should prefer explicit file identity over path string comparisons.
 pub fn tokenize(
     source_code: &str,
-    src_path: &InternedPath,
+    src_path: PathId,
     entry_mode: TokenizerEntryMode,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     file_id: SourceId,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> TokenizeResult<FileTokens> {
@@ -555,8 +556,8 @@ pub fn tokenize(
             last_meaningful_token_kind: last_meaningful_token_kind.as_ref(),
             meaningful_token_before_last_kind: meaningful_token_before_last_kind.as_ref(),
         };
-        token = match get_token_kind(&mut stream, style_directives, string_table, context) {
-            Ok(token) => token,
+        token = match get_token_kind(&mut stream, style_directives, string_table, path_fork, context) {
+            Ok(next_token) => next_token,
             Err(TokenizeFailure::Diagnosed(mut diagnostic)) => {
                 // Every lexical failure crosses this boundary while its original source
                 // builder is live. Extended-table exhaustion is terminal: capture returns
@@ -578,7 +579,7 @@ pub fn tokenize(
         crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
     );
     let mut file_tokens =
-        FileTokens::new_with_identity(src_path.to_owned(), file_id, None, tokens, path_syntax);
+        FileTokens::new_with_identity(src_path, file_id, None, tokens, path_syntax);
     file_tokens.token_stats = token_stats;
     Ok(file_tokens)
 }
@@ -587,6 +588,7 @@ fn get_token_kind(
     stream: &mut TokenStream<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     context: LexerTokenContext<'_>,
 ) -> TokenizeResult<Token> {
     // WHY: Comments do not produce tokens. A labeled loop allows the comment handler
@@ -1221,7 +1223,7 @@ fn get_token_kind(
 
         // Paths (@/path)
         if current_char == '@' {
-            return parse_file_path(stream, string_table);
+            return parse_file_path(stream, string_table, path_fork);
         }
 
         // Wildcard or Identifier starting with '_'

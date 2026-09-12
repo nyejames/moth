@@ -12,8 +12,6 @@ use crate::compiler_frontend::datatypes::definitions::{
     StructTypeDefinition, TypeDefinition,
 };
 #[cfg(any(test, feature = "show_hir"))]
-use crate::compiler_frontend::datatypes::display::display_type;
-#[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -55,8 +53,9 @@ use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 #[cfg(any(test, feature = "show_hir"))]
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 #[cfg(any(test, feature = "show_hir"))]
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::fmt::Write as _;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -85,11 +84,11 @@ impl Default for HirDisplayOptions {
         }
     }
 }
-
 #[cfg(any(test, feature = "show_hir"))]
 #[derive(Clone, Copy)]
 pub(crate) struct HirDisplayContext<'a> {
     string_table: &'a StringTable,
+    path_fork: &'a PathInternerFork,
     side_table: Option<&'a HirSideTable>,
     type_environment: Option<&'a TypeEnvironment>,
     options: HirDisplayOptions,
@@ -97,9 +96,13 @@ pub(crate) struct HirDisplayContext<'a> {
 
 #[cfg(any(test, feature = "show_hir"))]
 impl<'a> HirDisplayContext<'a> {
-    pub(crate) fn new(string_table: &'a StringTable) -> Self {
+    pub(crate) fn new(
+        string_table: &'a StringTable,
+        path_fork: &'a PathInternerFork,
+    ) -> Self {
         Self {
             string_table,
+            path_fork,
             side_table: None,
             type_environment: None,
             options: HirDisplayOptions::default(),
@@ -821,11 +824,9 @@ impl<'a> HirDisplayContext<'a> {
                 BuiltinTypeKey::Range => "Range".to_owned(),
                 BuiltinTypeKey::None => "()".to_owned(),
             },
-            TypeDefinition::Struct(StructTypeDefinition { path, .. }) => {
-                path.to_string(self.string_table)
-            }
+            TypeDefinition::Struct(StructTypeDefinition { path, .. }) => self.path_label(*path),
             TypeDefinition::Choice(ChoiceTypeDefinition { path, .. }) => {
-                format!("Choice({})", path.to_string(self.string_table))
+                format!("Choice({})", self.path_label(*path))
             }
             TypeDefinition::Function(FunctionTypeDefinition {
                 parameters,
@@ -889,11 +890,26 @@ impl<'a> HirDisplayContext<'a> {
                         .join(", ");
                     format!("({joined})")
                 }
-                TypeConstructor::Builtin(BuiltinTypeConstructor::Collection { .. }) => {
-                    display_type(ty, type_environment, self.string_table)
+                TypeConstructor::Builtin(BuiltinTypeConstructor::Collection { fixed_capacity }) => {
+                    let element = arguments.first().map_or_else(
+                        || "?".to_owned(),
+                        |arg| self.render_type_with_environment(type_environment, *arg, depth + 1),
+                    );
+                    match fixed_capacity {
+                        Some(capacity) => format!("{{{capacity} {element}}}"),
+                        None => format!("{{{element}}}"),
+                    }
                 }
                 TypeConstructor::Builtin(BuiltinTypeConstructor::OrderedMap) => {
-                    display_type(ty, type_environment, self.string_table)
+                    let key = arguments.first().map_or_else(
+                        || "?".to_owned(),
+                        |arg| self.render_type_with_environment(type_environment, *arg, depth + 1),
+                    );
+                    let value = arguments.get(1).map_or_else(
+                        || "?".to_owned(),
+                        |arg| self.render_type_with_environment(type_environment, *arg, depth + 1),
+                    );
+                    format!("{{{key} = {value}}}")
                 }
                 TypeConstructor::Builtin(BuiltinTypeConstructor::Option) => {
                     let inner = arguments.first().map_or_else(
@@ -929,7 +945,7 @@ impl<'a> HirDisplayContext<'a> {
                     .join(", ");
                 let name = type_environment
                     .nominal_path_by_id(instance.base)
-                    .map(|path| path.to_string(self.string_table))
+                    .map(|path| self.path_label(*path))
                     .unwrap_or_else(|| format!("GenericInstance({})", instance.base.0));
                 if args.is_empty() {
                     name
@@ -944,10 +960,16 @@ impl<'a> HirDisplayContext<'a> {
         }
     }
 
+    fn path_label(&self, path: PathId) -> String {
+        let mut scratch: Vec<StringId> = Vec::new();
+        self.path_fork
+            .render_portable(path, self.string_table, &mut scratch)
+    }
+
     fn local_label(&self, local_id: LocalId) -> String {
         if let Some(name) = self
             .side_table
-            .and_then(|side| side.resolve_local_name(local_id, self.string_table))
+            .and_then(|side| side.resolve_local_name(local_id, self.path_fork, self.string_table))
         {
             return name.to_owned();
         }
@@ -958,7 +980,7 @@ impl<'a> HirDisplayContext<'a> {
     fn function_label(&self, function_id: FunctionId) -> String {
         if let Some(name) = self
             .side_table
-            .and_then(|side| side.resolve_function_name(function_id, self.string_table))
+            .and_then(|side| side.resolve_function_name(function_id, self.path_fork, self.string_table))
         {
             return name.to_owned();
         }
@@ -969,7 +991,7 @@ impl<'a> HirDisplayContext<'a> {
     fn struct_label(&self, struct_id: StructId) -> String {
         if let Some(name) = self
             .side_table
-            .and_then(|side| side.display_struct_name(struct_id, self.string_table))
+            .and_then(|side| side.display_struct_name(struct_id, self.path_fork, self.string_table))
         {
             return name;
         }
@@ -980,7 +1002,7 @@ impl<'a> HirDisplayContext<'a> {
     fn choice_label(&self, choice_id: ChoiceId) -> String {
         if let Some(name) = self
             .side_table
-            .and_then(|side| side.display_choice_name(choice_id, self.string_table))
+            .and_then(|side| side.display_choice_name(choice_id, self.path_fork, self.string_table))
         {
             return name;
         }
@@ -991,7 +1013,7 @@ impl<'a> HirDisplayContext<'a> {
     fn field_label(&self, field_id: FieldId) -> String {
         if let Some(name) = self
             .side_table
-            .and_then(|side| side.resolve_field_name(field_id, self.string_table))
+            .and_then(|side| side.resolve_field_name(field_id, self.path_fork, self.string_table))
         {
             return name.to_owned();
         }
@@ -1054,16 +1076,24 @@ impl<'a> HirDisplayContext<'a> {
 #[cfg(any(test, feature = "show_hir"))]
 #[allow(dead_code)]
 impl HirModule {
-    pub(crate) fn display_with_table(&self, string_table: &StringTable) -> String {
-        HirDisplayContext::new(string_table).render_module(self)
+    pub(crate) fn display_with_table(
+        &self,
+        string_table: &StringTable,
+        path_fork: &PathInternerFork,
+    ) -> String {
+        HirDisplayContext::new(string_table, path_fork).render_module(self)
     }
 
     pub(crate) fn display_with_context(&self, display: &HirDisplayContext<'_>) -> String {
         display.render_module(self)
     }
 
-    pub(crate) fn debug_string(&self, string_table: &StringTable) -> String {
-        self.display_with_table(string_table)
+    pub(crate) fn debug_string(
+        &self,
+        string_table: &StringTable,
+        path_fork: &PathInternerFork,
+    ) -> String {
+        self.display_with_table(string_table, path_fork)
     }
 }
 

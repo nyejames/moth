@@ -28,6 +28,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalAccessKind, ExternalFunctionDef, ExternalParameter,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::type_coercion::compatibility::{
     TypeCompatibilityCache, TypeCompatibilityMode,
 };
@@ -159,22 +160,25 @@ pub(crate) struct CallArgumentResolutionContext<'a> {
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) compatibility_cache: &'a mut TypeCompatibilityCache,
+    pub(crate) path_fork: &'a PathInternerFork,
 }
 
 struct CallArgumentPolicyContext<'a> {
     string_table: &'a mut StringTable,
     type_environment: &'a TypeEnvironment,
     type_validation: CallTypeValidation<'a>,
+    path_fork: &'a PathInternerFork,
 }
 
 /// Builds one expectation per user-defined parameter declaration.
 pub(crate) fn expectations_from_user_parameters(
     parameters: &[Declaration],
+    path_fork: &PathInternerFork,
 ) -> Vec<ParameterExpectation> {
     parameters
         .iter()
         .map(|parameter| ParameterExpectation {
-            name: parameter.id.name(),
+            name: path_fork.component(parameter.id),
             expected_type: ExpectedParameterType::Known(parameter.value.type_id),
             access_mode: if parameter.value.value_mode.is_mutable() {
                 ExpectedAccessMode::Mutable
@@ -237,11 +241,12 @@ pub(crate) fn expectations_from_host_function(
 
 pub(crate) fn expectations_from_constructor_fields(
     fields: &[ConstructorField],
+    path_fork: &PathInternerFork,
 ) -> Vec<ParameterExpectation> {
     fields
         .iter()
         .map(|field| ParameterExpectation {
-            name: field.name.name(),
+            name: path_fork.component(field.name),
             expected_type: ExpectedParameterType::Known(field.type_id),
             access_mode: match field.access_mode {
                 ConstructorFieldAccessMode::Shared => ExpectedAccessMode::Shared,
@@ -255,8 +260,9 @@ pub(crate) fn expectations_from_constructor_fields(
 
 pub(crate) fn expectations_from_receiver_method_signature(
     parameters_excluding_receiver: &[Declaration],
+    path_fork: &PathInternerFork,
 ) -> Vec<ParameterExpectation> {
-    expectations_from_user_parameters(parameters_excluding_receiver)
+    expectations_from_user_parameters(parameters_excluding_receiver, path_fork)
 }
 
 /// Resolves parser-owned call arguments through shared final validation.
@@ -280,6 +286,7 @@ pub(crate) fn resolve_call_arguments(
             string_table: context.string_table,
             type_environment: context.type_environment,
             type_validation: CallTypeValidation::Validate(context.compatibility_cache),
+            path_fork: context.path_fork,
         },
     )
 }
@@ -300,6 +307,7 @@ pub(crate) fn resolve_call_arguments_shape_and_access(
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<CallArgument>, CallValidationError> {
     resolve_call_arguments_with_type_policy(
         diagnostics,
@@ -310,6 +318,7 @@ pub(crate) fn resolve_call_arguments_shape_and_access(
             string_table,
             type_environment,
             type_validation: CallTypeValidation::Skip,
+            path_fork,
         },
     )
 }
@@ -325,6 +334,7 @@ fn resolve_call_arguments_with_type_policy(
         string_table,
         type_environment,
         mut type_validation,
+        path_fork,
     } = context;
 
     // Validation flow order is intentionally fixed:
@@ -381,7 +391,7 @@ fn resolve_call_arguments_with_type_policy(
         };
 
         let passing_mode =
-            classify_call_passing_mode(&diagnostics, &argument, expectation, slot, string_table)?;
+            classify_call_passing_mode(&diagnostics, &argument, expectation, slot, string_table, path_fork)?;
 
         if expectation.requires_reactive_source && !argument.value.is_reactive_source() {
             return Err(CompilerDiagnostic::invalid_call_shape(
@@ -456,10 +466,10 @@ fn classify_call_passing_mode(
     expectation: &ParameterExpectation,
     slot_index: usize,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<CallPassingMode, CallValidationError> {
     let callee_name = Some(string_table.intern(diagnostics.callee_name));
-    let source_state = classify_argument_source_state(&argument.value);
-
+    let source_state = classify_argument_source_state(&argument.value, path_fork);
     match (argument.access_mode, &expectation.access_mode) {
         // Shared argument passed to a shared parameter: no restriction.
         (CallAccessMode::Shared, ExpectedAccessMode::Shared) => Ok(CallPassingMode::Shared),
@@ -603,28 +613,26 @@ enum CallArgumentSourceState {
 ///       and, for an existing place, its mutability and simple root binding name.
 /// WHY: shared and authored-`~` mutable-parameter branches share one classification, so the
 ///      call boundary traverses the argument exactly once instead of once per fact.
-fn classify_argument_source_state(expression: &Expression) -> CallArgumentSourceState {
+fn classify_argument_source_state(
+    expression: &Expression,
+    path_fork: &PathInternerFork,
+) -> CallArgumentSourceState {
     match &expression.kind {
-        // A reference is the root: its mutability comes from the value mode, and its binding
-        // name is the referenced path's simple name.
         ExpressionKind::Reference(path) => {
-            let binding_name = path.name();
+            let binding_name = path_fork.component(*path);
             if expression.value_mode.is_mutable() {
                 CallArgumentSourceState::MutablePlace
             } else {
                 CallArgumentSourceState::ImmutablePlace { binding_name }
             }
         }
-        // A field access follows its base to the root place, inheriting the root's mutability
-        // and binding name when the root is immutable.
-        ExpressionKind::FieldAccess { base, .. } => classify_argument_source_state(base),
-        // A single-operand runtime projection follows that operand.
+        ExpressionKind::FieldAccess { base, .. } => classify_argument_source_state(base, path_fork),
         ExpressionKind::Runtime(rpn) if rpn.items.len() == 1 => match rpn.items.first() {
-            Some(ExpressionRpnItem::Operand(inner)) => classify_argument_source_state(inner),
+            Some(ExpressionRpnItem::Operand(inner)) => {
+                classify_argument_source_state(inner, path_fork)
+            }
             _ => CallArgumentSourceState::Fresh,
         },
-        // `copy` produces an independent value, so it is fresh at the call boundary even though
-        // its operand is an existing place. Every other expression kind is a fresh rvalue.
         _ => CallArgumentSourceState::Fresh,
     }
 }

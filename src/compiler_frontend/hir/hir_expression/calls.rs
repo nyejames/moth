@@ -27,7 +27,7 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
 
 use super::LoweredExpression;
@@ -85,7 +85,7 @@ impl<'a> HirBuilder<'a> {
     }
     pub(crate) fn lower_receiver_method_call_expression(
         &mut self,
-        method_path: &InternedPath,
+        method_path: &PathId,
         receiver: &Expression,
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],

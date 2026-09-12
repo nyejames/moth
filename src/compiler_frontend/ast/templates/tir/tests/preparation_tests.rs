@@ -41,16 +41,17 @@ use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn runtime_expression(string_table: &mut StringTable) -> Expression {
-    let scope = InternedPath::from_single_str("main.moth", string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork.try_intern_portable_path("main.moth", string_table).expect("test path fits");
     let name = string_table.intern("runtime_text");
     Expression::new(
         ExpressionKind::FunctionCall {
-            name: scope.append(name),
+            name: path_fork.try_intern_child(scope, name).expect("test path fits"),
             args: Vec::new(),
             result_type_ids: vec![builtin_type_ids::STRING],
         },
@@ -68,6 +69,7 @@ fn prepare_root(
 ) -> Result<(TemplatePreparation, super::super::view::TirViewIdentity), TemplateError> {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let root = build_root(&mut builder, &mut string_table);
@@ -184,11 +186,12 @@ fn preparation_returns_runtime_with_exact_identity_for_runtime_expression() {
 
 #[test]
 fn preparation_keeps_reactive_content_on_runtime_handoff() {
+    let mut path_fork = PathInternerFork::empty();
     let (prepared, identity) = prepare_root(
         TemplateType::String,
         |builder, table| {
             let source = ReactiveSource {
-                path: InternedPath::from_single_str("main.moth/#reactive", table),
+                path: path_fork.try_intern_portable_path("main.moth/#reactive", table).expect("test path fits"),
                 kind: ReactiveSourceKind::Declaration,
             };
             let text = table.intern("reactive text");
@@ -547,6 +550,7 @@ fn preparation_rejects_exact_child_cycle_as_internal_error() {
 fn preparation_validates_runtime_slot_plan_authority() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let text = string_table.intern("slot plan");
@@ -581,6 +585,7 @@ fn preparation_validates_runtime_slot_plan_authority() {
 fn preparation_publishes_runtime_plan_and_site_facts() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let render_root = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         builder.push_text_node(
@@ -642,6 +647,7 @@ fn preparation_publishes_runtime_plan_and_site_facts() {
 fn preparation_rejects_runtime_slot_site_from_a_different_plan() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let render_root = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         builder.push_text_node(
@@ -718,6 +724,7 @@ fn preparation_rejects_out_of_range_runtime_slot_site() {
 fn preparation_rejects_mismatched_runtime_slot_site_identity() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let render_root = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         builder.push_text_node(
@@ -762,8 +769,9 @@ fn preparation_rejects_mismatched_runtime_slot_site_identity() {
 fn preparation_propagates_reactive_facts_from_runtime_slot_contribution_roots() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let reactive_source = ReactiveSource {
-        path: InternedPath::from_single_str("main.moth/#reactive", &mut string_table),
+        path: path_fork.try_intern_portable_path("main.moth/#reactive", &mut string_table).expect("test path fits"),
         kind: ReactiveSourceKind::Declaration,
     };
     let contribution_root = {
@@ -823,6 +831,7 @@ fn preparation_propagates_reactive_facts_from_runtime_slot_contribution_roots() 
 fn preparation_reports_missing_wrapper_root_without_a_separate_slot_layout_walk() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let missing_root = TemplateIrNodeId::new(999);
     let wrapper_template = store.push_template(TemplateIr::new(
         missing_root,
@@ -874,10 +883,11 @@ fn preparation_reports_missing_wrapper_root_without_a_separate_slot_layout_walk(
 fn runtime_contribution_constness_propagates_option_capture_bindings() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
     let capture_name = string_table.intern("value");
-    let capture_path = InternedPath::from_single_str("main.moth/#value", &mut string_table);
+    let capture_path = path_fork.try_intern_portable_path("main.moth/#value", &mut string_table).expect("test path fits");
     let scrutinee = Expression::option_none_with_type_id(
         string_type_id,
         DataType::StringSlice,
@@ -941,6 +951,7 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
 fn preparation_validates_wrapper_set_authority() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let text = string_table.intern("wrapper set");
@@ -1025,6 +1036,7 @@ fn site_plan(site: RuntimeSlotSiteId, render_root: TemplateIrNodeId) -> Template
 fn preparation_rejects_contribution_marker_with_wrong_plan() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         builder.push_text_node(
@@ -1070,6 +1082,7 @@ fn preparation_rejects_contribution_marker_with_wrong_plan() {
 fn preparation_rejects_contribution_marker_outside_owning_plan() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let marker = {
         let plan = store.push_slot_plan(TemplateSlotPlan {
             contribution_sources: vec![],
@@ -1107,6 +1120,7 @@ fn preparation_rejects_contribution_marker_outside_owning_plan() {
 fn preparation_rejects_out_of_range_contribution_source() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let interned = string_table.intern("src");
@@ -1144,6 +1158,7 @@ fn preparation_rejects_out_of_range_contribution_source() {
 fn preparation_rejects_source_identity_mismatch() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let interned = string_table.intern("src");
@@ -1188,6 +1203,7 @@ fn preparation_rejects_source_identity_mismatch() {
 fn preparation_rejects_plan_a_source_inside_plan_b() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let text = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let interned = string_table.intern("src");
@@ -1231,6 +1247,7 @@ fn preparation_rejects_plan_a_source_inside_plan_b() {
 fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let inner_text = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let interned = string_table.intern("inner");

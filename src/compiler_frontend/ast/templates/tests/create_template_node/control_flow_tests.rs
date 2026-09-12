@@ -1,8 +1,10 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn template_option_capture_binding_is_not_visible_in_else_branch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[if maybe_name is |name|:
@@ -23,7 +25,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
     let maybe_name = string_table.intern("maybe_name");
     let capture_name = string_table.intern("name");
     let declaration = Declaration {
-        id: token_stream.src_path.append(maybe_name),
+        id: path_fork.try_intern_child(token_stream.src_path, maybe_name).expect("test path fits"),
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
@@ -34,7 +36,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
         binding_span: None,
         config_qualifier: None,
     };
-    context.add_var(declaration, None);
+    context.add_var(declaration, None, &path_fork);
 
     let diagnostic = Template::new_with_type_interner(
         &mut token_stream,
@@ -42,6 +44,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
         &mut type_interner,
         vec![],
         &mut string_table,
+        &mut path_fork,
     )
     .expect_err("option-present capture should not be visible in template else branch");
     let diagnostic = expect_template_diagnostic(diagnostic);
@@ -156,6 +159,7 @@ fn nested_template_else_if_builds_independent_branch_chains() {
 #[test]
 fn template_else_if_option_capture_binding_is_branch_local() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[if false:
@@ -178,7 +182,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
     let maybe_name = string_table.intern("maybe_name");
     let capture_name = string_table.intern("name");
     let declaration = Declaration {
-        id: token_stream.src_path.append(maybe_name),
+        id: path_fork.try_intern_child(token_stream.src_path, maybe_name).expect("test path fits"),
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
@@ -189,7 +193,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
         binding_span: None,
         config_qualifier: None,
     };
-    context.add_var(declaration, None);
+    context.add_var(declaration, None, &path_fork);
 
     let diagnostic = Template::new_with_type_interner(
         &mut token_stream,
@@ -197,6 +201,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
         &mut type_interner,
         vec![],
         &mut string_table,
+        &mut path_fork,
     )
     .expect_err("else-if option capture should not be visible in the fallback branch");
     let diagnostic = expect_template_diagnostic(diagnostic);
@@ -601,9 +606,10 @@ fn template_if_composition_formats_each_branch_independently() {
 #[test]
 fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let wrapper_scope =
-        InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
+        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
     let mut card_tokens = template_tokens_from_source(
         "[: <card>[$slot]</card>]",
@@ -611,12 +617,14 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         &mut span_builder,
     );
     let card_context = new_constant_context(card_tokens.src_path.to_owned());
-    let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table)
+    let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
 
     let card_name = string_table.intern("card");
     let declarations = vec![Declaration {
-        id: wrapper_scope.append(card_name),
+        id: path_fork
+            .try_intern_child(wrapper_scope, card_name)
+            .expect("test path fits"),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -645,6 +653,7 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         Vec::new(),
         &mut string_table,
         NestedTemplateParseOptions::runtime_capable(),
+        &mut path_fork,
     )
     .expect("template if should parse through control-flow composition")
     .template;

@@ -25,6 +25,7 @@ use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, increment_ast_counter, increment_frontend_counter,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -48,6 +49,7 @@ pub fn evaluate_expression(
     expected_type: &mut ExpectedType,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Expression, ExpressionTypingError> {
     let (rpn_items, span) = ordering::order_expression_nodes(nodes)?;
 
@@ -91,8 +93,8 @@ pub fn evaluate_expression(
         span,
         string_table,
         type_interner.environment(),
+        path_fork,
     )?;
-
     validate_expression_result_type(
         expected_type,
         resolved_type,

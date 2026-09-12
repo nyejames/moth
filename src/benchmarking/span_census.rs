@@ -13,7 +13,7 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{self, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
@@ -482,14 +482,18 @@ pub(super) fn tokenize_source(
         .ok_or_else(|| format!("source kind {source_kind:?} has no tokenizer entry mode"))?;
 
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str(relative, &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork
+        .try_intern_portable_path(relative, &mut string_table)
+        .map_err(|error| format!("synthetic census path should intern: {error:?}"))?;
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
-        &source_path,
+        source_path,
         entry_mode,
         style_directives,
         &mut string_table,
+        &mut path_fork,
         SourceId::COMPILATION_ROOT,
         &mut span_builder,
     )

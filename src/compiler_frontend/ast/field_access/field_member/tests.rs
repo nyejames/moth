@@ -25,7 +25,7 @@ use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTy
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -60,11 +60,16 @@ fn store_with_template() -> (Rc<RefCell<TemplateIrStore>>, Template) {
 #[test]
 fn receiver_authored_field_uses_foreign_effective_tir() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (registry, template) = store_with_template();
     let field_name = string_table.intern("content");
-    let field_path = InternedPath::from_components(vec![field_name]);
+    let field_path = path_fork
+        .try_intern_components(&[field_name])
+        .expect("test path fits");
     let receiver_value = Expression::struct_instance(
-        InternedPath::from_single_str("Card", &mut string_table),
+        path_fork
+            .try_intern_portable_path("Card", &mut string_table)
+            .expect("test path fits"),
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
@@ -80,10 +85,13 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
     let receiver = AstNode {
         kind: NodeKind::ExpressionStatement(receiver_value),
         span: None,
-        scope: InternedPath::from_single_str("scope", &mut string_table),
+        scope: path_fork
+            .try_intern_portable_path("scope", &mut string_table)
+            .expect("test path fits"),
     };
 
-    let inlined = const_inline_field_value_from_receiver(&receiver, field_name, &registry, None)
+    let inlined =
+        const_inline_field_value_from_receiver(&receiver, field_name, &registry, None, &path_fork)
         .expect("effective TIR classification should succeed")
         .expect("receiver-authored const field should inline");
 
@@ -95,9 +103,11 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
 fn missing_member_name_after_dot_points_at_offending_token_boundary() {
     // A non-EOF token after the dot is the immediate missing-member boundary. The diagnostic
     // must point at that offending token, not the authored dot or the receiver start. This
-    // complements the integration case, which pins the EOF span at the authored dot.
     let mut string_table = StringTable::new();
-    let scope = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
     let offending_span =
         LocalSpan::exact(12, 1, &mut span_builder).expect("offending token span should fit");
@@ -132,20 +142,24 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
         other => panic!("expected InvalidFieldAccess::ExpectedNameAfterDot, got {other:?}"),
     }
 }
-
 #[test]
 fn resolved_default_field_uses_foreign_effective_tir() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (registry, template) = store_with_template();
     let mut type_environment = TypeEnvironment::new();
     let field_name = string_table.intern("content");
-    let struct_path = InternedPath::from_single_str("Card", &mut string_table);
-    let field_path = struct_path.clone().append(field_name);
+    let struct_path = path_fork
+        .try_intern_portable_path("Card", &mut string_table)
+        .expect("test path fits");
+    let field_path = path_fork
+        .try_intern_child(struct_path, field_name)
+        .expect("test path fits");
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: struct_path.clone(),
+        path: struct_path,
         fields: vec![FieldDefinition {
-            name: field_path.clone(),
+            name: field_path,
             type_id: type_environment.builtins().string,
             span: None,
         }]
@@ -154,7 +168,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         const_record: true,
     });
     let resolved_fields = FxHashMap::from_iter([(
-        struct_path.clone(),
+        struct_path,
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
@@ -164,7 +178,9 @@ fn resolved_default_field_uses_foreign_effective_tir() {
     )]);
     let receiver = AstNode {
         kind: NodeKind::ExpressionStatement(Expression::reference_with_type_id(
-            InternedPath::from_single_str("card", &mut string_table),
+            path_fork
+                .try_intern_portable_path("card", &mut string_table)
+                .expect("test path fits"),
             DataType::const_struct_record(struct_path, struct_type_id),
             struct_type_id,
             None,
@@ -172,7 +188,9 @@ fn resolved_default_field_uses_foreign_effective_tir() {
             crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::ConstRecord,
         )),
         span: None,
-        scope: InternedPath::from_single_str("scope", &mut string_table),
+        scope: path_fork
+            .try_intern_portable_path("scope", &mut string_table)
+            .expect("test path fits"),
     };
 
     let inlined = const_inline_field_value(
@@ -183,6 +201,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         Some(&resolved_fields),
         &registry,
         None,
+        &path_fork,
     )
     .expect("effective TIR classification should succeed")
     .expect("resolved const default should inline");

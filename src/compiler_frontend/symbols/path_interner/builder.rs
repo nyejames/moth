@@ -37,6 +37,17 @@ pub struct PathInternerBuilder {
 }
 
 impl PathInternerBuilder {
+    /// Rebuild a mutable builder from a complete fork snapshot.
+    ///
+    /// This preserves every inherited and worker-local `PathId` while giving the
+    /// destination source database the same lookup domain as the discovery fork.
+    pub(super) fn from_parts(
+        table: PathTable,
+        lookup: FxHashMap<(PathId, StringId), PathId>,
+    ) -> Self {
+        Self { table, lookup }
+    }
+
     /// Create an empty interner whose first node is the root path.
     pub fn new() -> Self {
         increment_frontend_counter(FrontendCounter::PathNodeCount);

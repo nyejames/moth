@@ -25,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -42,16 +42,9 @@ fn parse_args(
 ) -> Vec<crate::compiler_frontend::ast::expressions::call_argument::CallArgument> {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
-    let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
-    let mut tokens: FileTokens = tokenize(
-        source,
-        &file_path,
-        TokenizerEntryMode::SourceFile,
-        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
+    let mut tokens: FileTokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
 
     while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
@@ -60,8 +53,8 @@ fn parse_args(
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
-        InternedPath::new(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        PathId::ROOT,
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -70,23 +63,22 @@ fn parse_args(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-    parse_raw_call_args_for_test(&mut tokens, &context, &mut type_interner, &mut string_table)
+    parse_raw_call_args_for_test(
+        &mut tokens,
+        &context,
+        &mut type_interner,
+        &mut string_table,
+        &mut path_fork,
+    )
         .expect("call arguments should parse")
 }
 
 fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Vec<CallArgument> {
     let mut string_table = StringTable::new();
-    let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
-        source,
-        &file_path,
-        TokenizerEntryMode::SourceFile,
-        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let mut tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
 
     while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
@@ -95,8 +87,8 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
-        InternedPath::new(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        PathId::ROOT,
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -123,6 +115,7 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         &mut string_table,
         &expectations,
         super::CallArgumentSyntax::Supported { callee_name: None },
+        &mut path_fork,
     )
     .expect("call arguments should parse")
 }
@@ -138,6 +131,7 @@ fn parse_raw_call_args_for_test(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     super::parse_call_arguments_inner(
         token_stream,
@@ -147,22 +141,16 @@ fn parse_raw_call_args_for_test(
         super::CallArgumentSyntaxContext::Ordinary,
         super::CallArgumentSyntax::Supported { callee_name: None },
         None,
+        path_fork,
     )
 }
 
 fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
-    let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
-        source,
-        &file_path,
-        TokenizerEntryMode::SourceFile,
-        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let mut tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
 
     while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
@@ -171,8 +159,8 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
-        InternedPath::new(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        PathId::ROOT,
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -182,7 +170,13 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     let error =
-        parse_raw_call_args_for_test(&mut tokens, &context, &mut type_interner, &mut string_table)
+        parse_raw_call_args_for_test(
+            &mut tokens,
+            &context,
+            &mut type_interner,
+            &mut string_table,
+            &mut path_fork,
+        )
             .expect_err("call arguments should fail");
     match error {
         ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
@@ -280,17 +274,10 @@ fn retains_parser_selected_parameter_slots_for_named_and_positional_arguments() 
 #[test]
 fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let mut string_table = StringTable::new();
-    let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
-        "call(1, third = 3)",
-        &file_path,
-        TokenizerEntryMode::SourceFile,
-        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let mut tokens = tokenize("call(1, third = 3)", file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
 
     while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
@@ -299,8 +286,8 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
-        InternedPath::new(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        PathId::ROOT,
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -341,6 +328,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         &mut string_table,
         &expectations,
         super::CallArgumentSyntax::Supported { callee_name: None },
+        &mut path_fork,
     )
     .expect("call arguments should parse");
 
@@ -355,6 +343,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             string_table: &mut string_table,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
+            path_fork: &path_fork,
         },
     )
     .unwrap_or_else(|_| panic!("retained slots should resolve without rerouting"));

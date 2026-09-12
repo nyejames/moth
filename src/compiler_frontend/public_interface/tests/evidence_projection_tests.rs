@@ -39,7 +39,7 @@ use crate::compiler_frontend::folded_value::FoldedValueGenericParameterResolver;
 use crate::compiler_frontend::semantic_identity::{
     OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, ResolvedTraitReturn,
@@ -114,7 +114,7 @@ fn canonical_evidence(
         kind: TraitEvidenceKind::Canonical,
         target_type_id,
         trait_id,
-        source_file: InternedPath::new(),
+        source_file: PathId::ROOT,
         declaration_span: None,
         requirements,
     }
@@ -126,7 +126,7 @@ fn builtin_evidence(trait_id: TraitId, target_type_id: TypeId) -> TraitEvidenceD
         kind: TraitEvidenceKind::Builtin,
         target_type_id,
         trait_id,
-        source_file: InternedPath::new(),
+        source_file: PathId::ROOT,
         declaration_span: None,
         requirements: vec![],
     }
@@ -142,13 +142,13 @@ fn builtin_evidence(trait_id: TraitId, target_type_id: TypeId) -> TraitEvidenceD
 /// method origins directly as finalized test inputs and never builds a `ReceiverMethodCatalog`;
 /// the production projection under test only consumes those origins.
 fn declarations_with_receiver_methods(
-    entries: &[(InternedPath, ReceiverKey)],
+    entries: &[(PathId, ReceiverKey)],
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
 ) -> Vec<PublicDeclarationRecord> {
-    let mut by_receiver: FxHashMap<&InternedPath, Vec<PublicReceiverMethodSemantics>> =
+    let mut by_receiver: FxHashMap<&PathId, Vec<PublicReceiverMethodSemantics>> =
         FxHashMap::default();
-    let mut by_receiver_name: FxHashMap<&InternedPath, String> = FxHashMap::default();
+    let mut by_receiver_name: FxHashMap<&PathId, String> = FxHashMap::default();
     for (function_path, receiver) in entries {
         let receiver_path = match receiver {
             ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => path,
@@ -156,19 +156,13 @@ fn declarations_with_receiver_methods(
                 panic!("test helper only supports nominal receivers")
             }
         };
-        let method_name = function_path
-            .name_str(string_table)
-            .expect("test method path must have a defining name")
-            .to_owned();
+        let method_name = format!("{function_path:?}");
         let receiver_origin = type_environment
             .nominal_id_for_path(receiver_path)
             .map(|_| {
                 OriginTypeId::new(
                     module_origin(),
-                    receiver_path
-                        .name_str(string_table)
-                        .expect("receiver path has defining name")
-                        .to_owned(),
+                    format!("{receiver_path:?}"),
                     match receiver {
                         ReceiverKey::Struct(_) => OriginTypeCategory::Struct,
                         ReceiverKey::Choice(_) => OriginTypeCategory::Choice,
@@ -189,10 +183,7 @@ fn declarations_with_receiver_methods(
                 returns: vec![],
                 error_return: None,
             });
-        by_receiver_name.insert(
-            receiver_path,
-            receiver_path.name_str(string_table).unwrap().to_owned(),
-        );
+        by_receiver_name.insert(receiver_path, format!("{receiver_path:?}"));
     }
 
     by_receiver
@@ -235,8 +226,8 @@ fn project_evidence(
     trait_environment: &TraitEnvironment,
     trait_evidence_environment: &TraitEvidenceEnvironment,
     declarations: &[PublicDeclarationRecord],
-    nominal_origins: &FxHashMap<InternedPath, OriginTypeId>,
-    trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    nominal_origins: &FxHashMap<PathId, OriginTypeId>,
+    trait_origins: &FxHashMap<PathId, OriginTraitId>,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
 ) -> Result<Vec<PublicEvidenceRecord>, CompilerError> {
@@ -246,6 +237,7 @@ fn project_evidence(
     let projection_context =
         CanonicalTypeProjectionContext::new(&nominal_resolver, &generic_resolver, &registry);
 
+    let path_fork = PathInternerFork::empty();
     let context = EvidenceProjectionContext {
         trait_environment,
         trait_evidence_environment,
@@ -253,6 +245,7 @@ fn project_evidence(
         public_source_trait_origins: trait_origins,
         type_environment,
         string_table,
+        path_fork: &path_fork,
         projection_context: &projection_context,
     };
 
@@ -271,6 +264,7 @@ fn project_label_display_evidence_with_method_origins(
     method_origins: Vec<OriginFunctionId>,
 ) -> Result<Vec<PublicEvidenceRecord>, CompilerError> {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
 
     let this_id = this_type(&mut type_environment, &mut string_table);
@@ -345,6 +339,7 @@ fn project_label_display_evidence_with_method_origins(
 #[test]
 fn evidence_identity_stable_across_local_allocations() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     // Build two identical semantic configurations with different local allocation offsets.
     // The first uses TypeId, TraitId, TraitRequirementId and TraitEvidenceId starting from
@@ -359,8 +354,8 @@ fn evidence_identity_stable_across_local_allocations() {
         TraitEnvironment,
         TraitEvidenceEnvironment,
         Vec<PublicDeclarationRecord>,
-        FxHashMap<InternedPath, OriginTypeId>,
-        FxHashMap<InternedPath, OriginTraitId>,
+        FxHashMap<PathId, OriginTypeId>,
+        FxHashMap<PathId, OriginTraitId>,
         TypeEnvironment,
     ) {
         let mut env = TypeEnvironment::new();
@@ -517,8 +512,8 @@ fn evidence_identity_stable_across_local_allocations() {
         trait_env: &TraitEnvironment,
         evidence_env: &TraitEvidenceEnvironment,
         env: &TypeEnvironment,
-        label_path: &InternedPath,
-        real_trait_canonical_path: &InternedPath,
+        label_path: &PathId,
+        real_trait_canonical_path: &PathId,
     ) -> (TypeId, TraitId, TraitRequirementId, TraitEvidenceId) {
         let label_type_id = env
             .type_id_for_nominal_id(
@@ -579,6 +574,7 @@ fn evidence_identity_stable_across_local_allocations() {
 #[test]
 fn evidence_requirement_mappings_preserve_authored_order_and_exact_receiver_origins() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
@@ -673,6 +669,7 @@ fn evidence_requirement_mappings_preserve_authored_order_and_exact_receiver_orig
 #[test]
 fn evidence_excludes_private_target_and_retains_public_target() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
@@ -759,6 +756,7 @@ fn evidence_excludes_private_target_and_retains_public_target() {
 #[test]
 fn evidence_excludes_private_source_trait() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
@@ -819,6 +817,7 @@ fn evidence_excludes_private_source_trait() {
 #[test]
 fn evidence_excludes_builtin_from_direct_module_draft() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let (_, target_type_id) =
@@ -867,6 +866,7 @@ fn evidence_excludes_builtin_from_direct_module_draft() {
 #[test]
 fn evidence_retains_source_canonical_core_trait_evidence() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let (_, label_type_id) =
@@ -949,6 +949,7 @@ fn evidence_retains_source_canonical_core_trait_evidence() {
 #[test]
 fn evidence_rejects_duplicate_stable_keys() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
@@ -1022,6 +1023,7 @@ fn evidence_rejects_core_trait_without_classifier() {
     // compiler metadata. The projection must reject it as a `CompilerError` rather than
     // silently fall through to source-path visibility.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
@@ -1101,6 +1103,7 @@ fn evidence_rejects_core_trait_without_classifier() {
 #[test]
 fn evidence_rejects_requirement_count_mismatch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
@@ -1230,6 +1233,7 @@ fn evidence_rejects_duplicate_public_method_match() {
 #[test]
 fn evidence_ownership_is_source_canonical_for_direct_drafts() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);

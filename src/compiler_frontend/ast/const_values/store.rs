@@ -29,7 +29,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::PublicConstTemplate;
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -60,7 +60,7 @@ impl ConstValueId {
 /// joins a module constant by its exact defining `InternedPath`, so the path is the row key.
 #[derive(Clone, Debug)]
 struct ConstValueRow {
-    path: InternedPath,
+    path: PathId,
     value: ConstValueId,
 }
 
@@ -137,7 +137,7 @@ pub(crate) struct ConstValueMetadata {
 /// metadata where they are available.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstValueField {
-    pub(crate) name: InternedPath,
+    pub(crate) name: PathId,
     pub(crate) value: ConstValueId,
 }
 
@@ -184,7 +184,7 @@ pub(crate) enum ConstValuePayload {
     Collection(Vec<ConstValueId>),
     Record(Vec<ConstValueField>),
     Choice {
-        nominal_path: InternedPath,
+        nominal_path: PathId,
         tag: usize,
         fields: Vec<ConstValueField>,
     },
@@ -221,7 +221,7 @@ pub(crate) enum ConstValueVisit<'a, T> {
     Collection(Vec<T>),
     Record(Vec<ConstValueFieldVisit<'a, T>>),
     Choice {
-        nominal_path: &'a InternedPath,
+        nominal_path: &'a PathId,
         tag: usize,
         fields: Vec<ConstValueFieldVisit<'a, T>>,
     },
@@ -240,7 +240,7 @@ pub(crate) enum ConstValueVisit<'a, T> {
 
 /// One module-constant row, borrowed together with the metadata it is guaranteed to have.
 pub(crate) struct ConstValueRowView<'a> {
-    pub(crate) path: &'a InternedPath,
+    pub(crate) path: &'a PathId,
     pub(crate) id: ConstValueId,
     pub(crate) metadata: &'a ConstValueMetadata,
 }
@@ -250,7 +250,7 @@ pub(crate) struct ConstValueRowView<'a> {
 /// WHAT: pairs the authored field name with the value's store metadata `TypeId` so public
 /// projection can project each field's canonical identity without a second lookup.
 pub(crate) struct ConstValueFieldVisit<'a, T> {
-    pub(crate) name: &'a InternedPath,
+    pub(crate) name: &'a PathId,
     pub(crate) type_id: TypeId,
     pub(crate) value: T,
 }
@@ -260,7 +260,7 @@ pub(crate) struct ConstValueFieldVisit<'a, T> {
 pub(crate) struct ConstValueStore {
     values: Vec<ConstValue>,
     rows: Vec<ConstValueRow>,
-    values_by_path: FxHashMap<InternedPath, ConstValueId>,
+    values_by_path: FxHashMap<PathId, ConstValueId>,
 }
 
 impl ConstValueStore {
@@ -274,7 +274,7 @@ impl ConstValueStore {
         resolved_module_constants: &ResolvedConstantSet,
         type_environment: &TypeEnvironment,
         template_builder: &mut impl FnMut(
-            Option<&InternedPath>,
+            Option<&PathId>,
             &crate::compiler_frontend::ast::templates::template::Template,
         ) -> Result<ConstTemplateValue, ConstValueStoreError>,
     ) -> Result<Self, ConstValueStoreError> {
@@ -342,7 +342,7 @@ impl ConstValueStore {
         declaration: &Declaration,
         type_environment: &TypeEnvironment,
         template_builder: &mut impl FnMut(
-            Option<&InternedPath>,
+            Option<&PathId>,
             &Template,
         ) -> Result<ConstTemplateValue, ConstValueStoreError>,
     ) -> Result<(), ConstValueStoreError> {
@@ -392,25 +392,20 @@ impl ConstValueStore {
 
     fn insert_record_fields(
         &mut self,
-
         fields: &[Declaration],
         type_environment: &TypeEnvironment,
         template_builder: &mut impl FnMut(
-            Option<&InternedPath>,
+            Option<&PathId>,
             &crate::compiler_frontend::ast::templates::template::Template,
         ) -> Result<ConstTemplateValue, ConstValueStoreError>,
     ) -> Result<Vec<ConstValueField>, ConstValueStoreError> {
-        let mut field_index_by_name: FxHashMap<StringId, usize> = FxHashMap::default();
+        let mut field_index_by_name: FxHashMap<PathId, usize> = FxHashMap::default();
         let mut stored_fields = Vec::with_capacity(fields.len());
 
         for field in fields {
             let value =
                 self.insert_expression(&field.value, None, type_environment, template_builder)?;
-            let name = field.id.name().ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "ConstValueStore record field declaration has no interned field name.",
-                )
-            })?;
+            let name = field.id;
             if field_index_by_name
                 .insert(name, stored_fields.len())
                 .is_some()
@@ -433,10 +428,10 @@ impl ConstValueStore {
     fn insert_expression(
         &mut self,
         expression: &Expression,
-        defining_path: Option<&InternedPath>,
+        defining_path: Option<&PathId>,
         type_environment: &TypeEnvironment,
         template_builder: &mut impl FnMut(
-            Option<&InternedPath>,
+            Option<&PathId>,
             &Template,
         ) -> Result<ConstTemplateValue, ConstValueStoreError>,
     ) -> Result<ConstValueId, ConstValueStoreError> {
@@ -678,14 +673,14 @@ impl ConstValueStore {
         self.value(id).map(|value| &value.payload)
     }
 
-    pub(crate) fn value_for_path(&self, path: &InternedPath) -> Option<ConstValueId> {
+    pub(crate) fn value_for_path(&self, path: &PathId) -> Option<ConstValueId> {
         self.values_by_path.get(path).copied()
     }
 
     /// Every path binding in the store, including body-local const records.
     pub(crate) fn path_value_bindings(
         &self,
-    ) -> impl Iterator<Item = (&InternedPath, ConstValueId)> {
+    ) -> impl Iterator<Item = (&PathId, ConstValueId)> {
         self.values_by_path.iter().map(|(path, id)| (path, *id))
     }
 
@@ -705,18 +700,23 @@ impl ConstValueStore {
         })
     }
 
-    pub(crate) fn module_constant_paths(&self) -> impl Iterator<Item = &InternedPath> {
+    pub(crate) fn module_constant_paths(&self) -> impl Iterator<Item = &PathId> {
         self.rows.iter().map(|row| &row.path)
     }
 
-    pub(crate) fn field_value(&self, id: ConstValueId, field: StringId) -> Option<ConstValueId> {
+    pub(crate) fn field_value(
+        &self,
+        id: ConstValueId,
+        field: StringId,
+        path_fork: &PathInternerFork,
+    ) -> Option<ConstValueId> {
         let fields = match self.payload(id)? {
             ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => fields,
             _ => return None,
         };
         fields
             .iter()
-            .find(|entry| entry.name.name() == Some(field))
+            .find(|entry| path_fork.component(entry.name) == Some(field))
             .map(|entry| entry.value)
     }
 

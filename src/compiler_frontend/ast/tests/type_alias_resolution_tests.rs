@@ -11,14 +11,20 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeConstructor, TypeConstructor, TypeId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 
-fn page_path(name: &str, string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str("@page.moth", string_table).append(string_table.intern(name))
+fn page_path(name: &str, string_table: &mut StringTable) -> PathId {
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork
+        .try_intern_portable_path("@page.moth", string_table)
+        .expect("test path fits");
+    path_fork
+        .try_intern_child(scope, string_table.intern(name))
+        .expect("test path fits")
 }
 
 fn nominal_type_id(ast: &Ast, string_table: &mut StringTable, name: &str) -> TypeId {
@@ -34,10 +40,11 @@ fn field_type_id(
     owner: TypeId,
     field_name: &str,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> TypeId {
     let name = string_table.intern(field_name);
     ast.type_environment
-        .field_for(owner, name)
+        .field_for(owner, name, path_fork)
         .map(|field| field.type_id)
         .unwrap_or_else(|| panic!("{field_name} should be a registered field"))
 }
@@ -51,10 +58,10 @@ Task = |
     id TaskId,
 |
 "#;
-    let (ast, mut string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
     let task_type_id = nominal_type_id(&ast, &mut string_table, "Task");
     assert_eq!(
-        field_type_id(&ast, task_type_id, "id", &mut string_table),
+        field_type_id(&ast, task_type_id, "id", &mut string_table, &path_fork),
         ast.type_environment.builtins().int
     );
 }
@@ -76,16 +83,17 @@ Holder = |
     maybe MaybeTask,
 |
 "#;
-    let (ast, mut string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
     let task_type_id = nominal_type_id(&ast, &mut string_table, "Task");
     let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder");
 
     assert_eq!(
-        field_type_id(&ast, task_type_id, "id", &mut string_table),
+        field_type_id(&ast, task_type_id, "id", &mut string_table, &path_fork),
         ast.type_environment.builtins().int
     );
 
-    let items_type_id = field_type_id(&ast, holder_type_id, "items", &mut string_table);
+    let items_type_id =
+        field_type_id(&ast, holder_type_id, "items", &mut string_table, &path_fork);
     assert_eq!(
         ast.type_environment
             .collection_shape(items_type_id)
@@ -95,7 +103,8 @@ Holder = |
         "collection alias element must keep the local nominal identity of Task"
     );
 
-    let maybe_type_id = field_type_id(&ast, holder_type_id, "maybe", &mut string_table);
+    let maybe_type_id =
+        field_type_id(&ast, holder_type_id, "maybe", &mut string_table, &path_fork);
     assert_eq!(
         ast.type_environment.option_inner_type(maybe_type_id),
         Some(task_type_id),
@@ -117,7 +126,7 @@ Holder = |
     level P,
 |
 "#;
-    let (ast, mut string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
     let priority_type_id = nominal_type_id(&ast, &mut string_table, "Priority");
     let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder");
 
@@ -128,7 +137,13 @@ Holder = |
         "Priority should be registered as a choice"
     );
     assert_eq!(
-        field_type_id(&ast, holder_type_id, "level", &mut string_table),
+        field_type_id(
+            &ast,
+            holder_type_id,
+            "level",
+            &mut string_table,
+            &path_fork,
+        ),
         priority_type_id,
         "choice alias must keep the local nominal identity of Priority"
     );
@@ -148,12 +163,18 @@ Holder = |
     item Chain,
 |
 "#;
-    let (ast, mut string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
     let item_type_id = nominal_type_id(&ast, &mut string_table, "Item");
     let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder");
 
     assert_eq!(
-        field_type_id(&ast, holder_type_id, "item", &mut string_table),
+        field_type_id(
+            &ast,
+            holder_type_id,
+            "item",
+            &mut string_table,
+            &path_fork,
+        ),
         item_type_id,
         "alias chain must resolve to the final local nominal identity"
     );
@@ -171,9 +192,10 @@ Holder = |
     names MoreNames,
 |
 "#;
-    let (ast, mut string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
     let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder");
-    let names_type_id = field_type_id(&ast, holder_type_id, "names", &mut string_table);
+    let names_type_id =
+        field_type_id(&ast, holder_type_id, "names", &mut string_table, &path_fork);
 
     // The member uses an alias that names a constant-dependent alias, so both aliases must be
     // published from the constant walk before this shell is built. A provisional target would

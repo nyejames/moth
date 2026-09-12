@@ -58,7 +58,7 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -85,7 +85,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
     pub(in crate::compiler_frontend::ast) warnings: Vec<CompilerDiagnostic>,
     /// Folded top-level const template result records keyed by source file.
     pub(in crate::compiler_frontend::ast) const_templates_by_path:
-        FxHashMap<InternedPath, FoldedConstTemplateResult>,
+        FxHashMap<PathId, FoldedConstTemplateResult>,
     /// Concrete generic function instances emitted while lowering visible calls.
     pub(in crate::compiler_frontend::ast) generic_instance_count: usize,
     /// Imported generic calls are inferred here but materialised by the generated-function
@@ -105,11 +105,11 @@ mod capacity_budget_tests;
 /// [`ScopeContext`] that is identical across function, start, and const-template emission.
 struct BaseScopeContextInput<'scope> {
     kind: ContextKind,
-    scope: InternedPath,
+    scope: PathId,
     top_level_declarations: &'scope Rc<TopLevelDeclarationTable>,
     visibility: Arc<FileVisibility>,
     declaring_file_id: SourceId,
-    source_file_scope: InternedPath,
+    source_file_scope: PathId,
     scope_frame_capacity: usize,
 }
 
@@ -145,30 +145,36 @@ impl ScopeFrameCapacityBudget {
     }
 }
 
-/// Rebase each parameter's [`InternedPath`] from a bare name to a fully qualified path
+/// Rebase each parameter's [`PathId`] from a bare name to a fully qualified path
 /// under the given function path.
 ///
 /// WHAT: ensures parameter symbols are module-unique before body parsing.
-/// WHY: AST symbol IDs are full [`InternedPath`] values, not local-scope names.
-fn rebase_signature_parameters(signature: &mut FunctionSignature, function_path: &InternedPath) {
+/// WHY: AST symbol IDs are complete [`PathId`] values, not local-scope names.
+fn rebase_signature_parameters(
+    signature: &mut FunctionSignature,
+    function_path: PathId,
+    path_fork: &mut PathInternerFork,
+) {
     for parameter in &mut signature.parameters {
-        let Some(parameter_name) = parameter.id.name() else {
+        let Some(parameter_name) = path_fork.component(parameter.id) else {
             continue;
         };
 
-        let old_parameter_id = parameter.id.clone();
-        parameter.id = function_path.append(parameter_name);
+        let old_parameter_id = parameter.id;
+        parameter.id = path_fork
+            .try_intern_child(function_path, parameter_name)
+            .expect("path table exhausted while rebasing generic signature parameter");
 
         if let Some(source) = &mut parameter.value.reactive_source
             && source.path == old_parameter_id
         {
-            source.path = parameter.id.clone();
+            source.path = parameter.id;
         }
 
         if let Some(metadata) = &mut parameter.value.reactive_template {
             for dependency in &mut metadata.template_value_parameters {
                 if dependency.parameter == old_parameter_id {
-                    dependency.parameter = parameter.id.clone();
+                    dependency.parameter = parameter.id;
                 }
             }
         }
@@ -196,13 +202,13 @@ fn count_root_scope_arena_consumers(headers: &[Header]) -> usize {
         })
         .count()
 }
-
 pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'environment> {
-    context: &'context AstPhaseContext<'services>,
-    environment: &'environment mut AstModuleEnvironment,
     ast: Vec<AstNode>,
     warnings: Vec<CompilerDiagnostic>,
-    const_templates_by_path: FxHashMap<InternedPath, FoldedConstTemplateResult>,
+    context: &'context AstPhaseContext<'services>,
+    path_fork: &'services mut PathInternerFork,
+    environment: &'environment mut AstModuleEnvironment,
+    const_templates_by_path: FxHashMap<PathId, FoldedConstTemplateResult>,
     compatibility_cache: TypeCompatibilityCache,
     generic_function_instantiation_requests: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
     generic_function_instances_by_key:
@@ -217,10 +223,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context: &'context AstPhaseContext<'services>,
         environment: &'environment mut AstModuleEnvironment,
         header_count: usize,
+        path_fork: &'services mut PathInternerFork,
     ) -> Self {
         let warnings = environment.lookups.warnings.clone();
         Self {
             context,
+            path_fork,
             environment,
             ast: Vec::with_capacity(header_count * settings::TOKEN_TO_NODE_RATIO),
             warnings,
@@ -528,7 +536,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &self,
         parameter_list_id: GenericParameterListId,
         substitutions: Option<FxHashMap<GenericParameterId, TypeId>>,
-        source_parameter_by_rebased_path: FxHashMap<InternedPath, GenericParameterId>,
+        source_parameter_by_rebased_path: FxHashMap<PathId, GenericParameterId>,
         string_table: &StringTable,
     ) -> Result<ActiveGenericTypeContext, CompilerMessages> {
         let Some(parameter_list) = self
@@ -555,7 +563,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &self,
         source_signature: &FunctionSignature,
         emitted_signature: &FunctionSignature,
-    ) -> FxHashMap<InternedPath, GenericParameterId> {
+    ) -> FxHashMap<PathId, GenericParameterId> {
         let mut origins = FxHashMap::default();
 
         for (source_parameter, emitted_parameter) in source_signature
@@ -571,7 +579,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 continue;
             };
 
-            origins.insert(emitted_parameter.id.clone(), parameter.id);
+            origins.insert(emitted_parameter.id, parameter.id);
         }
 
         origins
@@ -623,7 +631,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .any(|active_key| active_key == &request.key)
         {
             let mut diagnostic = recursive_generic_function_instantiation(
-                request.key.function_path.name(),
+                self.path_fork.component(request.key.function_path),
                 request.call_span,
             );
             if request.call_span.is_some()
@@ -687,7 +695,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mapping,
             &mut self.environment.type_environment,
         );
-        rebase_signature_parameters(&mut signature, &request.instance_path);
+        rebase_signature_parameters(&mut signature, request.instance_path, &mut *self.path_fork);
         let generic_type_context = self.build_active_generic_type_context(
             template.generic_parameter_list_id,
             Some(mapping),
@@ -747,8 +755,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         }
         context.expected_result_type_ids = signature.success_return_type_ids();
         context.expected_error_type = signature.error_return_type_id();
-        context.current_function_return_type_ids = context.expected_result_type_ids.clone();
-        context.set_local_declarations(signature.parameters.to_owned());
+        context.set_local_declarations(signature.parameters.to_owned(), &*self.path_fork);
 
         // --------------------------
         //  Parse body and materialize nested instances
@@ -765,6 +772,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut type_interner,
             &mut self.warnings,
             string_table,
+            &mut *self.path_fork,
         ) {
             Ok(body) => {
                 if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
@@ -827,7 +835,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &mut self,
         header: Header,
         visibility: Arc<FileVisibility>,
-        source_file_scope: InternedPath,
+        source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -892,8 +900,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context = context.with_active_generic_type_context(generic_type_context);
         context.expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
         context.expected_error_type = resolved_signature.signature.error_return_type_id();
-        context.current_function_return_type_ids = context.expected_result_type_ids.clone();
-        context.set_local_declarations(resolved_signature.signature.parameters.clone());
+        context.set_local_declarations(resolved_signature.signature.parameters.clone(), &*self.path_fork);
 
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
@@ -905,6 +912,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             type_interner: &mut type_interner,
             warnings: &mut self.warnings,
             string_table,
+            path_fork: &mut *self.path_fork,
         })
         .map_err(|error| self.expression_error_messages(error, string_table))?;
 
@@ -921,7 +929,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &mut self,
         header: Header,
         visibility: Arc<FileVisibility>,
-        source_file_scope: InternedPath,
+        source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -968,8 +976,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let expected_error_type = resolved_signature.signature.error_return_type_id();
         context.expected_result_type_ids = expected_result_type_ids;
         context.expected_error_type = expected_error_type;
-        context.current_function_return_type_ids = context.expected_result_type_ids.clone();
-        context.set_local_declarations(resolved_signature.signature.parameters.to_owned());
+        context.set_local_declarations(resolved_signature.signature.parameters.to_owned(), &*self.path_fork);
 
         // --------------------------
         //  Parse body and emit node
@@ -987,6 +994,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut type_interner,
             &mut self.warnings,
             string_table,
+            &mut *self.path_fork,
         );
 
         let body =
@@ -1011,7 +1019,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &mut self,
         header: Header,
         visibility: Arc<FileVisibility>,
-        source_file_scope: InternedPath,
+        source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -1041,6 +1049,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut type_interner,
             &mut self.warnings,
             string_table,
+            &mut *self.path_fork,
         );
 
         let body =
@@ -1049,9 +1058,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Synthesize implicit start signature and emit node
         // --------------------------
-        let full_name = token_stream
-            .src_path
-            .join_str(IMPLICIT_START_FUNC_NAME, string_table);
+        let full_name = self
+            .path_fork
+            .try_intern_child(
+                token_stream.src_path,
+                string_table.intern(IMPLICIT_START_FUNC_NAME),
+            )
+            .expect("path table exhausted while creating implicit start function path");
 
         // WHAT: entry start() returns Collection(StringSlice, MutableOwned),
         //       which is the Moth frontend type for Vec<String>.
@@ -1139,6 +1152,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut type_interner,
             vec![],
             string_table,
+            &mut *self.path_fork,
         );
 
         let template = template_result

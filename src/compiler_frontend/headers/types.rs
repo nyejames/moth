@@ -31,7 +31,7 @@ use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
@@ -134,7 +134,7 @@ pub struct TopLevelConstFragment {
     /// Number of runtime fragments seen before this const fragment in source order.
     /// Used by the builder to insert the const string at the correct position.
     pub runtime_insertion_index: usize,
-    pub header_path: InternedPath,
+    pub header_path: PathId,
     /// Exact authored source span of this const fragment.
     pub span: SourceSpan,
 }
@@ -296,26 +296,17 @@ pub enum LocalDeclarationOrderingHintOrigin {
 pub struct LocalDeclarationOrderingHint {
     /// The conservative referenced path: a provider spelling, a same-file spelling, or a content
     /// source's `content` constant path.
-    path: InternedPath,
+    path: PathId,
     origin: LocalDeclarationOrderingHintOrigin,
     /// The authored occurrence's path-row handle for content-source hints.
-    ///
-    /// WHAT: the dense `PathSyntaxId` of the shell occurrence that produced the hint, valid inside
-    ///       the referencing file's prepared path table.
-    ///       (referencing `SourceId`, this handle) instead of re-deriving the authored spelling, so
-    ///       a module-relative authored spelling still orders against the canonical content
-    ///       constant of a nested module.
     occurrence: Option<PathSyntaxId>,
     /// The exact authored span for a content-source occurrence.
-    ///
-    /// Synthetic content headers intentionally have deferred path tables, so Stage 3 must carry
-    /// this source-qualified span on the retained hint rather than reopening a token stream.
     occurrence_span: Option<SourceSpan>,
 }
 
 impl LocalDeclarationOrderingHint {
     /// Record a same-file path that must move with final source identity.
-    pub fn source_owned(path: InternedPath) -> Self {
+    pub fn source_owned(path: PathId) -> Self {
         Self {
             path,
             origin: LocalDeclarationOrderingHintOrigin::SourceOwned,
@@ -325,7 +316,7 @@ impl LocalDeclarationOrderingHint {
     }
 
     /// Record a provider spelling that deliberately has no dependency on this source prefix.
-    pub fn provider_spelling(path: InternedPath) -> Self {
+    pub fn provider_spelling(path: PathId) -> Self {
         Self {
             path,
             origin: LocalDeclarationOrderingHintOrigin::ProviderSpelling,
@@ -335,7 +326,7 @@ impl LocalDeclarationOrderingHint {
     }
 
     /// Record a namespace-qualified type spelling for direct visibility resolution.
-    pub fn qualified_type_spelling(path: InternedPath) -> Self {
+    pub fn qualified_type_spelling(path: PathId) -> Self {
         Self {
             path,
             origin: LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling,
@@ -345,10 +336,7 @@ impl LocalDeclarationOrderingHint {
     }
 
     /// Record an ordering fact against a content source's synthetic `content` constant.
-    ///
-    /// `occurrence` is the authored shell occurrence's path-row handle; Stage 3 resolves the
-    /// exact graph key through the Stage 0 resolved-reference table.
-    pub fn content_source(path: InternedPath, occurrence: PathSyntaxId) -> Self {
+    pub fn content_source(path: PathId, occurrence: PathSyntaxId) -> Self {
         Self {
             path,
             origin: LocalDeclarationOrderingHintOrigin::ContentSource,
@@ -374,31 +362,32 @@ impl LocalDeclarationOrderingHint {
     }
 
     /// The conservative referenced path this hint records.
-    pub fn path(&self) -> &InternedPath {
-        &self.path
+    pub fn path(&self) -> PathId {
+        self.path
     }
 
     pub fn origin(&self) -> LocalDeclarationOrderingHintOrigin {
         self.origin
     }
 
-    /// Remap the interned path into a merged string table.
-    ///
-    /// WHY: per-file frontend preparation uses local string tables; merging them into the module
-    ///      table requires shifting the `InternedPath` so later stages resolve the hint through the
-    ///      global table.
-    // Called when merging per-file frontend outputs into the module-wide compilation.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.path.remap_string_ids(remap);
+    pub fn remap_string_ids(&mut self, _remap: &StringIdRemap) {}
+
+    /// Remap the complete path identity after its path fork merges.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.path = remap.get(self.path);
     }
 
     fn validate_required_source_prefix(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
-        if self.origin == LocalDeclarationOrderingHintOrigin::SourceOwned {
-            self.path
-                .try_rebind_required_prefix(provisional_source_file, provisional_source_file)?;
+        if self.origin == LocalDeclarationOrderingHintOrigin::SourceOwned
+            && !path_fork.starts_with(self.path, provisional_source_file)
+        {
+            return Err(CompilerError::compiler_error(
+                "source-owned retained path is missing its provisional source prefix",
+            ));
         }
         Ok(())
     }
@@ -406,16 +395,17 @@ impl LocalDeclarationOrderingHint {
     fn rebind_source_identity(
         self,
         final_file_id: SourceId,
-        provisional_source_file: &InternedPath,
-        logical_path: &InternedPath,
+        provisional_source_file: PathId,
+        logical_path: PathId,
+        path_fork: &mut PathInternerFork,
     ) -> Result<Self, CompilerError> {
         let path = match self.origin {
-            LocalDeclarationOrderingHintOrigin::SourceOwned => self
-                .path
-                .try_rebind_required_prefix(provisional_source_file, logical_path)?,
-
-            // Provider, qualified-type and content-constant spellings never carry the referencing
-            // file's prefix, so final source identity does not rewrite them.
+            LocalDeclarationOrderingHintOrigin::SourceOwned => rebind_required_path(
+                self.path,
+                provisional_source_file,
+                logical_path,
+                path_fork,
+            )?,
             LocalDeclarationOrderingHintOrigin::ProviderSpelling
             | LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling
             | LocalDeclarationOrderingHintOrigin::ContentSource => self.path,
@@ -429,6 +419,29 @@ impl LocalDeclarationOrderingHint {
                 .map(|span| SourceSpan::new(final_file_id, span.local())),
         })
     }
+}
+
+fn rebind_required_path(
+    path: PathId,
+    old_prefix: PathId,
+    new_prefix: PathId,
+    path_fork: &mut PathInternerFork,
+) -> Result<PathId, CompilerError> {
+    if !path_fork.starts_with(path, old_prefix) {
+        return Err(CompilerError::compiler_error(
+            "source-owned retained path is missing its provisional source prefix",
+        ));
+    }
+    let mut scratch = Vec::new();
+    path_fork.resolve_components(path, &mut scratch);
+    let old_depth = path_fork.depth(old_prefix) as usize;
+    let mut rebound = new_prefix;
+    for component in scratch.iter().skip(old_depth) {
+        rebound = path_fork.try_intern_child(rebound, *component).ok_or_else(|| {
+            CompilerError::compiler_error("path table exhausted while rebinding source-owned path")
+        })?;
+    }
+    Ok(rebound)
 }
 
 #[derive(Clone, Debug)]
@@ -462,7 +475,7 @@ pub struct Header {
     // Token Body (for functions / templates) and info about canonical_os_path
     pub tokens: FileTokens,
 
-    pub source_file: InternedPath,
+    pub source_file: PathId,
     /// Bare fixed-capacity constant references discovered in type annotations on this header.
     ///
     /// WHAT: value-namespace references from fixed-collection capacity annotations.
@@ -478,29 +491,39 @@ impl Display for Header {
 }
 
 impl TopLevelConstFragment {
-    /// Remap every interned string owned by this fragment into the merged global string table.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.header_path.remap_string_ids(remap);
+    /// Remap the complete path identity after its path fork merges.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.header_path = remap.get(self.header_path);
     }
+
+    pub fn remap_string_ids(&mut self, _remap: &StringIdRemap) {}
 
     fn validate_required_source_prefix(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
-        self.header_path
-            .try_rebind_required_prefix(provisional_source_file, provisional_source_file)?;
+        if !path_fork.starts_with(self.header_path, provisional_source_file) {
+            return Err(CompilerError::compiler_error(
+                "source-owned retained path is missing its provisional source prefix",
+            ));
+        }
         Ok(())
     }
 
     pub fn rebind_source_identity(
         &mut self,
         final_file_id: SourceId,
-        provisional_source_file: &InternedPath,
-        logical_path: &InternedPath,
+        provisional_source_file: PathId,
+        logical_path: PathId,
+        path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerError> {
-        self.header_path = self
-            .header_path
-            .try_rebind_required_prefix(provisional_source_file, logical_path)?;
+        self.header_path = rebind_required_path(
+            self.header_path,
+            provisional_source_file,
+            logical_path,
+            path_fork,
+        )?;
         self.span = SourceSpan::new(final_file_id, self.span.local());
         Ok(())
     }
@@ -513,9 +536,14 @@ impl RetainedDependencyClause {
         self.binding.remap_string_ids(remap);
     }
 
+    /// Remap the retained dependency complete-path identity after its path fork merges.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.dependency.remap_path_ids(remap);
+    }
+
     /// Commit the source identity after `FileFrontendPrepareOutput` has preflighted every
     /// required source-owned retained path.
-    pub fn commit_source_rebinding(&mut self, file_id: SourceId, logical_path: &InternedPath) {
+    pub fn commit_source_rebinding(&mut self, file_id: SourceId, logical_path: PathId) {
         self.dependency
             .commit_source_rebinding(file_id, logical_path);
         self.binding.rebind_source_identity(file_id);
@@ -617,33 +645,54 @@ impl HeaderKind {
         }
     }
 
+    /// Remap nested declaration member path identities after the path fork merges.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        match self {
+            HeaderKind::Function { signature, .. } => signature.remap_path_ids(remap),
+            HeaderKind::Struct { fields, .. } => {
+                for field in fields {
+                    field.remap_path_ids(remap);
+                }
+            }
+            HeaderKind::Choice { variants, .. } => {
+                for variant in variants {
+                    variant.remap_path_ids(remap);
+                }
+            }
+            HeaderKind::Trait { declaration } => declaration.remap_path_ids(remap),
+            HeaderKind::Constant { .. }
+            | HeaderKind::TypeAlias { .. }
+            | HeaderKind::ConstTemplate { .. }
+            | HeaderKind::StartFunction
+            | HeaderKind::TraitConformance { .. }
+            | HeaderKind::TraitIncompatibility { .. } => {}
+        }
+    }
+
     fn validate_required_source_prefixes(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
         match self {
             HeaderKind::Function { signature, .. } => {
-                signature.validate_required_source_prefixes(provisional_source_file)
+                signature.validate_required_source_prefixes(provisional_source_file, path_fork)
             }
-
             HeaderKind::Struct { fields, .. } => {
                 for field in fields {
-                    field.validate_required_source_prefix(provisional_source_file)?;
+                    field.validate_required_source_prefix(provisional_source_file, path_fork)?;
                 }
                 Ok(())
             }
-
             HeaderKind::Choice { variants, .. } => {
                 for variant in variants {
-                    variant.validate_required_source_prefixes(provisional_source_file)?;
+                    variant.validate_required_source_prefixes(provisional_source_file, path_fork)?;
                 }
                 Ok(())
             }
-
             HeaderKind::Trait { declaration } => {
-                declaration.validate_required_source_prefixes(provisional_source_file)
+                declaration.validate_required_source_prefixes(provisional_source_file, path_fork)
             }
-
             HeaderKind::Constant { .. }
             | HeaderKind::TypeAlias { .. }
             | HeaderKind::ConstTemplate { .. }
@@ -656,8 +705,9 @@ impl HeaderKind {
     pub fn rebind_source_identity(
         &mut self,
         file_id: SourceId,
-        logical_path: &InternedPath,
-        provisional_source_file: &InternedPath,
+        logical_path: PathId,
+        provisional_source_file: PathId,
+        path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerError> {
         match self {
             HeaderKind::Function {
@@ -670,6 +720,7 @@ impl HeaderKind {
                     file_id,
                     provisional_source_file,
                     logical_path,
+                    path_fork,
                 )?;
             }
 
@@ -688,6 +739,7 @@ impl HeaderKind {
                         file_id,
                         provisional_source_file,
                         logical_path,
+                        path_fork,
                     )?;
                 }
             }
@@ -703,6 +755,7 @@ impl HeaderKind {
                         file_id,
                         provisional_source_file,
                         logical_path,
+                        path_fork,
                     )?;
                 }
             }
@@ -722,6 +775,7 @@ impl HeaderKind {
                     file_id,
                     provisional_source_file,
                     logical_path,
+                    path_fork,
                 )?;
             }
 
@@ -810,12 +864,16 @@ fn rebind_parsed_type_ref_source_identity(type_ref: &mut ParsedTypeRef, file_id:
 fn rebind_signature_member_source_identity(
     member: &mut SignatureMemberSyntax,
     file_id: SourceId,
-    provisional_source_file: &InternedPath,
-    logical_path: &InternedPath,
+    provisional_source_file: PathId,
+    logical_path: PathId,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
-    member.id = member
-        .id
-        .try_rebind_required_prefix(provisional_source_file, logical_path)?;
+    member.id = rebind_required_path(
+        member.id,
+        provisional_source_file,
+        logical_path,
+        path_fork,
+    )?;
     rebind_source_span(&mut member.span, file_id);
     rebind_parsed_type_ref_source_identity(&mut member.type_annotation, file_id);
     Ok(())
@@ -824,8 +882,9 @@ fn rebind_signature_member_source_identity(
 fn rebind_function_signature_source_identity(
     signature: &mut FunctionSignatureSyntax,
     file_id: SourceId,
-    provisional_source_file: &InternedPath,
-    logical_path: &InternedPath,
+    provisional_source_file: PathId,
+    logical_path: PathId,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
     for parameter in &mut signature.parameters {
         rebind_signature_member_source_identity(
@@ -833,6 +892,7 @@ fn rebind_function_signature_source_identity(
             file_id,
             provisional_source_file,
             logical_path,
+            path_fork,
         )?;
     }
     for return_slot in &mut signature.returns {
@@ -844,8 +904,9 @@ fn rebind_function_signature_source_identity(
 fn rebind_trait_declaration_source_identity(
     declaration: &mut TraitDeclarationSyntax,
     file_id: SourceId,
-    provisional_source_file: &InternedPath,
-    logical_path: &InternedPath,
+    provisional_source_file: PathId,
+    logical_path: PathId,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
     declaration.name_span = SourceSpan::new(file_id, declaration.name_span.local());
     declaration.span = SourceSpan::new(file_id, declaration.span.local());
@@ -857,6 +918,7 @@ fn rebind_trait_declaration_source_identity(
             file_id,
             provisional_source_file,
             logical_path,
+            path_fork,
         )?;
     }
     Ok(())
@@ -865,8 +927,9 @@ fn rebind_trait_declaration_source_identity(
 fn rebind_choice_variant_source_identity(
     variant: &mut ChoiceVariantSyntax,
     file_id: SourceId,
-    provisional_source_file: &InternedPath,
-    logical_path: &InternedPath,
+    provisional_source_file: PathId,
+    logical_path: PathId,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
     rebind_source_span(&mut variant.span, file_id);
     if let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
@@ -879,6 +942,7 @@ fn rebind_choice_variant_source_identity(
                 file_id,
                 provisional_source_file,
                 logical_path,
+                path_fork,
             )?;
         }
     }
@@ -898,58 +962,76 @@ fn rebind_declaration_source_identity(
 
 impl Header {
     /// Remap every interned string owned by this header into the merged global string table.
-    ///
-    /// NOTE: source spans carry no interned strings and therefore require no remapping.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.kind.remap_string_ids(remap);
-
-        // Rebuild the hint set after remapping because InternedPath hash values
-        // depend on their component StringIds, which change during remapping.
-        let mut remapped_hints = HashSet::with_capacity(self.local_ordering_hints.len());
-        for mut hint in self.local_ordering_hints.drain() {
-            hint.remap_string_ids(remap);
-            remapped_hints.insert(hint);
-        }
-        self.local_ordering_hints = remapped_hints;
-
+        let hints = std::mem::take(&mut self.local_ordering_hints);
+        self.local_ordering_hints = hints
+            .into_iter()
+            .map(|mut hint| {
+                hint.remap_string_ids(remap);
+                hint
+            })
+            .collect();
         self.tokens.remap_string_ids(remap);
-        self.source_file.remap_string_ids(remap);
         for reference in &mut self.capacity_references {
             reference.remap_string_ids(remap);
         }
     }
 
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.kind.remap_path_ids(remap);
+        let hints = std::mem::take(&mut self.local_ordering_hints);
+        self.local_ordering_hints = hints
+            .into_iter()
+            .map(|mut hint| {
+                hint.remap_path_ids(remap);
+                hint
+            })
+            .collect();
+        self.tokens.remap_path_ids(remap);
+        self.source_file = remap.get(self.source_file);
+    }
+
     fn validate_required_source_prefixes(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
-        self.tokens
-            .src_path
-            .try_rebind_required_prefix(provisional_source_file, provisional_source_file)?;
+        if !path_fork.starts_with(self.tokens.src_path, provisional_source_file) {
+            return Err(CompilerError::compiler_error(
+                "source-owned retained path is missing its provisional source prefix",
+            ));
+        }
         for hint in &self.local_ordering_hints {
-            hint.validate_required_source_prefix(provisional_source_file)?;
+            hint.validate_required_source_prefix(provisional_source_file, path_fork)?;
         }
         self.kind
-            .validate_required_source_prefixes(provisional_source_file)
+            .validate_required_source_prefixes(provisional_source_file, path_fork)
     }
 
     pub fn rebind_source_identity(
         &mut self,
         file_id: SourceId,
-        logical_path: InternedPath,
+        logical_path: PathId,
         canonical_os_path: std::path::PathBuf,
+        path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerError> {
-        let provisional_source_file = self.source_file.clone();
-        self.validate_required_source_prefixes(&provisional_source_file)?;
-        self.kind
-            .rebind_source_identity(file_id, &logical_path, &provisional_source_file)?;
+        let provisional_source_file = self.source_file;
+        self.validate_required_source_prefixes(provisional_source_file, path_fork)?;
+        self.kind.rebind_source_identity(
+            file_id,
+            logical_path,
+            provisional_source_file,
+            path_fork,
+        )?;
 
         let mut rebound_hints = HashSet::with_capacity(self.local_ordering_hints.len());
         for hint in self.local_ordering_hints.drain() {
             rebound_hints.insert(hint.rebind_source_identity(
                 file_id,
-                &provisional_source_file,
-                &logical_path,
+                provisional_source_file,
+                logical_path,
+                path_fork,
             )?);
         }
         self.local_ordering_hints = rebound_hints;
@@ -957,12 +1039,14 @@ impl Header {
         if let Some(name_span) = self.name_span {
             self.name_span = Some(SourceSpan::new(file_id, name_span.local()));
         }
-        let rebound_header_path = self
-            .tokens
-            .src_path
-            .try_rebind_required_prefix(&provisional_source_file, &logical_path)?;
+        let rebound_header_path = rebind_required_path(
+            self.tokens.src_path,
+            provisional_source_file,
+            logical_path,
+            path_fork,
+        )?;
         self.tokens
-            .rebind_file_identity(logical_path.clone(), file_id, Some(canonical_os_path));
+            .rebind_file_identity(logical_path, file_id, Some(canonical_os_path));
         self.tokens.src_path = rebound_header_path;
         self.source_file = logical_path;
         Ok(())
@@ -1117,6 +1201,7 @@ impl RetainedDependencyClause {
     pub(crate) fn effective_namespace_local_name(
         &self,
         string_table: &mut StringTable,
+        path_fork: &PathInternerFork,
     ) -> Option<StringId> {
         let DependencyBindingSyntax::Namespace { alias } = &self.binding else {
             return None;
@@ -1126,7 +1211,7 @@ impl RetainedDependencyClause {
             return Some(alias.name);
         }
 
-        let provider_name = self.dependency.path.name()?;
+        let provider_name = path_fork.component(self.dependency.path)?;
         let provider_name = string_table.resolve(provider_name).to_owned();
         let stem = provider_name.strip_suffix(".js").unwrap_or(&provider_name);
         (!stem.is_empty()).then(|| string_table.intern(stem))
@@ -1224,7 +1309,13 @@ impl FileRole {
 /// WHY: explicit per-file boundaries are required before tokenization/header parsing can run
 /// in parallel; each file must be self-contained so later phases can merge/remap outputs.
 pub struct FileFrontendPrepareOutput {
-    pub source_file: InternedPath,
+    /// Complete logical identity of the prepared source file in the active path table.
+    ///
+    /// WHAT: the `PathId` interned for this file through the owning `PathInternerFork`,
+    ///      shared with its `FileTokens.src_path` and authored path rows.
+    /// WHY: tokenizer and dependency owners share one compact path domain; the
+    ///      filesystem `canonical_os_path` remains the only `PathBuf` identity for IO.
+    pub source_file: PathId,
     /// Stable source identity used by the prepared-file invariant gate to validate every header
     /// stream and retained dependency shell before module aggregation.
     pub file_id: SourceId,
@@ -1366,6 +1457,24 @@ pub struct FileFrontendPrepareError {
     pub warnings: Vec<CompilerDiagnostic>,
     pub diagnostic: CompilerDiagnostic,
 }
+impl FileFrontendPrepareError {
+    /// Remap every complete-path identity owned by this failed per-file output.
+    ///
+    /// Failed preparation keeps the same local path domain as successful output: warnings and the
+    /// primary diagnostic may carry token, dependency, or place paths. The path fork must therefore
+    /// be merged after strings and before the failure leaves the module-local preparation boundary.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if remap.is_identity() {
+            return;
+        }
+
+        for warning in &mut self.warnings {
+            warning.remap_path_ids(remap);
+        }
+        self.diagnostic.remap_path_ids(remap);
+    }
+}
+
 
 /// Per-file preparation outcome that preserves the diagnostic and infrastructure lanes.
 ///
@@ -1432,9 +1541,11 @@ impl From<CompilerError> for FileFrontendPrepareFailure {
 impl FileFrontendPrepareOutput {
     /// Remap every interned string owned by this per-file output into the merged global string table.
     ///
-    /// WHAT: remaps source file, dependency clauses, headers, const fragments, and warnings.
+    /// WHAT: remaps dependency target extensions, headers, const fragments, and warnings.
     /// WHY: per-file frontend preparation uses local string tables; merging them into the module
-    ///      table requires shifting every `StringId` and `InternedPath` in retained syntax.
+    ///      table requires shifting every `StringId` in retained syntax. Complete-path
+    ///      identities (`source_file`, dependency paths, token file identities, path rows)
+    ///      remap separately through `remap_path_ids` after the string delta merges.
     ///      stages resolve names through the global table.
     // Called when merging per-file frontend outputs into the module-wide compilation.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) -> Result<(), CompilerError> {
@@ -1443,8 +1554,6 @@ impl FileFrontendPrepareOutput {
         if remap.is_identity() {
             return Ok(());
         }
-
-        self.source_file.remap_string_ids(remap);
 
         for clause in &mut self.file_dependency_clauses {
             clause.remap_string_ids(remap);
@@ -1471,9 +1580,32 @@ impl FileFrontendPrepareOutput {
             warning.remap_string_ids(remap);
         }
 
-        // Header token streams carry only dense path handles. This is the sole traversal of the
-        // file-owned table before any header stream is allowed to share it.
-        self.path_syntax.table_mut()?.remap_string_ids(remap);
+        Ok(())
+    }
+
+    /// Remap every complete-path identity owned by this per-file output.
+    ///
+    /// WHAT: rewrites the file identity, retained dependency paths, header token file
+    ///       identities and the file-owned path table through a worker-local merge remap.
+    /// WHY: strings merge before paths; worker `StringId` components rewrite first, then
+    ///      path nodes re-intern into the module fork. Callers must invoke `remap_string_ids`
+    ///      first (when non-identity) and then this method with the corresponding path remap,
+    ///      mirroring the chunk merge order.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) -> Result<(), CompilerError> {
+        if remap.is_identity() {
+            return Ok(());
+        }
+        self.source_file = remap.get(self.source_file);
+        for clause in &mut self.file_dependency_clauses {
+            clause.remap_path_ids(remap);
+        }
+        for header in &mut self.headers {
+            header.remap_path_ids(remap);
+        }
+        for fragment in &mut self.top_level_const_fragments {
+            fragment.remap_path_ids(remap);
+        }
+        self.path_syntax.table_mut()?.remap_path_ids(remap);
         Ok(())
     }
 
@@ -1489,23 +1621,24 @@ impl FileFrontendPrepareOutput {
     pub fn rebind_source_identity(
         &mut self,
         final_file_id: SourceId,
-        final_logical_path: InternedPath,
+        final_logical_path: PathId,
         canonical_os_path: std::path::PathBuf,
+        path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerError> {
-        let provisional_source_file = self.source_file.clone();
+        let provisional_source_file = self.source_file;
         // Validate all required source-owned paths and the mutable lifecycle before any retained
         // output is changed. A failed rebinding must never leave a partially finalised file.
         self.path_syntax.table_mut()?;
-        self.validate_source_rebinding(&provisional_source_file)?;
-        self.source_file = final_logical_path.clone();
+        self.validate_source_rebinding(provisional_source_file, &*path_fork)?;
+        self.source_file = final_logical_path;
         self.file_id = final_file_id;
         self.canonical_os_path = Some(canonical_os_path.clone());
 
         for clause in &mut self.file_dependency_clauses {
-            clause.commit_source_rebinding(final_file_id, &final_logical_path);
+            clause.commit_source_rebinding(final_file_id, final_logical_path);
         }
         self.structural_file_references
-            .rebind_source_identity(final_file_id, &final_logical_path);
+            .rebind_source_identity(final_file_id, final_logical_path);
         for selection in &mut self.dependency_selections {
             selection.rebind_source_identity(final_file_id);
         }
@@ -1514,13 +1647,15 @@ impl FileFrontendPrepareOutput {
                 final_file_id,
                 final_logical_path.clone(),
                 canonical_os_path.clone(),
+                path_fork,
             )?;
         }
         for fragment in &mut self.top_level_const_fragments {
             fragment.rebind_source_identity(
                 final_file_id,
-                &provisional_source_file,
-                &final_logical_path,
+                provisional_source_file,
+                final_logical_path,
+                path_fork,
             )?;
         }
         for warning in &mut self.warnings {
@@ -1546,8 +1681,9 @@ impl FileFrontendPrepareOutput {
     pub(crate) fn freeze_path_syntax(
         &mut self,
         string_table: &StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerError> {
-        self.validate_file_invariants(string_table)?;
+        self.validate_file_invariants(string_table, &*path_fork)?;
         if matches!(self.path_syntax, PreparedFilePathSyntax::Frozen(_)) {
             return Ok(());
         }
@@ -1581,13 +1717,14 @@ impl FileFrontendPrepareOutput {
 
     fn validate_source_rebinding(
         &self,
-        provisional_source_file: &InternedPath,
+        provisional_source_file: PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
         for header in &self.headers {
-            header.validate_required_source_prefixes(provisional_source_file)?;
+            header.validate_required_source_prefixes(provisional_source_file, path_fork)?;
         }
         for fragment in &self.top_level_const_fragments {
-            fragment.validate_required_source_prefix(provisional_source_file)?;
+            fragment.validate_required_source_prefix(provisional_source_file, path_fork)?;
         }
         Ok(())
     }
@@ -1599,7 +1736,11 @@ impl FileFrontendPrepareOutput {
     /// WHY: this is the last boundary with the whole prepared-file output in one owner. Later
     ///      stages intentionally receive independent header substreams and must not reconstruct
     ///      source ownership, path-row validity or final source identity from those pieces.
-    fn validate_file_invariants(&self, string_table: &StringTable) -> Result<(), CompilerError> {
+    fn validate_file_invariants(
+        &self,
+        string_table: &StringTable,
+        path_fork: &PathInternerFork,
+    ) -> Result<(), CompilerError> {
         add_frontend_counter(FrontendCounter::PreparedFileInvariantValidationCount, 1);
         let path_syntax = self.path_syntax.table();
         path_syntax.validate_file_owned_locations(self.file_id)?;
@@ -1609,6 +1750,7 @@ impl FileFrontendPrepareOutput {
             &self.dependency_selections,
             self.file_id,
             string_table,
+            path_fork,
         )?;
 
         for header in &self.headers {
@@ -1617,13 +1759,14 @@ impl FileFrontendPrepareOutput {
                 header,
                 self.file_id,
                 self.canonical_os_path.as_deref(),
-                &self.source_file,
+                self.source_file,
                 path_syntax,
+                path_fork,
             )?;
         }
 
         for fragment in &self.top_level_const_fragments {
-            if !fragment.header_path.starts_with(&self.source_file) {
+            if !path_fork.starts_with(fragment.header_path, self.source_file) {
                 return Err(CompilerError::compiler_error(
                     "top-level const fragment retained a path outside its prepared source file",
                 ));
@@ -1637,12 +1780,12 @@ impl FileFrontendPrepareOutput {
         Ok(())
     }
 }
-
 fn validate_dependency_clauses(
     clauses: &[RetainedDependencyClause],
     selections: &[DependencySelection],
     file_id: SourceId,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
     let mut next_selection_start = 0usize;
 
@@ -1652,7 +1795,7 @@ fn validate_dependency_clauses(
                 "prepared file contains more dependency clauses than its dense shell identity can represent",
             )
         })?;
-        validate_dependency_path(&clause.dependency, file_id, string_table)?;
+        validate_dependency_path(&clause.dependency, file_id, string_table, path_fork)?;
         if clause.dependency.dependency_shell_id.ordinal != expected_ordinal {
             return Err(CompilerError::compiler_error(
                 "retained dependency clause shell ordinal does not match its dense file-local clause position",
@@ -1711,13 +1854,14 @@ fn validate_dependency_path(
     dependency: &RetainedDependencyPath,
     file_id: SourceId,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
-    if dependency.path.is_empty() {
+    if dependency.path == PathId::ROOT {
         return Err(CompilerError::compiler_error(
             "retained dependency clause has an empty path",
         ));
     }
-    decode_dependency_target(&dependency.path, &dependency.target, string_table)?;
+    decode_dependency_target(dependency.path, &dependency.target, path_fork, string_table)?;
     validate_source_span(Some(dependency.span), file_id, "dependency path")?;
     if dependency.dependency_shell_id.source == file_id {
         Ok(())
@@ -1738,20 +1882,20 @@ fn validate_dependency_selection(
     }
     Ok(())
 }
-
 fn validate_header(
     header: &Header,
     file_id: SourceId,
     canonical_os_path: Option<&std::path::Path>,
-    source_file: &InternedPath,
+    source_file: PathId,
     path_syntax: &PathSyntaxTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
-    if header.source_file != *source_file {
+    if header.source_file != source_file {
         return Err(CompilerError::compiler_error(
             "retained header source file does not match its prepared-file identity",
         ));
     }
-    if !header.tokens.src_path.starts_with(source_file) {
+    if !path_fork.starts_with(header.tokens.src_path, source_file) {
         return Err(CompilerError::compiler_error(
             "retained header path does not use the prepared file's final source prefix",
         ));
@@ -1770,7 +1914,7 @@ fn validate_header(
     validate_tokens(&header.tokens.tokens, file_id, path_syntax, "header body")?;
     for hint in &header.local_ordering_hints {
         if hint.origin() == LocalDeclarationOrderingHintOrigin::SourceOwned
-            && !hint.path().starts_with(source_file)
+            && !path_fork.starts_with(hint.path(), source_file)
         {
             return Err(CompilerError::compiler_error(
                 "source-owned declaration ordering hint retained a provisional source prefix",
@@ -1780,14 +1924,15 @@ fn validate_header(
     for reference in &header.capacity_references {
         validate_source_span(reference.span, file_id, "header capacity reference")?;
     }
-    validate_header_kind(&header.kind, file_id, source_file, path_syntax)
+    validate_header_kind(&header.kind, file_id, source_file, path_syntax, path_fork)
 }
 
 fn validate_header_kind(
     kind: &HeaderKind,
     file_id: SourceId,
-    source_file: &InternedPath,
+    source_file: PathId,
     path_syntax: &PathSyntaxTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
     match kind {
         HeaderKind::Function {
@@ -1795,7 +1940,7 @@ fn validate_header_kind(
             signature,
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
-            validate_function_signature(signature, file_id, source_file, path_syntax)?;
+            validate_function_signature(signature, file_id, source_file, path_syntax, path_fork)?;
         }
         HeaderKind::Constant { declaration } => {
             validate_declaration_syntax(declaration, file_id, source_file, path_syntax)?;
@@ -1806,7 +1951,7 @@ fn validate_header_kind(
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
             for field in fields {
-                validate_signature_member(field, file_id, source_file, path_syntax)?;
+                validate_signature_member(field, file_id, source_file, path_syntax, path_fork)?;
             }
         }
         HeaderKind::Choice {
@@ -1815,7 +1960,7 @@ fn validate_header_kind(
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
             for variant in variants {
-                validate_choice_variant(variant, file_id, source_file, path_syntax)?;
+                validate_choice_variant(variant, file_id, source_file, path_syntax, path_fork)?;
             }
         }
         HeaderKind::TypeAlias { target } => {
@@ -1843,6 +1988,7 @@ fn validate_header_kind(
                     file_id,
                     source_file,
                     path_syntax,
+                    path_fork,
                 )?;
             }
         }
@@ -1869,11 +2015,12 @@ fn validate_generic_parameters(
 fn validate_function_signature(
     signature: &FunctionSignatureSyntax,
     file_id: SourceId,
-    source_file: &InternedPath,
+    source_file: PathId,
     path_syntax: &PathSyntaxTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
     for parameter in &signature.parameters {
-        validate_signature_member(parameter, file_id, source_file, path_syntax)?;
+        validate_signature_member(parameter, file_id, source_file, path_syntax, path_fork)?;
     }
     for return_slot in &signature.returns {
         validate_source_span(return_slot.value.span, file_id, "function return")?;
@@ -1881,14 +2028,14 @@ fn validate_function_signature(
     }
     Ok(())
 }
-
 fn validate_signature_member(
     member: &SignatureMemberSyntax,
     file_id: SourceId,
-    source_file: &InternedPath,
+    source_file: PathId,
     path_syntax: &PathSyntaxTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
-    if !member.id.starts_with(source_file) {
+    if !path_fork.starts_with(member.id, source_file) {
         return Err(CompilerError::compiler_error(
             "retained declaration member path does not use the prepared file's final source prefix",
         ));
@@ -1906,8 +2053,9 @@ fn validate_signature_member(
 fn validate_choice_variant(
     variant: &ChoiceVariantSyntax,
     file_id: SourceId,
-    source_file: &InternedPath,
+    source_file: PathId,
     path_syntax: &PathSyntaxTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
     validate_source_span(variant.span, file_id, "choice variant")?;
     match &variant.payload {
@@ -1916,7 +2064,7 @@ fn validate_choice_variant(
             fields,
         } => {
             for field in fields.iter() {
-                validate_signature_member(field, file_id, source_file, path_syntax)?;
+                validate_signature_member(field, file_id, source_file, path_syntax, path_fork)?;
             }
         }
     }
@@ -1926,7 +2074,7 @@ fn validate_choice_variant(
 fn validate_declaration_syntax(
     declaration: &DeclarationSyntax,
     file_id: SourceId,
-    _source_file: &InternedPath,
+    _source_file: PathId,
     path_syntax: &PathSyntaxTable,
 ) -> Result<(), CompilerError> {
     validate_source_span(declaration.span, file_id, "declaration shell")?;
@@ -2063,6 +2211,7 @@ pub(super) struct HeaderParseContext<'a> {
     pub file_role: FileRole,
     pub is_config_file: bool,
     pub string_table: &'a mut StringTable,
+    pub path_fork: &'a mut PathInternerFork,
     pub span_builder: &'a mut ExtendedSpanBuilder,
     /// Module-wide base offset for const-template synthetic names in this file.
     ///
@@ -2079,9 +2228,10 @@ pub(super) struct HeaderParseContext<'a> {
 // Shared per-header builder inputs that stay stable while one declaration is classified.
 pub(super) struct HeaderBuildContext<'a> {
     pub warnings: &'a mut Vec<CompilerDiagnostic>,
-    pub source_file: &'a InternedPath,
+    pub source_file: PathId,
     pub file_dependency_clauses: &'a [RetainedDependencyClause],
     pub dependency_selections: &'a [DependencySelection],
     pub string_table: &'a mut StringTable,
+    pub path_fork: &'a mut PathInternerFork,
     pub file_role: FileRole,
 }

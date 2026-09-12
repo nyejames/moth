@@ -31,7 +31,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use std::collections::HashSet;
 
@@ -325,7 +325,7 @@ impl PreparationWalk {
         &mut self,
         template_id: TemplateIrId,
         view: &TirView<'_>,
-        loop_binding_paths: &[InternedPath],
+        loop_binding_paths: &[PathId],
         role: PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
         let traversal_key = view.identity();
@@ -436,7 +436,7 @@ impl PreparationWalk {
         &mut self,
         node_id: TemplateIrNodeId,
         view: &TirView<'_>,
-        loop_binding_paths: &[InternedPath],
+        loop_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
         let store = view.store();
@@ -946,12 +946,12 @@ impl PreparationWalk {
         &mut self,
         view: &TirView<'_>,
         expression: &Expression,
-        loop_binding_paths: &[InternedPath],
+        loop_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
         let mut nested_facts = PreparationFacts::const_value();
         let mut visit_nested_template =
-            |reference: TemplateTirReference, nested_binding_paths: &[InternedPath]| {
+            |reference: TemplateTirReference, nested_binding_paths: &[PathId]| {
                 let nested_view = view.nested_template_value(reference)?;
                 let facts = self.walk_template(
                     reference.root,
@@ -985,9 +985,9 @@ impl PreparationWalk {
         view: &TirView<'_>,
         selector: &TemplateBranchSelector,
         fallback_span: Option<SourceSpan>,
-        loop_binding_paths: &[InternedPath],
+        loop_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
-    ) -> Result<(Vec<InternedPath>, bool, PreparationFacts), TemplateError> {
+    ) -> Result<(Vec<PathId>, bool, PreparationFacts), TemplateError> {
         let mut branch_binding_paths = loop_binding_paths.to_owned();
         let mut selector_facts = PreparationFacts::const_value();
         let result = match selector {

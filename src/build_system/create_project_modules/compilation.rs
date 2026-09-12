@@ -136,7 +136,7 @@ pub(super) fn publish_compiled_module(
 ) -> Result<(), CompilerError> {
     let remap = string_table.merge_delta_from(&compiled.string_table, string_table_base_len);
     debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
-    let _path_remap = path_interner
+    let path_remap = path_interner
         .merge_delta_from(&compiled.path_fork, &remap)
         .map_err(|error| {
             CompilerError::compiler_error(format!("module path merge failed: {error:?}"))
@@ -149,9 +149,18 @@ pub(super) fn publish_compiled_module(
         path_fork: _,
         public_interface,
     } = compiled;
+    // Path IDs become boundary identities at this merge point. Retain an immutable snapshot on
+    // the executable lane so backend/render consumers can resolve names without a live fork.
+    let merged_path_table = std::sync::Arc::new(path_interner.paths().clone());
+    module.executable.path_table = std::sync::Arc::clone(&merged_path_table);
+    generated_delta.install_path_table(merged_path_table);
     if !remap.is_identity() {
         module.remap_string_ids(&remap);
         generated_delta.remap_string_ids(&remap);
+    }
+    if !path_remap.is_identity() {
+        module.remap_path_ids(&path_remap);
+        generated_delta.remap_path_ids(&path_remap);
     }
     publish_module_and_generated(ModuleBoundaryPublication {
         modules,
@@ -720,6 +729,7 @@ fn compile_directory_frontend_in_premerge_lane(
             )?;
         let (project_source_files, mut project_source_spans) = project_sources.split();
         let mut project_path_interner = project_source_files.clone_path_builder();
+        let project_path_fork = project_path_interner.fork_source().fork_for_module();
         let mut selected_source_texts = SelectedSourceTextMap::default();
         let config_globals = builder_surface.config_globals().clone();
 
@@ -753,11 +763,6 @@ fn compile_directory_frontend_in_premerge_lane(
                     .module_identities()
                     .derive_compilation_root_table(),
             );
-            let package_resolution = DirectoryDependencyResolution::package(
-                &project_setup.module_namespace_set,
-                dependency_prefix,
-                package_index,
-            );
             let package_registration_index = package_index.source_registration_index();
             let package_source_files = SourceDatabase::from_ordered_registration_index(
                 &package_registration_index,
@@ -769,6 +774,13 @@ fn compile_directory_frontend_in_premerge_lane(
             let mut package_selected_source_texts = SelectedSourceTextMap::default();
             let (package_source_files, mut package_source_spans) = package_sources.split();
             let mut path_interner = package_source_files.clone_path_builder();
+            let package_path_fork = path_interner.fork_source().fork_for_module();
+            let package_resolution = DirectoryDependencyResolution::package(
+                &project_setup.module_namespace_set,
+                dependency_prefix,
+                package_index,
+                &package_path_fork,
+            );
             timing_scope_attributed!(
                 timing_guard_build_boundary_inventory_2,
                 crate::timing::TimingMetric::BoundaryInventory,
@@ -847,10 +859,10 @@ fn compile_directory_frontend_in_premerge_lane(
             crate::timing::TimingBoundaryKind::MainProject,
             || config.project_name.clone(),
         );
-
         let directory_dependency_resolution = DirectoryDependencyResolution::project(
             &project_setup.module_namespace_set,
             &project_setup.source_tree_index,
+            &project_path_fork,
         );
         timing_scope_attributed!(
             timing_guard_build_boundary_inventory_3,
@@ -915,10 +927,12 @@ fn compile_directory_frontend_in_premerge_lane(
                     ))
                     .into());
                 };
+                let package_path_fork = inventory.path_interner.fork_source().fork_for_module();
                 let package_resolution = DirectoryDependencyResolution::package(
                     &project_setup.module_namespace_set,
                     inventory.dependency_prefix.as_str(),
                     package_index,
+                    &package_path_fork,
                 );
                 let (_, mut source_spans) = inventory.source_files.split();
                 let mut selected_source_texts = SelectedSourceTextMap::default();

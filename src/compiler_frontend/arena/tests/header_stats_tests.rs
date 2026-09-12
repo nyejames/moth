@@ -8,7 +8,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -54,6 +54,7 @@ DISPLAYABLE must:
 #[test]
 fn multi_file_declarations_are_aggregated() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let entry_path = PathBuf::from("src/@page.moth");
     let helper_path = PathBuf::from("src/helper.moth");
 
@@ -74,28 +75,12 @@ fn multi_file_declarations_are_aggregated() {
         .id;
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut prepare_file = |source: &str, path: &PathBuf, source_id| {
-        let interned_path = InternedPath::try_from_filesystem_path(path, &mut string_table)
+        let interned_path = path_fork.try_intern_filesystem_path(path, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let tokens = tokenize(
-            source,
-            &interned_path,
-            TokenizerEntryMode::SourceFile,
-            &style_directives,
-            &mut string_table,
-            source_id,
-            &mut span_builder,
-        )
+        let tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, source_id, &mut span_builder)
         .expect("source should tokenize");
-        prepare_file_from_tokens(
-            tokens,
-            &entry_path,
-            &HeaderParseOptions::default(),
-            &mut string_table,
-            0,
-            0,
-            &mut span_builder,
-        )
+        prepare_file_from_tokens(tokens, &entry_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut PathInternerFork::empty())
         .expect("source should prepare")
     };
     let entry_output = prepare_file("[runtime1]\n", &entry_path, entry_id);
@@ -105,21 +90,9 @@ fn multi_file_declarations_are_aggregated() {
         helper_id,
     );
 
-    let prepared_syntax = prepare_header_syntax(
-        &mut [entry_output, helper_output],
-        &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-    )
+    let prepared_syntax = prepare_header_syntax(&mut [entry_output, helper_output], &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
     .expect("header syntax should prepare");
-    let headers = bind_module_headers(
-        prepared_syntax,
-        &ExternalPackageRegistry::new(),
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        None,
-        &source_files,
-        &mut string_table,
-    )
+    let headers = bind_module_headers(prepared_syntax, &ExternalPackageRegistry::new(), &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), None, &source_files, &mut string_table, &mut PathInternerFork::empty())
     .expect("headers should bind");
 
     assert_eq!(headers.header_stats.functions, 1);

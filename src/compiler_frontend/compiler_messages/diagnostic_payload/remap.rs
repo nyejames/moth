@@ -74,34 +74,17 @@ impl DiagnosticPayload {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPayload::MissingImportTarget { path }
-            | DiagnosticPayload::AmbiguousImportTarget { path }
-            | DiagnosticPayload::BareFileImport { path }
-            | DiagnosticPayload::DirectSpecialFileImport { path }
-            | DiagnosticPayload::NotExportedBySourceFile { symbol_path: path }
-            | DiagnosticPayload::NotExportedByPublicSurface {
-                requested_path: path,
-                ..
-            }
-            | DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path: path }
-            | DiagnosticPayload::CrossModuleImportNotExported { symbol_path: path } => {
-                remap_path_import_payload(path, remap);
-            }
+            DiagnosticPayload::MissingImportTarget { .. }
+            | DiagnosticPayload::AmbiguousImportTarget { .. }
+            | DiagnosticPayload::BareFileImport { .. }
+            | DiagnosticPayload::DirectSpecialFileImport { .. }
+            | DiagnosticPayload::NotExportedBySourceFile { .. }
+            | DiagnosticPayload::NotExportedByPublicSurface { .. }
+            | DiagnosticPayload::MissingModuleRootPublicSurface { .. }
+            | DiagnosticPayload::CrossModuleImportNotExported { .. } => {}
 
-            DiagnosticPayload::DuplicateMothTemplateInputPath { path } => {
-                remap_path_import_payload(path, remap);
-            }
-            DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
-                first_path,
-                second_path,
-            } => {
-                remap_path_import_payload(first_path, remap);
-                remap_path_import_payload(second_path, remap);
-            }
-
-            DiagnosticPayload::ImportNameCollision { name } => {
-                *name = remap.get(*name);
-            }
+            DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
+            | DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. } => {}
 
             DiagnosticPayload::MissingPackageSymbol {
                 symbol,
@@ -191,9 +174,7 @@ impl DiagnosticPayload {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPayload::CircularDependency { path } => {
-                path.remap_string_ids(remap);
-            }
+            DiagnosticPayload::CircularDependency { .. } => {}
 
             DiagnosticPayload::NamespaceMisuse { name, .. } => {
                 *name = remap.get(*name);
@@ -226,25 +207,18 @@ impl DiagnosticPayload {
                 *package_path = remap.get(*package_path);
             }
 
-            DiagnosticPayload::DirectSymbolPathImport { path }
-            | DiagnosticPayload::InvalidNamespaceDefaultName { path }
-            | DiagnosticPayload::ExplicitMothExtension { path } => {
-                path.remap_string_ids(remap);
-            }
+            DiagnosticPayload::DirectSymbolPathImport { .. }
+            | DiagnosticPayload::InvalidNamespaceDefaultName { .. }
+            | DiagnosticPayload::ExplicitMothExtension { .. } => {}
 
-            DiagnosticPayload::ExplicitSourceExtension { path, extension }
-            | DiagnosticPayload::UnsupportedSourceFileKind { path, extension }
-            | DiagnosticPayload::InvalidSourceFileEntry { path, extension }
-            | DiagnosticPayload::UnsupportedExternalExtension { path, extension } => {
-                path.remap_string_ids(remap);
+            DiagnosticPayload::ExplicitSourceExtension { extension, .. }
+            | DiagnosticPayload::UnsupportedSourceFileKind { extension, .. }
+            | DiagnosticPayload::InvalidSourceFileEntry { extension, .. }
+            | DiagnosticPayload::UnsupportedExternalExtension { extension, .. } => {
                 *extension = remap.get(*extension);
             }
 
-            DiagnosticPayload::DuplicateImportSurfaceMember {
-                surface_path,
-                member_name,
-            } => {
-                surface_path.remap_string_ids(remap);
+            DiagnosticPayload::DuplicateImportSurfaceMember { member_name, .. } => {
                 *member_name = remap.get(*member_name);
             }
 
@@ -303,10 +277,86 @@ impl DiagnosticPayload {
             _ => unreachable!("reasoned payloads are handled by the central remap registry"),
         }
     }
-}
 
-fn remap_path_import_payload(path: &mut InternedPath, remap: &StringIdRemap) {
-    path.remap_string_ids(remap);
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        match self {
+            DiagnosticPayload::MissingImportTarget { path }
+            | DiagnosticPayload::AmbiguousImportTarget { path }
+            | DiagnosticPayload::BareFileImport { path }
+            | DiagnosticPayload::DirectSpecialFileImport { path }
+            | DiagnosticPayload::NotExportedBySourceFile { symbol_path: path }
+            | DiagnosticPayload::NotExportedByPublicSurface {
+                requested_path: path,
+                ..
+            }
+            | DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path: path }
+            | DiagnosticPayload::CrossModuleImportNotExported { symbol_path: path }
+            | DiagnosticPayload::DirectSymbolPathImport { path }
+            | DiagnosticPayload::InvalidNamespaceDefaultName { path }
+            | DiagnosticPayload::ExplicitMothExtension { path }
+            | DiagnosticPayload::InvalidImportPath { path, .. }
+            | DiagnosticPayload::InvalidExternalModule { path, .. }
+            | DiagnosticPayload::InvalidCompileTimePath { path, .. }
+            | DiagnosticPayload::UnsupportedExternalExtension { path, .. }
+            | DiagnosticPayload::ExplicitSourceExtension { path, .. }
+            | DiagnosticPayload::UnsupportedSourceFileKind { path, .. }
+            | DiagnosticPayload::InvalidSourceFileEntry { path, .. }
+            | DiagnosticPayload::DuplicateMothTemplateInputPath { path } => {
+                remap_path_import_payload(path, remap);
+            }
+            DiagnosticPayload::DuplicateImportSurfaceMember { surface_path, .. } => {
+                remap_path_import_payload(surface_path, remap);
+            }
+            DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
+                first_path,
+                second_path,
+            } => {
+                remap_path_import_payload(first_path, remap);
+                remap_path_import_payload(second_path, remap);
+            }
+            DiagnosticPayload::CircularDependency { path } => {
+                remap_path_import_payload(path, remap);
+            }
+            DiagnosticPayload::BorrowConflict { place, .. }
+            | DiagnosticPayload::UseOfUninitializedLocal { place }
+            | DiagnosticPayload::UseAfterPossibleMove { place }
+            | DiagnosticPayload::MoveWhileBorrowed { place, .. } => {
+                place.remap_path_ids(remap);
+            }
+            DiagnosticPayload::MultipleMutableBorrows {
+                place,
+                conflicting_place,
+            }
+            | DiagnosticPayload::SharedMutableConflict {
+                place,
+                conflicting_place,
+                ..
+            } => {
+                place.remap_path_ids(remap);
+                remap_optional_place_path(conflicting_place, remap);
+            }
+            DiagnosticPayload::WholeObjectBorrowConflict {
+                whole_place,
+                part_place,
+            } => {
+                whole_place.remap_path_ids(remap);
+                part_place.remap_path_ids(remap);
+            }
+            DiagnosticPayload::InvalidMutableAccess {
+                place,
+                conflicting_place,
+                ..
+            } => {
+                place.remap_path_ids(remap);
+                remap_optional_place_path(conflicting_place, remap);
+            }
+            _ => {}
+        }
+    }
+
+}
+fn remap_path_import_payload(path: &mut PathId, remap: &PathIdRemap) {
+    *path = remap.get(*path);
 }
 
 fn remap_single_place_borrow_payload(place: &mut DiagnosticPlace, remap: &StringIdRemap) {
@@ -334,5 +384,11 @@ fn remap_place_with_optional_conflict(
 fn remap_optional_place(place: &mut Option<DiagnosticPlace>, remap: &StringIdRemap) {
     if let Some(place) = place {
         place.remap_string_ids(remap);
+    }
+}
+
+fn remap_optional_place_path(place: &mut Option<DiagnosticPlace>, remap: &PathIdRemap) {
+    if let Some(place) = place {
+        place.remap_path_ids(remap);
     }
 }

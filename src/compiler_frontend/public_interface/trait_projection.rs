@@ -33,7 +33,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginTraitId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::FxHashMap;
@@ -76,11 +76,12 @@ pub(super) struct DirectTraitProjection<'a> {
     consumed: FxHashMap<&'a str, ()>,
     trait_source_facts: &'a FxHashMap<TraitId, ResolvedTraitSourceFact>,
     public_source_nominal_type_origins:
-        &'a FxHashMap<InternedPath, crate::compiler_frontend::semantic_identity::OriginTypeId>,
-    public_source_trait_origins: &'a FxHashMap<InternedPath, OriginTraitId>,
+        &'a FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTypeId>,
+    public_source_trait_origins: &'a FxHashMap<PathId, OriginTraitId>,
     type_environment: &'a TypeEnvironment,
     external_registry: &'a ExternalPackageRegistry,
     string_table: &'a StringTable,
+    path_fork: &'a PathInternerFork,
 }
 
 /// Named inputs for [`DirectTraitProjection::new`].
@@ -93,11 +94,12 @@ pub(crate) struct DirectTraitProjectionInput<'a> {
     pub(super) trait_roots: &'a [ResolvedPublicTraitRoot],
     pub(super) trait_source_facts: &'a FxHashMap<TraitId, ResolvedTraitSourceFact>,
     pub(super) public_source_nominal_type_origins:
-        &'a FxHashMap<InternedPath, crate::compiler_frontend::semantic_identity::OriginTypeId>,
-    pub(super) public_source_trait_origins: &'a FxHashMap<InternedPath, OriginTraitId>,
+        &'a FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTypeId>,
+    pub(super) public_source_trait_origins: &'a FxHashMap<PathId, OriginTraitId>,
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) external_registry: &'a ExternalPackageRegistry,
     pub(super) string_table: &'a StringTable,
+    pub(super) path_fork: &'a PathInternerFork,
 }
 
 impl<'a> DirectTraitProjection<'a> {
@@ -114,17 +116,21 @@ impl<'a> DirectTraitProjection<'a> {
             type_environment,
             external_registry,
             string_table,
+            path_fork,
         } = input;
         let mut roots_by_name: FxHashMap<&'a str, &'a ResolvedPublicTraitRoot> =
             FxHashMap::default();
         for root in trait_roots {
-            let name = root.canonical_path.name_str(string_table).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "public-interface draft trait projection: a trait root has no resolvable \
-                     defining name (canonical path: {:?})",
-                    root.canonical_path
-                ))
-            })?;
+            let name = path_fork
+                .component(root.canonical_path)
+                .map(|component| string_table.resolve(component))
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "public-interface draft trait projection: a trait root has no resolvable \
+                         defining name (canonical path: {:?})",
+                        root.canonical_path
+                    ))
+                })?;
             if roots_by_name.insert(name, root).is_some() {
                 return Err(CompilerError::compiler_error(format!(
                     "public-interface draft trait projection: two trait roots share the public \
@@ -142,6 +148,7 @@ impl<'a> DirectTraitProjection<'a> {
             type_environment,
             external_registry,
             string_table,
+            path_fork,
         })
     }
 
@@ -216,7 +223,12 @@ impl<'a> DirectTraitProjection<'a> {
         }
 
         // Validate the trait root this_type before projecting requirements.
-        validate_trait_root_this_type(root, self.type_environment, self.string_table)?;
+        validate_trait_root_this_type(
+            root,
+            self.type_environment,
+            self.string_table,
+            self.path_fork,
+        )?;
 
         let nominal_resolver = super::type_projection::TransientNominalOriginResolver::new(
             self.type_environment,
@@ -239,6 +251,7 @@ impl<'a> DirectTraitProjection<'a> {
                     self.type_environment,
                     &projection_context,
                     self.string_table,
+                    self.path_fork,
                 )
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -272,18 +285,18 @@ impl<'a> DirectTraitProjection<'a> {
 }
 
 /// Validate that a trait root's `this_type` is the trait-local synthetic generic
-/// parameter named exactly `This`.
 fn validate_trait_root_this_type(
     root: &ResolvedPublicTraitRoot,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
     let Some(definition) = type_environment.get(root.this_type) else {
         return Err(CompilerError::compiler_error(format!(
             "public-interface draft trait projection: the trait root '{}' this_type TypeId({}) \
              is not registered in the TypeEnvironment; the trait self type must be a synthetic \
              generic parameter",
-            root.canonical_path.to_string(string_table),
+            path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
             root.this_type.0
         )));
     };
@@ -293,7 +306,7 @@ fn validate_trait_root_this_type(
             "public-interface draft trait projection: the trait root '{}' this_type TypeId({}) \
              resolved to {:?}, not a GenericParameter; the trait self type must be the synthetic \
              generic parameter named exactly \"This\"",
-            root.canonical_path.to_string(string_table),
+            path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
             root.this_type.0,
             definition
         )));
@@ -305,21 +318,20 @@ fn validate_trait_root_this_type(
             "public-interface draft trait projection: the trait root '{}' this_type is a \
              GenericParameter named '{}', not \"This\"; the trait self type must be named \
              exactly \"This\"",
-            root.canonical_path.to_string(string_table),
+            path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
             name
         )));
     }
 
     Ok(())
 }
-
-/// Project one resolved trait requirement into a stable surface requirement.
 fn project_trait_requirement(
     requirement: &ResolvedTraitRequirementFact,
     owning_this_type: TypeId,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<PublicTraitRequirementSurface, CompilerError> {
     if requirement.receiver.this_type != owning_this_type {
         return Err(CompilerError::compiler_error(format!(
@@ -341,10 +353,9 @@ fn project_trait_requirement(
         .parameters
         .iter()
         .map(|parameter| {
-            let name = parameter
-                .name
-                .name_str(string_table)
-                .map(|name| name.to_owned());
+            let name = path_fork
+                .component(parameter.name)
+                .map(|name| string_table.resolve(name).to_owned());
             let type_identity = project_trait_surface_type_identity(
                 parameter.type_id,
                 owning_this_type,
@@ -405,7 +416,7 @@ fn project_trait_incompatibilities(
     incompatible_trait_ids: &[TraitId],
     owning_trait_origin: &OriginTraitId,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
-    public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
 ) -> Result<Vec<CanonicalTraitIdentity>, CompilerError> {
     let owning_canonical = CanonicalTraitIdentity::Source(owning_trait_origin.clone());
 
@@ -441,4 +452,13 @@ fn project_trait_incompatibilities(
     }
 
     Ok(incompatibilities)
+}
+fn path_name<'a>(
+    path: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &'a StringTable,
+) -> Option<&'a str> {
+    path_fork
+        .component(path)
+        .map(|component| string_table.resolve(component))
 }

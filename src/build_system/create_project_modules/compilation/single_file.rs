@@ -35,7 +35,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_module_root_file;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
@@ -184,6 +184,7 @@ fn compile_single_file_frontend_with_target(
     target: SingleFileFrontendTarget,
 ) -> Result<SingleFileFrontendResult, PremergeFailure> {
     let mut resource_inputs = ResourceInputRegistry::new();
+    let mut discovery_path_fork = PathInternerFork::empty();
     // 1. Verify standard Moth file extension.
     //
     // A non-UTF-8 extension is an unrepresentable filesystem input. Reject it before
@@ -198,28 +199,33 @@ fn compile_single_file_frontend_with_target(
             .into());
         }
     };
-
     if extension_text != LANGUAGE_SOURCE_EXTENSION {
-        let interned_path =
-            match InternedPath::try_from_filesystem_path(&config.entry_dir, string_table) {
-                Ok(path) => path,
-                Err(non_utf8) => {
-                    return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
-                        &non_utf8.path,
-                        "single-file entry path",
-                    )));
-                }
-            };
+        let interned_path = match discovery_path_fork
+            .try_intern_filesystem_path(&config.entry_dir, string_table)
+        {
+            Ok(path) => path,
+            Err(PathInternError::NonUtf8(non_utf8)) => {
+                return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
+                    &non_utf8.path,
+                    "single-file entry path",
+                )));
+            }
+            Err(PathInternError::TableFull) => {
+                return Err(PremergeFailure::from(CompilerError::compiler_error(
+                    "path table exhausted while interning single-file entry path",
+                )));
+            }
+        };
         let extension = string_table.intern(extension_text);
         let diagnostic =
             CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, None);
 
-        // Move the local table into the batch; this diagnosed path aborts discovery,
-        // so no clone is needed to carry the diagnostic.
+        // Move the local string table and path identity into the diagnosed lane. Discovery aborts
+        // before a source database exists, so the path snapshot must travel with the diagnostic.
         let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
-        ));
+        let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
+        batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()));
+        return Err(PremergeFailure::Diagnosed(batch));
     }
 
     timing_scope!(
@@ -310,6 +316,7 @@ fn compile_single_file_frontend_with_target(
         &mut external_imports,
         &builder_surface.source_file_kinds,
         &mut resource_inputs,
+        &mut discovery_path_fork,
         string_table,
     ) {
         Ok(collected) => collected,

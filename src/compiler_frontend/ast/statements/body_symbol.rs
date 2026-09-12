@@ -29,6 +29,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidDeclarationReason,
     InvalidStandaloneStatementReason, InvalidThisUsageReason, ReservedNameOwner,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
@@ -80,6 +81,7 @@ pub(crate) fn parse_this_statement(
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let this_id = string_table.intern("this");
 
@@ -125,6 +127,7 @@ pub(crate) fn parse_this_statement(
                 context,
                 type_interner,
                 string_table,
+                path_fork,
             )?;
 
             if token_stream.current_token_kind().is_assignment_operator() {
@@ -149,6 +152,7 @@ pub(crate) fn parse_this_statement(
                     context,
                     type_interner,
                     string_table,
+                    path_fork,
                 )?;
 
                 ast.push(mutation_node);
@@ -174,6 +178,7 @@ pub(crate) fn parse_this_statement(
                 this_id,
                 type_interner,
                 string_table,
+                path_fork,
             )?;
 
             let span = expression.span;
@@ -198,6 +203,7 @@ pub(crate) fn parse_symbol_statement(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
         return Err(CompilerDiagnostic::expected_symbol_statement(Some(
@@ -235,9 +241,8 @@ pub(crate) fn parse_symbol_statement(
         .into());
     }
 
-    // Multi-bind syntax (`a, b = ...`) takes priority over single-symbol dispatch.
     if let Some(multi_bind_node) =
-        parse_multi_bind_statement(token_stream, context, type_interner, string_table)?
+        parse_multi_bind_statement(token_stream, context, type_interner, string_table, path_fork)?
     {
         ast.push(multi_bind_node);
         return Ok(());
@@ -257,6 +262,7 @@ pub(crate) fn parse_symbol_statement(
                     context,
                     type_interner,
                     string_table,
+                    path_fork,
                 )?;
 
                 ast.push(mutation_node);
@@ -272,6 +278,7 @@ pub(crate) fn parse_symbol_statement(
                     context,
                     type_interner,
                     string_table,
+                    path_fork,
                 )?;
 
                 if token_stream.current_token_kind().is_assignment_operator() {
@@ -296,6 +303,7 @@ pub(crate) fn parse_symbol_statement(
                         context,
                         type_interner,
                         string_table,
+                        path_fork,
                     )?;
 
                     ast.push(mutation_node);
@@ -341,6 +349,7 @@ pub(crate) fn parse_symbol_statement(
                     symbol_id,
                     type_interner,
                     string_table,
+                    path_fork,
                 )?;
 
                 let span = expression.span;
@@ -391,6 +400,7 @@ pub(crate) fn parse_symbol_statement(
                 warnings: Some(warnings),
                 type_interner,
                 string_table,
+                path_fork,
             })?;
         let external_call_span = external_call_expression.span;
         ast.push(AstNode {
@@ -443,6 +453,7 @@ pub(crate) fn parse_symbol_statement(
             symbol_id,
             type_interner,
             string_table,
+            path_fork,
         )?;
         let span = expression.span;
         ast.push(AstNode {
@@ -461,6 +472,7 @@ pub(crate) fn parse_symbol_statement(
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )?;
     let declaration = resolved_declaration.declaration;
     let statement_kind = resolved_declaration.statement_kind;
@@ -500,9 +512,9 @@ pub(crate) fn parse_symbol_statement(
     }
 
     if is_compile_time_binding {
-        context.add_compile_time_var(declaration, declaration_span);
+        context.add_compile_time_var(declaration, declaration_span, path_fork);
     } else {
-        context.add_var(declaration, declaration_span);
+        context.add_var(declaration, declaration_span, path_fork);
     }
     Ok(())
 }

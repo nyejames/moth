@@ -9,6 +9,7 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::headers::types::HeaderParseFailure;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 fn span(start: u32, length: u32, builder: &mut ExtendedSpanBuilder) -> SourceSpan {
     SourceSpan::new(
@@ -20,9 +21,10 @@ fn span(start: u32, length: u32, builder: &mut ExtendedSpanBuilder) -> SourceSpa
 #[test]
 fn duplicate_public_export_retains_first_owner_span_across_passes() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let export_name = string_table.intern("greet");
-    let source_path = InternedPath::from_single_str("src/greet", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("src/greet", &mut string_table).expect("test path fits");
     let first_span = span(5, 5, &mut span_builder);
     let duplicate_span = span(12, 5, &mut span_builder);
 

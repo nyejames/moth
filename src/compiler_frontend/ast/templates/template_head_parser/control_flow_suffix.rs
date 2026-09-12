@@ -25,6 +25,7 @@ use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Template head control flow joins ordinary expression parsing with template construction. It
 /// preserves both authored diagnostics and retained-data infrastructure failures until the
@@ -38,6 +39,7 @@ pub(crate) fn parse_if_suffix(
     type_interner: &mut AstTypeInterner<'_>,
     validation_mode: TemplateControlFlowValidationMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ControlFlowSuffixResult<TemplateBodyParseMode> {
     let marker_span = token_stream.current_token().span;
     token_stream.advance(); // consume `if`
@@ -54,14 +56,15 @@ pub(crate) fn parse_if_suffix(
         .into());
     }
 
-    let parsed_header = parse_if_header(token_stream, context, type_interner, string_table)?;
+    let parsed_header =
+        parse_if_header(token_stream, context, type_interner, string_table, path_fork)?;
 
     ensure_suffix_ends_at_body_start(token_stream)?;
     token_stream.advance(); // consume `:`
-
     let (mut condition, then_context) = match parsed_header {
         ParsedIfHeader::BoolCondition { condition } => {
-            let then_context = context.new_child_control_flow(ContextKind::Branch, string_table);
+            let then_context =
+                context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
             (TemplateBranchSelector::Bool(condition), then_context)
         }
 
@@ -71,7 +74,7 @@ pub(crate) fn parse_if_suffix(
             then_context,
         } => {
             let then_context =
-                then_context.new_child_control_flow(ContextKind::Branch, string_table);
+                then_context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
             (
                 TemplateBranchSelector::OptionPresentCapture {
                     scrutinee,
@@ -99,7 +102,8 @@ pub(crate) fn parse_if_suffix(
             inline_source_consts_for_const_required_if_condition(condition, context, string_table);
     }
 
-    let else_context = context.new_child_control_flow(ContextKind::Branch, string_table);
+    let else_context =
+        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
 
     Ok(TemplateBodyParseMode::If(Box::new(
         TemplateIfBodyParseInput {
@@ -118,6 +122,7 @@ pub(crate) fn parse_loop_suffix(
     type_interner: &mut AstTypeInterner<'_>,
     validation_mode: TemplateControlFlowValidationMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ControlFlowSuffixResult<TemplateBodyParseMode> {
     let marker_span = token_stream.current_token().span;
     token_stream.advance(); // consume `loop`
@@ -153,10 +158,11 @@ pub(crate) fn parse_loop_suffix(
     let (parsed_header, body_context) = parse_loop_header_tokens(
         suffix_tokens,
         &token_stream.path_syntax,
-        context.new_child_control_flow(ContextKind::Loop, string_table),
+        context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
         type_interner,
         &mut warnings,
         string_table,
+        path_fork,
     )?;
 
     for warning in warnings {

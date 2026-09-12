@@ -191,15 +191,7 @@ impl FrontendProject {
         let mut const_template_offset = 0usize;
         let mut runtime_fragment_offset = 0usize;
         for (file_tokens, mut span_builder) in tokenized_files {
-            let output = prepare_file_from_tokens(
-                file_tokens,
-                &self.entry_file,
-                &options,
-                &mut self.frontend.string_table,
-                const_template_offset,
-                runtime_fragment_offset,
-                &mut span_builder,
-            )
+            let output = prepare_file_from_tokens(file_tokens, &self.entry_file, &options, &mut self.frontend.string_table, const_template_offset, runtime_fragment_offset, &mut span_builder, &mut PathInternerFork::empty())
             .expect("header parsing should succeed");
 
             const_template_offset += output.const_template_count;
@@ -207,21 +199,9 @@ impl FrontendProject {
             prepared_outputs.push(output);
         }
 
-        let prepared_syntax = prepare_header_syntax(
-            &mut prepared_outputs,
-            &mut self.frontend.string_table,
-            &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
-        )
+        let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut self.frontend.string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
         .expect("header syntax preparation should succeed");
-        bind_module_headers(
-            prepared_syntax,
-            self.frontend.external_package_registry.as_ref(),
-            &ExternalImportResolutionTable::default(),
-            &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-            options.project_path_resolver,
-            self.frontend.source_files.as_ref(),
-            &mut self.frontend.string_table,
-        )
+        bind_module_headers(prepared_syntax, self.frontend.external_package_registry.as_ref(), &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), options.project_path_resolver, self.frontend.source_files.as_ref(), &mut self.frontend.string_table, &mut PathInternerFork::empty())
         .expect("header binding should succeed")
     }
 
@@ -533,7 +513,7 @@ fn html_style_directive_available_during_header_parsing() {
     let head_id = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path.name_str(&project.frontend.string_table) == Some("head"))
+        .next()
         .expect("head constant should exist")
         .id;
     // [$html: <div>Hello</div>] has no runtime slots → folds to a string.

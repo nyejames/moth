@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -33,6 +34,7 @@ pub(super) fn parse_template_expression(
     consume_closing_parenthesis: bool,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Option<Expression>, ExpressionParseError> {
     let template_span = Some(token_stream.current_span());
     let template_context = context.new_template_parsing_context();
@@ -43,6 +45,7 @@ pub(super) fn parse_template_expression(
             type_interner,
             vec![],
             string_table,
+            path_fork,
         )
         // Const-required preparation proves a distinct semantic mode. This
         // expression path intentionally prepares the resulting template again
@@ -55,6 +58,7 @@ pub(super) fn parse_template_expression(
             type_interner,
             vec![],
             string_table,
+            path_fork,
         )
     }
     .map_err(ExpressionParseError::from)?;

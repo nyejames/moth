@@ -31,7 +31,7 @@ use crate::compiler_frontend::folded_value::{
     PublicConstTemplateSlot, PublicTemplateSlotKey,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -41,8 +41,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// The path index lets an in-flight generated compilation rebuild the exact declaring-module
 /// constant in its fresh TIR store.
 pub(super) struct ProjectedConstTemplates {
-    pub(super) by_path: FxHashMap<InternedPath, PublicConstTemplate>,
-    pub(super) module_values: FxHashMap<InternedPath, ProjectedConstTemplateValue>,
+    pub(super) by_path: FxHashMap<PathId, PublicConstTemplate>,
+    pub(super) module_values: FxHashMap<PathId, ProjectedConstTemplateValue>,
 }
 
 /// One exact module-constant template projection produced by the finalization owner.
@@ -185,7 +185,7 @@ impl AstFinalizer<'_, '_> {
     }
 
     fn insert_projected_template(
-        by_path: &mut FxHashMap<InternedPath, PublicConstTemplate>,
+        by_path: &mut FxHashMap<PathId, PublicConstTemplate>,
         declaration: &crate::compiler_frontend::ast::ast_nodes::Declaration,
         projected: PublicConstTemplate,
     ) -> Result<(), TemplateNormalizationError> {
@@ -197,7 +197,7 @@ impl AstFinalizer<'_, '_> {
             )
             .into());
         }
-        by_path.insert(declaration.id.clone(), projected);
+        by_path.insert(declaration.id, projected);
         Ok(())
     }
 }

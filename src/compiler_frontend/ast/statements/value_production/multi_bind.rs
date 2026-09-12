@@ -26,6 +26,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
@@ -50,6 +51,7 @@ pub fn try_parse_multi_bind_value_block(
     target_count: usize,
     known_slot_types: &[Option<TypeId>],
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Option<MultiBindValueResult<Expression>> {
     debug_assert_eq!(known_slot_types.len(), target_count);
 
@@ -59,6 +61,7 @@ pub fn try_parse_multi_bind_value_block(
         type_interner,
         ActiveValueProductionTarget::mixed(known_slot_types, ValueReceiverKind::MultiBind),
         string_table,
+        path_fork,
     )?;
 
     Some(parsed.and_then(|parsed| match parsed {

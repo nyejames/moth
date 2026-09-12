@@ -79,7 +79,7 @@ pub enum ImportPublicSurfaceType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagnosticPlace {
     Local(StringId),
-    Path(InternedPath),
+    Path(PathId),
     RenderedText(StringId),
     Unknown,
 }
@@ -91,9 +91,13 @@ impl DiagnosticPlace {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPlace::Path(path) => path.remap_string_ids(remap),
+            DiagnosticPlace::Path(_) | DiagnosticPlace::Unknown => {}
+        }
+    }
 
-            DiagnosticPlace::Unknown => {}
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let DiagnosticPlace::Path(path) = self {
+            *path = remap.get(*path);
         }
     }
 }

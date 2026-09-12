@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -41,14 +41,14 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Block
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub string_table: &'a mut StringTable,
     pub active_target: ActiveValueProductionTarget,
+    pub path_fork: &'a mut PathInternerFork,
 }
 
-/// Parsed then and else bodies plus their all-path exit summaries.
 pub(in crate::compiler_frontend::ast::statements::value_production) struct ParsedValueBlockBodies {
     pub then_body: Vec<AstNode>,
     pub else_body: Vec<AstNode>,
-    pub then_scope: InternedPath,
-    pub else_scope: InternedPath,
+    pub then_scope: PathId,
+    pub else_scope: PathId,
     pub then_exits: BranchExitSummary,
     pub else_exits: BranchExitSummary,
     pub generic_request_ranges: IfGenericRequestRanges,
@@ -68,6 +68,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         type_interner,
         string_table,
         active_target,
+        path_fork,
     } = input;
 
     token_stream.advance(); // consume `:`
@@ -80,6 +81,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         type_interner,
         string_table,
         active_target.clone(),
+        path_fork,
     )?;
     let then_request_end = outer_context.generic_request_checkpoint();
 
@@ -99,9 +101,9 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         type_interner,
         string_table,
         active_target,
+        path_fork,
     )?;
     let else_request_end = outer_context.generic_request_checkpoint();
-
     let then_exits = analyze_branch_exits(&then_body);
     let else_exits = analyze_branch_exits(&else_body);
 
@@ -126,9 +128,11 @@ fn parse_one_value_block_body(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     active_target: ActiveValueProductionTarget,
-) -> BlockBodyResult<(Vec<AstNode>, InternedPath)> {
-    let mut branch_context = parent.new_child_control_flow(ContextKind::Branch, string_table);
-    let branch_scope = branch_context.scope.clone();
+    path_fork: &mut PathInternerFork,
+) -> BlockBodyResult<(Vec<AstNode>, PathId)> {
+    let mut branch_context =
+        parent.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+    let branch_scope = branch_context.scope;
     branch_context.active_value_target = Some(active_target);
 
     let mut warnings = Vec::new();
@@ -138,6 +142,7 @@ fn parse_one_value_block_body(
         type_interner,
         &mut warnings,
         string_table,
+        path_fork,
     )?;
     emit_collected_warnings(outer_context, warnings);
 

@@ -4,27 +4,33 @@ use super::discovery_provider_imports::{
     unsupported_external_extension_error,
 };
 use super::*;
+use crate::compiler_frontend::symbols::interned_path::NonUtf8PathComponent;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::paths::path_normalization::{
+    is_relative_dependency_path, join_and_normalize_path,
+};
 /// Resolve provider-backed and binding-backed dependency classes before indexed source resolution.
 ///
 /// Directory module scheduling calls this with provider references retained by header syntax.
-/// It never scans tokens or source text.
 pub(crate) fn resolve_structural_provider_reference(
     provider: &RetainedDependencyPath,
     clause_kind: DependencyClauseKind,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
+    path_fork: &PathInternerFork,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     string_table: &mut StringTable,
 ) -> Result<StructuralProviderAction, SourceDiscoveryError> {
     match handle_provider_capable_dependency(
         ProviderCapableDependencyInput {
-            dependency_path: &provider.path,
+            dependency_path: provider.path,
             dependency_span: Some(provider.span),
             clause_kind,
             target: &provider.target,
             canonical_file,
             project_path_resolver,
+            path_fork,
             directory_dependency_resolution: Some(directory_dependency_resolution),
             string_table,
         },
@@ -60,14 +66,14 @@ enum DependencyPolicy<'a, 'b> {
         external_imports: &'a mut ExternalImportDiscoveryState<'b>,
     },
 }
-
 struct ProviderCapableDependencyInput<'a> {
-    dependency_path: &'a InternedPath,
+    dependency_path: PathId,
     dependency_span: Option<SourceSpan>,
     clause_kind: DependencyClauseKind,
     target: &'a DependencyTargetKind,
     canonical_file: &'a Path,
     project_path_resolver: &'a ProjectPathResolver,
+    path_fork: &'a PathInternerFork,
     directory_dependency_resolution: Option<DirectoryDependencyResolution<'a>>,
     string_table: &'a mut StringTable,
 }
@@ -102,6 +108,7 @@ fn scan_and_cache_local_moth_source(
     project_path_resolver: &ProjectPathResolver,
     entry_file_path: &Path,
     source_files: &mut SourceDatabase,
+    path_fork: &mut PathInternerFork,
     local_source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
     string_table: &mut StringTable,
 ) -> Result<ScannedMothSource, SourceDiscoveryError> {
@@ -118,6 +125,7 @@ fn scan_and_cache_local_moth_source(
         &Some(project_path_resolver.clone()),
         entry_file_path,
         source_files,
+        path_fork,
         string_table,
     )?;
     let source_byte_count = scanned.source_byte_len;
@@ -128,13 +136,13 @@ fn scan_and_cache_local_moth_source(
         source_byte_count,
     })
 }
-
 fn scan_and_cache_local_moth_template_source(
     canonical_file: &Path,
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &ProjectPathResolver,
     entry_file_path: &Path,
     source_files: &mut SourceDatabase,
+    path_fork: &mut PathInternerFork,
     local_source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
     string_table: &mut StringTable,
 ) -> Result<ScannedMothSource, SourceDiscoveryError> {
@@ -151,6 +159,7 @@ fn scan_and_cache_local_moth_template_source(
         &Some(project_path_resolver.clone()),
         entry_file_path,
         source_files,
+        path_fork,
         string_table,
     )?;
     let source_byte_count = scanned.source_byte_len;
@@ -187,6 +196,7 @@ fn traverse_reachable_source_files(
     source_file_kinds: &SourceFileKindRegistry,
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<ReachableTraversalOutcome, SourceDiscoveryError> {
     let canonical_entry_path = fs::canonicalize(&entry_paths[0]).map_err(|error| {
         CompilerError::file_error(
@@ -230,6 +240,7 @@ fn traverse_reachable_source_files(
         &context,
         policy,
         &mut file_reference_resolver,
+        path_fork,
         string_table,
     );
     let failure = match outcome {
@@ -252,6 +263,7 @@ fn traverse_reachable_source_files(
         &canonical_entry_path,
         project_path_resolver,
         string_table,
+        path_fork,
         failure,
         &mut resolved_file_references,
     )?;
@@ -267,6 +279,7 @@ fn walk_reachable_sources(
     context: &DiscoveryWalkContext<'_>,
     policy: &mut DependencyPolicy<'_, '_>,
     file_reference_resolver: &mut SingleFileReferenceResolver<'_>,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<DiscoveryWalkOutcome, SourceDiscoveryError> {
     let ReachableSourceInventory {
@@ -324,6 +337,7 @@ fn walk_reachable_sources(
                 project_path_resolver,
                 canonical_entry_path,
                 traversal_source_files,
+                path_fork,
                 local_source_cache,
                 string_table,
             ),
@@ -333,6 +347,7 @@ fn walk_reachable_sources(
                 project_path_resolver,
                 canonical_entry_path,
                 traversal_source_files,
+                path_fork,
                 local_source_cache,
                 string_table,
             ),
@@ -371,7 +386,7 @@ fn walk_reachable_sources(
             // facts inside the completed provider surface and never become independent source
             // paths during discovery.
             let provider = &clause.dependency;
-            let dependency_path = &provider.path;
+            let dependency_path = provider.path;
             let action = policy.handle_dependency(ProviderCapableDependencyInput {
                 dependency_path,
                 dependency_span: Some(provider.span),
@@ -379,6 +394,7 @@ fn walk_reachable_sources(
                 target: &provider.target,
                 canonical_file: &canonical_file,
                 project_path_resolver,
+                path_fork,
                 directory_dependency_resolution: None,
                 string_table,
             })?;
@@ -390,6 +406,7 @@ fn walk_reachable_sources(
                     let result = resolve_and_queue_local_dependency(
                         provider,
                         &canonical_file,
+                        path_fork,
                         project_path_resolver,
                         string_table,
                         &mut reachable_queue,
@@ -411,6 +428,7 @@ fn walk_reachable_sources(
                     prepared_path_syntax.table(),
                     reference,
                     string_table,
+                    path_fork,
                 )
                 .map_err(SourceDiscoveryError::from)?;
             if let SingleFileReferenceOutcome::Source { canonical } = &resolved.outcome
@@ -465,6 +483,7 @@ pub(crate) fn discover_reachable_source_files(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     source_file_kinds: &SourceFileKindRegistry,
     resource_inputs: &mut ResourceInputRegistry,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<ReachableTraversalOutcome, SourceDiscoveryError> {
     let mut policy = DependencyPolicy::Capable { external_imports };
@@ -477,6 +496,7 @@ pub(crate) fn discover_reachable_source_files(
         source_file_kinds,
         resource_inputs,
         string_table,
+        path_fork,
     )
 }
 
@@ -489,6 +509,7 @@ pub(crate) fn discover_reachable_source_files(
 fn resolve_and_queue_local_dependency(
     provider: &RetainedDependencyPath,
     canonical_file: &Path,
+    path_fork: &mut PathInternerFork,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     reachable_queue: &mut ReachableQueue<'_>,
@@ -496,6 +517,7 @@ fn resolve_and_queue_local_dependency(
     resolve_and_queue_via_filesystem(
         provider,
         canonical_file,
+        path_fork,
         project_path_resolver,
         string_table,
         reachable_queue,
@@ -512,28 +534,40 @@ fn resolve_and_queue_local_dependency(
 fn resolve_and_queue_via_filesystem(
     provider: &RetainedDependencyPath,
     canonical_file: &Path,
+    path_fork: &mut PathInternerFork,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     reachable_queue: &mut ReachableQueue<'_>,
 ) -> Result<(), SourceDiscoveryError> {
-    let resolved = if is_relative_dependency_path(&provider.path, string_table)
+    let resolved = if is_relative_dependency_path(provider.path, path_fork, string_table)
         || project_path_resolver
-            .source_package_root_for_dependency(&provider.path, string_table)
+            .source_package_root_for_dependency(provider.path, path_fork, string_table)
             .is_some()
     {
         project_path_resolver
-            .resolve_dependency_to_source_file(&provider.path, canonical_file, string_table)
+            .resolve_dependency_to_source_file(
+                provider.path,
+                path_fork,
+                canonical_file,
+                string_table,
+            )
             .map_err(SourceDiscoveryError::from)?
     } else {
         match resolve_module_root_bare_dependency(
-            &provider.path,
+            provider.path,
+            path_fork,
             canonical_file,
             project_path_resolver,
             string_table,
         )? {
             Some(resolved) => resolved,
             None => project_path_resolver
-                .resolve_dependency_to_source_file(&provider.path, canonical_file, string_table)
+                .resolve_dependency_to_source_file(
+                    provider.path,
+                    path_fork,
+                    canonical_file,
+                    string_table,
+                )
                 .map_err(SourceDiscoveryError::from)?,
         }
     };
@@ -556,15 +590,16 @@ fn resolve_and_queue_via_filesystem(
 ///      module-root-relative source contract as directory discovery without allowing an entry-root
 ///      namesake to shadow the declaring module's source.
 fn resolve_module_root_bare_dependency(
-    provider: &InternedPath,
+    provider: PathId,
+    path_fork: &mut PathInternerFork,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<Option<ResolvedDependencyFile>, SourceDiscoveryError> {
-    let Some(first_component) = provider.as_components().first() else {
+    let Some(first_component) = path_fork.component(provider) else {
         return Ok(None);
     };
-    let first_segment = string_table.resolve(*first_component);
+    let first_segment = string_table.resolve(first_component);
     if matches!(first_segment, "." | "..") {
         return Ok(None);
     }
@@ -574,7 +609,8 @@ fn resolve_module_root_bare_dependency(
         return Ok(None);
     };
 
-    let root_candidate = join_and_normalize_path(&module_root, provider, string_table);
+    let root_candidate =
+        join_and_normalize_path(&module_root, provider, &*path_fork, string_table);
     if let Some(root_file) = project_path_resolver.module_root_file_for_directory(&root_candidate) {
         return Ok(Some(ResolvedDependencyFile {
             path: root_file,
@@ -596,25 +632,44 @@ fn resolve_module_root_bare_dependency(
                 project_path_resolver.entry_root().display()
             )))
         })?;
-    let module_prefix = InternedPath::try_from_filesystem_path(module_prefix, string_table)
-        .map_err(|NonUtf8PathComponent { path }| {
-            SourceDiscoveryError::from(CompilerError::file_error(
+    let module_prefix = path_fork
+        .try_intern_filesystem_path(module_prefix, string_table)
+        .map_err(|error| match error {
+            crate::compiler_frontend::symbols::path_interner::PathInternError::NonUtf8(
+                NonUtf8PathComponent { path },
+            ) => SourceDiscoveryError::from(CompilerError::file_error(
                 &path,
                 format!(
                     "Owning module path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                 ),
+            )),
+            crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
+                SourceDiscoveryError::from(CompilerError::compiler_error(
+                    "path table exhausted while interning owning module path",
+                ))
+            }
+        })?;
+    let mut scratch = Vec::new();
+    let module_local_provider = path_fork
+        .try_join(module_prefix, provider, &mut scratch)
+        .ok_or_else(|| {
+            SourceDiscoveryError::from(CompilerError::compiler_error(
+                "path table exhausted while joining owning module dependency path",
             ))
         })?;
-    let mut module_local_components = module_prefix.as_components().to_vec();
-    module_local_components.extend_from_slice(provider.as_components());
-    let module_local_provider = InternedPath::from_components(module_local_components);
 
     project_path_resolver
-        .resolve_dependency_to_source_file(&module_local_provider, canonical_file, string_table)
+        .resolve_dependency_to_source_file(
+            module_local_provider,
+            &*path_fork,
+            canonical_file,
+            string_table,
+        )
         .map(Some)
         .map_err(SourceDiscoveryError::from)
-}
 
+
+}
 fn handle_provider_capable_dependency(
     input: ProviderCapableDependencyInput<'_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -626,16 +681,19 @@ fn handle_provider_capable_dependency(
         target,
         canonical_file,
         project_path_resolver,
+        path_fork,
         directory_dependency_resolution,
         string_table,
     } = input;
     // `@project` is a reserved synthetic provider, not a source/package path. Keep the exact
     // root out of filesystem discovery and external-package registration only for the owning
     // project boundary; source packages must receive the structured reserved-path diagnostic.
-    if is_project_globals_namespace(dependency_path, string_table) {
+    if is_project_globals_namespace(dependency_path, path_fork, string_table) {
         let is_owning_project_root = directory_dependency_resolution
             .is_none_or(|resolution| resolution.is_project_boundary());
-        if is_project_globals_dependency(dependency_path, string_table) && is_owning_project_root {
+        if is_project_globals_dependency(dependency_path, path_fork, string_table)
+            && is_owning_project_root
+        {
             return Ok(DependencyPolicyAction::Skip);
         }
         return Err(CompilerDiagnostic::invalid_dependency_clause(
@@ -649,7 +707,7 @@ fn handle_provider_capable_dependency(
     // Skip virtual package dependencies — AST resolution handles those.
     if external_imports
         .external_packages
-        .is_virtual_package_dependency(dependency_path, string_table)
+        .is_virtual_package_dependency(dependency_path, path_fork, string_table)
     {
         if directory_dependency_resolution.is_some_and(|resolution| {
             resolution.has_binding_package_dependency(dependency_path, string_table)
@@ -664,7 +722,7 @@ fn handle_provider_capable_dependency(
     // Check for unsupported builder-specific core packages.
     if let Some(package_path) = external_imports
         .external_packages
-        .unsupported_known_package_dependency(dependency_path, string_table)
+        .unsupported_known_package_dependency(dependency_path, path_fork, string_table)
     {
         return Err(SourceDiscoveryError::from(
             unsupported_builder_package_error(package_path, dependency_span, string_table),
@@ -673,11 +731,11 @@ fn handle_provider_capable_dependency(
 
     // Consume the retained provider classification. Header syntax already identified the
     // first explicit non-source extension, so Stage 0 must not rescan path components.
-    if let Some(decoded) = decode_dependency_target(dependency_path, target, string_table)
+    if let Some(decoded) = decode_dependency_target(dependency_path, target, path_fork, string_table)
         .map_err(SourceDiscoveryError::from)?
     {
-        let prefix_path = decoded.prefix_path();
-        let prefix_str = prefix_path.to_portable_string(string_table);
+        let prefix_path = decoded.prefix_path_id();
+        let prefix_str = path_fork.render_portable(prefix_path, string_table, &mut Vec::new());
         let extension = decoded.extension_spelling().to_owned();
         if let Some(provider) = external_imports.providers.find_by_extension(&extension) {
             let result = resolve_provider_backed_import(
@@ -685,10 +743,11 @@ fn handle_provider_capable_dependency(
                     consumer_canonical_path: canonical_file,
                     import_path: dependency_path,
                     source_span: dependency_span,
-                    prefix_path: &prefix_path,
+                    prefix_path,
                     raw_prefix: &prefix_str,
                     provider,
                     project_path_resolver,
+                    path_fork,
                     directory_dependency_resolution,
                 },
                 external_imports,

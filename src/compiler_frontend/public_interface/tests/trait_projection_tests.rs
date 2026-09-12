@@ -44,7 +44,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -102,8 +102,8 @@ fn ret(type_id: TypeId, channel: ReturnChannel) -> ResolvedTraitReturnFact {
 fn build_traits(
     trait_roots: &[ResolvedPublicTraitRoot],
     bindings: Vec<ExportBinding>,
-    nominal_origins: &FxHashMap<InternedPath, OriginTypeId>,
-    trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    nominal_origins: &FxHashMap<PathId, OriginTypeId>,
+    trait_origins: &FxHashMap<PathId, OriginTraitId>,
     env: &TypeEnvironment,
     string_table: &StringTable,
 ) -> Result<Vec<PublicTraitSemantics>, CompilerError> {
@@ -122,12 +122,13 @@ fn build_traits_with_facts(
     trait_roots: &[ResolvedPublicTraitRoot],
     bindings: Vec<ExportBinding>,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
-    nominal_origins: &FxHashMap<InternedPath, OriginTypeId>,
-    trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    nominal_origins: &FxHashMap<PathId, OriginTypeId>,
+    trait_origins: &FxHashMap<PathId, OriginTraitId>,
     env: &TypeEnvironment,
     string_table: &StringTable,
 ) -> Result<Vec<PublicTraitSemantics>, CompilerError> {
     let registry = ExternalPackageRegistry::new();
+    let path_fork = PathInternerFork::empty();
     let mut projection = DirectTraitProjection::new(DirectTraitProjectionInput {
         trait_roots,
         trait_source_facts,
@@ -136,6 +137,7 @@ fn build_traits_with_facts(
         type_environment: env,
         external_registry: &registry,
         string_table,
+        path_fork: &path_fork,
     })?;
     let mut semantics = Vec::new();
     for binding in &bindings {
@@ -188,6 +190,7 @@ fn core_cast_fact(
 #[test]
 fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let int_id = env.builtins().int;
@@ -248,6 +251,7 @@ fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
 #[test]
 fn aliased_trait_binding_joins_the_defining_trait_root() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let root = trait_root("Shape", this_id, Vec::new(), &mut string_table);
@@ -275,6 +279,7 @@ fn aliased_trait_binding_joins_the_defining_trait_root() {
 #[test]
 fn projects_self_type_for_direct_this_type_parameter_and_return_occurrences() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -320,6 +325,7 @@ fn projects_self_type_for_direct_this_type_parameter_and_return_occurrences() {
 #[test]
 fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let int_id = env.builtins().int;
@@ -372,6 +378,7 @@ fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
 #[test]
 fn retains_value_mode_and_return_channel_facts() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let int_id = env.builtins().int;
@@ -425,6 +432,7 @@ fn retains_value_mode_and_return_channel_facts() {
 #[test]
 fn rejects_requirement_receiver_this_type_mismatch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let other_id = this_type(&mut env, &mut string_table);
@@ -462,6 +470,7 @@ fn rejects_requirement_receiver_this_type_mismatch() {
 #[test]
 fn rejects_mutable_receiver_this_type_mismatch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let other_id = this_type(&mut env, &mut string_table);
@@ -498,6 +507,7 @@ fn rejects_mutable_receiver_this_type_mismatch() {
 #[test]
 fn ignores_non_trait_export_bindings() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -535,6 +545,7 @@ fn ignores_non_trait_export_bindings() {
 #[test]
 fn rejects_trait_binding_without_matching_root() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
 
     let binding = trait_binding("Missing");
@@ -557,6 +568,7 @@ fn rejects_trait_binding_without_matching_root() {
 #[test]
 fn rejects_duplicate_trait_roots_sharing_a_name() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -583,6 +595,7 @@ fn rejects_duplicate_trait_roots_sharing_a_name() {
 #[test]
 fn rejects_trait_root_without_matching_binding() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -607,6 +620,7 @@ fn rejects_trait_root_without_matching_binding() {
 #[test]
 fn rejects_trait_binding_origin_mismatching_root_resolved_origin() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -637,6 +651,7 @@ fn rejects_trait_binding_origin_mismatching_root_resolved_origin() {
 #[test]
 fn rejects_trait_root_without_retained_source_trait_origin() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -665,6 +680,7 @@ fn rejects_trait_root_without_retained_source_trait_origin() {
 #[test]
 fn rejects_trait_root_with_builtin_this_type() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
@@ -694,6 +710,7 @@ fn rejects_trait_root_with_builtin_this_type() {
 #[test]
 fn rejects_trait_root_with_wrong_name_generic_parameter() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     // Register a synthetic generic parameter with the wrong name.
@@ -724,6 +741,7 @@ fn rejects_trait_root_with_wrong_name_generic_parameter() {
 #[test]
 fn projects_source_to_source_incompatibility_identity() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -763,6 +781,7 @@ fn projects_source_to_source_incompatibility_identity() {
 #[test]
 fn projects_source_to_core_incompatibility_identity() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -810,6 +829,7 @@ fn projects_source_to_core_incompatibility_identity() {
 #[test]
 fn incompatibility_identity_is_stable_across_local_trait_id_allocation() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -881,6 +901,7 @@ fn incompatibility_identity_is_stable_across_local_trait_id_allocation() {
 #[test]
 fn rejects_duplicate_canonical_incompatibility_identity() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -930,6 +951,7 @@ fn rejects_duplicate_canonical_incompatibility_identity() {
 #[test]
 fn rejects_incompatibility_without_retained_source_fact() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -963,6 +985,7 @@ fn rejects_incompatibility_without_retained_source_fact() {
 #[test]
 fn rejects_incompatibility_source_without_public_source_trait_origin() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -1003,6 +1026,7 @@ fn rejects_incompatibility_source_without_public_source_trait_origin() {
 #[test]
 fn rejects_internal_self_incompatibility_relation() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -1041,6 +1065,7 @@ fn rejects_internal_self_incompatibility_relation() {
 #[test]
 fn builder_carries_incompatibilities_on_trait_record() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let int_id = env.builtins().int;
@@ -1079,7 +1104,7 @@ fn builder_carries_incompatibilities_on_trait_record() {
         trait_source_facts,
     };
 
-    let nominal_origins: FxHashMap<InternedPath, OriginTypeId> = FxHashMap::default();
+    let nominal_origins: FxHashMap<PathId, OriginTypeId> = FxHashMap::default();
     let mut trait_origins = FxHashMap::default();
     trait_origins.insert(path("Shape", &mut string_table), trait_origin("Shape"));
     trait_origins.insert(path("Mark", &mut string_table), trait_origin("Mark"));
@@ -1090,23 +1115,21 @@ fn builder_carries_incompatibilities_on_trait_record() {
         FxHashMap::default(),
     );
 
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: AstPublicInterfaceProjectionInput {
-            root_table,
-            trait_roots: vec![trait_root],
-            trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
-            trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        },
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &trait_origins,
-        type_environment: &env,
-        external_registry: &ExternalPackageRegistry::new(),
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: AstPublicInterfaceProjectionInput {
+        root_table,
+        trait_roots: vec![trait_root],
+        trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
+        trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+    },
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &trait_origins,
+    type_environment: &env,
+    external_registry: &ExternalPackageRegistry::new(),
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("a trait record with one public incompatibility builds a draft")
     .draft;

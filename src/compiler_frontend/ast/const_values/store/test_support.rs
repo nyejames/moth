@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::folded_value::{PublicConstTemplate, PublicConstTemplateKind};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
 impl ConstValueStore {
@@ -47,7 +47,7 @@ impl ConstValueStore {
         type_environment: &TypeEnvironment,
     ) -> Result<(), CompilerError> {
         let mut template_builder =
-            |_: Option<&InternedPath>,
+            |_: Option<&PathId>,
              _: &crate::compiler_frontend::ast::templates::template::Template|
              -> Result<ConstTemplateValue, ConstValueStoreError> {
                 Ok(test_wrapper_template_value(None))
@@ -74,7 +74,7 @@ impl ConstValueStore {
         for declaration in declarations {
             let folded = folded.clone();
             let mut template_builder =
-                |_: Option<&InternedPath>,
+                |_: Option<&PathId>,
                  _: &crate::compiler_frontend::ast::templates::template::Template|
                  -> Result<ConstTemplateValue, ConstValueStoreError> {
                     Ok(ConstTemplateValue::Folded {
@@ -106,7 +106,7 @@ impl ConstValueStore {
         type_environment: &TypeEnvironment,
     ) {
         let mut template_builder =
-            |_: Option<&InternedPath>,
+            |_: Option<&PathId>,
              _: &crate::compiler_frontend::ast::templates::template::Template|
              -> Result<ConstTemplateValue, ConstValueStoreError> {
                 Ok(test_wrapper_template_value(Some(folded.clone())))
@@ -123,7 +123,7 @@ impl ConstValueStore {
         &mut self,
         declaration: Declaration,
         template_builder: &mut impl FnMut(
-            Option<&InternedPath>,
+            Option<&PathId>,
             &crate::compiler_frontend::ast::templates::template::Template,
         ) -> Result<ConstTemplateValue, ConstValueStoreError>,
         type_environment: &TypeEnvironment,

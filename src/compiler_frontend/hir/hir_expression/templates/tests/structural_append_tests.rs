@@ -66,6 +66,7 @@ fn append_constant_chunk(
 #[test]
 fn appending_text_to_a_piece_bearing_string_keeps_the_resource_anchor_boundary() {
     let mut string_table = StringTable::new();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut resources = ModuleResourceTable::new();
     let (logo, _origin) = fixture_resource(&mut resources, "assets/logo.svg");
 
@@ -73,7 +74,7 @@ fn appending_text_to_a_piece_bearing_string_keeps_the_resource_anchor_boundary()
     let appended = string_table.intern("-thumbnail.svg");
     let location = None;
 
-    let mut builder = setup_builder(&mut string_table);
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let mut rendered = structural_expression(
         &mut builder,
         &location,
@@ -107,6 +108,7 @@ fn appending_text_to_a_piece_bearing_string_keeps_the_resource_anchor_boundary()
 #[test]
 fn appending_two_piece_bearing_strings_fuses_the_join_but_never_across_an_anchor() {
     let mut string_table = StringTable::new();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut resources = ModuleResourceTable::new();
     let (logo, _origin) = fixture_resource(&mut resources, "assets/logo.svg");
 
@@ -123,7 +125,7 @@ fn appending_two_piece_bearing_strings_fuses_the_join_but_never_across_an_anchor
 
     let location = None;
 
-    let mut builder = setup_builder(&mut string_table);
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let mut rendered = structural_expression(
         &mut builder,
         &location,
@@ -170,13 +172,14 @@ fn appending_two_piece_bearing_strings_fuses_the_join_but_never_across_an_anchor
 #[test]
 fn anchor_free_append_demotes_to_a_plain_string_literal() {
     let mut string_table = StringTable::new();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
 
     let head = string_table.intern("docs");
     let separator = string_table.intern("/");
     let tail = string_table.intern("index.html");
     let location = None;
 
-    let mut builder = setup_builder(&mut string_table);
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let mut rendered = structural_expression(
         &mut builder,
         &location,

@@ -8,7 +8,7 @@
 
 use super::span::ExtendedSpanResolver;
 use super::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 pub(crate) struct TestSourceContext {
     source_id: SourceId,
     path: PathBuf,
-    source_path: InternedPath,
+    source_path: PathId,
     string_table: StringTable,
     span_builder: ExtendedSpanBuilder,
 }
@@ -31,7 +31,9 @@ impl TestSourceContext {
     pub(crate) fn with_source_id(source_id: SourceId, path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let mut string_table = StringTable::new();
-        let source_path = InternedPath::try_from_filesystem_path(&path, &mut string_table)
+        let mut path_fork = PathInternerFork::empty();
+        let source_path = path_fork
+            .try_intern_filesystem_path(&path, &mut string_table)
             .expect("test source path should be UTF-8");
 
         Self {
@@ -51,7 +53,7 @@ impl TestSourceContext {
         &self.path
     }
 
-    pub(crate) fn source_path(&self) -> &InternedPath {
+    pub(crate) fn source_path(&self) -> &PathId {
         &self.source_path
     }
 
@@ -82,6 +84,7 @@ impl TestSourceContext {
 pub(crate) fn database_with_retained_text(text: &str) -> (SourceDatabase, SourceId) {
     let source_path = PathBuf::from("/project/main.moth");
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut database = SourceDatabase::build(
         std::iter::once(&source_path),
         &source_path,

@@ -36,7 +36,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use crate::timing_scope_attributed_opt;
@@ -55,17 +55,20 @@ use super::debug_type_validation::debug_validate_type_ids_for_hir;
 pub(in crate::compiler_frontend::ast) struct AstFinalizer<'context, 'services> {
     pub(super) context: &'context AstPhaseContext<'services>,
     pub(super) environment: AstModuleEnvironment,
+    pub(super) path_fork: &'services mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 }
 
 impl<'context, 'services> AstFinalizer<'context, 'services> {
-    /// Creates a new finalizer with the given phase context and resolved environment.
+    /// Creates a new finalizer with the given phase context, resolved environment, and path table.
     pub(in crate::compiler_frontend::ast) fn new(
         context: &'context AstPhaseContext<'services>,
         environment: AstModuleEnvironment,
+        path_fork: &'services mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Self {
         Self {
             context,
             environment,
+            path_fork,
         }
     }
 
@@ -130,7 +133,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let const_values = {
             let template_ir_store = self.context.template_ir_store.borrow();
             let mut template_builder =
-                |defining_path: Option<&InternedPath>,
+                |defining_path: Option<&PathId>,
                  template: &Template|
                  -> Result<ConstTemplateValue, ConstValueStoreError> {
                     // A root module constant was already projected once by `project_const_templates`.
@@ -258,9 +261,9 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         discard_inactive_assertion_messages(&mut emitted.ast);
 
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
-            self.context
-                .entry_dir
-                .join_str(IMPLICIT_START_FUNC_NAME, string_table)
+            self.path_fork
+                .try_intern_child(self.context.entry_dir, string_table.intern(IMPLICIT_START_FUNC_NAME))
+                .expect("path table exhausted while creating implicit start function path")
         });
 
         // ----------------------------
@@ -280,7 +283,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             specialization.commit_active_generic_requests(emitted.deferred_generic_requests);
         self.validate_specialized_function_terminality(
             &emitted.ast,
-            start_function_path.as_ref(),
+            start_function_path,
             &emitted.warnings,
             string_table,
         )?;
@@ -525,7 +528,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     fn validate_specialized_function_terminality(
         &self,
         ast_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
-        start_function_path: Option<&InternedPath>,
+        start_function_path: Option<PathId>,
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -535,7 +538,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             };
             let policy = terminality_policy_for_signature(
                 signature,
-                start_function_path.is_some_and(|start_path| start_path == path),
+                start_function_path.is_some_and(|start_path| start_path == *path),
             );
             if let Some(diagnostic) = validate_function_body_terminality(body, policy, node.span) {
                 return Err(CompilerMessages::from_diagnostic_with_warnings(

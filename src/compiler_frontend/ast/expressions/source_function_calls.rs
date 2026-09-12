@@ -22,7 +22,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -34,7 +34,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 /// namespace-member call sites.
 pub(super) struct SourceCallableMemberInput<'a, 'env> {
     pub(super) token_stream: &'a mut FileTokens,
-    pub(super) function_path: &'a InternedPath,
+    pub(super) function_path: &'a PathId,
     pub(super) signature: &'a FunctionSignature,
     pub(super) generic_template: Option<&'a GenericFunctionTemplate>,
     pub(super) visible_name: StringId,
@@ -45,6 +45,7 @@ pub(super) struct SourceCallableMemberInput<'a, 'env> {
     pub(super) expected_result_evidence_allowed: bool,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
     pub(super) string_table: &'a mut StringTable,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Parse a call to a source-defined function (generic or non-generic) and push
@@ -71,6 +72,7 @@ pub(super) fn parse_source_callable_member(
         expected_result_evidence_allowed,
         type_interner,
         string_table,
+        path_fork,
     } = input;
 
     let expression_is_boundary_leading = expression.is_empty();
@@ -140,6 +142,7 @@ pub(super) fn parse_source_callable_member(
             warnings: None,
             type_interner,
             string_table,
+            path_fork,
         };
 
         let function_call_expression = if context.generic_template_validation {
@@ -156,6 +159,7 @@ pub(super) fn parse_source_callable_member(
             expression,
             allow_boundary_catch,
             function_call_expression,
+            path_fork,
         )?;
 
         return Ok(());
@@ -177,6 +181,7 @@ pub(super) fn parse_source_callable_member(
         warnings: None,
         type_interner,
         string_table,
+        path_fork,
     })?;
 
     push_expression_operand(
@@ -187,6 +192,7 @@ pub(super) fn parse_source_callable_member(
         expression,
         allow_boundary_catch,
         function_call_expression,
+        path_fork,
     )?;
 
     Ok(())

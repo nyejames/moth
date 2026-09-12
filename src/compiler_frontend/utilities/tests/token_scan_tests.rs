@@ -1,7 +1,7 @@
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
@@ -15,9 +15,10 @@ fn token(kind: TokenKind) -> Token {
 }
 
 fn stream_from_kinds(kinds: Vec<TokenKind>, string_table: &mut StringTable) -> FileTokens {
+    let mut path_fork = PathInternerFork::empty();
     let tokens = kinds.into_iter().map(token).collect();
     FileTokens::new(
-        InternedPath::from_single_str("token_scan_tests", string_table),
+        path_fork.try_intern_portable_path("token_scan_tests", string_table).expect("test path fits"),
         SourceId::COMPILATION_ROOT,
         tokens,
     )
@@ -26,6 +27,7 @@ fn stream_from_kinds(kinds: Vec<TokenKind>, string_table: &mut StringTable) -> F
 #[test]
 fn top_level_comma_detection_ignores_nested_commas() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let nested_only = stream_from_kinds(
         vec![
@@ -74,6 +76,7 @@ fn top_level_comma_detection_ignores_nested_commas() {
 #[test]
 fn expression_end_index_respects_nested_depth() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let tokens = vec![
         token(TokenKind::Symbol(string_table.intern("call"))),
@@ -97,6 +100,7 @@ fn expression_end_index_respects_nested_depth() {
 #[test]
 fn declaration_initializer_tokens_include_terminal_catch_then_block() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let load_name = string_table.intern("load");
     let next_statement_name = string_table.intern("next_statement");
     let mut stream = stream_from_kinds(
@@ -143,6 +147,7 @@ fn declaration_initializer_tokens_include_terminal_catch_then_block() {
 #[test]
 fn declaration_initializer_tokens_balance_nested_blocks_inside_catch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let load_name = string_table.intern("load");
     let flag_name = string_table.intern("flag");
     let io_name = string_table.intern("io");
@@ -198,6 +203,7 @@ fn declaration_initializer_tokens_balance_nested_blocks_inside_catch() {
 #[test]
 fn balanced_template_region_consumes_nested_templates() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let text_outer = string_table.intern("outer");
     let text_inner = string_table.intern("inner");
@@ -239,6 +245,7 @@ fn balanced_template_region_consumes_nested_templates() {
 #[test]
 fn balanced_template_region_errors_on_eof_before_close() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let mut stream = stream_from_kinds(
         vec![
@@ -261,6 +268,7 @@ fn balanced_template_region_errors_on_eof_before_close() {
 #[test]
 fn collect_symbol_references_matches_initializer_behavior_for_bare_symbol() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let name = string_table.intern("value");
     let tokens = vec![
         token(TokenKind::Symbol(name)),
@@ -281,6 +289,7 @@ fn collect_symbol_references_matches_initializer_behavior_for_bare_symbol() {
 #[test]
 fn collect_symbol_references_matches_initializer_behavior_for_dot_member() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let name = string_table.intern("config");
     let member = string_table.intern("setting");
     let tokens = vec![
@@ -305,6 +314,7 @@ fn collect_symbol_references_matches_initializer_behavior_for_dot_member() {
 #[test]
 fn collect_symbol_references_matches_initializer_behavior_for_call() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let name = string_table.intern("helper");
     let tokens = vec![
         token(TokenKind::Symbol(name)),
@@ -324,6 +334,7 @@ fn collect_symbol_references_matches_initializer_behavior_for_call() {
 #[test]
 fn collect_symbol_references_matches_initializer_behavior_for_choice_namespace() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let name = string_table.intern("Status");
     let tokens = vec![
         token(TokenKind::Symbol(name)),
@@ -370,6 +381,7 @@ fn eof_expected_delimiter(
 #[test]
 fn eof_in_template_reports_closing_bracket() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let name = string_table.intern("value");
     let mut stream = stream_from_kinds(
         vec![
@@ -392,6 +404,7 @@ fn eof_in_template_reports_closing_bracket() {
 #[test]
 fn eof_in_parenthesis_reports_closing_paren() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let name = string_table.intern("call");
     let mut stream = stream_from_kinds(
         vec![
@@ -414,6 +427,7 @@ fn eof_in_parenthesis_reports_closing_paren() {
 #[test]
 fn eof_in_collection_reports_closing_brace() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let name = string_table.intern("data");
     let mut stream = stream_from_kinds(
         vec![
@@ -436,6 +450,7 @@ fn eof_in_collection_reports_closing_brace() {
 #[test]
 fn eof_in_catch_block_reports_semicolon() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let load_name = string_table.intern("load");
     let mut stream = stream_from_kinds(
         vec![
@@ -462,6 +477,7 @@ fn eof_in_catch_block_reports_semicolon() {
 #[test]
 fn eof_in_value_producing_if_reports_semicolon() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let condition_name = string_table.intern("ready");
     let mut stream = stream_from_kinds(
         vec![
@@ -486,6 +502,7 @@ fn eof_in_value_producing_if_reports_semicolon() {
 #[test]
 fn eof_in_nested_parenthesis_inside_catch_reports_innermost_paren() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let load_name = string_table.intern("load");
     let arg_name = string_table.intern("arg");
     let mut stream = stream_from_kinds(
@@ -515,6 +532,7 @@ fn eof_in_nested_parenthesis_inside_catch_reports_innermost_paren() {
 #[test]
 fn eof_in_parenthesis_inside_template_reports_innermost_paren() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut stream = stream_from_kinds(
         vec![
             TokenKind::TemplateHead,
@@ -535,6 +553,7 @@ fn eof_in_parenthesis_inside_template_reports_innermost_paren() {
 #[test]
 fn eof_in_template_inside_parenthesis_reports_innermost_template() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut stream = stream_from_kinds(
         vec![
             TokenKind::OpenParenthesis,
@@ -578,6 +597,7 @@ fn innermost_open_construct_prioritizes_depth_over_statement_blocks() {
 #[test]
 fn declaration_initializer_tokens_keep_a_multiline_pipe_list_together() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let field_a = string_table.intern("a");
     let field_b = string_table.intern("b");
     let next_statement = string_table.intern("next");
@@ -615,6 +635,7 @@ fn declaration_initializer_tokens_keep_a_multiline_pipe_list_together() {
 #[test]
 fn declaration_initializer_tokens_keep_a_malformed_multiline_pipe_list_together() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let field_b = string_table.intern("b");
     let next_statement = string_table.intern("next");
     let mut stream = stream_from_kinds(
@@ -654,6 +675,7 @@ fn declaration_initializer_tokens_keep_a_malformed_multiline_pipe_list_together(
 #[test]
 fn initializer_references_carry_the_scanned_token_span() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut builder = ExtendedSpanBuilder::new();
     let name = string_table.intern("other_const");
     let source_id = SourceId::from_index(1);

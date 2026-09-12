@@ -15,16 +15,22 @@ use crate::compiler_frontend::external_packages::{
     IO_INPUT_EXTERNAL_TYPE_ID, external_success_returns,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-fn import_path(components: &[&str], string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_components(
-        components
-            .iter()
-            .map(|component| string_table.intern(component))
-            .collect(),
-    )
+fn import_path(
+    components: &[&str],
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> PathId {
+    path_fork
+        .try_intern_components(
+            &components
+                .iter()
+                .map(|component| string_table.intern(component))
+                .collect::<Vec<_>>(),
+        )
+        .expect("test path fits")
 }
 
 #[test]
@@ -299,9 +305,10 @@ fn package_prefix_lookup_returns_longest_registered_package() {
         .expect("child test package should register");
 
     let mut string_table = StringTable::new();
-    let path = import_path(&["test", "pkg", "open"], &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = import_path(&["test", "pkg", "open"], &mut path_fork, &mut string_table);
     let matched = registry
-        .longest_package_prefix_for_dependency(&path, &string_table)
+        .longest_package_prefix_for_dependency(path, &path_fork, &string_table)
         .expect("package prefix should match");
 
     assert_eq!(matched.package_path, "@test/pkg");
@@ -315,13 +322,14 @@ fn package_prefix_lookup_supports_exact_namespace_bindings() {
     crate::builder_surface::core_packages::register_core_math_package(&mut registry);
 
     let mut string_table = StringTable::new();
-    let path = import_path(&["core", "math"], &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = import_path(&["core", "math"], &mut path_fork, &mut string_table);
     let matched = registry
-        .longest_package_prefix_for_dependency(&path, &string_table)
+        .longest_package_prefix_for_dependency(path, &path_fork, &string_table)
         .expect("core math package should match");
 
     assert_eq!(matched.package_path, "@core/math");
-    assert_eq!(matched.matched_component_count, path.len());
+    assert_eq!(matched.matched_component_count, path_fork.depth(path) as usize);
 }
 
 #[test]
@@ -330,11 +338,22 @@ fn virtual_package_detection_uses_symbol_suffixes() {
     crate::builder_surface::core_packages::register_core_math_package(&mut registry);
 
     let mut string_table = StringTable::new();
-    let package_symbol = import_path(&["core", "math", "sin"], &mut string_table);
-    let source_path = import_path(&["core", "missing", "sin"], &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let package_symbol =
+        import_path(&["core", "math", "sin"], &mut path_fork, &mut string_table);
+    let source_path =
+        import_path(&["core", "missing", "sin"], &mut path_fork, &mut string_table);
 
-    assert!(registry.is_virtual_package_dependency(&package_symbol, &string_table));
-    assert!(!registry.is_virtual_package_dependency(&source_path, &string_table));
+    assert!(registry.is_virtual_package_dependency(
+        package_symbol,
+        &path_fork,
+        &string_table
+    ));
+    assert!(!registry.is_virtual_package_dependency(
+        source_path,
+        &path_fork,
+        &string_table
+    ));
 }
 
 // ------------------------------------------------------------------

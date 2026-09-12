@@ -1,7 +1,7 @@
 //! Frozen artefact reconstruction and generated sidecar input emission.
 use super::super::GenericFunctionTemplate;
 use super::alias_projection;
-use super::frozen_syntax::{MaterialisedBody, materialise_path};
+use super::frozen_syntax::MaterialisedBody;
 use super::nominal_blueprints::{
     intern_generated_canonical_type, intern_materialisation_type_blueprint,
     materialised_nominal_declaration, materialised_struct_fields,
@@ -54,9 +54,9 @@ use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHandle};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -80,6 +80,13 @@ pub(crate) struct ModuleMaterialisationContext {
     pub(super) frozen_identity_handle: FrozenIdentityHandle,
 }
 impl ModuleMaterialisationContext {
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.semantic_closure.remap_path_ids(remap);
+        for artefact in &mut self.artefacts {
+            artefact.remap_path_ids(remap);
+        }
+    }
+
     pub(crate) fn frozen_identity_handle(&self) -> FrozenIdentityHandle {
         self.frozen_identity_handle.clone()
     }
@@ -163,6 +170,7 @@ impl GenericTemplateArtefact {
             identity,
             requester_context,
             requester_call_span,
+            path_fork,
             external_package_registry,
             style_directives,
             build_profile,
@@ -173,12 +181,12 @@ impl GenericTemplateArtefact {
         let (mut string_table, requester_string_remap) =
             requester_context.fork_materialisation_string_table();
 
-        let source_file = materialise_path(&self.source_file, &mut string_table);
-        let function_path = materialise_path(&self.function_path, &mut string_table);
-        let entry_dir = source_file.parent().unwrap_or_default();
+        let source_file = self.source_file;
+        let function_path = self.function_path;
+        let entry_dir = path_fork.parent(source_file).unwrap_or(PathId::ROOT);
         let materialised_body = self
             .body
-            .materialise(&source_file, &mut string_table)
+            .materialise(source_file, path_fork, &mut string_table)
             .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
@@ -190,6 +198,7 @@ impl GenericTemplateArtefact {
             external_package_registry: Arc::new(external_package_registry.clone()),
             style_directives,
             string_table: &mut string_table,
+            path_fork,
             entry_dir,
             root_role: ModuleRootRole::Support,
             build_profile,
@@ -203,7 +212,7 @@ impl GenericTemplateArtefact {
             #[cfg(feature = "timers")]
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
-        let (phase_context, string_table_ref) =
+        let (phase_context, string_table_ref, path_fork_ref) =
             AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()));
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
@@ -215,11 +224,13 @@ impl GenericTemplateArtefact {
                 context,
                 &source_file,
                 external_package_registry,
+                path_fork_ref,
                 string_table_ref,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
         let builtin_manifest =
             crate::compiler_frontend::builtins::error_type::register_builtin_error_types(
+                path_fork_ref,
                 string_table_ref,
             );
         let mut module_symbols = ModuleSymbols::empty();
@@ -233,10 +244,7 @@ impl GenericTemplateArtefact {
         module_symbols
             .struct_source_by_path
             .extend(builtin_manifest.struct_source_by_path);
-        module_symbols
-            .builtin_struct_ast_nodes
-            .extend(builtin_manifest.ast_struct_nodes);
-        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context).build(
+        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context, path_fork_ref).build(
             &[],
             AstEnvironmentInput {
                 module_symbols,
@@ -254,6 +262,7 @@ impl GenericTemplateArtefact {
             &mut environment,
             &value_services,
             string_table_ref,
+            path_fork_ref,
             Some(materialised_body),
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
@@ -269,6 +278,7 @@ impl GenericTemplateArtefact {
                 requester_call_span,
             },
             self,
+            path_fork_ref,
             string_table_ref,
         )?;
         Ok(MaterialisedGenericAst {
@@ -281,8 +291,9 @@ impl GenericTemplateArtefact {
     fn materialise_binding_environment(
         &self,
         context: &ModuleMaterialisationContext,
-        source_file: &InternedPath,
+        source_file: &PathId,
         external_package_registry: &ExternalPackageRegistry,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         string_table: &mut StringTable,
     ) -> Result<HeaderBindingEnvironment, CompilerError> {
         let mut environment = HeaderBindingEnvironment::default();
@@ -290,11 +301,11 @@ impl GenericTemplateArtefact {
             source_file.clone(),
             Arc::new(
                 self.visibility
-                    .materialise(external_package_registry, string_table)?,
+                    .materialise(external_package_registry, path_fork, string_table)?,
             ),
         );
         for binding in &self.declarations {
-            let local_path = materialise_path(&binding.local_path, string_table);
+            let local_path = binding.local_path;
             environment
                 .imported_declarations_by_local_path
                 .insert(local_path, binding.origin.clone());
@@ -310,7 +321,7 @@ impl GenericTemplateArtefact {
                 .insert(record.identity.clone(), record.clone());
         }
         for callable in &self.callables {
-            let local_path = materialise_path(&callable.local_path, string_table);
+            let local_path = callable.local_path;
             let target = callable.target.materialise(local_path.clone());
             let SourceFunctionTarget::Imported { origin, .. } = &target else {
                 // Generated and module-private callables materialise through the generated
@@ -333,6 +344,7 @@ impl GenericTemplateArtefact {
         environment: &mut AstModuleEnvironment,
         services: &GeneratedValueMaterialisationServices<'_>,
         string_table: &mut StringTable,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         mut materialised_self_body: Option<MaterialisedBody>,
     ) -> Result<(), CompilerError> {
         let external_package_registry = services.external_registry;
@@ -346,8 +358,9 @@ impl GenericTemplateArtefact {
                 external_package_registry,
                 self,
                 string_table,
+                path_fork,
             )?;
-            let local_path = materialise_path(&nominal.local_path, string_table);
+            let local_path = nominal.local_path;
             environment
                 .type_environment
                 .register_nominal_path_alias(local_path.clone(), type_id)?;
@@ -400,6 +413,7 @@ impl GenericTemplateArtefact {
                     self,
                     value_services,
                     string_table,
+                    path_fork,
                 )?
             {
                 Rc::make_mut(&mut lookups.resolved_struct_fields_by_path)
@@ -413,6 +427,7 @@ impl GenericTemplateArtefact {
                         type_id,
                         &environment.type_environment,
                     )?,
+                    path_fork,
                 )?;
             }
         }
@@ -427,6 +442,7 @@ impl GenericTemplateArtefact {
             external_package_registry,
             template_ir_store,
             string_table,
+            path_fork,
         )?;
 
         for callable in &self.callables {
@@ -437,13 +453,14 @@ impl GenericTemplateArtefact {
             {
                 continue;
             }
-            let local_path = materialise_path(&callable.local_path, string_table);
+            let local_path = callable.local_path;
             let (signature, function_type_id, fallible_carrier_type_id) =
                 callable.signature.materialise(
                     &local_path,
                     &mut StableFunctionMaterialisationContext {
                         generic_parameter_type_ids: &[],
                         nominal_source: self,
+                        path_fork,
                         type_environment: &mut environment.type_environment,
                         external_package_registry,
                         template_ir_store,
@@ -464,7 +481,7 @@ impl GenericTemplateArtefact {
                 config_qualifier: None,
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
-            append_materialised_declaration(lookups, declaration)?;
+            append_materialised_declaration(lookups, declaration, path_fork)?;
             Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
                 local_path.clone(),
                 ResolvedFunctionSignature {
@@ -485,12 +502,12 @@ impl GenericTemplateArtefact {
         }
 
         for local_path_components in &self.local_declarations {
-            let local_path = materialise_path(local_path_components, string_table);
+            let local_path = *local_path_components;
             if let Some(constant) = context
                 .semantic_closure
                 .constants
                 .iter()
-                .find(|constant| constant.local_path.as_ref() == local_path_components.as_ref())
+                .find(|constant| constant.local_path == *local_path_components)
             {
                 let type_id = intern_generated_canonical_type(
                     &constant.type_identity,
@@ -498,6 +515,7 @@ impl GenericTemplateArtefact {
                     external_package_registry,
                     self,
                     string_table,
+                    path_fork,
                 )?;
                 let mut materialiser = GeneratedFoldedValueMaterialiser {
                     type_environment: &mut environment.type_environment,
@@ -505,6 +523,7 @@ impl GenericTemplateArtefact {
                     nominal_source: self,
                     template_ir_store: Rc::clone(template_ir_store),
                     module_resources: Rc::clone(&module_resources),
+                    path_fork,
                 };
                 let span = constant.span;
                 let mut value = materialize_public_folded_value(
@@ -527,21 +546,25 @@ impl GenericTemplateArtefact {
                     .declaration_id_by_path(&local_path)
                 {
                     Some(declaration_id) => declaration_id,
-                    None => append_materialised_declaration(lookups, declaration.clone())?,
+                    None => append_materialised_declaration(
+                        lookups,
+                        declaration.clone(),
+                        path_fork,
+                    )?,
                 };
                 Rc::make_mut(&mut lookups.resolved_module_constants).insert(declaration_id);
                 Rc::make_mut(&mut lookups.declaration_semantics)
                     .register_materialised_constant(local_path);
                 continue;
             }
-
             if alias_projection::restore_generated_local_alias(
                 self,
                 context,
                 environment,
                 local_path,
-                local_path_components,
+                *local_path_components,
                 external_package_registry,
+                path_fork,
                 string_table,
             )? {
                 continue;
@@ -549,11 +572,11 @@ impl GenericTemplateArtefact {
         }
 
         for method in &self.visibility.receiver_methods {
-            let method_path = materialise_path(&method.local_path, string_table);
+            let method_path = method.local_path;
             if context
                 .artefacts
                 .iter()
-                .any(|nested| materialise_path(&nested.function_path, string_table) == method_path)
+                .any(|nested| nested.function_path == method_path)
             {
                 continue;
             }
@@ -575,6 +598,7 @@ impl GenericTemplateArtefact {
                         generic_parameter_type_ids: &[],
                         nominal_source: self,
                         type_environment: &mut environment.type_environment,
+                        path_fork,
                         external_package_registry,
                         template_ir_store,
                         module_resources: Rc::clone(&module_resources),
@@ -603,7 +627,7 @@ impl GenericTemplateArtefact {
                 .get_by_path(&method_path)
                 .is_none()
             {
-                append_materialised_declaration(lookups, declaration)?;
+                append_materialised_declaration(lookups, declaration, path_fork)?;
             }
             Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
                 method_path.clone(),
@@ -614,9 +638,10 @@ impl GenericTemplateArtefact {
             );
             register_materialised_receiver_method(
                 lookups,
-                method_path.clone(),
+                method_path,
                 receiver,
-                signature,
+                signature.clone(),
+                path_fork,
             )?;
             Rc::make_mut(&mut lookups.declaration_semantics)
                 .register_materialised_function(method_path.clone());
@@ -634,9 +659,9 @@ impl GenericTemplateArtefact {
             );
         }
 
-        let selected_paths = self.visibility.materialised_selected_paths(string_table);
+        let selected_paths = self.visibility.materialised_selected_paths();
         for nested in &context.artefacts {
-            let nested_path = materialise_path(&nested.function_path, string_table);
+            let nested_path = nested.function_path;
             if nested.declaration_identity != self.declaration_identity
                 && !selected_paths.contains(&nested_path)
             {
@@ -660,6 +685,7 @@ impl GenericTemplateArtefact {
                     external_package_registry,
                     self,
                     string_table,
+                    path_fork,
                 )?;
                 let generic_parameter_list_id =
                     match environment.type_environment.get(nominal_type_id) {
@@ -729,6 +755,7 @@ impl GenericTemplateArtefact {
                     external_package_registry,
                     self,
                     string_table,
+                    path_fork,
                 )?;
                 let generic_parameter_list_id =
                     match environment.type_environment.get(receiver_type_id) {
@@ -874,6 +901,7 @@ impl GenericTemplateArtefact {
                     generic_parameter_type_ids: &generic_parameter_type_ids,
                     nominal_source: nested,
                     type_environment: &mut environment.type_environment,
+                    path_fork,
                     external_package_registry,
                     template_ir_store,
                     module_resources: Rc::clone(&module_resources),
@@ -888,7 +916,7 @@ impl GenericTemplateArtefact {
             } else {
                 None
             };
-            let source_file = materialise_path(&nested.source_file, string_table);
+            let source_file = nested.source_file;
             let body = if nested.declaration_identity == self.declaration_identity {
                 materialised_self_body.take().ok_or_else(|| {
                     CompilerError::compiler_error(
@@ -899,7 +927,7 @@ impl GenericTemplateArtefact {
             } else {
                 nested
                     .body
-                    .materialise(&source_file, string_table)?
+                    .materialise(source_file, path_fork, string_table)?
                     .into_generic_body()
             };
             let template = GenericFunctionTemplate {
@@ -926,9 +954,10 @@ impl GenericTemplateArtefact {
             if let Some(receiver) = receiver.clone() {
                 register_materialised_receiver_method(
                     lookups,
-                    nested_path.clone(),
+                    nested_path,
                     receiver,
                     signature.clone(),
+                    path_fork,
                 )?;
             }
             if lookups
@@ -950,6 +979,7 @@ impl GenericTemplateArtefact {
                         binding_span: None,
                         config_qualifier: None,
                     },
+                    path_fork,
                 )?;
             }
             Rc::make_mut(&mut lookups.declaration_semantics)
@@ -986,19 +1016,20 @@ fn materialised_receiver_key(
 
 fn register_materialised_receiver_method(
     lookups: &mut AstModuleLookups,
-    function_path: InternedPath,
+    function_path: PathId,
     receiver: ReceiverKey,
     signature: FunctionSignature,
+    path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> Result<(), CompilerError> {
-    let method_name = function_path.name().ok_or_else(|| {
+    let method_name = path_fork.component(function_path).ok_or_else(|| {
         CompilerError::compiler_error(
             "Materialised receiver method path has no final method-name component",
         )
     })?;
     let entry = ReceiverMethodEntry {
-        function_path: function_path.clone(),
+        function_path,
         receiver: receiver.clone(),
-        source_file: function_path.parent().unwrap_or_default(),
+        source_file: path_fork.parent(function_path).unwrap_or(PathId::ROOT),
         receiver_mutable: signature
             .parameters
             .first()
@@ -1031,10 +1062,11 @@ fn register_materialised_receiver_method(
 pub(super) fn append_materialised_declaration(
     lookups: &mut AstModuleLookups,
     declaration: Declaration,
+    path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> Result<crate::compiler_frontend::ast::module_ast::environment::DeclarationId, CompilerError> {
-    let path = declaration.id.clone();
+    let path = declaration.id;
     Rc::make_mut(&mut lookups.declaration_table)
-        .append_for_construction(declaration)
+        .append_for_construction(declaration, path_fork)
         .ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Materialised declaration path {path:?} was registered more than once",
@@ -1136,13 +1168,14 @@ struct StableFunctionMaterialisationContext<'a, N: MaterialisationNominalSource>
     template_ir_store:
         &'a Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
     module_resources: Rc<RefCell<ModuleResourceTable>>,
+    path_fork: &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &'a mut StringTable,
 }
 
 impl StableFunctionSignature {
     fn materialise<N: MaterialisationNominalSource>(
         &self,
-        function_path: &InternedPath,
+        function_path: &PathId,
         context: &mut StableFunctionMaterialisationContext<'_, N>,
     ) -> Result<(FunctionSignature, TypeId, Option<TypeId>), CompilerError> {
         let mut parameters = Vec::with_capacity(self.parameters.len());
@@ -1155,9 +1188,17 @@ impl StableFunctionSignature {
                 context.type_environment,
                 context.external_package_registry,
                 context.string_table,
+                context.path_fork,
             )?;
             let name = context.string_table.intern(&parameter.name);
-            let parameter_path = function_path.append(name);
+            let parameter_path = context
+                .path_fork
+                .try_intern_child(*function_path, name)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "path table exhausted while materialising a function parameter",
+                    )
+                })?;
             let parameter_span = parameter.span;
             let mut value = if let Some(default) = parameter.folded_default.as_ref() {
                 let mut materialiser = GeneratedFoldedValueMaterialiser {
@@ -1166,6 +1207,7 @@ impl StableFunctionSignature {
                     nominal_source: context.nominal_source,
                     template_ir_store: Rc::clone(context.template_ir_store),
                     module_resources: Rc::clone(&context.module_resources),
+                    path_fork: context.path_fork,
                 };
                 materialize_public_folded_value(
                     &mut materialiser,
@@ -1209,6 +1251,7 @@ impl StableFunctionSignature {
                 context.type_environment,
                 context.external_package_registry,
                 context.string_table,
+                context.path_fork,
             )?;
             let diagnostic_type = diagnostic_type_spelling(type_id, context.type_environment);
             returns.push(ReturnSlot {

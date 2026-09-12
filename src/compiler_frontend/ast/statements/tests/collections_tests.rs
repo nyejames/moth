@@ -22,6 +22,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 
 fn runtime_collection_builtin_op(expression: &Expression) -> CollectionBuiltinOp {
     let ExpressionKind::CollectionBuiltinCall { op, .. } = &expression.kind else {
@@ -57,8 +58,8 @@ fn handled_collection_builtin_op(expression: &Expression) -> CollectionBuiltinOp
 
 #[test]
 fn parses_collection_literal_items() {
-    let (ast, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(values_decl) = &body[0].kind else {
         panic!("expected collection declaration");
@@ -77,8 +78,8 @@ fn parses_collection_literal_items() {
 #[test]
 fn parses_multiline_inferred_collection_literal_with_constructor_items() {
     let source = "Entry = |\n    value Int,\n|\n\nrender || -> String:\n    entries = {\n        Entry(1),\n        Entry(2),\n    }\n    return [entries.length()]\n;\n";
-    let (ast, string_table) = parse_single_file_ast(source);
-    let body = function_body_by_name(&ast, &string_table, "render");
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "render");
 
     let NodeKind::VariableDeclaration(entries_decl) = &body[0].kind else {
         panic!("expected collection declaration");
@@ -93,15 +94,15 @@ fn parses_multiline_inferred_collection_literal_with_constructor_items() {
         entries_decl
             .value
             .diagnostic_type
-            .display_with_table(&string_table),
+            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
         "{Entry}"
     );
 }
 
 #[test]
 fn infers_collection_element_type_from_non_empty_literal() {
-    let (ast, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(values_decl) = &body[0].kind else {
         panic!("expected values declaration");
@@ -111,16 +112,15 @@ fn infers_collection_element_type_from_non_empty_literal() {
         values_decl
             .value
             .diagnostic_type
-            .display_with_table(&string_table),
+            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
         "{Int}"
     );
 }
 
 #[test]
 fn parses_empty_collection_with_explicit_element_type() {
-    let (ast, string_table) =
-        parse_single_file_ast("Reading = |\n    value Float,\n|\n\nreadings ~{Reading} = {}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("Reading = |\n    value Float,\n|\n\nreadings ~{Reading} = {}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(readings_decl) = &body[0].kind else {
         panic!("expected readings declaration");
@@ -130,7 +130,7 @@ fn parses_empty_collection_with_explicit_element_type() {
         readings_decl
             .value
             .diagnostic_type
-            .display_with_table(&string_table),
+            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
         "{Reading}"
     );
 }
@@ -163,8 +163,8 @@ fn rejects_item_that_does_not_match_explicit_collection_type() {
 
 #[test]
 fn parses_growable_push_after_explicit_empty_collection() {
-    let (ast, string_table) = parse_single_file_ast("values ~{Int} = {}\n~values.push(1)\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("values ~{Int} = {}\n~values.push(1)\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
         panic!("expected push statement");
@@ -202,23 +202,21 @@ fn rejects_missing_collection_item_after_comma() {
 
 #[test]
 fn parses_collection_get_with_fallback_handler_and_propagation() {
-    let (ast, string_table) = parse_single_file_ast(
-        "read_or_default |values {Int}, idx Int| -> Int:\n    return values.get(idx) catch:\n        then 0\n    ;\n;\n\nread_with_handler |values {Int}, idx Int| -> Int:\n    return values.get(idx) catch |err|:\n        io.line([: [err.message]])\n        then 0\n    ;\n;\n\nforward_read |values {Int}, idx Int| -> Int, Error!:\n    return values.get(idx)!\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("read_or_default |values {Int}, idx Int| -> Int:\n    return values.get(idx) catch:\n        then 0\n    ;\n;\n\nread_with_handler |values {Int}, idx Int| -> Int:\n    return values.get(idx) catch |err|:\n        io.line([: [err.message]])\n        then 0\n    ;\n;\n\nforward_read |values {Int}, idx Int| -> Int, Error!:\n    return values.get(idx)!\n;\n");
 
-    let fallback_body = function_body_by_name(&ast, &string_table, "read_or_default");
+    let fallback_body = function_body_by_name(&ast, &path_fork, &string_table, "read_or_default");
     let NodeKind::Return(values) = &fallback_body[0].kind else {
         panic!("expected return statement in fallback function");
     };
     assert!(matches!(values[0].kind, ExpressionKind::ValueBlock { .. }));
 
-    let handler_body = function_body_by_name(&ast, &string_table, "read_with_handler");
+    let handler_body = function_body_by_name(&ast, &path_fork, &string_table, "read_with_handler");
     let NodeKind::Return(values) = &handler_body[0].kind else {
         panic!("expected return statement in handler function");
     };
     assert!(matches!(values[0].kind, ExpressionKind::ValueBlock { .. }));
 
-    let propagation_body = function_body_by_name(&ast, &string_table, "forward_read");
+    let propagation_body = function_body_by_name(&ast, &path_fork, &string_table, "forward_read");
     let NodeKind::Return(values) = &propagation_body[0].kind else {
         panic!("expected return statement in propagation function");
     };
@@ -234,10 +232,8 @@ fn parses_collection_get_with_fallback_handler_and_propagation() {
 
 #[test]
 fn parses_collection_mutators_and_length_calls() {
-    let (ast, string_table) = parse_single_file_ast(
-        "values ~= {1, 2, 3}\n~values.set(1, 9) catch:\n;\n~values.push(4)\nremoved = ~values.remove(2) catch:\n    then 0\n;\nsize = values.length()\n",
-    );
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n~values.set(1, 9) catch:\n;\n~values.push(4)\nremoved = ~values.remove(2) catch:\n    then 0\n;\nsize = values.length()\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(set_expr) = &body[1].kind else {
         panic!("expected set(...) statement");
@@ -275,10 +271,8 @@ fn parses_collection_mutators_and_length_calls() {
 
 #[test]
 fn parses_collection_mutators_with_explicit_receiver_tilde_prefix() {
-    let (ast, string_table) = parse_single_file_ast(
-        "values ~= {1, 2, 3}\n~values.push(4)\n~values.set(1, 9) catch:\n;\nremoved = ~values.remove(2) catch:\n    then 0\n;\nsize = values.length()\n",
-    );
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n~values.push(4)\n~values.set(1, 9) catch:\n;\nremoved = ~values.remove(2) catch:\n    then 0\n;\nsize = values.length()\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
         panic!("expected push(...) statement");
@@ -307,8 +301,8 @@ fn parses_collection_mutators_with_explicit_receiver_tilde_prefix() {
 
 #[test]
 fn accepts_unhandled_growable_collection_push() {
-    let (ast, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n~values.push(4)\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n~values.push(4)\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
         panic!("expected push statement");
@@ -376,9 +370,8 @@ fn rejects_propagation_on_growable_collection_push() {
 
 #[test]
 fn parses_fixed_collection_push_with_fallback_handler() {
-    let (ast, string_table) =
-        parse_single_file_ast("items ~{2 Int} = {1, 2}\n~items.push(3) catch:\n;\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("items ~{2 Int} = {1, 2}\n~items.push(3) catch:\n;\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
         panic!("expected push statement");
@@ -392,14 +385,12 @@ fn parses_fixed_collection_push_with_fallback_handler() {
 
 #[test]
 fn parses_fixed_collection_push_postfix_propagation() {
-    let (ast, string_table) = parse_single_file_ast(
-        "append || -> Error!:
-    items ~{2 Int} = {1, 2}
-    ~items.push(3)!
-;
-",
-    );
-    let body = function_body_by_name(&ast, &string_table, "append");
+    let (ast, path_fork, string_table) = parse_single_file_ast("append || -> Error!:
+        items ~{2 Int} = {1, 2}
+        ~items.push(3)!
+    ;
+    ");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "append");
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
         panic!("expected push statement");
@@ -605,15 +596,17 @@ fn rejects_removed_builtin_error_helper_methods() {
 
 #[test]
 fn fixed_collection_literal_within_capacity_is_accepted() {
-    let (ast, string_table) = parse_single_file_ast("items {2 Int} = {1, 2}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("items {2 Int} = {1, 2}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
     };
 
     assert_eq!(
-        decl.value.diagnostic_type.display_with_table(&string_table),
+        decl.value
+            .diagnostic_type
+            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
         "{2 Int}"
     );
 }
@@ -624,8 +617,8 @@ fn fixed_collection_literal_within_capacity_is_accepted() {
 
 #[test]
 fn parses_inferred_map_literal() {
-    let (ast, string_table) = parse_single_file_ast("scores ~= {\"Ada\" = 10, \"Grace\" = 12}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~= {\"Ada\" = 10, \"Grace\" = 12}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
@@ -644,15 +637,15 @@ fn parses_inferred_map_literal() {
         scores_decl
             .value
             .diagnostic_type
-            .display_with_table(&string_table),
+            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
         "{String = Int}"
     );
 }
 
 #[test]
 fn parses_explicit_empty_map_literal() {
-    let (ast, string_table) = parse_single_file_ast("scores {String = Int} = {}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores {String = Int} = {}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
@@ -667,17 +660,15 @@ fn parses_explicit_empty_map_literal() {
         scores_decl
             .value
             .diagnostic_type
-            .display_with_table(&string_table),
+            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
         "{String = Int}"
     );
 }
 
 #[test]
 fn parses_map_literal_with_runtime_key_expression() {
-    let (ast, string_table) = parse_single_file_ast(
-        "get_key || -> String:\n    return \"Ada\"\n;\n\nscores ~= {get_key() = 10}\n",
-    );
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("get_key || -> String:\n    return \"Ada\"\n;\n\nscores ~= {get_key() = 10}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
@@ -696,8 +687,8 @@ fn parses_map_literal_with_runtime_key_expression() {
 
 #[test]
 fn parses_map_literal_with_bare_identifier_key_as_variable() {
-    let (ast, string_table) = parse_single_file_ast("key = \"Ada\"\nscores ~= {key = 10}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("key = \"Ada\"\nscores ~= {key = 10}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[1].kind else {
         panic!("expected scores declaration, got: {:?}", body[1].kind);
@@ -719,9 +710,8 @@ fn parses_map_literal_with_bare_identifier_key_as_variable() {
 
 #[test]
 fn parses_map_literal_with_contextual_none_value() {
-    let (ast, string_table) =
-        parse_single_file_ast("scores ~{String = Int?} = {\"Ada\" = none, \"Grace\" = 12}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = Int?} = {\"Ada\" = none, \"Grace\" = 12}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
@@ -740,8 +730,8 @@ fn parses_map_literal_with_contextual_none_value() {
 
 #[test]
 fn parses_map_literal_with_string_key_coercion() {
-    let (ast, string_table) = parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
@@ -760,9 +750,8 @@ fn parses_map_literal_with_string_key_coercion() {
 
 #[test]
 fn parses_nested_map_literal_value() {
-    let (ast, string_table) =
-        parse_single_file_ast("scores ~{String = {String = Int}} = {\"group\" = {\"Ada\" = 10}}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = {String = Int}} = {\"group\" = {\"Ada\" = 10}}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
@@ -781,9 +770,8 @@ fn parses_nested_map_literal_value() {
 
 #[test]
 fn parses_map_type_alias_literal() {
-    let (ast, string_table) =
-        parse_single_file_ast("Scores as {String = Int}\nscores Scores = {\"Ada\" = 10}\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("Scores as {String = Int}\nscores Scores = {\"Ada\" = 10}\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
@@ -798,7 +786,7 @@ fn parses_map_type_alias_literal() {
         scores_decl
             .value
             .diagnostic_type
-            .display_with_table(&string_table),
+            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
         "{String = Int}"
     );
 }
@@ -894,10 +882,8 @@ fn handled_map_builtin_op(expression: &Expression) -> MapBuiltinOp {
 
 #[test]
 fn parses_map_get_with_catch_handler() {
-    let (ast, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nvalue = scores.get(\"Ada\") catch:\n    then 0\n;\n",
-    );
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\nvalue = scores.get(\"Ada\") catch:\n    then 0\n;\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(value_decl) = &body[1].kind else {
         panic!("expected value declaration");
@@ -908,10 +894,8 @@ fn parses_map_get_with_catch_handler() {
 
 #[test]
 fn parses_map_get_with_propagation() {
-    let (ast, string_table) = parse_single_file_ast(
-        "get_value |scores {String = Int}| -> Int, Error!:\n    return scores.get(\"Ada\")!\n;\n",
-    );
-    let body = function_body_by_name(&ast, &string_table, "get_value");
+    let (ast, path_fork, string_table) = parse_single_file_ast("get_value |scores {String = Int}| -> Int, Error!:\n    return scores.get(\"Ada\")!\n;\n");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "get_value");
 
     let NodeKind::Return(values) = &body[0].kind else {
         panic!("expected return statement");
@@ -922,10 +906,8 @@ fn parses_map_get_with_propagation() {
 
 #[test]
 fn parses_map_contains() {
-    let (ast, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nfound = scores.contains(\"Ada\")\n",
-    );
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\nfound = scores.contains(\"Ada\")\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(found_decl) = &body[1].kind else {
         panic!("expected found declaration");
@@ -939,10 +921,8 @@ fn parses_map_contains() {
 
 #[test]
 fn parses_map_set_with_mutable_receiver() {
-    let (ast, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7) catch:\n;\n",
-    );
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7) catch:\n;\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(expr) = &body[1].kind else {
         panic!("expected expression statement");
@@ -953,10 +933,8 @@ fn parses_map_set_with_mutable_receiver() {
 
 #[test]
 fn parses_map_remove_with_mutable_receiver() {
-    let (ast, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nremoved = ~scores.remove(\"Ada\") catch:\n    then 0\n;\n",
-    );
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\nremoved = ~scores.remove(\"Ada\") catch:\n    then 0\n;\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(removed_decl) = &body[1].kind else {
         panic!("expected removed declaration");
@@ -970,9 +948,8 @@ fn parses_map_remove_with_mutable_receiver() {
 
 #[test]
 fn parses_map_clear_with_mutable_receiver() {
-    let (ast, string_table) =
-        parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear()\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear()\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(expr) = &body[1].kind else {
         panic!("expected expression statement");
@@ -983,9 +960,8 @@ fn parses_map_clear_with_mutable_receiver() {
 
 #[test]
 fn parses_map_length_as_property() {
-    let (ast, string_table) =
-        parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\ncount = scores.length\n");
-    let body = start_function_body(&ast, &string_table);
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\ncount = scores.length\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(count_decl) = &body[1].kind else {
         panic!("expected count declaration");
@@ -1088,10 +1064,8 @@ fn rejects_map_builtin_as_free_function() {
 fn map_builtin_wins_before_visible_value_name() {
     // A visible free function named `get` must not capture `scores.get(...)`.
     // Map member syntax is compiler-owned once the receiver has a map type.
-    let (ast, string_table) = parse_single_file_ast(
-        "get |key String| -> Int:\n    return 0\n;\n\nget_value |scores {String = Int}| -> Int, Error!:\n    return scores.get(\"Ada\")!\n;\n",
-    );
-    let body = function_body_by_name(&ast, &string_table, "get_value");
+    let (ast, path_fork, string_table) = parse_single_file_ast("get |key String| -> Int:\n    return 0\n;\n\nget_value |scores {String = Int}| -> Int, Error!:\n    return scores.get(\"Ada\")!\n;\n");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "get_value");
 
     let NodeKind::Return(values) = &body[0].kind else {
         panic!("expected return statement");

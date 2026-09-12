@@ -44,7 +44,7 @@ use std::sync::Arc;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -311,7 +311,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
-        aliases_waiting_for_constants: &FxHashSet<InternedPath>,
+        aliases_waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         // Constructor scaffolds are built inside the Stage 3 walk below, so each nominal's
@@ -377,6 +377,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 false,
             )?;
             let template_ir_store = Rc::clone(&self.context.template_ir_store);
+            let path_fork = self.path_fork as *const PathInternerFork;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
                 header.tokens.file_id,
@@ -390,6 +391,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &mut type_resolution_context,
                 &template_ir_store,
                 string_table,
+                unsafe { &*path_fork },
             )
             .map_err(|error| match error {
                 StructFieldResolutionError::Diagnostic(diagnostic) => {
@@ -559,7 +561,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             else {
                 let error = CompilerError::compiler_error(format!(
                     "Choice '{}' was not registered before resolved variant update",
-                    header.tokens.src_path.to_string(string_table)
+                    self.path_fork.render_portable(
+                        header.tokens.src_path,
+                        string_table,
+                        &mut Vec::new(),
+                    )
                 ));
                 return Err(self.error_messages(error, string_table));
             };
@@ -653,7 +659,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             )?;
 
             if header.export_mode.is_public() {
-                let owner_name = header.tokens.src_path.name().ok_or_else(|| {
+                let owner_name = self.path_fork.component(header.tokens.src_path).ok_or_else(|| {
                     self.error_messages(
                         CompilerError::compiler_error(
                             "Public nominal generic header had no source-path name.",
@@ -876,6 +882,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         })?;
 
                     let resolved_fields = {
+                        let path_fork = self.path_fork as *const PathInternerFork;
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
                                 &visibility,
@@ -888,6 +895,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             &unresolved_fields,
                             &mut type_resolution_context,
                             string_table,
+                            unsafe { &*path_fork },
                         )
                     }
                     .map_err(|error| match error {
@@ -1019,7 +1027,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         core_traits: &TraitEnvironment,
-        aliases_waiting_for_constants: &FxHashSet<InternedPath>,
+        aliases_waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         if aliases_waiting_for_constants.is_empty() {
@@ -1059,7 +1067,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         scope: ConstantWalkScope,
         trait_environment: &TraitEnvironment,
-        aliases_waiting_for_constants: &FxHashSet<InternedPath>,
+        aliases_waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         if declaration_lanes.constants.is_empty() && aliases_waiting_for_constants.is_empty() {
@@ -1139,6 +1147,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 file_visibility: &visibility,
                                 type_environment: &mut self.type_environment,
                                 warnings: &mut self.warnings,
+                                path_fork: self.path_fork,
                             },
                             string_table,
                         )
@@ -1194,6 +1203,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &mut type_interner,
                     string_table,
                     fallback_policy,
+                    self.path_fork,
                 )
                 .map_err(|error| match error {
                     ExpressionParseError::Diagnostic(diagnostic) => {

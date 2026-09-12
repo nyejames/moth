@@ -24,7 +24,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathInternError, PathInternerBuilder, PathTable,
+    PathId, PathInternError, PathInternerBuilder, PathInternerFork, PathTable,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -188,7 +188,33 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerError> {
-        let mut database = Self::empty();
+        Self::from_registration_index_sorted_by_logical_path_with_path_builder(
+            registration_index,
+            entry_file_path,
+            project_path_resolver,
+            string_table,
+            PathInternerBuilder::new(),
+        )
+    }
+
+    /// Build deterministic source identities while retaining a pre-existing path domain.
+    ///
+    /// Discovery prepares source facts against a live path fork. Reusing that fork's complete
+    /// builder here keeps every already-issued `PathId` valid when source slots are finalized.
+    pub(crate) fn from_registration_index_sorted_by_logical_path_with_path_builder(
+        registration_index: &SourceRegistrationIndex<'_>,
+        entry_file_path: &Path,
+        project_path_resolver: Option<&ProjectPathResolver>,
+        string_table: &mut StringTable,
+        path_interner: PathInternerBuilder,
+    ) -> Result<Self, CompilerError> {
+        let mut database = Self {
+            slots: vec![compilation_root_slot()],
+            loaded: Vec::new(),
+            load_failures: Vec::new(),
+            canonical_to_id: FxHashMap::default(),
+            path_interner,
+        };
         let mut rows = logical_rows_for_registration_index(
             registration_index,
             entry_file_path,
@@ -306,6 +332,13 @@ impl SourceDatabase {
         self.path_interner.clone()
     }
 
+    /// Fork the registered logical-path table for one local frontend preparation wave.
+    pub(crate) fn fork_path_interner(
+        &self,
+    ) -> crate::compiler_frontend::symbols::path_interner::PathInternerFork {
+        self.path_interner.fork_source().fork_for_module()
+    }
+
     /// Adopt a compilation-owned sibling builder back before the freeze.
     ///
     /// WHAT: replaces the registration prefix table with the sibling's merged full table.
@@ -314,6 +347,41 @@ impl SourceDatabase {
     pub(crate) fn adopt_path_builder(&mut self, builder: PathInternerBuilder) {
         debug_assert!(self.path_interner.len() <= builder.len());
         self.path_interner = builder;
+    }
+
+    /// Re-intern a registered source's logical path into a caller-owned path fork.
+    ///
+    /// Source registration owns its own append-only table while discovery is assembling the
+    /// closure. Tokenization and header preparation may use a different fork, so the numeric
+    /// source path must be walked by components rather than copied as a foreign `PathId`.
+    pub(crate) fn logical_path_in_fork(
+        &self,
+        source: SourceId,
+        path_fork: &mut PathInternerFork,
+    ) -> Result<PathId, CompilerError> {
+        let logical_path = self
+            .get(source)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "source identity {} is absent while re-interning its logical path",
+                    source.index()
+                ))
+            })?
+            .logical_path;
+        let table = self.paths();
+        let depth = table.try_depth(logical_path).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source identity {} carries an invalid logical path",
+                source.index()
+            ))
+        })?;
+        let mut components = Vec::with_capacity(depth as usize);
+        table.resolve_components(logical_path, &mut components);
+        path_fork.try_intern_components(&components).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path table exhausted while re-interning a source logical path",
+            )
+        })
     }
 
     /// Reconstruct the legacy path view for a registered source identity.
@@ -676,6 +744,11 @@ impl SourceDatabase {
             return None;
         }
         Some(slot)
+    }
+
+    /// Return the compact logical path identity assigned to one physical source.
+    pub(crate) fn source_logical_path(&self, id: SourceId) -> Option<PathId> {
+        self.get(id).map(|slot| slot.logical_path)
     }
 }
 impl FrozenSourceDatabase {

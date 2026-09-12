@@ -12,7 +12,8 @@ use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 
 /// Values produced by a `then` statement inside a value-producing block.
 ///
@@ -133,8 +134,8 @@ pub struct ValueIfBlock {
     pub condition: Expression,
     pub then_body: Vec<AstNode>,
     pub else_body: Vec<AstNode>,
-    pub then_scope: InternedPath,
-    pub else_scope: InternedPath,
+    pub then_scope: PathId,
+    pub else_scope: PathId,
     pub span: Option<SourceSpan>,
     pub generic_request_ranges: IfGenericRequestRanges,
     /// Expected result types for each produced value slot.
@@ -153,7 +154,7 @@ pub struct ValueIfBlock {
 #[derive(Clone, Debug)]
 pub struct ValueLexicalScope {
     pub body: Vec<AstNode>,
-    pub scope: InternedPath,
+    pub scope: PathId,
     pub result_type_ids: Vec<TypeId>,
 }
 

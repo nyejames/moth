@@ -54,7 +54,7 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
@@ -75,7 +75,7 @@ fn bool_expression(value: bool) -> Expression {
 /// Builds a runtime (non-const) string reference expression.
 fn runtime_string_expression() -> Expression {
     Expression::new(
-        ExpressionKind::Reference(InternedPath::new()),
+        ExpressionKind::Reference(PathId::ROOT),
         None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
@@ -882,6 +882,7 @@ fn text_child_builder(
 #[test]
 fn wrapper_context_overlay_folds_inherited_wrapper() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),
@@ -905,6 +906,7 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
     // innermost-to-outermost, so forward fold consumption applies the innermost
     // wrapper directly around the child and the outermost wrapper last.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let (parent, wrapper_set_id, context) = {
@@ -975,6 +977,7 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
 #[test]
 fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_nested_virtual_wrapper_fixture(&mut string_table);
 
     let emission = prepared_fold_fixture_result(&fixture, &mut string_table)
@@ -1021,6 +1024,7 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
 #[test]
 fn wrapper_context_overlay_honors_fresh_suppression() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext {
@@ -1045,6 +1049,7 @@ fn wrapper_context_overlay_honors_fresh_suppression() {
 fn prepared_fold_applies_if_child_emits_only_when_the_child_emits_output() {
     // A child that structurally outputs receives the inherited wrapper.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext {
@@ -1092,6 +1097,7 @@ fn prepared_fold_applies_if_child_emits_only_when_the_child_emits_output() {
 #[test]
 fn prepared_fold_applies_wrapper_expression_overlay() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let wrapper_text = string_table.intern("wrapper-overlay");
     let (fixture, _) = build_expression_wrapper_fixture(
         &mut string_table,
@@ -1114,6 +1120,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
     // A const outer override replaces a runtime wrapper-local expression so the
     // whole wrapper folds to a constant result.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let outer_text = string_table.intern("outer-const");
     let (const_outer_fixture, _) = build_expression_wrapper_fixture(
         &mut string_table,
@@ -1196,6 +1203,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
 #[test]
 fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let wrapper_text = string_table.intern("wrapper-overlay");
     let (fixture, site_id) = build_expression_wrapper_fixture(
         &mut string_table,
@@ -1272,6 +1280,7 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
 #[test]
 fn prepared_fold_injects_child_before_resolving_other_wrapper_slots() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (fixture, _) = build_slot_resolution_wrapper_fixture(&mut string_table);
     let emission = fold_fixture(&fixture, &mut string_table);
     let TemplateEmission::Output(output_id) = emission else {
@@ -1287,6 +1296,7 @@ fn prepared_fold_injects_child_before_resolving_other_wrapper_slots() {
 #[test]
 fn preparation_falls_back_for_runtime_non_injected_slot_source() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let resolved_text = string_table.intern("resolved");
     let (fixture, source_template_id) = build_slot_resolution_wrapper_fixture(&mut string_table);
 
@@ -1336,6 +1346,7 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
 #[test]
 fn below_composed_wrapper_reference_uses_structural_root_without_overlay_lookup() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),
@@ -1384,6 +1395,7 @@ fn below_composed_wrapper_reference_uses_structural_root_without_overlay_lookup(
 #[test]
 fn prepared_fold_rejects_slot_insert_from_wrapper_context_set() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),
@@ -1413,6 +1425,7 @@ fn prepared_fold_rejects_slot_insert_from_wrapper_context_set() {
 #[test]
 fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let (wrapper_template_id, source_template_id, context) = {
         let mut tir = store.borrow_mut();
@@ -1460,6 +1473,7 @@ fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
 #[test]
 fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let (parent_template_id, parent_context) = {
         let mut tir = store.borrow_mut();
@@ -1576,6 +1590,7 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
 #[test]
 fn handoff_tir_view_applies_inherited_wrapper_context_overlay() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),
@@ -1600,6 +1615,7 @@ fn handoff_tir_view_applies_inherited_wrapper_context_overlay() {
 #[test]
 fn handoff_tir_view_honors_fresh_suppression_in_wrapper_context_overlay() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext {
@@ -1617,6 +1633,7 @@ fn handoff_tir_view_honors_fresh_suppression_in_wrapper_context_overlay() {
 #[test]
 fn handoff_tir_view_materializes_if_child_emits_as_conditional_wrapper() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext {
@@ -1648,6 +1665,7 @@ fn handoff_tir_view_materializes_if_child_emits_as_conditional_wrapper() {
 #[test]
 fn wrapper_fixture_keeps_child_in_the_shared_store() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),

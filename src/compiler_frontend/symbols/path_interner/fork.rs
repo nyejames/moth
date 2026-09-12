@@ -5,7 +5,8 @@
 //! WHY:  parallel workers must share inherited source paths by numeric identity while keeping
 //!       their own append-only suffix, mirroring the string-table fork pattern.
 
-use super::builder::{PathInternError, PathNode};
+use super::builder::{PathInternerBuilder, PathInternError, PathNode};
+use super::frozen::PathTable;
 use super::id::PathId;
 use crate::compiler_frontend::symbols::interned_path::NonUtf8PathComponent;
 use crate::compiler_frontend::symbols::string_interning::{
@@ -259,7 +260,6 @@ impl PathInternerFork {
     }
 
     /// Fill `scratch` with `path`'s components in forward order and return that slice.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn resolve_components<'a>(
         &self,
         path: PathId,
@@ -397,11 +397,25 @@ impl PathInternerFork {
         Some(child)
     }
 
+    /// Walk already-interned components onto `ROOT` without allocating the identity.
+    ///
+    /// WHAT: interns one `PathId` for an explicit component slice, reusing existing children.
+    /// WHY: tokenizer and dependency producers collect `StringId` components before interning;
+    ///      this is the single component-walk owner for those rows so callers never rebuild
+    ///      `InternedPath` vectors as an intermediate identity.
+    /// `None` reports authored exhaustion of the compact path-node domain.
+    pub fn try_intern_components(&mut self, components: &[StringId]) -> Option<PathId> {
+        let mut path = PathId::ROOT;
+        for component in components {
+            path = self.try_intern_child(path, *component)?;
+        }
+        Some(path)
+    }
+
     /// Walk the interned components of `suffix` onto `prefix` without allocating the identity.
     ///
     /// Caller-owned `scratch` carries the forward component walk. `None` reports authored
     /// exhaustion of the compact path-node domain.
-    #[allow(dead_code)] // Phase 2 migrates semantic path producers to this fork surface.
     pub fn try_join(
         &mut self,
         prefix: PathId,
@@ -424,7 +438,6 @@ impl PathInternerFork {
     }
 
     /// Intern a filesystem path using the exact component semantics shared with `InternedPath`.
-    #[allow(dead_code)] // Phase 2 migrates semantic path producers to this fork surface.
     pub fn try_intern_filesystem_path(
         &mut self,
         path: &Path,
@@ -449,7 +462,6 @@ impl PathInternerFork {
     }
 
     /// Intern a portable forward-slash path without changing its exact separator spelling.
-    #[allow(dead_code)] // Phase 2 migrates semantic path producers to this fork surface.
     pub fn try_intern_portable_path(
         &mut self,
         spelling: &str,
@@ -488,6 +500,38 @@ impl PathInternerFork {
             lookup,
         )
     }
+    /// Snapshot this fork's complete path table for standalone consumers.
+    ///
+    /// A fork normally merges into its owning builder before freezing. Standalone fixtures and
+    /// direct backend callers have no boundary builder, so they can snapshot the same inherited
+    /// and local nodes without reconstructing an `InternedPath`.
+    pub fn snapshot_table(&self) -> PathTable {
+
+        let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
+        nodes.extend_from_slice(&self.base.nodes);
+        nodes.extend_from_slice(&self.nodes);
+        let mut depths = Vec::with_capacity(self.base.depths.len() + self.nodes.len());
+        depths.extend_from_slice(&self.base.depths);
+        depths.extend_from_slice(&self.depths);
+        PathTable::from_parts(nodes, depths)
+    }
+    /// Clone this fork's complete identity domain into a mutable builder.
+    ///
+    /// The resulting builder retains the exact numeric IDs already issued by the
+    /// fork, including its inherited prefix and local suffix.
+    pub(crate) fn clone_path_builder(&self) -> PathInternerBuilder {
+        let source = self.fork_source();
+        let mut lookup = source.base.lookup.clone();
+        lookup.extend(self.lookup.iter().map(|(key, value)| (*key, *value)));
+        PathInternerBuilder::from_parts(
+            PathTable::from_parts(
+                source.base.nodes.to_vec(),
+                source.base.depths.to_vec(),
+            ),
+            lookup,
+        )
+    }
+
 
     /// Merge one sub-fork delta (forked from this fork's snapshot) into this fork.
     ///

@@ -9,7 +9,7 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 
@@ -46,8 +46,9 @@ fn synthetic_physical_resolution_cache_reuses_settled_outcome() {
         &mut resource_inputs,
     );
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut path_syntax = PathSyntaxTable::new();
-    let path = InternedPath::from_single_str("assets/logo.svg", &mut strings);
+    let path = path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
         path.clone(),
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -61,10 +62,10 @@ fn synthetic_physical_resolution_cache_reuses_settled_outcome() {
 
     let owner = canonical_root.join("main.moth");
     let first = resolver
-        .resolve(&owner, &path_syntax, &reference, &mut strings)
+        .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
         .expect("first resource reference should resolve");
     let second = resolver
-        .resolve(&owner, &path_syntax, &reference, &mut strings)
+        .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
         .expect("repeated resource reference should resolve");
 
     assert!(
@@ -88,8 +89,9 @@ fn synthetic_moth_value_skips_physical_resolution_for_missing_target() {
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut path_syntax = PathSyntaxTable::new();
-    let path = InternedPath::from_single_str("missing.moth", &mut strings);
+    let path = path_fork.try_intern_portable_path("missing.moth", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
         path.clone(),
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -107,6 +109,7 @@ fn synthetic_moth_value_skips_physical_resolution_for_missing_target() {
             &path_syntax,
             &reference,
             &mut strings,
+            &path_fork,
         )
         .expect("a .moth value should be identified without a physical target");
 
@@ -133,8 +136,9 @@ fn synthetic_not_a_directory_is_a_typed_path_failure() {
         &mut resource_inputs,
     );
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut path_syntax = PathSyntaxTable::new();
-    let path = InternedPath::from_single_str("not_a_directory/value.mtf", &mut strings);
+    let path = path_fork.try_intern_portable_path("not_a_directory/value.mtf", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
         path.clone(),
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -151,6 +155,7 @@ fn synthetic_not_a_directory_is_a_typed_path_failure() {
             &path_syntax,
             &reference,
             &mut strings,
+            &path_fork,
         )
         .expect("NotADirectory should remain a typed path outcome");
     let SingleFileReferenceOutcome::Diagnostic(diagnostic) = resolved.outcome else {
@@ -189,8 +194,9 @@ fn synthetic_in_owner_dangling_alias_watches_resolved_physical_prefix() {
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut path_syntax = PathSyntaxTable::new();
-    let path = InternedPath::from_single_str("alias/leaf.svg", &mut strings);
+    let path = path_fork.try_intern_portable_path("alias/leaf.svg", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
         path.clone(),
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -205,7 +211,7 @@ fn synthetic_in_owner_dangling_alias_watches_resolved_physical_prefix() {
     let owner = root.join("main.moth");
     for _ in 0..2 {
         let resolved = resolver
-            .resolve(&owner, &path_syntax, &reference, &mut strings)
+            .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
             .expect("in-owner dangling alias should settle");
         assert!(matches!(
             resolved.outcome,
@@ -249,8 +255,9 @@ fn synthetic_dangling_alias_resolves_nested_symlink_targets_before_parent_segmen
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut path_syntax = PathSyntaxTable::new();
-    let path = InternedPath::from_single_str("alias/missing.svg", &mut strings);
+    let path = path_fork.try_intern_portable_path("alias/missing.svg", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
         path.clone(),
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -268,6 +275,7 @@ fn synthetic_dangling_alias_resolves_nested_symlink_targets_before_parent_segmen
             &path_syntax,
             &reference,
             &mut strings,
+            &path_fork,
         )
         .expect("nested dangling alias should settle");
     assert!(matches!(
@@ -311,13 +319,14 @@ fn synthetic_dangling_symlink_cycles_and_excessive_depth_are_infrastructure_erro
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut path_syntax = PathSyntaxTable::new();
 
-    let resolve = |resolver: &mut SingleFileReferenceResolver<'_>,
+    let mut resolve = |resolver: &mut SingleFileReferenceResolver<'_>,
                    path: &str,
                    strings: &mut StringTable,
                    path_syntax: &mut PathSyntaxTable| {
-        let authored_path = InternedPath::from_single_str(path, strings);
+        let authored_path = path_fork.try_intern_portable_path(path, strings).expect("test path fits");
         let path_syntax_id = path_syntax.push(
             authored_path.clone(),
             SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -328,7 +337,7 @@ fn synthetic_dangling_symlink_cycles_and_excessive_depth_are_infrastructure_erro
             path_syntax: path_syntax_id,
             class: PreparedFileReferenceClass::ResourceFile,
         };
-        resolver.resolve(&root.join("main.moth"), path_syntax, &reference, strings)
+        resolver.resolve(&root.join("main.moth"), path_syntax, &reference, strings, &path_fork)
     };
 
     assert!(
@@ -399,14 +408,15 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut path_syntax = PathSyntaxTable::new();
 
-    let resolve = |resolver: &mut SingleFileReferenceResolver<'_>,
+    let mut resolve = |resolver: &mut SingleFileReferenceResolver<'_>,
                    path: &str,
                    class: PreparedFileReferenceClass,
                    strings: &mut StringTable,
                    path_syntax: &mut PathSyntaxTable| {
-        let authored_path = InternedPath::from_single_str(path, strings);
+        let authored_path = path_fork.try_intern_portable_path(path, strings).expect("test path fits");
         let path_syntax_id = path_syntax.push(
             authored_path.clone(),
             SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -418,7 +428,7 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
             class,
         };
         resolver
-            .resolve(&root.join("main.moth"), path_syntax, &reference, strings)
+            .resolve(&root.join("main.moth"), path_syntax, &reference, strings, &path_fork)
             .expect("synthetic reference should settle")
     };
 

@@ -62,7 +62,7 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
         token_stream.src_path.to_owned(),
         &parser_registry,
     );
-    let fallback_error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let fallback_error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect_err("template-head fallback should reject missing registry directives");
     let fallback_error = expect_template_diagnostic(fallback_error);
 
@@ -99,7 +99,7 @@ fn builder_registered_style_directive_parses_as_noop_scaffold() {
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("builder-registered directives should parse in scaffold mode");
 
     assert_eq!(effective_tir_style(&template, &context).id, "");
@@ -137,7 +137,7 @@ fn builder_effects_only_handler_updates_style_without_formatter() {
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("effects-only directive should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -164,7 +164,7 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
 
-    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect_err("default no-op directives should reject parenthesized arguments");
     let error = expect_template_diagnostic(error);
 
@@ -202,7 +202,7 @@ fn builder_registered_handler_directive_accepts_declared_optional_argument_type(
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("provided directives should parse optional arguments when configured");
 
     assert!(matches!(
@@ -236,7 +236,7 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
 
-    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect_err("handler directives should reject multiple arguments");
     let error = expect_template_diagnostic(error);
     assert!(matches!(
@@ -274,7 +274,7 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
         &mut string_table,
     );
 
-    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect_err("handler directives should reject runtime-only argument values");
     let error = expect_template_diagnostic(error);
     assert!(matches!(
@@ -305,7 +305,7 @@ fn builder_registered_style_directive_preserves_raw_body_whitespace() {
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
         .expect("builder-registered directives should parse in scaffold mode");
     let folded = fold_template_in_context(&template, &context, &mut string_table);
 

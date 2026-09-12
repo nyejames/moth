@@ -173,7 +173,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         imported_nominals.sort_by(|left, right| left.0.cmp(&right.0));
 
         for (origin, record) in &imported_nominals {
-            let nominal_path = imported_nominal_path(origin, string_table);
+            let nominal_path = imported_nominal_path(origin, string_table, self.path_fork);
             let generic_parameters = match &record.semantics {
                 PublicDeclarationSemantics::Struct(semantics) => &semantics.generic_parameters,
                 PublicDeclarationSemantics::Choice(semantics) => &semantics.generic_parameters,
@@ -306,18 +306,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
             }
             Rc::make_mut(&mut self.declaration_table)
-                .append_for_construction(Declaration {
-                    id: local_path,
-                    value: Expression::new(
-                        ExpressionKind::NoValue,
-                        None,
-                        type_id,
-                        diagnostic_type,
-                        ValueMode::ImmutableReference,
-                    ),
-                    binding_span: None,
-                    config_qualifier: None,
-                })
+                .append_for_construction(
+                    Declaration {
+                        id: local_path,
+                        value: Expression::new(
+                            ExpressionKind::NoValue,
+                            None,
+                            type_id,
+                            diagnostic_type,
+                            ValueMode::ImmutableReference,
+                        ),
+                        binding_span: None,
+                        config_qualifier: None,
+                    },
+                    self.path_fork,
+                )
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
                         "Imported nominal declaration path was registered more than once",
@@ -466,7 +469,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         for field in &semantics.fields {
             let field_type_id = self.intern_imported_canonical_type(&field.type_identity)?;
-            let field_path = nominal_path.join_str(&field.name, string_table);
+            let field_path = self
+                .path_fork
+                .try_intern_child(nominal_path, string_table.intern(&field.name))
+                .ok_or_else(|| CompilerError::compiler_error("Imported field path table exhausted"))?;
             fields.push(FieldDefinition {
                 name: field_path.clone(),
                 type_id: field_type_id,
@@ -530,7 +536,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     let field_type_id =
                         self.intern_imported_canonical_type(&field.type_identity)?;
                     fields.push(FieldDefinition {
-                        name: nominal_path.join_str(&field.name, string_table),
+                        name: self
+                            .path_fork
+                            .try_intern_child(nominal_path, string_table.intern(&field.name))
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Imported field path table exhausted",
+                                )
+                            })?,
                         type_id: field_type_id,
                         span: None,
                     });
@@ -564,10 +577,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 pub(crate) fn imported_nominal_path(
     origin: &OriginTypeId,
     string_table: &mut StringTable,
-) -> InternedPath {
+    path_fork: &mut PathInternerFork,
+) -> PathId {
     // Angle brackets cannot occur in a source identifier, so this namespace is structurally
     // disjoint from every authored nominal path rather than relying on a reserved spelling.
-    let mut path = InternedPath::from_single_str("<imported>", string_table);
     let package_origin = match origin.module_origin().package().origin() {
         crate::builder_surface::PackageOrigin::Core => "core",
         crate::builder_surface::PackageOrigin::Builder => "builder",
@@ -581,14 +594,18 @@ pub(crate) fn imported_nominal_path(
             "facade"
         }
     };
-    path.push_str(package_origin, string_table);
-    path.push_str(origin.module_origin().package().name(), string_table);
-    path.push_str(root_role, string_table);
-    for component in origin.module_origin().logical_module_path().split('/') {
+    let mut path = PathId::ROOT;
+    for component in std::iter::once("<imported>")
+        .chain(std::iter::once(package_origin))
+        .chain(std::iter::once(origin.module_origin().package().name()))
+        .chain(std::iter::once(root_role))
+        .chain(origin.module_origin().logical_module_path().split('/'))
+    {
         if !component.is_empty() {
-            path.push_str(component, string_table);
+            path = path_fork
+                .try_intern_child(path, string_table.intern(component))
+                .expect("imported nominal path table exhausted");
         }
     }
-    path.push_str(origin.defining_name(), string_table);
     path
 }

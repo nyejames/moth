@@ -13,6 +13,7 @@ use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFa
 use crate::compiler_frontend::pipeline::CompilerFrontend;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -425,6 +426,7 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     let source = format!("\"{}\"", "x".repeat(1023));
     let path = Path::new("capacity.moth");
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let malformed_path = Path::new("unterminated.moth");
     let malformed_source = source[..source.len() - 1].to_owned();
     let mut sources =
@@ -442,6 +444,7 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
         path,
         TokenizerEntryMode::SourceFile,
         &mut strings,
+        &mut path_fork,
         &mut builder,
     )
     .expect_err("minting a long token must report exhausted source storage");
@@ -482,6 +485,7 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
         malformed_path,
         TokenizerEntryMode::SourceFile,
         &mut strings,
+        &mut path_fork,
         &mut malformed_builder,
     )
     .expect_err("the unterminated literal must report exhausted source storage");

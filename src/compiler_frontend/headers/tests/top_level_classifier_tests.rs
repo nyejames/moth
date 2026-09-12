@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 
@@ -31,6 +31,7 @@ fn function_and_compile_time_bindings_are_header_declarations() {
 #[test]
 fn qualified_match_arm_is_not_a_choice_declaration() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let ready = string_table.intern("Ready");
     let span = LocalSpan::source_start();
     let tokens = vec![
@@ -44,7 +45,7 @@ fn qualified_match_arm_is_not_a_choice_declaration() {
     assert!(!classification.starts_header_declaration());
 
     let mut token_stream = FileTokens::new(
-        InternedPath::from_single_str("src/@page.moth", &mut string_table),
+        path_fork.try_intern_portable_path("src/@page.moth", &mut string_table).expect("test path fits"),
         SourceId::COMPILATION_ROOT,
         tokens,
     );

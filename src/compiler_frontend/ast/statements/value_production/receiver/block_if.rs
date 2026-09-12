@@ -30,7 +30,7 @@ pub(super) fn parse_block_value_if(
         string_table,
         condition,
         span,
-        ..
+        path_fork,
     } = input;
 
     let receiver_kind = target.receiver_kind;
@@ -44,6 +44,7 @@ pub(super) fn parse_block_value_if(
         type_interner,
         string_table,
         active_target: target,
+        path_fork,
     })?;
 
     validate_closed_branch_pair(bodies.then_exits, bodies.else_exits, span)?;

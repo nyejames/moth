@@ -59,6 +59,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId, OriginTypeCategory,
     OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -218,13 +219,11 @@ fn synthetic_module(
     let function_link_facts = collect_module_function_link_facts(&hir)
         .expect("synthetic HIR should produce function link facts");
     Module {
-        executable: ModuleExecutable {
-            hir,
-            resource_table,
-            type_environment:
-                crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(),
-        },
+        executable: ModuleExecutable { hir,
+        resource_table,
+        type_environment:
+            crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
+        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: Vec::new(),

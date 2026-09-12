@@ -40,6 +40,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
 
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
+        path_table: &module.executable.path_table,
         resource_table: &module.executable.resource_table,
         reachability: &reachability,
         type_environment: &module.executable.type_environment,
@@ -149,6 +150,7 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
+        path_table: &module.executable.path_table,
         resource_table: &module.executable.resource_table,
         reachability: &reachability,
         type_environment: &module.executable.type_environment,

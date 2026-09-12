@@ -54,7 +54,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
 };
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -83,7 +83,8 @@ fn register_choice(
     string_table: &mut StringTable,
     name: &str,
 ) -> (NominalTypeId, TypeId) {
-    let path = InternedPath::from_single_str(name, string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
     env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
         path,
@@ -190,6 +191,7 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
 #[test]
 fn builder_produces_declaration_centric_draft_covering_every_category() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
@@ -271,7 +273,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     };
 
     let max_size_constant = Declaration {
-        id: InternedPath::from_single_str("MaxSize", &mut string_table),
+        id: path_fork.try_intern_portable_path("MaxSize", &mut string_table).expect("test path fits"),
         value: Expression::int(256, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -281,18 +283,16 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         .expect("test module constant should be representable in the value store");
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &trait_origins,
-        type_environment: &env,
-        external_registry: &registry,
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &const_values,
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &trait_origins,
+    type_environment: &env,
+    external_registry: &registry,
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &const_values,
+    module_resources: None, })
     .build()
     .expect("declaration-centric draft builds for all categories")
     .draft;
@@ -373,6 +373,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
 #[test]
 fn builder_attaches_receiver_methods_to_struct_record() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     let (_, struct_type_id) =
@@ -428,18 +429,16 @@ fn builder_attaches_receiver_methods_to_struct_record() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: &env,
-        external_registry: &registry,
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: &env,
+    external_registry: &registry,
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("draft with receiver method builds")
     .draft;
@@ -459,6 +458,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
 #[test]
 fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir_origin_seed() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     // Register a generic parameter list with one authored parameter "A".
@@ -542,7 +542,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     // parameter list as the receiver nominal so the aliasing step sees matching parameters.
     let template = GenericFunctionTemplate {
         function_path: method_fn_path.clone(),
-        source_file: InternedPath::new(),
+        source_file: PathId::ROOT,
         declaration_identity: None,
         generic_parameter_owner: None,
         generic_parameter_list_id: list_id,
@@ -554,22 +554,20 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         ))),
         declaration_span: None,
     };
-    let template_map: FxHashMap<InternedPath, GenericFunctionTemplate> =
+    let template_map: FxHashMap<PathId, GenericFunctionTemplate> =
         [(method_fn_path.clone(), template)].into_iter().collect();
 
     let registry = ExternalPackageRegistry::new();
-    let build_result = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: &env,
-        external_registry: &registry,
-        string_table: &string_table,
-        generic_function_templates: &template_map,
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let build_result = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: &env,
+    external_registry: &registry,
+    string_table: &string_table,
+    generic_function_templates: &template_map,
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("generic receiver path should build");
 
@@ -614,9 +612,9 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
 
 #[test]
 fn module_origin_survives_empty_public_surface() {
+    let mut path_fork = PathInternerFork::empty();
     let string_table = StringTable::new();
     let env = TypeEnvironment::new();
-
     let export_seed = DirectExportSeed::new(module_origin(), vec![], FxHashMap::default());
 
     let projection_input = AstPublicInterfaceProjectionInput {
@@ -627,18 +625,16 @@ fn module_origin_survives_empty_public_surface() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &FxHashMap::default(),
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: &env,
-        external_registry: &registry,
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &FxHashMap::default(),
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: &env,
+    external_registry: &registry,
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("empty-surface draft builds")
     .draft;
@@ -654,8 +650,9 @@ fn module_origin_survives_empty_public_surface() {
 #[test]
 fn receiver_method_semantics_from_seed_rejects_free_function_seed_without_panic() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let seed = CallableSeed {
-        path: InternedPath::from_single_str("free_fn", &mut string_table),
+        path: path_fork.try_intern_portable_path("free_fn", &mut string_table).expect("test path fits"),
         origin: free_function_origin("free_fn"),
         generic_template: false,
         kind: CallableSeedKind::FreeFunction,
@@ -671,9 +668,10 @@ fn receiver_method_semantics_from_seed_rejects_free_function_seed_without_panic(
 #[test]
 fn receiver_method_semantics_from_seed_rejects_missing_signature_without_panic() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let origin = struct_origin("Counter");
     let seed = CallableSeed {
-        path: InternedPath::from_single_str("tick", &mut string_table),
+        path: path_fork.try_intern_portable_path("tick", &mut string_table).expect("test path fits"),
         origin: OriginFunctionId::new_receiver(module_origin(), "tick".to_owned(), origin),
         generic_template: false,
         kind: CallableSeedKind::ReceiverMethod {
@@ -696,6 +694,7 @@ fn receiver_method_semantics_from_seed_rejects_missing_signature_without_panic()
 #[test]
 fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
     let string_id = env.builtins().string;
@@ -759,18 +758,16 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &FxHashMap::default(),
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: &env,
-        external_registry: &registry,
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &FxHashMap::default(),
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: &env,
+    external_registry: &registry,
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("draft with function defaults should build")
     .draft;
@@ -809,6 +806,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
 #[test]
 fn struct_retains_folded_field_defaults_in_authored_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let int_id = env.builtins().int;
     let bool_id = env.builtins().bool;
@@ -866,18 +864,16 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: &env,
-        external_registry: &registry,
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: &env,
+    external_registry: &registry,
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("draft with struct field defaults should build")
     .draft;
@@ -909,6 +905,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
 #[test]
 fn choice_payload_fields_remain_default_free() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
@@ -964,18 +961,16 @@ fn choice_payload_fields_remain_default_free() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: &env,
-        external_registry: &registry,
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: &env,
+    external_registry: &registry,
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("draft with choice should build")
     .draft;
@@ -995,6 +990,7 @@ fn choice_payload_fields_remain_default_free() {
 #[test]
 fn receiver_method_retains_folded_parameter_defaults() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let string_id = env.builtins().string;
 
@@ -1063,18 +1059,16 @@ fn receiver_method_retains_folded_parameter_defaults() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: projection_input,
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &FxHashMap::default(),
-        type_environment: &env,
-        external_registry: &registry,
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: projection_input,
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &FxHashMap::default(),
+    type_environment: &env,
+    external_registry: &registry,
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("draft with receiver method defaults should build")
     .draft;

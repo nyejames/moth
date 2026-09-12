@@ -40,7 +40,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -84,13 +84,14 @@ struct GenericReceiverMethodInferenceInput<'a, 'interner> {
     scope_context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'interner>,
     string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
 }
 
 fn infer_generic_receiver_method_target<'a, 'interner>(
     input: GenericReceiverMethodInferenceInput<'a, 'interner>,
 ) -> Result<
     (
-        InternedPath,
+        PathId,
         FunctionSignature,
         GenericFunctionInstantiationRequest,
     ),
@@ -105,6 +106,7 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         scope_context,
         type_interner,
         string_table,
+        path_fork,
     } = input;
     let receiver_expr = expression_from_postfix_node(receiver_node)?;
     let receiver_access = if receiver_mutable {
@@ -138,18 +140,20 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         call_span: member_span,
         type_environment: type_interner.environment_mut_for_derived_types(),
         string_table,
+        path_fork,
     })?;
     let selected_evidence = validate_generic_function_bound_evidence(
         template,
         inference.key.type_arguments.as_ref(),
         scope_context,
         type_interner.environment(),
+        path_fork,
         member_span,
     )?;
 
     if scope_context.is_generic_function_instantiation_active(&inference.key) {
         return Err(recursive_generic_function_instantiation(
-            template.function_path.name(),
+            path_fork.component(template.function_path),
             member_span,
         )
         .into());
@@ -177,6 +181,7 @@ pub(super) struct SourceReceiverMethodCallInput<'a, 'interner> {
     pub(super) source_method: SourceReceiverMethodTarget<'a>,
     pub(super) type_interner: &'a mut AstTypeInterner<'interner>,
     pub(super) string_table: &'a mut StringTable,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 pub(super) fn parse_source_receiver_method_target_call_typed(
@@ -193,6 +198,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         source_method,
         type_interner,
         string_table,
+        path_fork,
     } = input;
 
     if receiver_node.expression_is_const_record_value()? {
@@ -225,6 +231,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
     let method_name = string_table.resolve(member_name).to_owned();
     validate_receiver_access(
         receiver_node,
+        path_fork,
         receiver_access_mode,
         member_span,
         authored_marker_span,
@@ -236,8 +243,10 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         },
     )?;
 
-    let initial_expectations =
-        expectations_from_receiver_method_signature(&source_method.signature().parameters[1..]);
+    let initial_expectations = expectations_from_receiver_method_signature(
+        &source_method.signature().parameters[1..],
+        path_fork,
+    );
     let raw_args = parse_call_arguments_typed_with_expectations(
         token_stream,
         scope_context,
@@ -247,6 +256,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         CallArgumentSyntax::Supported {
             callee_name: Some(member_name),
         },
+        path_fork,
     )?;
 
     let (method_path, call_signature, generic_request) = match &source_method {
@@ -264,6 +274,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         scope_context,
                         type_interner,
                         string_table,
+                        path_fork,
                     })?;
 
                 (instance_path, signature, Some(request))
@@ -290,6 +301,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         scope_context,
                         type_interner,
                         string_table,
+                        path_fork,
                     })?;
                 (instance_path, signature, Some(request))
             } else {
@@ -298,7 +310,10 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         }
     };
 
-    let expectations = expectations_from_receiver_method_signature(&call_signature.parameters[1..]);
+    let expectations = expectations_from_receiver_method_signature(
+        &call_signature.parameters[1..],
+        path_fork,
+    );
     let type_check_context = type_interner.type_check_context();
     let args = resolve_call_arguments(
         CallDiagnosticContext::receiver_method(&method_name),
@@ -309,6 +324,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             string_table,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
+            path_fork,
         },
     )?;
     let result_type_ids = receiver_result_type_ids_for_call(

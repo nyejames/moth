@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::statements::functions::{
 };
 use crate::compiler_frontend::datatypes::{DataType, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -33,20 +33,17 @@ pub(crate) fn node(kind: NodeKind, span: Option<SourceSpan>) -> AstNode {
     AstNode {
         kind,
         span,
-        scope: InternedPath::new(),
+        scope: PathId::ROOT,
     }
 }
 
 pub(crate) fn test_if_branch_metadata(has_else: bool) -> IfBranchMetadata {
-    let mut string_table = StringTable::new();
-    let then_scope = InternedPath::from_single_str("test_then_branch", &mut string_table);
-    let else_scope =
-        has_else.then(|| InternedPath::from_single_str("test_else_branch", &mut string_table));
-
+    let then_scope = PathId::ROOT;
+    let else_scope = has_else.then_some(PathId::ROOT);
     IfBranchMetadata::new(IfGenericRequestRanges::default(), then_scope, else_scope)
 }
 
-pub(crate) fn make_test_variable(name: InternedPath, value: Expression) -> Declaration {
+pub(crate) fn make_test_variable(name: PathId, value: Expression) -> Declaration {
     Declaration {
         id: name,
         value,
@@ -56,7 +53,7 @@ pub(crate) fn make_test_variable(name: InternedPath, value: Expression) -> Decla
 }
 
 fn parameter(
-    name: InternedPath,
+    name: PathId,
     data_type: DataType,
     type_id: TypeId,
     mutable: bool,
@@ -86,7 +83,7 @@ fn parameter(
 /// type is part of the fixture, and `param_with_type_id` when the canonical
 /// `TypeId` is all the test needs.
 pub(crate) fn param_with_datatype(
-    name: InternedPath,
+    name: PathId,
     data_type: DataType,
     type_id: TypeId,
     mutable: bool,
@@ -96,7 +93,7 @@ pub(crate) fn param_with_datatype(
 }
 
 pub(crate) fn param_with_type_id(
-    name: InternedPath,
+    name: PathId,
     type_id: TypeId,
     mutable: bool,
     span: Option<SourceSpan>,
@@ -105,7 +102,7 @@ pub(crate) fn param_with_type_id(
 }
 
 pub(crate) fn function_node(
-    name: InternedPath,
+    name: PathId,
     signature: FunctionSignature,
     body: Vec<AstNode>,
     span: Option<SourceSpan>,
@@ -129,12 +126,18 @@ pub(crate) fn fresh_success_returns(result_type_ids: Vec<TypeId>) -> Vec<ReturnS
         .collect()
 }
 
-pub(crate) fn symbol(name: &str, string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str(name, string_table)
+pub(crate) fn symbol(
+    name: &str,
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> PathId {
+    path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits")
 }
 
 fn reference_expr(
-    name: InternedPath,
+    name: PathId,
     data_type: DataType,
     type_id: TypeId,
     span: Option<SourceSpan>,
@@ -155,7 +158,7 @@ fn reference_expr(
 /// immutable), or `reference_expr_with_type_id` when the canonical `TypeId` is
 /// known and the value mode must be chosen by the caller.
 pub(crate) fn reference_expr_with_datatype(
-    name: InternedPath,
+    name: PathId,
     data_type: DataType,
     type_id: TypeId,
     span: Option<SourceSpan>,
@@ -170,7 +173,7 @@ pub(crate) fn reference_expr_with_datatype(
 }
 
 pub(crate) fn reference_expr_with_type_id(
-    name: InternedPath,
+    name: PathId,
     type_id: TypeId,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
@@ -179,7 +182,7 @@ pub(crate) fn reference_expr_with_type_id(
 }
 
 pub(crate) fn assignment_target(
-    name: InternedPath,
+    name: PathId,
     data_type: DataType,
     id: TypeId,
     span: Option<SourceSpan>,
@@ -195,13 +198,17 @@ pub(crate) fn assignment_target(
 
 pub(crate) fn function_node_by_name<'a>(
     ast: &'a Ast,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
     name: &str,
 ) -> &'a AstNode {
+    let mut scratch = Vec::new();
     ast.nodes
         .iter()
         .find(|node| match &node.kind {
-            NodeKind::Function(path, ..) => path.name_str(string_table) == Some(name),
+            NodeKind::Function(path, ..) => {
+                path_fork.render_portable(*path, string_table, &mut scratch) == name
+            }
             _ => false,
         })
         .unwrap_or_else(|| panic!("expected function '{name}' in AST"))
@@ -209,10 +216,11 @@ pub(crate) fn function_node_by_name<'a>(
 
 pub(crate) fn function_signature_by_name<'a>(
     ast: &'a Ast,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
     name: &str,
 ) -> &'a FunctionSignature {
-    let node = function_node_by_name(ast, string_table, name);
+    let node = function_node_by_name(ast, path_fork, string_table, name);
     match &node.kind {
         NodeKind::Function(_, signature, _) => signature,
         _ => unreachable!("function lookup should only return function nodes"),
@@ -221,16 +229,21 @@ pub(crate) fn function_signature_by_name<'a>(
 
 pub(crate) fn function_body_by_name<'a>(
     ast: &'a Ast,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
     name: &str,
 ) -> &'a [AstNode] {
-    let node = function_node_by_name(ast, string_table, name);
+    let node = function_node_by_name(ast, path_fork, string_table, name);
     match &node.kind {
         NodeKind::Function(_, _, body) => body,
         _ => unreachable!("function lookup should only return function nodes"),
     }
 }
 
-pub(crate) fn start_function_body<'a>(ast: &'a Ast, string_table: &StringTable) -> &'a [AstNode] {
-    function_body_by_name(ast, string_table, IMPLICIT_START_FUNC_NAME)
+pub(crate) fn start_function_body<'a>(
+    ast: &'a Ast,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> &'a [AstNode] {
+    function_body_by_name(ast, path_fork, string_table, IMPLICIT_START_FUNC_NAME)
 }

@@ -38,14 +38,14 @@ use crate::compiler_frontend::external_packages::{
     ExternalFunctionDef, ExternalFunctionId, ExternalSignatureType,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableResolver};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Input bundle for `parse_function_call` to avoid long argument lists.
 pub struct FunctionCallParseInput<'a, 'b> {
     pub token_stream: &'a mut FileTokens,
-    pub id: &'a InternedPath,
+    pub id: &'a PathId,
     pub call_span: Option<SourceSpan>,
     pub context: &'a ScopeContext,
     pub signature: &'a FunctionSignature,
@@ -54,6 +54,7 @@ pub struct FunctionCallParseInput<'a, 'b> {
     pub warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub string_table: &'a mut StringTable,
+    pub path_fork: &'a mut PathInternerFork,
 }
 
 /// Input bundle for external function calls.
@@ -68,6 +69,7 @@ pub struct ExternalFunctionCallParseInput<'a, 'b> {
     pub warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub string_table: &'a mut StringTable,
+    pub path_fork: &'a mut PathInternerFork,
 }
 
 struct ParsedExternalFunctionCall {
@@ -86,6 +88,7 @@ struct CallFinishContext<'a, 'b> {
     warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     type_interner: &'a mut AstTypeInterner<'b>,
     string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
 }
 
 /// Parses a source-function call for expression position.
@@ -108,6 +111,7 @@ pub(crate) fn parse_function_call_expression(
         warnings,
         type_interner,
         string_table,
+        path_fork,
     } = input;
 
     // ------------------------
@@ -115,8 +119,8 @@ pub(crate) fn parse_function_call_expression(
     // ------------------------
     // External calls share the same argument parser, but they reject named targets until
     // external metadata carries stable public parameter names.
-    if let Some((function_id, host_function)) = id
-        .name()
+    if let Some((function_id, host_function)) = path_fork
+        .component(*id)
         .and_then(|name| context.lookup_visible_external_function(name))
     {
         return parse_external_function_call_expression(ExternalFunctionCallParseInput {
@@ -130,13 +134,15 @@ pub(crate) fn parse_function_call_expression(
             warnings,
             type_interner,
             string_table,
+            path_fork,
         });
     }
 
     // ------------------------
     //  Parse and resolve arguments
     // ------------------------
-    let parameter_expectations = expectations_from_user_parameters(&signature.parameters);
+    let parameter_expectations =
+        expectations_from_user_parameters(&signature.parameters, path_fork);
     let raw_args = parse_call_arguments_typed_with_expectations(
         token_stream,
         context,
@@ -144,8 +150,9 @@ pub(crate) fn parse_function_call_expression(
         string_table,
         &parameter_expectations,
         CallArgumentSyntax::Supported {
-            callee_name: id.name(),
+            callee_name: path_fork.component(*id),
         },
+        path_fork,
     )?;
     let args = resolve_user_function_call_arguments(
         id,
@@ -154,7 +161,7 @@ pub(crate) fn parse_function_call_expression(
         call_span,
         string_table,
         type_interner,
-        Some(context),
+        path_fork,
     )?;
 
     let call = HandledFallibleCall {
@@ -175,6 +182,7 @@ pub(crate) fn parse_function_call_expression(
             warnings,
             type_interner,
             string_table,
+            path_fork,
         },
     )
 }
@@ -192,6 +200,7 @@ fn finish_function_call_expression(
         warnings,
         type_interner,
         string_table,
+        path_fork: _path_fork,
     } = finish;
 
     let Some(error_return_type_id) = error_return_type_id else {
@@ -212,7 +221,6 @@ fn finish_function_call_expression(
 
         return Ok(call.into_plain_expression(type_interner.environment_mut_for_derived_types()));
     };
-
     if token_stream_starts_fallible_handling_suffix(token_stream) {
         return parse_fallible_handling_suffix_for_call_expression(
             token_stream,
@@ -226,6 +234,7 @@ fn finish_function_call_expression(
             warnings,
             type_interner,
             string_table,
+            _path_fork,
         );
     }
 
@@ -237,19 +246,19 @@ fn finish_function_call_expression(
 }
 
 fn resolve_user_function_call_arguments(
-    function_name: &InternedPath,
+    function_name: &PathId,
     raw_args: &[CallArgument],
     parameters: &[Declaration],
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
     type_interner: &mut AstTypeInterner<'_>,
-    _scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
-    let callee_name = function_name
-        .name_str(string_table)
-        .map(|name| name.to_owned())
+    let callee_name = path_fork
+        .component(*function_name)
+        .map(|name| string_table.resolve(name).to_owned())
         .unwrap_or_else(|| String::from("<unknown>"));
-    let expectations = expectations_from_user_parameters(parameters);
+    let expectations = expectations_from_user_parameters(parameters, path_fork);
     let type_check_context = type_interner.type_check_context();
 
     resolve_call_arguments(
@@ -260,6 +269,7 @@ fn resolve_user_function_call_arguments(
         CallArgumentResolutionContext {
             string_table,
             type_environment: type_check_context.type_environment,
+            path_fork,
             compatibility_cache: type_check_context.compatibility_cache,
         },
     )
@@ -286,6 +296,7 @@ pub(crate) fn parse_external_function_call_expression(
         warnings,
         type_interner,
         string_table,
+        path_fork,
     } = input;
 
     let parsed_call = parse_external_function_call_parts(
@@ -296,6 +307,7 @@ pub(crate) fn parse_external_function_call_expression(
         context,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     finish_external_function_call_expression(
@@ -308,6 +320,7 @@ pub(crate) fn parse_external_function_call_expression(
             warnings,
             type_interner,
             string_table,
+            path_fork,
         },
     )
 }
@@ -320,6 +333,7 @@ fn parse_external_function_call_parts(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<ParsedExternalFunctionCall, ExpressionParseError> {
     let call_span = span;
 
@@ -342,6 +356,7 @@ fn parse_external_function_call_parts(
         CallArgumentSyntax::UnsupportedCall {
             callee_name: Some(callee_name),
         },
+        path_fork,
     )?;
 
     // ------------------------
@@ -356,6 +371,7 @@ fn parse_external_function_call_parts(
         CallArgumentResolutionContext {
             string_table,
             type_environment: type_check_context.type_environment,
+            path_fork,
             compatibility_cache: type_check_context.compatibility_cache,
         },
     )
@@ -417,8 +433,8 @@ fn finish_external_function_call_expression(
         warnings,
         type_interner,
         string_table,
+        path_fork: _path_fork,
     } = finish;
-
     let ParsedExternalFunctionCall {
         id,
         args,
@@ -448,6 +464,7 @@ fn finish_external_function_call_expression(
                 warnings,
                 type_interner,
                 string_table,
+                _path_fork,
             );
         }
 
