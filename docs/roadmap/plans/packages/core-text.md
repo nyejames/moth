@@ -59,7 +59,6 @@ rather than preluded.
 
 Current implementation debt relevant to this slice:
 
-- `length` uses `Array.from(...).length`, allocating a temporary array only to count scalars
 - the other four functions are one-line JS runtime wrappers that can use the existing inline external
   lowering path instead
 - `src/builder_surface/core_packages/text.rs` uses a homogeneous tuple table and repeated parameter
@@ -405,7 +404,7 @@ Exit: API, errors, evaluator ownership and target lowering owners are explicit a
       shape justified by the expanded signatures.
 - [ ] Convert `is_empty`, `contains`, `starts_with` and `ends_with` to inline JS lowerings and delete
       their runtime helper bodies.
-- [ ] Replace `Array.from(...).length` with allocation-free scalar counting.
+- [x] Replace `Array.from(...).length` with allocation-free scalar counting (delivered by the pre-checkpoint hardening slice).
 - [ ] Add the canonical Text builtin error codes and reuse `__moth_error_result`.
 - [ ] Add `char_at` and `slice` with strict fallible bounds and one-pass scalar-aware JS lowering.
 - [ ] Add or reuse the Rust scalar implementations and shared contract vectors.

@@ -10,7 +10,7 @@ use crate::backends::js::JsEmitter;
 pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
     CoreJsHelper {
         name: "__moth_text_length",
-        source: "function __moth_text_length(text) { return Array.from(__moth_string_value(text)).length; }",
+        source: "function __moth_text_length(text) { const value = __moth_string_value(text); let count = 0; let index = 0; while (index < value.length) { const codeUnit = value.charCodeAt(index); const isSurrogatePair = codeUnit >= 0xd800 && codeUnit <= 0xdbff && index + 1 < value.length && value.charCodeAt(index + 1) >= 0xdc00 && value.charCodeAt(index + 1) <= 0xdfff; index += isSurrogatePair ? 2 : 1; count += 1; } return count; }",
     },
     CoreJsHelper {
         name: "__moth_text_is_empty",
