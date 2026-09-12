@@ -4,8 +4,8 @@
 //!       for complete-path operations. `SourceDatabase` embeds the mutable builder so source
 //!       slots and path nodes share one build-lifetime identity base.
 //! WHY:  logical compiler identity needs compact shared prefixes, while filesystem `PathBuf` and
-//!       source snapshot identity remain separate owners. Source consumers awaiting migration
-//!       reconstruct transient `InternedPath` views through the source database.
+//!       source snapshot identity remain separate owners. Source consumers resolve logical paths
+//!       through the source database.
 //!
 //! Path domains:
 //!
@@ -25,6 +25,16 @@
 //! - [`fork`] snapshots an immutable base for module-local deltas that merge deterministically.
 //! - [`remap`] rewrites worker-local identities after a merge.
 //! - [`frozen`] resolves and renders paths without mutable interning.
+
+use std::path::PathBuf;
+
+/// A filesystem path containing a component that cannot be represented as UTF-8.
+///
+/// Filesystem identity is exact or rejected; lossy conversion could collapse distinct names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonUtf8PathComponent {
+    pub(crate) path: PathBuf,
+}
 
 mod builder;
 mod fork;

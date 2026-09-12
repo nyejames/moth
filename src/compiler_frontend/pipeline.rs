@@ -95,12 +95,18 @@ impl<'a> CompilerFrontend<'a> {
     pub(crate) fn new(
         options: FrontendOptions,
         string_table: StringTable,
-        path_fork: PathInternerFork,
+        mut path_fork: PathInternerFork,
         style_directives: &'a StyleDirectiveRegistry,
         external_package_registry: &'a Arc<ExternalPackageRegistry>,
         project_path_resolver: Option<&'a ProjectPathResolver>,
         source_files: &'a Arc<SourceDatabase>,
     ) -> Self {
+        // Source identities and retained prepared outputs use the source database's path domain.
+        // Rebind standalone test/fixture forks before any tokenizer or header reader can resolve
+        // a registered logical path through the wrong base table.
+        if path_fork.len() < source_files.paths().len() {
+            path_fork = source_files.fork_path_interner();
+        }
         Self {
             external_package_registry,
             style_directives,

@@ -59,6 +59,8 @@ impl ModuleMaterialisationContext {
             artefacts,
             module_origin: None,
             frozen_identity_handle,
+            path_table: None,
+            source_string_table: None,
         }
     }
 

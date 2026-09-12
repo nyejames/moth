@@ -550,7 +550,7 @@ fn run_semantic_stages(
     //    transient post-AST `CallableSeed` table, the one receiver and callable
     //    identity owner consumed by direct projection, declaration-record projection,
     //    HIR origin seeding and generic-template extraction. No donor-local TypeId,
-    //    NominalTypeId, GenericParameterId, TraitId, CoreTraitKind or InternedPath
+    //    NominalTypeId, GenericParameterId, TraitId, CoreTraitKind or PathId
     //    crosses the module result boundary. It is not the final
     //    PublicSemanticInterface: reusable evidence is now an internal builder step
     //    and draft collection, generic template body extraction is already completed in

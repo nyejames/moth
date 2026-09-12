@@ -360,6 +360,8 @@ impl ModuleMaterialisationPreparation {
             artefacts,
             module_origin: self.module_origin.clone(),
             frozen_identity_handle: self.frozen_identity_handle.clone(),
+            path_table: None,
+            source_string_table: None,
         }))
     }
     fn freeze_template(
@@ -416,7 +418,7 @@ impl ModuleMaterialisationPreparation {
             path_fork,
         )?;
         let content_value_at_path = |logical_path: &PathId| {
-            let content_path = self.content_constant_path_for_capture(logical_path)?;
+            let content_path = self.content_constant_path_for_capture(logical_path, path_fork)?;
             self.stable_folded_value_at_path(&content_path, resources, path_fork)
         };
         let stage0_resolution_facts = match body {
@@ -548,19 +550,14 @@ impl ModuleMaterialisationPreparation {
     pub(super) fn content_constant_path_for_capture(
         &self,
         logical_path: &PathId,
+        path_fork: &PathInternerFork,
     ) -> Result<PathId, CompilerError> {
-        let identity = self.frozen_identity_handle.get().ok_or_else(|| {
-            CompilerError::compiler_error(
-                "materialisation preparation has no frozen identity context",
-            )
-        })?;
-        let paths = identity.paths();
         self.const_values
             .module_constant_paths()
             .find(|path| {
                 let candidate = **path;
-                paths.try_parent(candidate) == Some(*logical_path)
-                    && paths
+                path_fork.try_parent(candidate) == Some(*logical_path)
+                    && path_fork
                         .component(candidate)
                         .map(|name| self.string_table.resolve(name) == "content")
                         .unwrap_or(false)
@@ -568,7 +565,7 @@ impl ModuleMaterialisationPreparation {
             .copied()
             .ok_or_else(|| {
                 let mut scratch = Vec::new();
-                let rendered = paths.render_portable(
+                let rendered = path_fork.render_portable(
                     *logical_path,
                     &self.string_table,
                     &mut scratch,
@@ -579,7 +576,6 @@ impl ModuleMaterialisationPreparation {
                 ))
             })
     }
-
     pub(super) fn stable_folded_value_at_expression_path(
         &self,
         path: &PathId,
@@ -594,16 +590,9 @@ impl ModuleMaterialisationPreparation {
                 .cloned()
                 .map(PublicFoldedValue::ConstTemplate)
                 .ok_or_else(|| {
-                    let rendered = if let Some(identity) = self.frozen_identity_handle.get() {
-                        let mut scratch = Vec::new();
-                        identity.paths().render_portable(
-                            *path,
-                            &self.string_table,
-                            &mut scratch,
-                        )
-                    } else {
-                        "<unknown>".to_owned()
-                    };
+                    let mut scratch = Vec::new();
+                    let rendered =
+                        path_fork.render_portable(*path, &self.string_table, &mut scratch);
                     CompilerError::compiler_error(format!(
                         "Retained const template at {} has no stable folded template value",
                         rendered
@@ -620,16 +609,8 @@ impl ModuleMaterialisationPreparation {
         path_fork: &PathInternerFork,
     ) -> Result<PublicFoldedValue, CompilerError> {
         let value_id = self.const_values.value_for_path(path).ok_or_else(|| {
-            let rendered = if let Some(identity) = self.frozen_identity_handle.get() {
-                let mut scratch = Vec::new();
-                identity.paths().render_portable(
-                    *path,
-                    &self.string_table,
-                    &mut scratch,
-                )
-            } else {
-                "<unknown>".to_owned()
-            };
+            let mut scratch = Vec::new();
+            let rendered = path_fork.render_portable(*path, &self.string_table, &mut scratch);
             CompilerError::compiler_error(format!(
                 "Retained module constant at {} has no stable folded store value",
                 rendered
@@ -736,12 +717,7 @@ impl ModuleMaterialisationPreparation {
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
     ) -> Result<StableFunctionSignature, CompilerError> {
-        let identity = self.frozen_identity_handle.get().ok_or_else(|| {
-            CompilerError::compiler_error(
-                "materialisation preparation has no frozen identity context",
-            )
-        })?;
-        let paths = identity.paths();
+        let paths = path_fork;
         let parameters = signature
             .parameters
             .iter()
@@ -976,7 +952,11 @@ impl ModuleMaterialisationPreparation {
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
     ) -> Result<Vec<(PathId, ModulePrivateExecutableIdentity)>, CompilerError> {
-        self.install_private_semantic_identities(module_origin, public_nominal_origins_by_path)?;
+        self.install_private_semantic_identities(
+            module_origin,
+            public_nominal_origins_by_path,
+            path_fork,
+        )?;
         self.install_nominal_blueprints(resources, path_fork)?;
         let generic_paths = self
             .generic_function_templates_by_path
@@ -1007,6 +987,7 @@ impl ModuleMaterialisationPreparation {
                     &path,
                     resolved,
                     ModulePrivateExecutableCategory::GenericFunction,
+                    path_fork,
                 )?)
             };
 
@@ -1120,8 +1101,13 @@ impl ModuleMaterialisationPreparation {
                 } else {
                     ModulePrivateExecutableCategory::FreeFunction
                 };
-                let identity =
-                    self.private_executable_identity(module_origin, &path, &resolved, category)?;
+                let identity = self.private_executable_identity(
+                    module_origin,
+                    &path,
+                    &resolved,
+                    category,
+                    path_fork,
+                )?;
                 private_executables.push((path.clone(), identity.clone()));
                 SourceFunctionTarget::ModulePrivate {
                     identity,
@@ -1232,6 +1218,7 @@ impl ModuleMaterialisationPreparation {
         &mut self,
         module_origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
         public_nominal_origins_by_path: &FxHashMap<PathId, OriginTypeId>,
+        path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
         let nominal_types = self
             .nominal_type_ids_by_path
@@ -1262,17 +1249,8 @@ impl ModuleMaterialisationPreparation {
                 _ => continue,
             };
             let defining_path = {
-                let identity = self.frozen_identity_handle.get().ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "materialisation preparation has no frozen identity context",
-                    )
-                })?;
                 let mut scratch = Vec::new();
-                identity.paths().render_portable(
-                    path,
-                    &self.string_table,
-                    &mut scratch,
-                )
+                path_fork.render_portable(path, &self.string_table, &mut scratch)
             };
             let identity = ModulePrivateNominalIdentity::new(
                 module_origin.clone(),
@@ -1294,12 +1272,7 @@ impl ModuleMaterialisationPreparation {
                         "Public materialisation trait path has no resolved trait definition",
                     )
                 })?;
-                let identity = self.frozen_identity_handle.get().ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "materialisation preparation has no frozen identity context",
-                    )
-                })?;
-                let defining_name = identity.paths().component(*path).ok_or_else(|| {
+                let defining_name = path_fork.component(*path).ok_or_else(|| {
                     CompilerError::compiler_error(
                         "Public materialisation trait path has no defining name",
                     )
@@ -1336,13 +1309,8 @@ impl ModuleMaterialisationPreparation {
             })
             .map(|definition| {
                 let defining_path = {
-                    let identity = self.frozen_identity_handle.get().ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "materialisation preparation has no frozen identity context",
-                        )
-                    })?;
                     let mut scratch = Vec::new();
-                    identity.paths().render_portable(
+                    path_fork.render_portable(
                         definition.canonical_path,
                         &self.string_table,
                         &mut scratch,
@@ -1370,13 +1338,9 @@ impl ModuleMaterialisationPreparation {
         path: &PathId,
         resolved: &ResolvedFunctionSignature,
         category: ModulePrivateExecutableCategory,
+        path_fork: &PathInternerFork,
     ) -> Result<ModulePrivateExecutableIdentity, CompilerError> {
-        let identity = self.frozen_identity_handle.get().ok_or_else(|| {
-            CompilerError::compiler_error(
-                "materialisation preparation has no frozen identity context",
-            )
-        })?;
-        let paths = identity.paths();
+        let paths = path_fork;
         let receiver_path = match resolved.receiver.as_ref() {
             Some(ReceiverKey::Struct(receiver) | ReceiverKey::Choice(receiver)) => {
                 let mut scratch = Vec::new();

@@ -515,7 +515,6 @@ fn discover_modules_for_test_with_resource_inputs(
     CompilerMessages,
 > {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
@@ -533,6 +532,7 @@ fn discover_modules_for_test_with_resource_inputs(
     )
     .map_err(|failure| failure.into_messages(&string_table))?;
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let path_fork = source_files.fork_path_interner();
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
@@ -631,7 +631,6 @@ fn discover_modules_for_test_with_providers(
     external_import_providers: &ExternalImportProviderRegistry,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
@@ -649,6 +648,7 @@ fn discover_modules_for_test_with_providers(
     )
     .map_err(|failure| failure.into_messages(&string_table))?;
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let path_fork = source_files.fork_path_interner();
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
@@ -1065,7 +1065,6 @@ fn discover_modules_and_graph_for_test(
     StringTable,
 ) {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
@@ -1083,6 +1082,7 @@ fn discover_modules_and_graph_for_test(
     )
     .expect("source tree index should build");
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let path_fork = source_files.fork_path_interner();
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);

@@ -600,6 +600,7 @@ pub(crate) fn imported_nominal_path(
         .chain(std::iter::once(origin.module_origin().package().name()))
         .chain(std::iter::once(root_role))
         .chain(origin.module_origin().logical_module_path().split('/'))
+        .chain(std::iter::once(origin.defining_name()))
     {
         if !component.is_empty() {
             path = path_fork

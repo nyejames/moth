@@ -13,7 +13,7 @@
 //! resolver trait, but the production resolver implementation belongs to the public semantic
 //! surface projection owner. The existing `datatypes::generic_identity_bridge::TypeIdentityKey` remains the
 //! module-local HIR/diagnostic bridge and is not repurposed here. The two are intentionally
-//! separate: `TypeIdentityKey` carries `InternedPath`, `StringId` and `ExternalTypeId` because
+//! separate: `TypeIdentityKey` carries `PathId`, `StringId` and `ExternalTypeId` because
 //! HIR lowering and diagnostics operate inside one module's `TypeEnvironment` and `StringTable`.
 //! `CanonicalTypeIdentity` carries only owned, stable, cross-build values because it crosses
 //! module boundaries. Consolidating their recursive shape-matching would blur the
@@ -44,7 +44,7 @@ use crate::compiler_frontend::semantic_identity::{
 /// parameter that a `TypeEnvironment` can resolve.
 ///
 /// WHAT: carries only stable, owned values. It never embeds `TypeId`, `NominalTypeId`,
-/// `GenericParameterId`, `GenericParameterListId`, `InternedPath`, `StringId`,
+/// `GenericParameterId`, `GenericParameterListId`, `PathId`, `StringId`,
 /// `ExternalPackageId`, `ExternalTypeId`, source locations, absolute paths or rendered display
 /// names.
 /// WHY: this is the identity a cross-module consumer compares. Two types with the same canonical
@@ -413,7 +413,7 @@ impl GenericDeclarationOrigin {
 ///
 /// WHAT: derives from the stable origin of the owning generic declaration, the
 /// declaration-local parameter position and the owned authored parameter name. It stores no
-/// `GenericParameterId`, `GenericParameterListId`, `TypeId`, `StringId`, `InternedPath`,
+/// `GenericParameterId`, `GenericParameterListId`, `TypeId`, `StringId`, `PathId`,
 /// source location, source file, declaration order outside the parameter list or rendered
 /// display name lookup.
 /// WHY: cross-module interfaces must compare exported generic parameters by their stable
@@ -465,7 +465,7 @@ impl ExportedGenericParameterIdentity {
 /// WHAT: carries only stable, owned values. It distinguishes source-declared traits
 /// (`Source(OriginTraitId)`) from compiler-owned core traits
 /// (`Core(CanonicalCoreTraitIdentity)`). It never embeds `TraitId`, `StringId`,
-/// `InternedPath`, `SourceId`, source location, rendered display name or a
+/// `PathId`, `SourceId`, source location, rendered display name or a
 /// `CoreTraitKind` registry handle.
 /// WHY: cross-module generic bound surfaces must compare trait identities rather than
 /// donor-local `TraitId` values. A source trait and a core trait with the same source
@@ -562,7 +562,7 @@ impl CanonicalEvidenceIdentity {
 ///
 /// WHAT: combines the canonical trait identity with the owned defining requirement name as
 /// authored in the trait declaration. It never embeds `TraitRequirementId`, `TraitId`,
-/// `StringId`, `InternedPath`, source location or declaration order. Two builds that assign
+/// `StringId`, `PathId`, source location or declaration order. Two builds that assign
 /// different dense `TraitRequirementId` values to the same authored requirement on the same
 /// canonical trait produce the same stable identity.
 /// WHY: reusable conformance evidence maps each requirement to the stable receiver-method

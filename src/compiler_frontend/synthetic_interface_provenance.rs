@@ -37,7 +37,7 @@ pub(crate) enum SyntheticInterfaceClass {
 /// Stable, self-contained identity for one member of a synthetic compile-time interface.
 ///
 /// WHAT: carries the interface class, interface name and member name as owned strings. It stores
-/// no `StringId`, `InternedPath`, local compiler IDs, source locations, absolute paths or
+/// no `StringId`, `PathId`, local compiler IDs, source locations, absolute paths or
 /// rendered display names. Iteration order is deterministic because the identity is totally
 /// ordered.
 /// WHY: downstream link-fact propagation and cross-build provenance comparison need a stable

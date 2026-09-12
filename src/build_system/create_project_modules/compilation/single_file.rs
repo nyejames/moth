@@ -457,6 +457,7 @@ fn compile_single_file_frontend_with_target(
             project_path_resolver: Some(&project_path_resolver),
             source_files,
             style_directives,
+            global_string_table: None,
             external_packages: Arc::clone(&external_packages),
             build_config_values: Arc::new(build_config_values),
             external_dependency_resolution_table: &builder_surface

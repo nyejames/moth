@@ -852,11 +852,13 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
         module.prepared.semantic.string_table.resolve(*expected),
         "assets"
     );
+    let path_table = module.prepared.semantic.path_fork.snapshot_table();
     let rendered = crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context(
         diagnostic,
         crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
             &module.prepared.semantic.string_table,
-        ),
+        )
+        .with_path_table(&path_table),
     );
     assert!(rendered.contains("Assets") && rendered.contains("assets"));
 }

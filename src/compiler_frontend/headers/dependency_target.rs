@@ -41,7 +41,7 @@ impl DependencyTargetKind {
 ///       spelling matches the prefix's last component.
 /// WHY: Stage 0 and binding must not reslice a raw count or reinterpret the extension ID.
 ///      The prefix stays a fork identity so later resolution never rebuilds an intermediate
-///      `InternedPath`; only the short provider suffix is owned here.
+///      path value; only the short provider suffix is owned here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedExternalProviderTarget<'a> {
     prefix: PathId,

@@ -173,23 +173,28 @@ fn materialise_generated_request_inner<'build>(
         DeclaringMaterialisation::Published {
             context: declaring_context,
             template_index,
-        } => declaring_context.materialise_ast_at(
-            template_index,
-            ModuleMaterialisationInput {
-                identity: &request.identity,
-                requester_context,
-                requester_call_span: request.call_span,
-                path_fork: &mut compiler.path_fork,
-                external_package_registry: context.external_packages.as_ref(),
-                style_directives: context.style_directives,
-                build_profile: context.build_profile,
-                template_const_loop_iteration_limit: context
-                    .options
-                    .template_const_loop_iteration_limit,
-                #[cfg(feature = "timers")]
-                timing_context: request.timing_context,
-            },
-        ),
+        } => {
+            let rebased_context = declaring_context
+                .rebased_for_requester(&mut compiler.path_fork, &mut compiler.string_table)
+                .map_err(PremergeFailure::Infrastructure)?;
+            rebased_context.materialise_ast_at(
+                template_index,
+                ModuleMaterialisationInput {
+                    identity: &request.identity,
+                    requester_context,
+                    requester_call_span: request.call_span,
+                    path_fork: &mut compiler.path_fork,
+                    external_package_registry: context.external_packages.as_ref(),
+                    style_directives: context.style_directives,
+                    build_profile: context.build_profile,
+                    template_const_loop_iteration_limit: context
+                        .options
+                        .template_const_loop_iteration_limit,
+                    #[cfg(feature = "timers")]
+                    timing_context: request.timing_context,
+                },
+            )
+        }
         DeclaringMaterialisation::Preparing(declaring_context) => declaring_context
             .materialise_ast(
                 &request.identity,

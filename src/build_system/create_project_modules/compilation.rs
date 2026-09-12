@@ -152,6 +152,16 @@ pub(super) fn publish_compiled_module(
     // Path IDs become boundary identities at this merge point. Retain an immutable snapshot on
     // the executable lane so backend/render consumers can resolve names without a live fork.
     let merged_path_table = std::sync::Arc::new(path_interner.paths().clone());
+    // Published templates retain the complete identity tables that issued their semantic IDs. A
+    // later project/package boundary can rebase those tables into its requester fork before
+    // materialising an imported generic.
+    if let Some(context) = &mut module.metadata.materialisation_context {
+        let source_string_table = std::sync::Arc::new(string_table.clone().freeze());
+        std::sync::Arc::make_mut(context).install_identity_tables(
+            Arc::clone(&merged_path_table),
+            source_string_table,
+        );
+    }
     module.executable.path_table = std::sync::Arc::clone(&merged_path_table);
     generated_delta.install_path_table(merged_path_table);
     if !remap.is_identity() {

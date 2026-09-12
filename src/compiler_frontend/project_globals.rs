@@ -214,9 +214,14 @@ pub(crate) fn is_project_globals_namespace(
     path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> bool {
+    // `PathInternerFork::component` returns the leaf component, but the reserved provider is
+    // identified by the first component after `@`.  Nested paths such as `@project/details` must
+    // therefore inspect the forward component sequence rather than its final segment.
+    let mut scratch = Vec::new();
     path_fork
-        .component(dependency_path)
-        .is_some_and(|component| string_table.resolve(component) == PROJECT_GLOBALS_DEPENDENCY_NAME)
+        .resolve_components(dependency_path, &mut scratch)
+        .first()
+        .is_some_and(|component| string_table.resolve(*component) == PROJECT_GLOBALS_DEPENDENCY_NAME)
 }
 
 #[cfg(test)]

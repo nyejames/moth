@@ -33,7 +33,7 @@ use std::path::PathBuf;
 ///
 /// The table is immutable after construction and remap-free by construction:
 /// `StableModuleOriginIdentity` carries only owned `String` values and a `ModuleRootRole`,
-/// never `StringId` or `InternedPath`, so string-table fork/merge does not touch it. One
+/// never `StringId` or `PathId`, so string-table fork/merge does not touch it. One
 /// `Arc<SourceModuleOriginTable>` is built per project or source-package boundary and shared by
 /// its prepared modules; single-file compilation uses a separate synthetic table.
 pub(crate) struct SourceModuleOriginTable {

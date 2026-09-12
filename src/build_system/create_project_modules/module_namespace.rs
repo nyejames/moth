@@ -217,6 +217,27 @@ impl<'a> DirectoryDependencyResolution<'a> {
     pub(crate) fn path_fork(self) -> &'a PathInternerFork {
         self.path_fork
     }
+    /// Rebind this boundary context to the path fork that issued a retained provider path.
+    ///
+    /// Header preparation may extend the boundary table with module-local dependency paths. Those
+    /// `PathId`s are valid only through the current syntax fork, not the immutable pre-discovery
+    /// prefix used to construct the boundary context.
+    pub(crate) fn with_path_fork<'b>(
+        self,
+        path_fork: &'b PathInternerFork,
+    ) -> DirectoryDependencyResolution<'b>
+    where
+        'a: 'b,
+    {
+        DirectoryDependencyResolution {
+            namespace_set: self.namespace_set,
+            source_tree_index: self.source_tree_index,
+            path_fork,
+            boundary: self.boundary,
+            package_prefix: self.package_prefix,
+        }
+    }
+
 
     pub(crate) fn resolve_dependency(
         self,

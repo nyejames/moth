@@ -22,9 +22,8 @@ use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistra
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathInternError, PathInternerBuilder, PathInternerFork, PathTable,
+    NonUtf8PathComponent, PathId, PathInternError, PathInternerBuilder, PathInternerFork, PathTable,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -384,26 +383,6 @@ impl SourceDatabase {
         })
     }
 
-    /// Reconstruct the legacy path view for a registered source identity.
-    ///
-    /// This is a temporary migration bridge. The source slot stores only its `PathId`, so the
-    /// component vector is rebuilt from parent links and is never retained by the database.
-    pub(crate) fn legacy_logical_path(&self, source: SourceId) -> InternedPath {
-        let path_id = self
-            .slots
-            .get(source.index())
-            .unwrap_or_else(|| {
-                panic!(
-                    "source identity {} is absent from the source database; this is a compiler bug",
-                    source.index()
-                )
-            })
-            .logical_path;
-        let table = self.paths();
-        let mut components = Vec::with_capacity(table.depth(path_id) as usize);
-        table.resolve_components(path_id, &mut components);
-        InternedPath::from_components(components)
-    }
 
     /// Look up the exact source snapshot retained for a physical source identity.
     ///
@@ -733,12 +712,11 @@ impl SourceDatabase {
     #[cfg(test)]
     pub(crate) fn unique_record_for_logical_path(
         &self,
-        logical_path: &InternedPath,
+        logical_path: PathId,
     ) -> Option<&SourceSlot> {
-        let table = self.paths();
         let mut matches = self
             .iter()
-            .filter(|slot| path_id_matches_components(table, slot.logical_path, logical_path));
+            .filter(|slot| slot.logical_path == logical_path);
         let slot = matches.next()?;
         if matches.next().is_some() {
             return None;
@@ -828,29 +806,6 @@ impl FrozenSourceDatabase {
     }
 }
 
-#[cfg(test)]
-fn path_id_matches_components(
-    table: &PathTable,
-    path_id: PathId,
-    components: &InternedPath,
-) -> bool {
-    let components = components.as_components();
-    if table.depth(path_id) as usize != components.len() {
-        return false;
-    }
-
-    let mut current = path_id;
-    for expected_component in components.iter().rev() {
-        if table.component(current) != Some(*expected_component) {
-            return false;
-        }
-        current = table
-            .parent(current)
-            .expect("a non-root path must carry a parent");
-    }
-
-    current == PathId::ROOT
-}
 
 fn compilation_root_slot() -> SourceSlot {
     SourceSlot {

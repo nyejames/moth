@@ -23,14 +23,14 @@ impl PathId {
     ///
     /// `None` reports authored table exhaustion: the build-lifetime path table cannot address
     /// another node, so the owning database surfaces a typed source-capacity failure.
-    pub(super) fn try_from_index(index: usize) -> Option<Self> {
+    pub(crate) fn try_from_index(index: usize) -> Option<Self> {
         let index = u32::try_from(index).ok()?;
         let raw = index.checked_add(1)?;
         Some(Self(NonZeroU32::new(raw)?))
     }
 
     /// Return the zero-based node index addressed by this identity.
-    pub(super) fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         self.0.get() as usize - 1
     }
 }

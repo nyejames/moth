@@ -1000,7 +1000,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let body =
             body_result.map_err(|error| self.expression_error_messages(error, string_table))?;
 
-        // AST symbol IDs are stored as full InternedPath values and are unique
+        // AST symbol IDs are stored as complete PathId values and are unique
         // module-wide, not only within a local scope.
         self.ast.push(AstNode {
             kind: NodeKind::Function(token_stream.src_path, resolved_signature.signature, body),

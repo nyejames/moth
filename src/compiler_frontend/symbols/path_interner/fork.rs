@@ -8,11 +8,11 @@
 use super::builder::{PathInternerBuilder, PathInternError, PathNode};
 use super::frozen::PathTable;
 use super::id::PathId;
-use crate::compiler_frontend::symbols::interned_path::NonUtf8PathComponent;
+use super::remap::PathIdRemap;
+use super::NonUtf8PathComponent;
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
 };
-use super::remap::PathIdRemap;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
@@ -97,6 +97,20 @@ pub struct PathInternerFork {
 }
 
 impl PathInternerFork {
+    /// Recreate an empty local fork over this fork's inherited base.
+    ///
+    /// This is used only when a direct preparation caller supplied a standalone fork while its
+    /// retained outputs were issued from the authoritative source-table prefix.  Keeping the
+    /// inherited nodes and lookup intact preserves the original `PathId` domain.
+    pub(crate) fn inherited_fork(&self) -> PathInternerFork {
+        PathInternerForkSource::new(
+            self.base.nodes.clone(),
+            self.base.depths.clone(),
+            self.base.lookup.clone(),
+        )
+        .fork_for_module()
+    }
+
     /// Construct an empty standalone fork for callers outside a boundary merge.
     #[allow(dead_code)] // Test-only standalone fork; production forks from the boundary builder.
     pub fn empty() -> Self {
@@ -402,7 +416,7 @@ impl PathInternerFork {
     /// WHAT: interns one `PathId` for an explicit component slice, reusing existing children.
     /// WHY: tokenizer and dependency producers collect `StringId` components before interning;
     ///      this is the single component-walk owner for those rows so callers never rebuild
-    ///      `InternedPath` vectors as an intermediate identity.
+    ///      component vectors as an intermediate identity.
     /// `None` reports authored exhaustion of the compact path-node domain.
     pub fn try_intern_components(&mut self, components: &[StringId]) -> Option<PathId> {
         let mut path = PathId::ROOT;
@@ -437,7 +451,7 @@ impl PathInternerFork {
         Some(joined)
     }
 
-    /// Intern a filesystem path using the exact component semantics shared with `InternedPath`.
+    /// Intern a filesystem path using the exact component semantics of the path table.
     pub fn try_intern_filesystem_path(
         &mut self,
         path: &Path,
@@ -504,7 +518,7 @@ impl PathInternerFork {
     ///
     /// A fork normally merges into its owning builder before freezing. Standalone fixtures and
     /// direct backend callers have no boundary builder, so they can snapshot the same inherited
-    /// and local nodes without reconstructing an `InternedPath`.
+    /// and local nodes without reconstructing a path component vector.
     pub fn snapshot_table(&self) -> PathTable {
 
         let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
@@ -599,4 +613,33 @@ impl PathInternerFork {
         }
         Ok(PathIdRemap::new(delta_base_len, mapped_suffix, is_identity))
     }
+    /// Re-intern a complete foreign path table into this fork.
+    ///
+    /// The source and destination tables may belong to different project/package boundaries, so
+    /// no numeric `PathId` is copied. Components are resolved through the source string table and
+    /// interned into the destination table before each parent-linked node is appended or reused.
+    /// The returned full remap can then rewrite every retained path payload in the foreign context.
+    pub(crate) fn remap_table_from_strings(
+        &mut self,
+        source_table: &PathTable,
+        source_strings: &impl StringTableResolver,
+        destination_strings: &mut StringTable,
+    ) -> Option<PathIdRemap> {
+        let mut mapped = Vec::with_capacity(source_table.len());
+        for index in 0..source_table.len() {
+            let old = PathId::try_from_index(index)?;
+            if old == PathId::ROOT {
+                mapped.push(PathId::ROOT);
+                continue;
+            }
+            let parent = source_table.try_parent(old)?;
+            let remapped_parent = mapped.get(parent.index()).copied()?;
+            let component = source_table.try_component(old)?;
+            let component = destination_strings.intern(source_strings.try_resolve(component)?);
+            let remapped = self.try_intern_child(remapped_parent, component)?;
+            mapped.push(remapped);
+        }
+        Some(PathIdRemap::from_full(mapped))
+    }
+
 }

@@ -400,6 +400,13 @@ impl ModulePreparationContext<'_> {
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<PreparedModule, PremergeFailure> {
         let mut warnings = Vec::new();
+        // Complete synthetic outputs retain `PathId`s from the source database's registration
+        // table. Direct preparation fixtures may supply a standalone empty fork, so restore the
+        // authoritative source-table prefix before parsing retained inputs.
+        if path_fork.len() < self.source_files.paths().len() {
+            path_fork = self.source_files.fork_path_interner();
+        }
+
 
         // Discovery owns the final source identity domain and supplies this database in
         // deterministic logical-path order. Prepared inputs carry only these final IDs, so the
@@ -539,6 +546,11 @@ impl ModulePreparationContext<'_> {
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PremergeFailure> {
+        // Retained direct-preparation inputs use the source database's path domain. Keep the
+        // mutable module fork in that domain before worker snapshots are created.
+        if path_fork.len() < self.source_files.paths().len() {
+            *path_fork = self.source_files.fork_path_interner();
+        }
         let entry_file_id = source_id_for_canonical_path(self.source_files, entry_file_path);
 
         let options = HeaderParseOptions {
@@ -628,6 +640,13 @@ impl ModulePreparationContext<'_> {
         // header order never depends on which worker finished first.
         preparation_chunks.sort_by_key(|chunk| chunk.chunk_index);
         validate_distinct_chunk_indexes(&preparation_chunks)?;
+        // Direct merge fixtures can provide an empty target fork while their chunks inherit the
+        // source-table prefix. Restore that prefix before applying worker path deltas.
+        if let Some(first_chunk) = preparation_chunks.first()
+            && path_fork.len() < first_chunk.local_path_fork.base_len()
+        {
+            *path_fork = first_chunk.local_path_fork.inherited_fork();
+        }
 
         let mut prepared_outputs = Vec::with_capacity(module_file_count);
         prepared_outputs.resize_with(module_file_count, || None);
@@ -815,6 +834,17 @@ impl ModulePreparationContext<'_> {
         strategy: FilePreparationStrategy,
         source_spans: &mut SourceSpanBuilders<'_>,
     ) -> Vec<FilePreparationChunk> {
+        // Standalone preparation callers may provide a truncated path source. Use the source
+        // registration prefix for worker inputs so retained source paths remain addressable.
+        let source_path_fork_source;
+        let path_fork_source =
+            if path_fork_source.base_len() < prepare_context.source_files.paths().len() {
+                source_path_fork_source =
+                    prepare_context.source_files.fork_path_interner().fork_source();
+                &source_path_fork_source
+            } else {
+                path_fork_source
+            };
         let module_file_count = module.len();
         let files = module.into_iter().map(|file| {
             let builder = source_spans.take_span_builder(file.source_id());

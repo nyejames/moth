@@ -581,7 +581,7 @@ impl HeaderKind {
     /// WHAT: dispatches to nested remap methods for function signatures, declaration shells,
     ///       struct fields, choice variants, and type-alias targets.
     /// WHY: per-file frontend preparation uses local string tables; merging them into the module
-    ///      table requires shifting every `StringId` and `InternedPath`.
+    ///      table requires shifting every `StringId` and `PathId`.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         match self {
             HeaderKind::Function {

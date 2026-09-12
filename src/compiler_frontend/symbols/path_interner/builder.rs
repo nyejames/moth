@@ -9,7 +9,7 @@ use super::fork::{PathInternerFork, PathInternerForkSource};
 use super::frozen::PathTable;
 use super::id::PathId;
 use super::remap::PathIdRemap;
-use crate::compiler_frontend::symbols::interned_path::NonUtf8PathComponent;
+use super::NonUtf8PathComponent;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter, record_path_max_depth,
@@ -106,7 +106,7 @@ impl PathInternerBuilder {
         Some(joined)
     }
 
-    /// Intern a filesystem path using the exact component semantics shared with `InternedPath`.
+    /// Intern a filesystem path using the exact component semantics of the path table.
     ///
     /// Filesystem components are validated as strict UTF-8 before their string IDs enter the
     /// table. No separator normalization or spelling rewrite is performed here. Exhaustion of

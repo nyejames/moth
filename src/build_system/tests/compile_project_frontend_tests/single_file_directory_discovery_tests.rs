@@ -283,12 +283,16 @@ fn directory_project_remaps_delta_collisions_across_modules() {
                 == Some("@b.moth")
         })
         .expect("expected @b.moth module");
-    let module_path = path_fork
-        .try_intern_filesystem_path(Path::new("second/@b.moth"), &mut string_table)
-        .expect("test path should be UTF-8");
-    let item_path = path_fork
-        .try_intern_child(module_path, string_table.intern("Item"))
-        .expect("test path fits");
+    let item_path = (0..second_module.executable.path_table.len())
+        .filter_map(PathId::try_from_index)
+        .find(|path| {
+            second_module
+                .executable
+                .path_table
+                .render_portable(*path, &string_table, &mut Vec::new())
+                == "second/@b.moth/Item"
+        })
+        .expect("Item path should exist in the published path table");
     let nominal_id = second_module
         .executable
         .type_environment

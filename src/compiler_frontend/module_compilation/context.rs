@@ -12,12 +12,13 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::ResolvedBuildConfigMap;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::module_compilation::generated::ProviderMaterialisationRegistry;
-use crate::compiler_frontend::module_compilation::options::FrontendOptions;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
+use crate::compiler_frontend::module_compilation::options::FrontendOptions;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::sync::Arc;
 
@@ -35,6 +36,9 @@ pub(crate) struct ModuleCompilationContext<'a> {
     /// This context borrows the boundary's handle. Only a consumer that genuinely outlives the
     /// call - the frontend's retained Stage 0 facts - clones it.
     pub(crate) source_files: &'a Arc<SourceDatabase>,
+    /// Optional build-wide string resolver for imported provider path tables. Local/direct
+    /// callers leave this absent because their retained paths already share the requester's table.
+    pub(crate) global_string_table: Option<&'a StringTable>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) external_packages: Arc<ExternalPackageRegistry>,
     /// Boundary-local resolved `#Config` values, collected before semantic AST construction.

@@ -249,7 +249,6 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let canonical_b = fs::canonicalize(&file_b).unwrap();
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let source_files = Arc::new(
         SourceDatabase::build(
             &[&canonical_a, &canonical_b],
@@ -267,7 +266,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        PathInternerFork::empty(),
+        source_files.fork_path_interner(),
         &style_directives,
         &external_package_registry,
         None,
@@ -349,11 +348,18 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         let remap = frontend
             .string_table
             .merge_delta_from(&local_string_table, base_len);
+        let path_remap = frontend
+            .path_fork
+            .merge_delta_from(&local_path_fork, &remap)
+            .expect("chunk-local paths should merge into the module path fork");
         match result {
             Ok(mut output) => {
                 output
                     .remap_string_ids(&remap)
                     .expect("chunk-local output should remap into the module table");
+                output
+                    .remap_path_ids(&path_remap)
+                    .expect("chunk-local output paths should remap into the module table");
                 output
                     .freeze_path_syntax(&frontend.string_table, &mut frontend.path_fork)
                     .expect("remapped output should pass the prepared-file invariant gate");
@@ -365,6 +371,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 ),
             ) => {
                 error.remap_string_ids(&remap);
+                error.remap_path_ids(&path_remap);
                 Err(error)
             }
             Err(
@@ -507,7 +514,6 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let canonical_entry = fs::canonicalize(&entry_file).unwrap();
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.as_path()),
         &canonical_entry,
@@ -598,7 +604,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &mut span_owners,
         &canonical_entry,
         local_table,
-        PathInternerFork::empty(),
+        source_files_view.fork_path_interner(),
         source_byte_count,
         None,
     );
@@ -609,7 +615,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &mut span_owners,
         &canonical_entry,
         local_table,
-        PathInternerFork::empty(),
+        source_files_view.fork_path_interner(),
         source_byte_count,
     );
     let prepared = prepared_result.expect("module preparation should succeed");
@@ -649,6 +655,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
         style_directives: &style_directives,
+        global_string_table: None,
         external_packages: Arc::clone(&external_packages),
         build_config_values: Arc::new(Default::default()),
         external_dependency_resolution_table: &resolution_table,
@@ -747,7 +754,6 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.as_path()),
         &canonical_entry,
@@ -815,7 +821,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &mut span_owners,
         &canonical_entry,
         local_table,
-        PathInternerFork::empty(),
+        source_files_view.fork_path_interner(),
         source_byte_count,
         None,
     );
@@ -826,7 +832,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &mut span_owners,
         &canonical_entry,
         local_table,
-        PathInternerFork::empty(),
+        source_files_view.fork_path_interner(),
         source_byte_count,
     );
     let prepared = prepared_result.expect("API-only module preparation should succeed");
@@ -841,6 +847,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
+        global_string_table: None,
         style_directives: &style_directives,
         external_packages,
         build_config_values: Arc::new(Default::default()),
@@ -1472,7 +1479,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
         super::ModulePreparationContext::prepare_module_file_chunks(
             std::mem::take(&mut fixture.input_files),
             &fork_source,
-            &PathInternerFork::empty().fork_source(),
+            &fixture.frontend.path_fork.fork_source(),
             &prepare_context,
             0,
             0,
@@ -1487,7 +1494,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
     }
     chunks.reverse();
 
-    let mut chunk_path_fork = PathInternerFork::empty();
+    let mut chunk_path_fork = fixture.frontend.path_fork.fork_source().fork_for_module();
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut fixture.frontend.string_table,
         &mut chunk_path_fork,
@@ -1536,7 +1543,8 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
-    let mut preparation_path_fork = PathInternerFork::empty();
+    let mut preparation_path_fork =
+        fixture.frontend.path_fork.fork_source().fork_for_module();
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
@@ -1639,7 +1647,7 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
             super::ModulePreparationContext::prepare_module_file_chunks(
                 std::mem::take(&mut fixture.input_files),
                 &fork_source,
-                &PathInternerFork::empty().fork_source(),
+                &fixture.frontend.path_fork.fork_source(),
                 &prepare_context,
                 0,
                 0,
@@ -1740,16 +1748,16 @@ fn parsed_prepared_output(
     source_name: &str,
     source_code: &str,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
     source_id: SourceId,
 ) -> FileFrontendPrepareOutput {
-    let mut path_fork = PathInternerFork::empty();
     let source_path = PathBuf::from(source_name);
     let source_identity = path_fork
         .try_intern_filesystem_path(&source_path, string_table)
         .expect("test source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut tokens = tokenize(source_code, source_identity, TokenizerEntryMode::SourceFile, &style_directives, string_table, &mut path_fork, source_id, span_builder)
+    let mut tokens = tokenize(source_code, source_identity, TokenizerEntryMode::SourceFile, &style_directives, string_table, path_fork, source_id, span_builder)
     .expect("test source should tokenize");
 
     parse_file_headers_with_table(
@@ -1757,7 +1765,7 @@ fn parsed_prepared_output(
         Path::new(source_name),
         &HeaderParseOptions::default(),
         string_table,
-        &mut path_fork,
+        path_fork,
         0,
         0,
         span_builder,
@@ -1781,6 +1789,7 @@ fn dummy_preparation_chunk(
                 &format!("file_{file_index}.moth"),
                 "x #= 1\n",
                 &mut local_string_table,
+                &mut path_fork,
                 &mut builder,
                 SourceId::COMPILATION_ROOT,
             );
@@ -1797,7 +1806,7 @@ fn dummy_preparation_chunk(
         chunk_index,
         local_string_table,
         results,
-        local_path_fork: PathInternerFork::empty(),
+        local_path_fork: path_fork,
         span_builders,
     }
 }
@@ -1920,15 +1929,16 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     source_files.retain_text(first_id, String::new()).unwrap();
     source_files.retain_text(second_id, String::new()).unwrap();
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
+    let mut synthetic_path_fork = PathInternerFork::empty();
     let mut synthetic_spans = ExtendedSpanBuilder::new();
     let mut synthetic_output = parsed_prepared_output(
         "synthetic-output.moth",
         "io.line([: [@docs/synthetic.md]])\n",
         &mut string_table,
+        &mut synthetic_path_fork,
         &mut synthetic_spans,
         synthetic_id,
     );
-    let mut synthetic_path_fork = PathInternerFork::empty();
     synthetic_output
         .freeze_path_syntax(&string_table, &mut synthetic_path_fork)
         .expect("synthetic output should freeze before chunk aggregation");
@@ -1942,10 +1952,13 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let (mut second_local_table, _) = fork_source.fork_for_module().into_parts();
     let mut first_spans = ExtendedSpanBuilder::new();
     let mut second_spans = ExtendedSpanBuilder::new();
+    let mut first_path_fork = PathInternerFork::empty();
+    let mut second_path_fork = PathInternerFork::empty();
     let first_output = parsed_prepared_output(
         "first-output.moth",
         "",
         &mut first_local_table,
+        &mut first_path_fork,
         &mut first_spans,
         first_id,
     );
@@ -1953,14 +1966,14 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
         "second-output.moth",
         "",
         &mut second_local_table,
+        &mut second_path_fork,
         &mut second_spans,
         second_id,
     );
-
     let first_chunk = super::FilePreparationChunk {
         chunk_index: 0,
         local_string_table: first_local_table,
-        local_path_fork: PathInternerFork::empty(),
+        local_path_fork: first_path_fork,
         results: vec![super::PreparedFileResult {
             file_index: 0,
             string_domain: super::PreparedFileStringDomain::ChunkLocal,
@@ -1971,7 +1984,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let second_chunk = super::FilePreparationChunk {
         chunk_index: 1,
         local_string_table: second_local_table,
-        local_path_fork: PathInternerFork::empty(),
+        local_path_fork: second_path_fork,
         results: vec![
             super::PreparedFileResult {
                 file_index: 1,

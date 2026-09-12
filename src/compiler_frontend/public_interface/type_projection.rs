@@ -100,7 +100,7 @@ pub(super) struct ProjectedReceiverMethodSignature {
 
 /// Transient resolver that maps module-local `NominalTypeId` to stable `OriginTypeId`.
 ///
-/// WHAT: looks up the nominal's `InternedPath` through `TypeEnvironment` then resolves it
+/// WHAT: looks up the nominal's `PathId` through `TypeEnvironment` then resolves it
 /// through the transient expanded public source-nominal origin index. Direct public declarations,
 /// imported project-graph nominals and private normal-file nominals exposed through a public alias
 /// resolve to their owning module origin; unexported, unregistered and source-package nominals

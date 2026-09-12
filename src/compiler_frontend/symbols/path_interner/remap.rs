@@ -35,6 +35,24 @@ impl PathIdRemap {
         }
     }
 
+    /// Build a remap for a complete source table whose IDs are all potentially foreign.
+    ///
+    /// Unlike a worker-delta remap, this form has no identity prefix: every source path is
+    /// explicitly mapped into the destination fork. It is used when a generated template crosses
+    /// a project/package boundary and therefore cannot assume that the donor's numeric `PathId`
+    /// domain is the requester's domain.
+    pub(crate) fn from_full(mapped: Vec<PathId>) -> Self {
+        let is_identity = mapped
+            .iter()
+            .enumerate()
+            .all(|(index, path)| path.index() == index);
+        Self {
+            identity_prefix_len: 0,
+            mapped_suffix: mapped,
+            is_identity,
+        }
+    }
+
     /// Rewrite one fork-issued identity into its merged destination identity.
     #[allow(dead_code)] // Phase 2C remaps PathId payloads; Slice 2B merges keep prefix identity.
     pub fn get(&self, old: PathId) -> PathId {

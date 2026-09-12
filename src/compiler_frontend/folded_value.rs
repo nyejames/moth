@@ -42,7 +42,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterface
 /// WHAT: preserves the authored field name as an owned stable string, the field value's
 /// canonical [`CanonicalTypeIdentity`], and the recursively owned folded value. The name
 /// derives from the declaration path's last component while the donor-local string table is
-/// available, so the field survives after donor-local `StringId` and `InternedPath`
+/// available, so the field survives after donor-local `StringId` and `PathId`
 /// identities are unavailable. The type identity lets import materialize nested values
 /// without donor field declarations: a nested anonymous const record projects to
 /// `AnonymousConstRecord` and a nested named struct to its source nominal identity.
@@ -198,7 +198,7 @@ impl Hash for FiniteFloat {
 /// directly exported constants (R2b) and function-parameter, receiver-parameter or
 /// struct-field defaults (R2c). Every leaf is an owned stable value: no `TypeId`,
 /// `NominalTypeId`, `StringId`,
-/// `InternedPath`, source location, AST/TIR identity, HIR ID, local choice tag/index or
+/// `PathId`, source location, AST/TIR identity, HIR ID, local choice tag/index or
 /// absolute path crosses this boundary. Choice variants carry a stable variant name
 /// derived from the donor-local type environment while it is available, not a local tag
 /// index. Option presence is modeled by the recursive `OptionSome`/`OptionNone` variants, not

@@ -3,7 +3,7 @@
 //! WHAT: owns every `Public*` semantic leaf type, the declaration-centric record model, the
 //! reusable-evidence record model, the pre-HIR [`PublicInterfaceDraft`] aggregate and the
 //! completed [`LocalPublicInterface`] phase. These types carry only owned stable values: no
-//! donor-local `TypeId`, `NominalTypeId`, `GenericParameterId`, `TraitId`, `InternedPath` or
+//! donor-local `TypeId`, `NominalTypeId`, `GenericParameterId`, `TraitId`, `PathId` or
 //! `StringId` crosses this boundary.
 //!
 //! WHY: the compiler design overview and the recovery plan require one declaration-centric
@@ -79,7 +79,7 @@ pub(crate) struct PublicReturnTypeSlot {
 /// the bounds are a separate fact on this entry.
 /// WHY: the exported generic parameter must carry both identity and bounds so a cross-module
 /// consumer can see the full constraint shape without donor-local `TraitId`, `GenericParameterId`,
-/// `InternedPath`, `StringId`, `SourceId`, `CoreTraitKind` registry handle or source span.
+/// `PathId`, `StringId`, `SourceId`, `CoreTraitKind` registry handle or source span.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicGenericParameterSurface {
     pub(crate) identity: ExportedGenericParameterIdentity,
@@ -358,7 +358,7 @@ pub(crate) struct PublicEvidenceRequirementMapping {
 /// WHAT: carries one [`CanonicalEvidenceIdentity`] (the canonical target-plus-trait key),
 /// a semantic ownership classification, and every trait requirement in authored order mapped
 /// to the stable implementing receiver-method origin. It never embeds
-/// `TraitEvidenceId`, `TraitId`, `TraitRequirementId`, `TypeId`, `InternedPath`, `StringId`,
+/// `TraitEvidenceId`, `TraitId`, `TraitRequirementId`, `TypeId`, `PathId`, `StringId`,
 /// source span or declaration order. Evidence for a private target or private source trait,
 /// or whose requirement methods are absent from the completed public receiver surface, does not
 /// enter the draft.
@@ -376,7 +376,7 @@ pub(crate) struct PublicEvidenceRecord {
 /// [`PublicDeclarationRecord`] per stable [`OriginDeclarationId`], and one separate
 /// deterministic [`PublicEvidenceRecord`] collection for direct reusable evidence. It carries
 /// only owned stable values: no donor-local `TypeId`, `NominalTypeId`, `GenericParameterId`,
-/// `TraitId`, `InternedPath` or `StringId` crosses this boundary.
+/// `TraitId`, `PathId` or `StringId` crosses this boundary.
 ///
 /// It is deliberately not the final `PublicSemanticInterface`. Generic template bodies and
 /// cross-module call lowering remain for later phases. Exported-name diagnostic spans are retained

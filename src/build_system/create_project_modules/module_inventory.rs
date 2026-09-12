@@ -171,12 +171,19 @@ fn resolve_directory_dependency_path(
     directory_dependency_resolution
         .resolve_dependency(provider, source_path, string_table)
         .map_err(|diagnostic| {
-            // Move the local table into the batch; the caller aborts discovery on this
-            // diagnosed path, so no clone is needed to carry the diagnostic.
+            // Move the local table into the batch; the caller aborts discovery on this diagnosed
+            // path, so no clone is needed to carry the diagnostic.  Keep the issuing fork beside
+            // it so its `PathId` domain remains valid after the source owner is finalized.
             let table = std::mem::take(string_table);
-            PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(diagnostic, table))
+            let mut failure =
+                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(diagnostic, table));
+            failure.attach_path_table_if_missing(Arc::new(
+                directory_dependency_resolution.path_fork().snapshot_table(),
+            ));
+            failure
         })
 }
+
 /// Borrowed Stage 0 services and live source spans for one serial discovery pass.
 struct ModuleDiscoveryContext<'a, 'sources> {
     project_path_resolver: &'a ProjectPathResolver,
@@ -745,7 +752,10 @@ fn prepare_check_only_module(
                 selected_source_texts,
             )
         };
-        let input = input_result.map_err(|error| error.into_failure(syntax.string_table_mut()))?;
+        let input = input_result.map_err(|error| {
+            let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+            error.into_failure(syntax.string_table_mut(), path_table)
+        })?;
         // `prepare_source` already returns the premerge lane, so propagate directly without
         // building an intermediate vessel.
         let prepared_output = syntax.prepare_source(input, source_spans)?;
@@ -761,24 +771,31 @@ fn prepare_check_only_module(
                     project_path_resolver,
                     syntax_path_fork,
                     &mut isolated_external_imports,
-                    directory_dependency_resolution,
+                    directory_dependency_resolution.with_path_fork(syntax_path_fork),
                     syntax_string_table,
                 )
             };
             let action = match action {
                 Ok(action) => action,
-                Err(error) => return Err(error.into_failure(syntax.string_table_mut())),
+                Err(error) => {
+                    let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+                    return Err(error.into_failure(syntax.string_table_mut(), path_table));
+                }
             };
             if matches!(&action, StructuralProviderAction::Handled) {
                 continue;
             }
 
-            let resolved = resolve_directory_dependency_path(
-                directory_dependency_resolution,
-                provider,
-                &current_file_path,
-                syntax.string_table_mut(),
-            )?;
+            let resolved = {
+                let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
+                    syntax.source_preparation_inputs_and_path_fork_mut();
+                resolve_directory_dependency_path(
+                    directory_dependency_resolution.with_path_fork(syntax_path_fork),
+                    provider,
+                    &current_file_path,
+                    syntax_string_table,
+                )?
+            };
             match resolved {
                 ResolvedDependency::SameModuleSource {
                     source_index: target_source_index,
@@ -906,8 +923,10 @@ fn prepare_check_only_module(
                 selected_source_texts,
             )
         };
-        let target_input =
-            target_input_result.map_err(|error| error.into_failure(syntax.string_table_mut()))?;
+        let target_input = target_input_result.map_err(|error| {
+            let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+            error.into_failure(syntax.string_table_mut(), path_table)
+        })?;
         // Already in the premerge lane; propagate without an intermediate vessel.
         let target_output = syntax.prepare_source(target_input, source_spans)?;
         let mut nested_content_sources = Vec::new();
@@ -1238,7 +1257,10 @@ fn discover_modules_serial_provider_capable(
             );
             let input = match input_result {
                 Ok(input) => input,
-                Err(error) => return Err(error.into_failure(syntax.string_table_mut())),
+                Err(error) => {
+                    let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+                    return Err(error.into_failure(syntax.string_table_mut(), path_table));
+                }
             };
             // Already in the premerge lane; propagate without an intermediate vessel.
             let prepared_output = syntax.prepare_source(input, source_spans)?;
@@ -1254,24 +1276,31 @@ fn discover_modules_serial_provider_capable(
                         project_path_resolver,
                         syntax_path_fork,
                         external_imports,
-                        directory_dependency_resolution,
+                        directory_dependency_resolution.with_path_fork(syntax_path_fork),
                         syntax_string_table,
                     )
                 };
                 let action = match action {
                     Ok(action) => action,
-                    Err(error) => return Err(error.into_failure(syntax.string_table_mut())),
+                    Err(error) => {
+                        let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+                        return Err(error.into_failure(syntax.string_table_mut(), path_table));
+                    }
                 };
                 if matches!(&action, StructuralProviderAction::Handled) {
                     continue;
                 }
 
-                let resolved = resolve_directory_dependency_path(
-                    directory_dependency_resolution,
-                    provider,
-                    &source_path,
-                    syntax.string_table_mut(),
-                )?;
+                let resolved = {
+                    let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
+                        syntax.source_preparation_inputs_and_path_fork_mut();
+                    resolve_directory_dependency_path(
+                        directory_dependency_resolution.with_path_fork(syntax_path_fork),
+                        provider,
+                        &source_path,
+                        syntax_string_table,
+                    )?
+                };
                 match resolved {
                     ResolvedDependency::SameModuleSource {
                         source_index: target_source_index,

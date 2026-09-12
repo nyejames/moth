@@ -753,7 +753,9 @@ fn source_database_resolves_retained_text_by_logical_path() {
         .get_by_canonical_path(&source_path)
         .expect("source should be registered")
         .id;
-    let logical_path = database.legacy_logical_path(source_id);
+    let logical_path = database
+        .source_logical_path(source_id)
+        .expect("source should have a logical path");
 
     database
         .retain_text(source_id, "compiled snapshot\n".to_owned())
@@ -761,7 +763,7 @@ fn source_database_resolves_retained_text_by_logical_path() {
 
     assert_eq!(
         database
-            .unique_record_for_logical_path(&logical_path)
+            .unique_record_for_logical_path(logical_path)
             .and_then(|slot| database.retained_text(slot.id)),
         Some("compiled snapshot\n"),
     );

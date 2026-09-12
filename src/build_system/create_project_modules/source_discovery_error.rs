@@ -18,7 +18,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
 use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::sync::Arc;
 /// Finalized Stage 0 failure preserving the finished source owner.
 ///
 /// WHAT: carries the typed premerge failure beside the finished source database that was
@@ -67,26 +69,35 @@ impl SourceDiscoveryError {
     ///
     /// WHAT: moves a diagnostic plus the caller's local table into a diagnosed batch, or
     ///       propagates an infrastructure error typed. The table moves via `mem::take`; no
-    ///       clone carries diagnostics.
+    ///       clone carries diagnostics. The issuing path-table snapshot moves with the batch so
+    ///       every retained `PathId` remains in its original identity domain.
     /// WHY: inventory preparation aborts on the first discovery failure and discards its
     ///      discovery owner, so the batch becomes the sole table owner. The final boundary owns
     ///      the single vessel conversion.
     ///
     /// A finalized failure already owns a finished source database this lane cannot carry:
-    /// [`PremergeFailure`] has no source owner, so converting here would drop the finished
-    /// database. Finalized failures must be matched explicitly and split with
+    /// [`PremergeFailure`] has no source owner, so converting here would drop the finished owner.
+    /// Finalized failures must be matched explicitly and split with
     /// [`FinalizedDiscoveryFailure::into_parts`] (see `collect_reachable_input_files`);
     /// reaching this converter with one is a caller bug and fails loudly in all builds
     /// instead of dropping the finished owner.
-    pub(crate) fn into_failure(self, string_table: &mut StringTable) -> PremergeFailure {
+    pub(crate) fn into_failure(
+        self,
+        string_table: &mut StringTable,
+        path_table: Arc<PathTable>,
+    ) -> PremergeFailure {
         match self {
             SourceDiscoveryError::Diagnostic(diagnostic) => {
                 let table = std::mem::take(string_table);
-                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                    diagnostic, table,
-                ))
+                let mut batch =
+                    PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
+                batch.attach_path_table_if_missing(path_table);
+                PremergeFailure::Diagnosed(batch)
             }
-            SourceDiscoveryError::Premerge(failure) => failure,
+            SourceDiscoveryError::Premerge(mut failure) => {
+                failure.attach_path_table_if_missing(path_table);
+                failure
+            }
             SourceDiscoveryError::Finalized(_) => {
                 unreachable!(
                     "finalized discovery failures own a finished SourceDatabase; match Finalized \

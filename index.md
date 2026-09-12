@@ -58,7 +58,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [declaration_syntax](src/compiler_frontend/declaration_syntax/): shared declaration/type shell parsers. kw: signatures, ParsedTypeRef.
 - [module_dependencies.rs](src/compiler_frontend/module_dependencies.rs): topological header ordering. kw: dependency edges, cycles.
 - [compiler_messages](src/compiler_frontend/compiler_messages/): plain `CompilerDiagnostic` diagnosed values, typed `CompilerError` infrastructure failures and rendering, plus the self-contained [ModuleDiagnostics](src/compiler_frontend/compiler_messages/module_diagnostics.rs) owner. kw: diagnostic codes, labels, module outcomes.
-- [symbols](src/compiler_frontend/symbols/): StringId, InternedPath, compiler symbols, naming policy.
+- [symbols](src/compiler_frontend/symbols/): StringId, PathId, compiler symbols, naming policy.
   - [path_interner](src/compiler_frontend/symbols/path_interner/): four-byte `PathId` handles into one parent-linked table, embedded in the source database during registration and borrowed for lookup.
 - [paths](src/compiler_frontend/paths/): file-owned path syntax plus path normalization, formatting and resolution. kw: PathSyntaxTable, dependency paths, source roots.
   - [file_references.rs](src/compiler_frontend/paths/file_references.rs): prepared non-dependency path classification and the keyed, remappable Stage 0 resolved-reference handoff consumed by module semantics.

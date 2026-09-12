@@ -69,7 +69,7 @@ pub(crate) struct ResolvedTraitReturnFact {
 /// WHAT: carries the owned requirement name (`StringId`), the receiver access plus embedded
 /// `this_type`, the ordered non-receiver parameters and the ordered return slots. It drops
 /// every source-coordinate record from the resolved trait requirement so the transient fact stays
-/// minimal. Donor-local `TypeId`, `StringId` and `InternedPath` are consumed transiently and
+/// minimal. Donor-local `TypeId`, `StringId` and `PathId` are consumed transiently and
 /// never cross the module result boundary.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedTraitRequirementFact {

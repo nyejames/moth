@@ -231,7 +231,10 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
             ) else {
                 panic!("source-package @project dependency must be rejected");
             };
-            let failure = error.into_failure(string_table);
+            let failure = error.into_failure(
+                string_table,
+                std::sync::Arc::new(resolution.path_fork().snapshot_table()),
+            );
             let messages = failure.into_messages(string_table);
             let diagnostic = first_error_diagnostic(&messages);
             assert!(matches!(

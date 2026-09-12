@@ -2,7 +2,7 @@
 //!
 //! These mirror types intentionally own donor-independent names, identities and spans. A frozen
 //! artefact must outlive the declaring environment, so it cannot retain live `StringId`,
-//! `InternedPath` or type-table handles.
+//! `PathId` or type-table handles.
 use super::frozen_syntax::StableBodySyntax;
 use super::nominal_blueprints::{
     MaterialisationTypeBlueprint, NominalMaterialisationBlueprint, intern_generated_canonical_type,

@@ -342,9 +342,14 @@ fn dependency_fact_retains_authored_source_location() {
 
     // The retained source identity is the declaring source file that authored the structural
     // provider reference.
-    let scope_path = source_files
-        .legacy_logical_path(retained_span.source())
-        .to_portable_string(&string_table);
+    let logical_path = source_files
+        .source_logical_path(retained_span.source())
+        .expect("retained span source should have a logical path");
+    let mut scratch = Vec::new();
+    let scope_path =
+        source_files
+            .paths()
+            .render_portable(logical_path, &string_table, &mut scratch);
     assert!(
         scope_path.contains("@pageA.moth"),
         "retained span source should name the declaring module root file: {scope_path}"

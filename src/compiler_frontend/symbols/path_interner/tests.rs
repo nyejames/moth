@@ -690,3 +690,30 @@ fn join_and_append_match_child_by_child_identity() {
 
     assert_eq!(rejoined, prefix);
 }
+
+#[cfg(unix)]
+mod non_utf8_filesystem_conversion {
+    use super::*;
+    use crate::compiler_frontend::symbols::path_interner::{
+        NonUtf8PathComponent, PathInternError,
+    };
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    #[test]
+    fn filesystem_interning_rejects_non_utf8_component_without_lossy_conversion() {
+        let mut string_table = StringTable::new();
+        let mut path_fork = super::super::PathInternerFork::empty();
+        let bad_component = OsString::from_vec(vec![0xFF, 0xFE]);
+        let path = PathBuf::from("valid").join(bad_component);
+
+        let error = path_fork
+            .try_intern_filesystem_path(&path, &mut string_table)
+            .expect_err("non-UTF-8 path component should be rejected");
+
+        assert!(matches!(
+            error,
+            PathInternError::NonUtf8(NonUtf8PathComponent { path: actual }) if actual == path
+        ));
+    }
+}

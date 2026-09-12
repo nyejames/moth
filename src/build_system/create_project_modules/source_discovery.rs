@@ -271,8 +271,9 @@ pub(super) fn collect_reachable_input_files(
             });
         }
         Err(other) => {
+            let path_table = std::sync::Arc::new(path_fork.snapshot_table());
             return Err(CollectReachableInputsError {
-                failure: Box::new(other.into_failure(string_table)),
+                failure: Box::new(other.into_failure(string_table, path_table)),
                 source_database: None,
             });
         }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 #[test]
 fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -1142,7 +1142,6 @@ result String = outer(LocalMarker(1), "trigger")
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     string_table.intern("preexisting-global-name");
     let frontend = compile_project_frontend(
         &mut config,
@@ -1154,12 +1153,26 @@ result String = outer(LocalMarker(1), "trigger")
     )
     .expect("nested generated sidecars should publish after the provider module");
 
-    let provider_path = path_fork
-        .try_intern_portable_path("provider", &mut string_table)
-        .expect("test path fits");
-    let imported_marker_path = path_fork
-        .try_intern_child(provider_path, string_table.intern("RemoteMarker"))
-        .expect("test path fits");
+    let imported_marker_path = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find_map(|artifact| {
+            let path_table = &artifact.module.executable.path_table;
+            let environment = &artifact.module.executable.type_environment;
+            (0..path_table.len())
+                .filter_map(PathId::try_from_index)
+                .find(|path| {
+                    let Some(nominal_id) = environment.nominal_id_for_path(path) else {
+                        return false;
+                    };
+                    let Some(type_id) = environment.type_id_for_nominal_id(nominal_id) else {
+                        return false;
+                    };
+                    display_type(type_id, environment, &string_table, path_table)
+                        == "RemoteMarker"
+                })
+        })
+        .expect("requester path table should contain the imported marker path");
     let published_alias_owners = frontend
         .project
         .successful_artefacts_in_module_id_order()
@@ -1298,7 +1311,6 @@ wrapped Wrapper = identity(make())
                 .flat_map(|package| package.boundary.generated.sidecars()),
         )
         .collect::<Vec<_>>();
-
     assert_eq!(sidecars.len(), 1);
     let sidecar = &sidecars[0];
     let wrapper_identity = sidecar

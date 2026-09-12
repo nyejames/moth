@@ -54,9 +54,11 @@ use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHandle};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathIdRemap, PathInternerFork, PathTable,
+};
+use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -65,7 +67,6 @@ use std::sync::Arc;
 #[cfg(test)]
 #[path = "artefact_emit/test_support.rs"]
 mod test_support;
-
 ///
 /// The context is deliberately a compact list rather than a donor-module snapshot. It owns one
 /// module-wide stable semantic closure and one retained body per template. Modules without
@@ -78,6 +79,18 @@ pub(crate) struct ModuleMaterialisationContext {
     pub(super) artefacts: Box<[GenericTemplateArtefact]>,
     pub(super) module_origin: Option<StableModuleOriginIdentity>,
     pub(super) frozen_identity_handle: FrozenIdentityHandle,
+    /// The complete path table that issued this context's retained `PathId`s.
+    ///
+    /// A published provider can be consumed by a different project/package boundary. Keeping the
+    /// issuing table here lets the requester re-intern those paths into its own live fork instead
+    /// of assuming that equal numeric IDs name equal paths.
+    pub(super) path_table: Option<Arc<PathTable>>,
+    /// The string table whose IDs are stored in `path_table`.
+    ///
+    /// Path components use the provider boundary's `StringId` domain. Retaining that resolver with
+    /// the path table prevents a requester boundary from interpreting the same numeric IDs as its
+    /// own strings while rebasing a published context.
+    pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
 }
 impl ModuleMaterialisationContext {
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
@@ -137,6 +150,48 @@ impl ModuleMaterialisationContext {
                 .install(Arc::clone(&identity))?;
         }
         Ok(())
+    }
+
+    /// Attach the complete identity tables that issued this context's retained identities.
+    pub(crate) fn install_identity_tables(
+        &mut self,
+        path_table: Arc<PathTable>,
+        source_string_table: Arc<FrozenStringTable>,
+    ) {
+        self.path_table = Some(path_table);
+        self.source_string_table = Some(source_string_table);
+    }
+
+    /// Rebase a published provider context into the requester's path/string identity domain.
+    ///
+    /// Provider contexts are published after their local path delta merges, but a source package
+    /// (and a later project module) may own a different numeric path domain. Re-interning the
+    /// issuing table through the requester's fork preserves path structure without introducing a
+    /// second interner, then the cloned retained context can be used for this request only.
+    pub(crate) fn rebased_for_requester(
+        &self,
+        path_fork: &mut PathInternerFork,
+        destination_strings: &mut StringTable,
+    ) -> Result<Self, CompilerError> {
+        let Some(path_table) = self.path_table.as_deref() else {
+            return Ok(self.clone());
+        };
+        let source_strings = self.source_string_table.as_deref().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "published materialisation context has no source string table",
+            )
+        })?;
+        let path_remap = path_fork
+            .remap_table_from_strings(path_table, source_strings, destination_strings)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "published materialisation context path table could not be re-interned",
+                )
+            })?;
+        let mut rebased = self.clone();
+        rebased.remap_path_ids(&path_remap);
+        rebased.path_table = Some(Arc::new(path_fork.snapshot_table()));
+        Ok(rebased)
     }
 }
 

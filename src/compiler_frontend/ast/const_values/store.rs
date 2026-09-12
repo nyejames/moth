@@ -57,7 +57,7 @@ impl ConstValueId {
 /// WHAT: pairs one module constant's defining path with the folded value the store owns for it,
 /// in declaration-table order.  The declaration table remains the source declaration owner.
 /// WHY: every consumer - config extraction, public projection, HIR, generated materialisation -
-/// joins a module constant by its exact defining `InternedPath`, so the path is the row key.
+/// joins a module constant by its exact defining `PathId`, so the path is the row key.
 #[derive(Clone, Debug)]
 struct ConstValueRow {
     path: PathId,

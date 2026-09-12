@@ -736,12 +736,13 @@ fn content_source_preparation_failures_name_the_logical_source() {
         Some("# Broken\n\n[$insert(\"unterminated]\n"),
         "the diagnosed boundary should retain the exact content snapshot",
     );
-    let scope = source_database
-        .legacy_logical_path(span.source())
-        .to_path_buf(&string_table);
+    let logical_path = source_database
+        .source_logical_path(span.source())
+        .expect("the diagnosed source should have a logical path");
+    let scope = messages.diagnostic_render_context(0).render_path(logical_path);
     assert_eq!(
         scope,
-        Path::new("docs/broken.mtf"),
+        "docs/broken.mtf",
         "the failure should name the logical content source, got {scope:?}"
     );
 }

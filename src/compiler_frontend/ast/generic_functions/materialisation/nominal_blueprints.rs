@@ -48,7 +48,7 @@ use std::rc::Rc;
 /// The blueprint carries owned names, stable type identities and declaration-local generic
 /// parameter slots, plus stable source locations used only for diagnostic and resource-origin
 /// provenance. It contains no requester `TypeId`, `NominalTypeId`, `GenericParameterId`,
-/// `InternedPath` or `StringId`. Registering every shell before populating members makes mutually
+/// `PathId` or `StringId`. Registering every shell before populating members makes mutually
 /// referential definitions safe without reopening the requester environment during materialisation.
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct NominalMaterialisationBlueprint {
@@ -543,13 +543,12 @@ impl ModuleMaterialisationPreparation {
         &self,
         nominal_path: &PathId,
         field_name: StringId,
+        path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Option<&Declaration> {
-        let identity = self.frozen_identity_handle.get()?;
-        let paths = identity.paths();
         self.resolved_struct_fields_by_path
             .get(nominal_path)?
             .iter()
-            .find(|declaration| paths.component(declaration.id) == Some(field_name))
+            .find(|declaration| path_fork.component(declaration.id) == Some(field_name))
     }
 
     fn nominal_field_blueprints(
@@ -560,12 +559,7 @@ impl ModuleMaterialisationPreparation {
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Result<Box<[NominalFieldBlueprint]>, CompilerError> {
-        let identity = self.frozen_identity_handle.get().ok_or_else(|| {
-            CompilerError::compiler_error(
-                "materialisation preparation has no frozen identity context",
-            )
-        })?;
-        let paths = identity.paths();
+        let paths = path_fork;
         fields
             .iter()
             .map(|field| {
@@ -575,7 +569,7 @@ impl ModuleMaterialisationPreparation {
                     )
                 })?;
                 let field_declaration =
-                    nominal_path.and_then(|path| self.field_declaration(path, name));
+                    nominal_path.and_then(|path| self.field_declaration(path, name, path_fork));
                 let folded_default = match field_declaration {
                     Some(declaration)
                         if !matches!(declaration.value.kind, ExpressionKind::NoValue) =>

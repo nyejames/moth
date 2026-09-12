@@ -15,7 +15,7 @@ use super::compiler_errors::{
 use super::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
-use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
 
@@ -304,7 +304,14 @@ impl PremergeDiagnosticBatch {
     }
     /// Attach one complete path identity snapshot to every diagnostic in this batch.
     pub(crate) fn attach_path_table_if_missing(&mut self, path_table: Arc<PathTable>) {
-        if self.bag.diagnostics.is_empty() || !self.render_path_contexts.is_empty() {
+        if self.bag.diagnostics.is_empty()
+            || !self.render_path_contexts.is_empty()
+            || (0..path_table.len()).any(|index| {
+                PathId::try_from_index(index)
+                    .and_then(|path| path_table.try_component(path))
+                    .is_some_and(|component| self.string_table.try_resolve(component).is_none())
+            })
+        {
             return;
         }
         self.render_path_contexts.push(RenderPathContext {

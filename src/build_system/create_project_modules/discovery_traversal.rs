@@ -4,8 +4,9 @@ use super::discovery_provider_imports::{
     unsupported_external_extension_error,
 };
 use super::*;
-use crate::compiler_frontend::symbols::interned_path::NonUtf8PathComponent;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::{
+    NonUtf8PathComponent, PathId, PathInternerFork,
+};
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };

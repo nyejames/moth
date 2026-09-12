@@ -221,7 +221,7 @@ impl ModuleMaterialisationPreparation {
                 )
             })?;
         let content_value_at_path = |logical_path: &PathId| {
-            let content_path = self.content_constant_path_for_capture(logical_path)?;
+            let content_path = self.content_constant_path_for_capture(logical_path, path_fork)?;
             let resources = self.module_resources.as_ref().ok_or_else(|| {
                 CompilerError::compiler_error(
                     "nested generic content capture has no module resource table",

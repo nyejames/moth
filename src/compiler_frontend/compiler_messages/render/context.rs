@@ -50,7 +50,7 @@ pub(crate) struct DiagnosticPrimaryPosition<'a> {
 ///
 /// Mutable frontend diagnostics use a module-local fork; diagnostics retained past a merge use
 /// the frozen path table attached to their identity context. A renderer must never reconstruct a
-/// path through the legacy `InternedPath` value.
+/// path through a legacy component-vector value.
 #[derive(Clone, Copy)]
 pub(crate) enum DiagnosticPathContext<'a> {
     Fork(&'a PathInternerFork),
@@ -298,9 +298,12 @@ impl<'a> DiagnosticRenderContext<'a> {
         let start = line_index.position(range.start())?;
         let end = line_index.position(range.end())?;
         let line = line_text_or_empty_file_eof(line_index, start)?;
-        let path = source_database
-            .legacy_logical_path(source)
-            .to_path_buf(self.string_table);
+        let path_id = source_database.source_logical_path(source)?;
+        let mut scratch = Vec::new();
+        let path = PathBuf::from(
+            DiagnosticPathContext::Table(source_database.paths())
+                .render(path_id, self.string_table, &mut scratch),
+        );
 
         Some(DiagnosticPrimaryPosition {
             source,

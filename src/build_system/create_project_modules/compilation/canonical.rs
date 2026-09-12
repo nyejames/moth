@@ -185,6 +185,9 @@ struct DirectoryModuleCompileContext<'boundary, 'services> {
     provider_binding_index: &'boundary FxHashMap<(ModuleId, DependencyShellId), usize>,
     source_package_dependencies: &'boundary [ResolvedSourcePackageDependency],
     source_package_dependency_index: &'boundary FxHashMap<(ModuleId, DependencyShellId), usize>,
+    /// Build-wide strings are needed to re-intern a published provider's path table into this
+    /// module's local string/path fork.
+    global_string_table: &'boundary StringTable,
 }
 
 impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
@@ -196,6 +199,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         provider_binding_index: &'boundary FxHashMap<(ModuleId, DependencyShellId), usize>,
         source_package_dependencies: &'boundary [ResolvedSourcePackageDependency],
         source_package_dependency_index: &'boundary FxHashMap<(ModuleId, DependencyShellId), usize>,
+        global_string_table: &'boundary StringTable,
     ) -> Self {
         Self {
             boundary,
@@ -205,6 +209,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             provider_binding_index,
             source_package_dependencies,
             source_package_dependency_index,
+            global_string_table,
         }
     }
 }
@@ -667,6 +672,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             external_dependency_resolution_table: effective_external_dependency_resolution_table,
             source_provider_dependencies: &source_provider_dependencies,
             provider_materialisations: self.provider_materialisations,
+            global_string_table: Some(self.global_string_table),
             builder_runtime_packages: &self.boundary.builder_surface.builder_runtime_packages,
         };
 
@@ -838,7 +844,7 @@ pub(super) fn compile_check_only_batches(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     source_package_dependency_index: &rustc_hash::FxHashMap<(ModuleId, DependencyShellId), usize>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
-    _string_table: &mut StringTable,
+    string_table: &mut StringTable,
     _path_interner: &mut PathInternerBuilder,
 ) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
@@ -860,6 +866,7 @@ pub(super) fn compile_check_only_batches(
                 provider_binding_index,
                 source_package_dependencies,
                 source_package_dependency_index,
+                &*string_table,
             );
             compile_check_only_job(
                 &compile_context,
@@ -1029,6 +1036,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                     &provider_binding_index,
                     source_package_dependencies,
                     &source_package_dependency_index,
+                    &*string_table,
                 );
                 compile_context.compile(job, generated_store.known_generated())
             };

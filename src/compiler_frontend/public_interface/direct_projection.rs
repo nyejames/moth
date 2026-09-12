@@ -58,7 +58,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Typed pre-HIR result carrying the draft and its transient exact declaration-path metadata.
 ///
-/// WHAT: keeps the stable public draft separate from the `InternedPath` values needed only to
+/// WHAT: keeps the stable public draft separate from the `PathId` values needed only to
 /// seed the HIR stable-origin/local-`FunctionId` relationship and validate generic body joins.
 /// The path side table is consumed before HIR lowering and never enters `PublicInterfaceDraft` or
 /// `ModuleSemanticResult`.
@@ -730,7 +730,7 @@ fn receiver_methods_for_origin(
 
 /// Fold one public constant root's value by exact defining path and collect its value provenance.
 ///
-/// WHAT: looks up the root's defining `InternedPath` in the module-local store, marks the
+/// WHAT: looks up the root's defining `PathId` in the module-local store, marks the
 /// resulting value ID consumed, and converts it through the shared store visitor. The conversion
 /// returns the canonical union of the root metadata and every nested folded value node, while the
 /// public folded payload remains unchanged.
