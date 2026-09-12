@@ -20,7 +20,7 @@ plans under this directory.
 STATUS: active programme, parked on its compiler prerequisite
 CURRENT_SLICE: none - Phase 1 is delivered; Phase 0 implementation is merged and stays open only on the red `just validate` clippy lane
 BLOCKERS: package implementation waits for the native result-slot and Core const-eval compiler checkpoint; `just validate` also fails repository-wide on pre-existing `clippy::result_large_err` owned by the source/token/diagnostic data-layout plan
-NEXT_ACTION: settle the red clippy lane with the roadmap owner and close Phase 0 on a green gate, decide the host-loading guard boundary, then start Phase 2 from main with `core-text.md` once the compiler checkpoint lands
+NEXT_ACTION: settle the red clippy lane with the roadmap owner and close Phase 0 on a green gate, then start Phase 2 from main with `core-text.md` once the compiler checkpoint lands
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -250,7 +250,7 @@ Phase 0 adds one focused validation owner to `just validate`. It must:
 - reuse the HTML JS parser scanner rather than a second lexer or repository-wide substring scan
 - reject unapproved JavaScript module-loading forms other than a named static import of a
   registered runtime module, within the lexical ECMAScript and `require` forms the scanner
-  classifies; host-driven script loading is a separate decision named in Phase 0 below
+  classifies; host-driven script loading is out of scope by decision, recorded in Phase 0 below
 - report invalid named imports or unsupported import forms from a registered runtime module as a
   distinct rule
 - use one explicit allowlist for Moth-owned runtime modules where imports are required
@@ -614,10 +614,18 @@ The guard classifies ECMAScript module loading lexically through the HTML JS sca
 dynamic `import`, `require` and re-export forms. Host-driven script loading of any shape is outside
 that classification, including classic-worker `importScripts`, `new Worker(url)`, an injected
 `script` element and specifiers reaching `eval` or `new Function` through a string or `fetch`
-response. Decide before Phase 2 starts whether to extend the scanner dispatch to the mechanically
-enforceable host forms or to narrow the validation ownership statement to lexical classification
-with host loading as a named manual audit boundary. Until then the guard's green result proves
-lexical module-loading cleanliness, not the absence of every host-driven third-party load.
+response.
+
+That boundary is now a decision, not an open question: the ownership statement in
+`validation.mtf > First-party dependency audit` names the lexical scope and the excluded host forms,
+and the scanner dispatch stays as it is. The guard enforces a promise about declared dependencies,
+so arbitrary runtime evaluation is not in its reach at any dispatch size, and teaching the scanner
+call-expression semantics would add a false-positive surface without closing the hole. The excluded
+forms are defended instead by compiler ownership: first-party JavaScript is either a physical asset
+under one of the four audited roots or an inventoried fragment in compiler sources, generated
+runtime glue is emitted from those owned sources, and both routes reach the repository through
+review. A green guard result therefore proves lexical module-loading cleanliness, and host-driven
+loading is a named manual review boundary.
 
 Phase 0's mandatory `just validate` gate currently fails on `clippy::result_large_err` across 102
 build-system, frontend and benchmark `Result` boundaries. The root cause is diagnostic and error

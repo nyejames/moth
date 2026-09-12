@@ -88,7 +88,8 @@ span-census:
     cargo run --quiet --package xtask --bin xtask -- span-census
 
 # Check first-party package implementation roots for manifests, vendored dependencies and
-# unapproved JavaScript module-loading forms, with invalid runtime imports as a distinct rule.
+# unapproved lexical JavaScript module-loading forms, with invalid runtime imports as a distinct
+# rule. Host-driven script loading is out of scope; see validation.mtf.
 first-party-deps:
     cargo run --quiet --package xtask --bin xtask -- first-party-deps
 

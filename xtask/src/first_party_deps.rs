@@ -18,6 +18,9 @@
 //! - User-owned or future dependency packages and their manifests.
 //! - Package declarations, aliases, resolution or package-graph design.
 //! - Generated HTML runtime glue, documentation, tests, benchmarks or repository-root manifests.
+//! - Host-driven script loading: `importScripts`, `new Worker(url)`, injected `script` elements and
+//!   specifiers reaching `eval`, `new Function` or a `fetch` response. Those are runtime behaviour
+//!   rather than a declared dependency, so the scoped roots and review defend them, not this scan.
 
 use crate::report_file::{ReportRunIdentity, write_report_atomically};
 use crate::source_tree::{WalkDecision, relative_display_path, walk_source_tree, workspace_root};
