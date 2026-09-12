@@ -158,29 +158,30 @@ fn rejects_an_unapproved_static_import() {
 
 #[test]
 fn rejects_require_dynamic_import_and_re_export_module_loading() {
-    let source = r#"
-const helper = require("./helper.js");
-const lazy = import("./helper.js");
-export * from "lodash";
-"#;
-    let findings = audit_javascript_source("fixture.js", source);
-
-    assert_eq!(
-        findings.len(),
-        3,
-        "require, dynamic import and star re-export are each module loading: {findings:?}"
-    );
-    for form in [
-        "CommonJS `require()`",
-        "Dynamic `import()`",
-        "Re-export forms",
+    for (source_label, source) in [
+        ("require.js", r#"const helper = require("./helper.js");"#),
+        (
+            "dynamic-import.js",
+            r#"const lazy = import("./helper.js");"#,
+        ),
+        ("re-export.js", r#"export * from "lodash";"#),
     ] {
-        assert!(
-            findings.iter().any(|finding| {
-                finding.rule == FirstPartyDepsRule::UnapprovedModuleImport
-                    && finding.message.contains(form)
-            }),
-            "{form} must reach the unapproved-module rule: {findings:?}"
+        let findings = audit_javascript_source(source_label, source);
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "{source_label} should produce one finding: {findings:?}"
+        );
+        let finding = &findings[0];
+        assert_eq!(
+            finding.rule,
+            FirstPartyDepsRule::UnapprovedModuleImport,
+            "{source_label} should reach the unapproved-module rule: {findings:?}"
+        );
+        assert_eq!(
+            finding.file, source_label,
+            "{source_label} should retain its source label: {findings:?}"
         );
     }
 }

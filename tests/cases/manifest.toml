@@ -9492,6 +9492,13 @@ contract = "language.dependencies.core_text_edge_cases_acceptance"
 role = "primary"
 
 [[case]]
+id = "core_text_helper_reachability"
+path = "core_text_helper_reachability"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_helper_reachability"
+role = "backend"
+
+[[case]]
 id = "prelude_name_declaration_rejected"
 path = "prelude_name_declaration_rejected"
 tags = ["integration", "language", "diagnostics"]
