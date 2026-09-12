@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["core_text len=3 empty=true has=true prefix=true suffix=true"]
+rendered_output_exact = "core_text len=3 empty=true has=true prefix=true suffix=true missing=false non_prefix=false non_suffix=false case_miss=false prefix_case_miss=false suffix_case_miss=false"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

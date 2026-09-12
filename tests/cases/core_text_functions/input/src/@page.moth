@@ -1,10 +1,20 @@
 @core/text length, is_empty, contains, starts_with, ends_with
 
 text = "mothball"
+
 len = length("abc")
 empty = is_empty("")
+
 has_ball = contains(text, "ball")
 has_prefix = starts_with(text, "moth")
 has_suffix = ends_with(text, "ball")
 
-io.line([:core_text len=[len] empty=[empty] has=[has_ball] prefix=[has_prefix] suffix=[has_suffix]])
+contains_missing = contains(text, "shell")
+starts_non_prefix = starts_with(text, "ball")
+ends_non_suffix = ends_with(text, "moth")
+
+contains_case_miss = contains(text, "Ball")
+starts_case_miss = starts_with(text, "Moth")
+ends_case_miss = ends_with(text, "Ball")
+
+io.line([:core_text len=[len] empty=[empty] has=[has_ball] prefix=[has_prefix] suffix=[has_suffix] missing=[contains_missing] non_prefix=[starts_non_prefix] non_suffix=[ends_non_suffix] case_miss=[contains_case_miss] prefix_case_miss=[starts_case_miss] suffix_case_miss=[ends_case_miss]])
