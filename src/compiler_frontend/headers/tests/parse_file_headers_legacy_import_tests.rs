@@ -216,6 +216,7 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
     let comment = "é".repeat(700);
     let source = format!("-- 🦋\nimport -- {comment}\n    @core/math {{ sin }}\n");
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut spans = ExtendedSpanBuilder::new();
     let options = HeaderParseOptions::default();
     let styles = StyleDirectiveRegistry::built_ins();
@@ -237,6 +238,7 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
         0,
         0,
         &mut spans,
+        &mut path_fork,
     ) {
         Ok(_) => panic!("legacy joined clause should be diagnosed"),
         Err(failure) => failure,

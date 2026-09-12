@@ -54,6 +54,7 @@ struct FrontendServices {
         Arc<crate::compiler_frontend::external_packages::ExternalPackageRegistry>,
     style_directives: StyleDirectiveRegistry,
     string_table: StringTable,
+    path_fork: PathInternerFork,
     project_path_resolver: Option<ProjectPathResolver>,
     source_files: Arc<SourceDatabase>,
 }
@@ -63,7 +64,7 @@ impl FrontendServices {
         let mut compiler = CompilerFrontend::new(
             self.options.clone(),
             std::mem::take(&mut self.string_table),
-            PathInternerFork::empty(),
+            std::mem::replace(&mut self.path_fork, PathInternerFork::empty()),
             &self.style_directives,
             &self.external_package_registry,
             self.project_path_resolver.as_ref(),
@@ -71,6 +72,7 @@ impl FrontendServices {
         );
         let result = run(&mut compiler);
         self.string_table = compiler.string_table;
+        self.path_fork = compiler.path_fork;
         result
     }
 }
@@ -131,9 +133,11 @@ impl FrontendProject {
             .expect("source file table should build"),
         );
 
+        let path_fork = source_files.fork_path_interner();
         let frontend = FrontendServices {
             options: Config::new(canonical_project_root).frontend_options(),
             string_table,
+            path_fork,
             style_directives,
             external_package_registry: Arc::new(
                 crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
@@ -191,7 +195,7 @@ impl FrontendProject {
         let mut const_template_offset = 0usize;
         let mut runtime_fragment_offset = 0usize;
         for (file_tokens, mut span_builder) in tokenized_files {
-            let output = prepare_file_from_tokens(file_tokens, &self.entry_file, &options, &mut self.frontend.string_table, const_template_offset, runtime_fragment_offset, &mut span_builder, &mut PathInternerFork::empty())
+            let output = prepare_file_from_tokens(file_tokens, &self.entry_file, &options, &mut self.frontend.string_table, const_template_offset, runtime_fragment_offset, &mut span_builder, &mut self.frontend.path_fork)
             .expect("header parsing should succeed");
 
             const_template_offset += output.const_template_count;
@@ -199,9 +203,9 @@ impl FrontendProject {
             prepared_outputs.push(output);
         }
 
-        let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut self.frontend.string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
+        let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut self.frontend.string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut self.frontend.path_fork)
         .expect("header syntax preparation should succeed");
-        bind_module_headers(prepared_syntax, self.frontend.external_package_registry.as_ref(), &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), options.project_path_resolver, self.frontend.source_files.as_ref(), &mut self.frontend.string_table, &mut PathInternerFork::empty())
+        bind_module_headers(prepared_syntax, self.frontend.external_package_registry.as_ref(), &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), options.project_path_resolver, self.frontend.source_files.as_ref(), &mut self.frontend.string_table, &mut self.frontend.path_fork)
         .expect("header binding should succeed")
     }
 

@@ -82,9 +82,11 @@ fn register_choice(
     env: &mut TypeEnvironment,
     string_table: &mut StringTable,
     name: &str,
+    path_fork: &mut PathInternerFork,
 ) -> (NominalTypeId, TypeId) {
-    let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
     env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
         path,
@@ -97,9 +99,10 @@ fn function_root(
     name: &str,
     signature: FunctionSignature,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ResolvedPublicTypeRoot {
     ResolvedPublicTypeRoot {
-        path: path(name, string_table),
+        path: path(name, string_table, path_fork),
         kind: ResolvedPublicTypeRootKind::Function {
             signature,
             generic_parameter_list_id: None,
@@ -111,9 +114,10 @@ fn choice_root(
     name: &str,
     type_id: TypeId,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ResolvedPublicTypeRoot {
     ResolvedPublicTypeRoot {
-        path: path(name, string_table),
+        path: path(name, string_table, path_fork),
         kind: ResolvedPublicTypeRootKind::Choice { type_id },
     }
 }
@@ -122,9 +126,10 @@ fn alias_root(
     name: &str,
     target_type_id: TypeId,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ResolvedPublicTypeRoot {
     ResolvedPublicTypeRoot {
-        path: path(name, string_table),
+        path: path(name, string_table, path_fork),
         kind: ResolvedPublicTypeRootKind::TransparentAlias { target_type_id },
     }
 }
@@ -133,9 +138,10 @@ fn constant_root(
     name: &str,
     type_id: TypeId,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ResolvedPublicTypeRoot {
     ResolvedPublicTypeRoot {
-        path: path(name, string_table),
+        path: path(name, string_table, path_fork),
         kind: ResolvedPublicTypeRootKind::Constant { type_id },
     }
 }
@@ -152,11 +158,12 @@ fn field_declaration_with_default(
     type_id: TypeId,
     default: Expression,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Declaration {
     let mut value = default;
     value.type_id = type_id;
     Declaration {
-        id: path(name, string_table),
+        id: path(name, string_table, path_fork),
         value,
         binding_span: None,
         config_qualifier: None,
@@ -167,9 +174,10 @@ fn field_declaration_no_default(
     name: &str,
     type_id: TypeId,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Declaration {
     Declaration {
-        id: path(name, string_table),
+        id: path(name, string_table, path_fork),
         value: Expression::no_value_with_type_id(
             None,
             DataType::Inferred,
@@ -181,9 +189,14 @@ fn field_declaration_no_default(
     }
 }
 
-fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> FieldDefinition {
+fn field_def(
+    name: &str,
+    type_id: TypeId,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> FieldDefinition {
     FieldDefinition {
-        name: path(name, string_table),
+        name: path(name, string_table, path_fork),
         type_id,
         span: None,
     }
@@ -197,15 +210,15 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
 
     // Register a struct and a choice so the type-surface projection can resolve them.
     let (_, struct_type_id) =
-        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None);
-    let (_, choice_type_id) = register_choice(&mut env, &mut string_table, "Status");
+        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None, &mut path_fork);
+    let (_, choice_type_id) = register_choice(&mut env, &mut string_table, "Status", &mut path_fork);
 
     // Build roots for every non-trait category.
-    let function_root = function_root("render", empty_signature(), &mut string_table);
-    let struct_root = struct_root("Counter", struct_type_id, vec![], &mut string_table);
-    let choice_root = choice_root("Status", choice_type_id, &mut string_table);
-    let alias_root = alias_root("IntAlias", int_id, &mut string_table);
-    let constant_root = constant_root("MaxSize", int_id, &mut string_table);
+    let function_root = function_root("render", empty_signature(), &mut string_table, &mut path_fork);
+    let struct_root = struct_root("Counter", struct_type_id, vec![], &mut string_table, &mut path_fork);
+    let choice_root = choice_root("Status", choice_type_id, &mut string_table, &mut path_fork);
+    let alias_root = alias_root("IntAlias", int_id, &mut string_table, &mut path_fork);
+    let constant_root = constant_root("MaxSize", int_id, &mut string_table, &mut path_fork);
 
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![
@@ -221,7 +234,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
 
     // Build the trait root.
     let this_id = this_type(&mut env, &mut string_table);
-    let trait_root = trait_root("Shape", this_id, vec![], &mut string_table);
+    let trait_root = trait_root("Shape", this_id, vec![], &mut string_table, &mut path_fork);
 
     // Build export bindings for all six categories, in deterministic sorted order by name.
     let bindings = vec![
@@ -253,15 +266,13 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         trait_binding("Shape"),
     ];
 
-    let nominal_origins = nominal_origins_map(
-        vec![
-            ("Counter", struct_origin("Counter")),
-            ("Status", choice_origin("Status")),
-        ],
-        &mut string_table,
-    );
+    let nominal_origins = nominal_origins_map(vec![
+        ("Counter", struct_origin("Counter")),
+        ("Status", choice_origin("Status")),
+    ],
+    &mut string_table, &mut path_fork);
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
     let export_seed = DirectExportSeed::new(module_origin(), bindings, nominal_origins.clone());
 
@@ -377,10 +388,10 @@ fn builder_attaches_receiver_methods_to_struct_record() {
     let mut env = TypeEnvironment::new();
 
     let (_, struct_type_id) =
-        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None);
+        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None, &mut path_fork);
 
-    let receiver_path = path("Counter", &mut string_table);
-    let method_fn_path = path("render", &mut string_table);
+    let receiver_path = path("Counter", &mut string_table, &mut path_fork);
+    let method_fn_path = path("render", &mut string_table, &mut path_fork);
     let signature = FunctionSignature {
         parameters: vec![],
         returns: vec![],
@@ -391,7 +402,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         signature,
     );
 
-    let root = struct_root("Counter", struct_type_id, vec![], &mut string_table);
+    let root = struct_root("Counter", struct_type_id, vec![], &mut string_table, &mut path_fork);
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![root],
         receiver_methods: vec![entry.clone()],
@@ -410,10 +421,8 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         struct_origin("Counter"),
     );
 
-    let nominal_origins = nominal_origins_map(
-        vec![("Counter", struct_origin("Counter"))],
-        &mut string_table,
-    );
+    let nominal_origins = nominal_origins_map(vec![("Counter", struct_origin("Counter"))],
+    &mut string_table, &mut path_fork);
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -471,18 +480,16 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
 
     // Register a generic struct Box<A> whose generic parameter list matches the method
     // template below.
-    let (_, struct_type_id) = register_struct(
-        &mut env,
-        &mut string_table,
-        "Box",
-        empty_fields(),
-        Some(list_id),
-    );
+    let (_, struct_type_id) = register_struct(&mut env,
+    &mut string_table,
+    "Box",
+    empty_fields(),
+    Some(list_id), &mut path_fork);
 
-    let receiver_path = path("Box", &mut string_table);
-    let method_fn_path = path("render", &mut string_table);
+    let receiver_path = path("Box", &mut string_table, &mut path_fork);
+    let method_fn_path = path("render", &mut string_table, &mut path_fork);
     let receiver = Declaration {
-        id: path("this", &mut string_table),
+        id: path("this", &mut string_table, &mut path_fork),
         value: Expression::no_value_with_type_id(
             None,
             DataType::Inferred,
@@ -509,6 +516,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
             struct_type_id,
             vec![],
             &mut string_table,
+            &mut path_fork,
         )],
         receiver_methods: vec![entry.clone()],
         trait_source_facts: FxHashMap::default(),
@@ -522,7 +530,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     let method_origin =
         OriginFunctionId::new_receiver(module_origin(), "render".to_owned(), struct_origin("Box"));
     let nominal_origins =
-        nominal_origins_map(vec![("Box", struct_origin("Box"))], &mut string_table);
+        nominal_origins_map(vec![("Box", struct_origin("Box"))], &mut string_table, &mut path_fork);
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -720,14 +728,21 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
                 default_member.clone(),
             )),
             &mut string_table,
+            &mut path_fork,
         ),
         field_declaration_with_default(
             "count",
             int_id,
             Expression::int(42, None, ValueMode::ImmutableOwned),
             &mut string_table,
+            &mut path_fork,
         ),
-        field_declaration_no_default("subject", string_id, &mut string_table),
+        field_declaration_no_default(
+            "subject",
+            string_id,
+            &mut string_table,
+            &mut path_fork,
+        ),
     ];
 
     let signature = FunctionSignature {
@@ -735,7 +750,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         returns: vec![],
     };
 
-    let root = function_root("render", signature, &mut string_table);
+    let root = function_root("render", signature, &mut string_table, &mut path_fork);
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![root],
         receiver_methods: vec![],
@@ -813,13 +828,13 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
     let string_id = env.builtins().string;
 
     let field_defs = Box::new([
-        field_def("x", int_id, &mut string_table),
-        field_def("flag", bool_id, &mut string_table),
-        field_def("label", string_id, &mut string_table),
+        field_def("x", int_id, &mut string_table, &mut path_fork),
+        field_def("flag", bool_id, &mut string_table, &mut path_fork),
+        field_def("label", string_id, &mut string_table, &mut path_fork),
     ]);
 
     let (_, struct_type_id) =
-        register_struct(&mut env, &mut string_table, "Point", field_defs, None);
+        register_struct(&mut env, &mut string_table, "Point", field_defs, None, &mut path_fork);
 
     let fields = vec![
         field_declaration_with_default(
@@ -827,17 +842,24 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
             int_id,
             Expression::int(10, None, ValueMode::ImmutableOwned),
             &mut string_table,
+            &mut path_fork,
         ),
         field_declaration_with_default(
             "flag",
             bool_id,
             Expression::bool(true, None, ValueMode::ImmutableOwned),
             &mut string_table,
+            &mut path_fork,
         ),
-        field_declaration_no_default("label", string_id, &mut string_table),
+        field_declaration_no_default(
+            "label",
+            string_id,
+            &mut string_table,
+            &mut path_fork,
+        ),
     ];
 
-    let root = struct_root("Point", struct_type_id, fields, &mut string_table);
+    let root = struct_root("Point", struct_type_id, fields, &mut string_table, &mut path_fork);
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![root],
         receiver_methods: vec![],
@@ -851,7 +873,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
     );
 
     let nominal_origins =
-        nominal_origins_map(vec![("Point", struct_origin("Point"))], &mut string_table);
+        nominal_origins_map(vec![("Point", struct_origin("Point"))], &mut string_table, &mut path_fork);
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -914,7 +936,7 @@ fn choice_payload_fields_remain_default_free() {
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Record {
             fields: Box::new([FieldDefinition {
-                name: path("value", &mut string_table),
+                name: path("value", &mut string_table, &mut path_fork),
                 type_id: int_id,
                 span: None,
             }]),
@@ -922,7 +944,7 @@ fn choice_payload_fields_remain_default_free() {
         span: None,
     };
 
-    let choice_path = path("Option", &mut string_table);
+    let choice_path = path("Option", &mut string_table, &mut path_fork);
     env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
         path: choice_path,
@@ -934,7 +956,7 @@ fn choice_payload_fields_remain_default_free() {
         .type_id_for_nominal_id(NominalTypeId(0))
         .expect("choice must have a TypeId");
 
-    let root = choice_root("Option", choice_type_id, &mut string_table);
+    let root = choice_root("Option", choice_type_id, &mut string_table, &mut path_fork);
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![root],
         receiver_methods: vec![],
@@ -948,7 +970,7 @@ fn choice_payload_fields_remain_default_free() {
     );
 
     let nominal_origins =
-        nominal_origins_map(vec![("Option", choice_origin("Option"))], &mut string_table);
+        nominal_origins_map(vec![("Option", choice_origin("Option"))], &mut string_table, &mut path_fork);
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -995,16 +1017,21 @@ fn receiver_method_retains_folded_parameter_defaults() {
     let string_id = env.builtins().string;
 
     let (_, struct_type_id) =
-        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None);
+        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None, &mut path_fork);
 
-    let receiver_path = path("Counter", &mut string_table);
-    let method_fn_path = path("render", &mut string_table);
+    let receiver_path = path("Counter", &mut string_table, &mut path_fork);
+    let method_fn_path = path("render", &mut string_table, &mut path_fork);
 
     // The first parameter is the `this` receiver: it carries the struct TypeId and has no
     // default. The second parameter is an ordinary parameter with a folded default.
     let signature = FunctionSignature {
         parameters: vec![
-            field_declaration_no_default("this", struct_type_id, &mut string_table),
+            field_declaration_no_default(
+                "this",
+                struct_type_id,
+                &mut string_table,
+                &mut path_fork,
+            ),
             field_declaration_with_default(
                 "label",
                 string_id,
@@ -1014,6 +1041,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
                     ValueMode::ImmutableOwned,
                 ),
                 &mut string_table,
+                &mut path_fork,
             ),
         ],
         returns: vec![],
@@ -1025,7 +1053,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
         signature,
     );
 
-    let root = struct_root("Counter", struct_type_id, vec![], &mut string_table);
+    let root = struct_root("Counter", struct_type_id, vec![], &mut string_table, &mut path_fork);
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![root],
         receiver_methods: vec![entry.clone()],
@@ -1038,10 +1066,8 @@ fn receiver_method_retains_folded_parameter_defaults() {
         OriginDeclarationId::Type(struct_origin("Counter")),
     );
 
-    let nominal_origins = nominal_origins_map(
-        vec![("Counter", struct_origin("Counter"))],
-        &mut string_table,
-    );
+    let nominal_origins = nominal_origins_map(vec![("Counter", struct_origin("Counter"))],
+    &mut string_table, &mut path_fork);
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());

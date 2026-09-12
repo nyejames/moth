@@ -202,13 +202,12 @@ pub(crate) fn function_node_by_name<'a>(
     string_table: &StringTable,
     name: &str,
 ) -> &'a AstNode {
-    let mut scratch = Vec::new();
     ast.nodes
         .iter()
         .find(|node| match &node.kind {
-            NodeKind::Function(path, ..) => {
-                path_fork.render_portable(*path, string_table, &mut scratch) == name
-            }
+            NodeKind::Function(path, ..) => path_fork
+                .component(*path)
+                .is_some_and(|component| string_table.resolve(component) == name),
             _ => false,
         })
         .unwrap_or_else(|| panic!("expected function '{name}' in AST"))

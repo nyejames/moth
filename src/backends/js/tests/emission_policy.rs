@@ -22,7 +22,7 @@ fn all_functions_is_default_for_direct_js_lowering() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let module = module_with_unreachable_function(&mut string_table, types.unit);
+    let module = module_with_unreachable_function(&mut path_fork, &mut string_table, types.unit);
 
     let output = lower_hir_to_js(&module,
     &BorrowCheckReport::default(),
@@ -48,7 +48,7 @@ fn selected_functions_skip_unselected_functions_and_external_references() {
     let (type_environment, types) = build_type_environment();
     let external_function = ExternalFunctionId::Synthetic(77);
     let module =
-        module_with_unreachable_external_call(&mut string_table, types.unit, external_function);
+        module_with_unreachable_external_call(&mut path_fork, &mut string_table, types.unit, external_function);
 
     let mut config = default_config();
     let facts = collect_module_function_link_facts(&module)
@@ -103,11 +103,11 @@ fn selected_functions_skip_unselected_functions_and_external_references() {
 }
 
 fn module_with_unreachable_function(
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     unit_type: crate::compiler_frontend::datatypes::ids::TypeId,
 ) -> crate::compiler_frontend::hir::module::HirModule {
-    let mut path_fork = PathInternerFork::empty();
-    let mut module = build_module(&mut path_fork, string_table,
+    let mut module = build_module(path_fork, string_table,
     "start_main",
     vec![return_block(0, unit_type)],
     function(0, 0, unit_type),
@@ -129,11 +129,12 @@ fn module_with_unreachable_function(
 }
 
 fn module_with_unreachable_external_call(
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     unit_type: crate::compiler_frontend::datatypes::ids::TypeId,
     external_function: ExternalFunctionId,
 ) -> crate::compiler_frontend::hir::module::HirModule {
-    let mut module = module_with_unreachable_function(string_table, unit_type);
+    let mut module = module_with_unreachable_function(path_fork, string_table, unit_type);
     module.blocks[1] = external_call_block(1, unit_type, external_function);
     module
 }

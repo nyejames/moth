@@ -118,12 +118,16 @@ impl TestHarness {
     }
 }
 
-fn rendered_error_msg(error: &DependencyPathResolutionError, string_table: &StringTable) -> String {
+fn rendered_error_msg(
+    error: &DependencyPathResolutionError,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> String {
     match error {
         DependencyPathResolutionError::Diagnostic(diagnostic) => {
             format_terse_diagnostic_with_context(
                 diagnostic,
-                DiagnosticRenderContext::new(string_table),
+                DiagnosticRenderContext::new(string_table).with_path_fork(path_fork),
             )
         }
         DependencyPathResolutionError::Infrastructure(error) => error.msg.clone(),
@@ -699,7 +703,7 @@ fn dependency_dotdot_rejected() {
     let declaring_source = entry_root.join("index.moth");
     let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
         .expect_err("'..' in dependencies should be rejected");
-    let rendered_msg = rendered_error_msg(&err, &string_table);
+    let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
 
     assert!(
         rendered_msg.contains("'..' are not supported"),
@@ -783,7 +787,7 @@ fn dependency_escape_project_root_rejected() {
             ..
         }
     ));
-    let rendered_msg = rendered_error_msg(&err, &string_table);
+    let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
 
     assert!(
         rendered_msg.contains("'..' are not supported"),
@@ -836,7 +840,7 @@ fn dependency_escape_package_root_rejected() {
             ..
         }
     ));
-    let rendered_msg = rendered_error_msg(&err, &string_table);
+    let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
 
     assert!(
         rendered_msg.contains("'..' are not supported"),
@@ -970,7 +974,7 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
                 ..
             }
         ));
-        let rendered_msg = rendered_error_msg(&err, &string_table);
+        let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
         assert!(
             rendered_msg.contains("case mismatch"),
             "expected case mismatch error, got: {}",

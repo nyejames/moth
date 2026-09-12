@@ -439,7 +439,7 @@ fn finalize_known_sources(
     entry_file_path: &Path,
     path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
-    mut path_fork: &mut PathInternerFork,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FinalizedTemplateSources, CompilerMessages> {
     let DiscoveredTemplateSources {
         candidates,
@@ -451,14 +451,17 @@ fn finalize_known_sources(
             .iter()
             .map(|(path, kind)| (path.as_path(), SourceKind::Compiler(*kind))),
     );
-    let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
-        &registration_index,
-        entry_file_path,
-        Some(path_resolver),
-        string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let source_files =
+        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
+            &registration_index,
+            entry_file_path,
+            Some(path_resolver),
+            string_table,
+            path_fork.clone_path_builder(),
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let mut source_builder = SourceDatabaseBuilder::new(source_files);
+
     let mut transfer_error = None;
 
     // Move every known snapshot into final ownership before touching any prepared output. A
@@ -554,6 +557,29 @@ fn finalize_known_sources(
         let messages = CompilerMessages::from_error_ref(error, string_table);
         return Err(finish_source_owner(messages, source_builder, string_table));
     }
+
+    // Registration may append logical paths for candidates queued before an aborted discovery
+    // walk reaches them. Reseed those source paths into the original fork in final source-slot
+    // order, and reject any unexpected identity remap before rebinding retained outputs.
+    let reseed_error = {
+        let source_files = source_builder.sources();
+        source_files.iter().find_map(|source| {
+            let expected_path = source.logical_path;
+            match source_files.logical_path_in_fork(source.id, path_fork) {
+                Ok(path) if path == expected_path => None,
+                Ok(_) => Some(CompilerError::compiler_error(
+                    "final source registration changed an existing logical PathId",
+                )),
+                Err(error) => Some(error),
+            }
+        })
+    };
+
+    if let Some(error) = reseed_error {
+        let messages = CompilerMessages::from_error_ref(error, string_table);
+        return Err(finish_source_owner(messages, source_builder, string_table));
+    }
+
     let rebound: Result<_, CompilerError> = (|| {
         let mut prepared_entry = None;
         let mut prepared_content_sources = Vec::new();
@@ -571,9 +597,9 @@ fn finalize_known_sources(
                     .source_logical_path(source_id)
                     .expect("transferred source must retain logical path"),
                 path,
-                &mut path_fork,
+                path_fork,
             )?;
-            prepared.freeze_path_syntax(string_table, &mut path_fork)?;
+            prepared.freeze_path_syntax(string_table, path_fork)?;
             if is_entry {
                 prepared_entry = Some(prepared);
             } else {
@@ -582,6 +608,9 @@ fn finalize_known_sources(
         }
         Ok((prepared_entry, prepared_content_sources))
     })();
+    source_builder
+        .sources_mut()
+        .adopt_path_builder(path_fork.clone_path_builder());
     match rebound {
         Ok((prepared_entry, prepared_content_sources)) => Ok(FinalizedTemplateSources {
             source_builder,

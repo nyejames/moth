@@ -8,11 +8,12 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 fn markdown_formatter_output_text_uses_authored_tir_spans() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
-        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder);
-    let context = new_constant_context(token_stream.src_path.to_owned());
+        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("markdown template should parse");
     let spans = collect_formatted_body_text_spans_from_tir(&template, &context);
 
@@ -111,11 +112,12 @@ fn collect_text_nodes(
 fn markdown_formatter_produces_formatted_tir_output() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
-        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder);
-    let context = new_constant_context(token_stream.src_path.to_owned());
+        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("markdown template should parse");
 
     let formatted_body = collect_formatted_body_text_from_tir(&template, &context, &string_table);

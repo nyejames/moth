@@ -18,7 +18,7 @@ pub(crate) fn resolve_structural_provider_reference(
     clause_kind: DependencyClauseKind,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
-    path_fork: &PathInternerFork,
+    path_fork: &mut PathInternerFork,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     string_table: &mut StringTable,
@@ -74,7 +74,7 @@ struct ProviderCapableDependencyInput<'a> {
     target: &'a DependencyTargetKind,
     canonical_file: &'a Path,
     project_path_resolver: &'a ProjectPathResolver,
-    path_fork: &'a PathInternerFork,
+    path_fork: &'a mut PathInternerFork,
     directory_dependency_resolution: Option<DirectoryDependencyResolution<'a>>,
     string_table: &'a mut StringTable,
 }
@@ -395,7 +395,7 @@ fn walk_reachable_sources(
                 target: &provider.target,
                 canonical_file: &canonical_file,
                 project_path_resolver,
-                path_fork,
+                path_fork: &mut *path_fork,
                 directory_dependency_resolution: None,
                 string_table,
             })?;
@@ -686,12 +686,18 @@ fn handle_provider_capable_dependency(
         directory_dependency_resolution,
         string_table,
     } = input;
+
+    // Rebind the directory resolution onto this caller-owned discovery fork so every namespace
+    // lookup and provider target resolution sees PathIds from the same domain the provider will
+    // intern diagnostic paths into.
+    let resolution = directory_dependency_resolution.map(|r| r.with_path_fork(&*path_fork));
+
     // `@project` is a reserved synthetic provider, not a source/package path. Keep the exact
     // root out of filesystem discovery and external-package registration only for the owning
     // project boundary; source packages must receive the structured reserved-path diagnostic.
     if is_project_globals_namespace(dependency_path, path_fork, string_table) {
-        let is_owning_project_root = directory_dependency_resolution
-            .is_none_or(|resolution| resolution.is_project_boundary());
+        let is_owning_project_root =
+            resolution.as_ref().is_none_or(|resolution| resolution.is_project_boundary());
         if is_project_globals_dependency(dependency_path, path_fork, string_table)
             && is_owning_project_root
         {
@@ -710,9 +716,12 @@ fn handle_provider_capable_dependency(
         .external_packages
         .is_virtual_package_dependency(dependency_path, path_fork, string_table)
     {
-        if directory_dependency_resolution.is_some_and(|resolution| {
-            resolution.has_binding_package_dependency(dependency_path, string_table)
-        }) {
+        if resolution
+            .as_ref()
+            .is_some_and(|resolution| {
+                resolution.has_binding_package_dependency(dependency_path, string_table)
+            })
+        {
             return Ok(DependencyPolicyAction::QueueLocal);
         }
         // Extensionless binding-package clauses bind through the external package registry.
@@ -732,31 +741,43 @@ fn handle_provider_capable_dependency(
 
     // Consume the retained provider classification. Header syntax already identified the
     // first explicit non-source extension, so Stage 0 must not rescan path components.
-    if let Some(decoded) = decode_dependency_target(dependency_path, target, path_fork, string_table)
-        .map_err(SourceDiscoveryError::from)?
+    if let Some(decoded) =
+        decode_dependency_target(dependency_path, target, path_fork, string_table)
+            .map_err(SourceDiscoveryError::from)?
     {
         let prefix_path = decoded.prefix_path_id();
         let prefix_str = path_fork.render_portable(prefix_path, string_table, &mut Vec::new());
         let extension = decoded.extension_spelling().to_owned();
         if let Some(provider) = external_imports.providers.find_by_extension(&extension) {
-            let result = resolve_provider_backed_import(
-                ProviderBackedImportRequest {
-                    consumer_canonical_path: canonical_file,
-                    import_path: dependency_path,
-                    source_span: dependency_span,
-                    prefix_path,
-                    raw_prefix: &prefix_str,
-                    provider,
-                    project_path_resolver,
-                    path_fork,
-                    directory_dependency_resolution,
-                },
-                external_imports,
-                string_table,
-            );
-            if let Err(error) = result {
-                return Err(with_provider_dependency_error(error, dependency_span));
-            }
+            // Directory projects resolve provider-owned targets through the same boundary-aware
+            // namespace as compiler-semantic dependencies; the scoped immutable reborrow finishes
+            // before the mutable fork is moved into the provider request.
+            let directory_target = resolution
+                .map(|resolution| {
+                    resolution
+                        .resolve_provider_target(
+                            prefix_path,
+                            canonical_file,
+                            dependency_span,
+                            string_table,
+                        )
+                        .map_err(SourceDiscoveryError::from)
+                })
+                .transpose()?;
+            let request = ProviderBackedImportRequest {
+                consumer_canonical_path: canonical_file,
+                import_path: dependency_path,
+                source_span: dependency_span,
+                prefix_path,
+                raw_prefix: &prefix_str,
+                provider,
+                project_path_resolver,
+                path_fork,
+            };
+            // The single-file traversal has no directory namespace; target resolution falls
+            // through to the filesystem lane inside `resolve_provider_backed_import`.
+            resolve_provider_backed_import(request, directory_target, external_imports, string_table)
+                .map_err(|error| with_provider_dependency_error(error, dependency_span))?;
             counter_observation!("stage0.reachable_discovery.provider_imports", 1.0);
             // Explicit-extension registered-provider clauses bind through the provider registry.
             add_frontend_counter(FrontendCounter::ResolvedProviderClauseCount, 1);

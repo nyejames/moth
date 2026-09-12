@@ -84,7 +84,7 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceSpan, SpanCapacityError,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -208,6 +208,31 @@ impl CompilerMessages {
             render_type_contexts: Vec::new(),
             render_path_contexts: None,
         }
+    }
+
+    /// Retain the path table that issued diagnostics before the local compiler owner is dropped.
+    ///
+    /// The snapshot is range-bound to the diagnostics it serves. Empty diagnostic streams carry
+    /// only infrastructure failures and intentionally keep no path context.
+    pub(crate) fn attach_path_table_if_missing(&mut self, path_table: Arc<PathTable>) {
+        if self.diagnostics.is_empty()
+            || self
+                .render_path_contexts
+                .as_ref()
+                .is_some_and(|contexts| !contexts.is_empty())
+            || (0..path_table.len()).any(|index| {
+                PathId::try_from_index(index)
+                    .and_then(|path| path_table.try_component(path))
+                    .is_some_and(|component| self.string_table.try_resolve(component).is_none())
+            })
+        {
+            return;
+        }
+
+        self.render_path_contexts = Some(Box::new(vec![RenderPathContext {
+            diagnostic_range: 0..self.diagnostics.len(),
+            path_table,
+        }]));
     }
 
     /// Whether this boundary carries the legacy outer infrastructure failure.
@@ -791,11 +816,11 @@ impl CompilerMessages {
             &remap,
             &render_frozen_contexts,
         );
-        if let Some(path_contexts) = render_path_contexts.as_mut() {
-            for path_context in path_contexts.iter_mut() {
-                Arc::make_mut(&mut path_context.path_table).remap_string_ids(&remap);
-            }
-        }
+        remap_path_contexts_preserving_frozen_context(
+            render_path_contexts.as_mut(),
+            &remap,
+            &render_frozen_contexts,
+        );
 
         let shift = self.diagnostics.len();
         self.diagnostics.append(&mut diagnostics);
@@ -835,7 +860,8 @@ impl CompilerMessages {
     ///
     /// Facts covered by a [`RenderFrozenContext`] already belong to that row's immutable identity
     /// owner. They must remain byte-for-byte in the owner's ID domain while any premerge
-    /// diagnostic or type-context facts continue through the supplied mutable-table remap.
+    /// diagnostic, type-context, or path-context facts continue through the supplied
+    /// mutable-table remap.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         remap_diagnostics_preserving_frozen_context(
             &mut self.diagnostics,
@@ -847,11 +873,11 @@ impl CompilerMessages {
             remap,
             &self.render_frozen_contexts,
         );
-        if let Some(path_contexts) = self.render_path_contexts.as_mut() {
-            for path_context in path_contexts.iter_mut() {
-                Arc::make_mut(&mut path_context.path_table).remap_string_ids(remap);
-            }
-        }
+        remap_path_contexts_preserving_frozen_context(
+            self.render_path_contexts.as_mut(),
+            remap,
+            &self.render_frozen_contexts,
+        );
     }
 
     /// Remap complete logical paths for diagnostics and renderer-owned type contexts.
@@ -1113,6 +1139,57 @@ fn remap_type_contexts_preserving_frozen_context(
         }
     }
     *type_contexts = remapped;
+}
+
+/// Split path-context ranges at frozen-owner boundaries before rewriting component IDs.
+///
+/// Mirrors [`remap_type_contexts_preserving_frozen_context`]: facts covered by a
+/// [`RenderFrozenContext`] belong to that owner's immutable string domain, so their path tables
+/// must keep the original component IDs while any premerge path table continues through the
+/// supplied mutable-table remap.
+fn remap_path_contexts_preserving_frozen_context(
+    path_contexts: Option<&mut Box<Vec<RenderPathContext>>>,
+    remap: &StringIdRemap,
+    frozen_contexts: &[RenderFrozenContext],
+) {
+    if remap.is_identity() {
+        return;
+    }
+    let Some(path_contexts) = path_contexts else {
+        return;
+    };
+
+    let incoming = std::mem::take(&mut **path_contexts);
+    let mut remapped = Vec::with_capacity(incoming.len());
+    for context in incoming {
+        let segments = type_context_segments(&context.diagnostic_range, frozen_contexts);
+        let segment_count = segments.len();
+        let mut path_table = Some(context.path_table);
+
+        for (segment_index, (diagnostic_range, is_frozen)) in segments.into_iter().enumerate() {
+            // Keep one owned table for the final segment and clone only when a mixed range must
+            // expose both owner domains. Homogeneous premerge/frozen rows stay move-only.
+            let mut path_table = if segment_index + 1 == segment_count {
+                path_table
+                    .take()
+                    .expect("path-context table must have one owner")
+            } else {
+                Arc::clone(
+                    path_table
+                        .as_ref()
+                        .expect("path-context table must have one owner"),
+                )
+            };
+            if !is_frozen {
+                Arc::make_mut(&mut path_table).remap_string_ids(remap);
+            }
+            remapped.push(RenderPathContext {
+                diagnostic_range,
+                path_table,
+            });
+        }
+    }
+    **path_contexts = remapped;
 }
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]

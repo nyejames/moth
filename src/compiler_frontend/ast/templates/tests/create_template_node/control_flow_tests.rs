@@ -6,16 +6,15 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if maybe_name is |name|:
-            [name]
-        [else]
-            [name]
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let mut context = runtime_template_context(&token_stream.src_path.clone(), &mut string_table);
+    let mut token_stream = template_tokens_from_source("[if maybe_name is |name|:
+        [name]
+    [else]
+        [name]
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let mut context =
+        runtime_template_context(&token_stream.src_path.clone(), &mut string_table, &mut path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let maybe_name_type_id = type_environment.intern_option(type_environment.builtins().string);
@@ -161,18 +160,17 @@ fn template_else_if_option_capture_binding_is_branch_local() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if false:
-            hidden
-        [else if maybe_name is |name|]
-            [name]
-        [else]
-            [name]
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let mut context = runtime_template_context(&token_stream.src_path.clone(), &mut string_table);
+    let mut token_stream = template_tokens_from_source("[if false:
+        hidden
+    [else if maybe_name is |name|]
+        [name]
+    [else]
+        [name]
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let mut context =
+        runtime_template_context(&token_stream.src_path.clone(), &mut string_table, &mut path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let maybe_name_type_id = type_environment.intern_option(type_environment.builtins().string);
@@ -611,12 +609,10 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
     let wrapper_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut card_tokens = template_tokens_from_source(
-        "[: <card>[$slot]</card>]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let card_context = new_constant_context(card_tokens.src_path.to_owned());
+    let mut card_tokens = template_tokens_from_source("[: <card>[$slot]</card>]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let card_context = new_constant_context(card_tokens.src_path.to_owned(), &path_fork);
     let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
 
@@ -630,16 +626,14 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source(
-        "[card, if true:
-            Visible
-        [else]
-            Hidden
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let context = constant_template_context(&token_stream.src_path, &declarations)
+    let mut token_stream = template_tokens_from_source("[card, if true:
+        Visible
+    [else]
+        Hidden
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
 
     let mut type_environment = TypeEnvironment::new();

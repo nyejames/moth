@@ -28,7 +28,6 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn if_branch_local_alias_does_not_escape_merge() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
@@ -93,7 +92,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("branch-local alias should not be visible after merge"); }
 
 #[test]
@@ -160,7 +159,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("match-arm local alias should not be visible after merge"); }
 
 #[test]
@@ -215,7 +214,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("while-body local alias should not be visible in exit block"); }
 
 #[test]
@@ -337,6 +336,6 @@ hir.side_table.map_value(
     synthetic_statement.span,
 );
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("dead local access should fail");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal); }

@@ -17,8 +17,11 @@ use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 
-fn page_path(name: &str, string_table: &mut StringTable) -> PathId {
-    let mut path_fork = PathInternerFork::empty();
+fn page_path(
+    name: &str,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> PathId {
     let scope = path_fork
         .try_intern_portable_path("@page.moth", string_table)
         .expect("test path fits");
@@ -27,8 +30,13 @@ fn page_path(name: &str, string_table: &mut StringTable) -> PathId {
         .expect("test path fits")
 }
 
-fn nominal_type_id(ast: &Ast, string_table: &mut StringTable, name: &str) -> TypeId {
-    let path = page_path(name, string_table);
+fn nominal_type_id(
+    ast: &Ast,
+    string_table: &mut StringTable,
+    name: &str,
+    path_fork: &mut PathInternerFork,
+) -> TypeId {
+    let path = page_path(name, string_table, path_fork);
     ast.type_environment
         .nominal_id_for_path(&path)
         .and_then(|nominal_id| ast.type_environment.type_id_for_nominal_id(nominal_id))
@@ -58,8 +66,8 @@ Task = |
     id TaskId,
 |
 "#;
-    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
-    let task_type_id = nominal_type_id(&ast, &mut string_table, "Task");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let task_type_id = nominal_type_id(&ast, &mut string_table, "Task", &mut path_fork);
     assert_eq!(
         field_type_id(&ast, task_type_id, "id", &mut string_table, &path_fork),
         ast.type_environment.builtins().int
@@ -83,9 +91,9 @@ Holder = |
     maybe MaybeTask,
 |
 "#;
-    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
-    let task_type_id = nominal_type_id(&ast, &mut string_table, "Task");
-    let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let task_type_id = nominal_type_id(&ast, &mut string_table, "Task", &mut path_fork);
+    let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder", &mut path_fork);
 
     assert_eq!(
         field_type_id(&ast, task_type_id, "id", &mut string_table, &path_fork),
@@ -126,9 +134,9 @@ Holder = |
     level P,
 |
 "#;
-    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
-    let priority_type_id = nominal_type_id(&ast, &mut string_table, "Priority");
-    let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let priority_type_id = nominal_type_id(&ast, &mut string_table, "Priority", &mut path_fork);
+    let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder", &mut path_fork);
 
     assert!(
         ast.type_environment
@@ -163,9 +171,9 @@ Holder = |
     item Chain,
 |
 "#;
-    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
-    let item_type_id = nominal_type_id(&ast, &mut string_table, "Item");
-    let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let item_type_id = nominal_type_id(&ast, &mut string_table, "Item", &mut path_fork);
+    let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder", &mut path_fork);
 
     assert_eq!(
         field_type_id(
@@ -192,8 +200,8 @@ Holder = |
     names MoreNames,
 |
 "#;
-    let (ast, path_fork, mut string_table) = parse_single_file_ast(source);
-    let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder", &mut path_fork);
     let names_type_id =
         field_type_id(&ast, holder_type_id, "names", &mut string_table, &path_fork);
 

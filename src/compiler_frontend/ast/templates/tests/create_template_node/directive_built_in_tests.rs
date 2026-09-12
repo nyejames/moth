@@ -19,18 +19,18 @@ fn html_directive_sets_formatter_via_handler_behavior() {
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source_with_style_directives(
-        "[$html:\n<div class=\"card\">x</div>\n]",
-        &style_directives,
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut path_fork = PathInternerFork::empty();
+    let mut token_stream = template_tokens_from_source_with_style_directives("[$html:\n<div class=\"card\">x</div>\n]",
+    &style_directives,
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
         &style_directives,
+        &path_fork,
     );
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("html template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -43,18 +43,18 @@ fn css_directive_sets_style_and_formatter_identity() {
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source_with_style_directives(
-        "[$css:\n.button { color: red; }\n]",
-        &style_directives,
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut path_fork = PathInternerFork::empty();
+    let mut token_stream = template_tokens_from_source_with_style_directives("[$css:\n.button { color: red; }\n]",
+    &style_directives,
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
         &style_directives,
+        &path_fork,
     );
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("css template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -66,11 +66,12 @@ fn css_directive_sets_style_and_formatter_identity() {
 fn markdown_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
-        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder);
-    let context = new_constant_context(token_stream.src_path.to_owned());
+        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("markdown template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -82,11 +83,12 @@ fn markdown_directive_sets_style_and_formatter_identity() {
 fn code_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
-        template_tokens_from_source("[$code:\nloop x\n]", &mut string_table, &mut span_builder);
-    let context = new_constant_context(token_stream.src_path.to_owned());
+        template_tokens_from_source("[$code:\nloop x\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("code template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -99,18 +101,18 @@ fn escape_html_directive_sets_style_and_formatter_identity() {
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source_with_style_directives(
-        "[$escape_html:\n<b>Hello</b>\n]",
-        &style_directives,
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut path_fork = PathInternerFork::empty();
+    let mut token_stream = template_tokens_from_source_with_style_directives("[$escape_html:\n<b>Hello</b>\n]",
+    &style_directives,
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
         &style_directives,
+        &path_fork,
     );
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("escape_html template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -185,14 +187,13 @@ fn runtime_html_templates_emit_warnings_for_static_body_segments() {
 fn runtime_templates_format_static_body_strings_only() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[value, $md:\n# Hello\n]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let context = runtime_template_context(&token_stream.src_path, &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let mut token_stream = template_tokens_from_source("[value, $md:\n# Hello\n]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let context = runtime_template_context(&token_stream.src_path, &mut string_table, &mut path_fork);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template should parse");
 
     assert!(matches!(

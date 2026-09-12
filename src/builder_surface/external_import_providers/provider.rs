@@ -13,6 +13,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::PathBuf;
 
@@ -107,6 +108,12 @@ pub struct ExternalImportRequest {
 pub struct ExternalImportProviderContext<'a> {
     pub package_registry: &'a mut ExternalPackageRegistry,
     pub cache: &'a mut super::cache::ExternalImportProviderCache,
+    /// Caller-owned discovery fork the provider must intern diagnostic paths into.
+    ///
+    /// WHAT: the mutable `PathInternerFork` of the discovery domain that invoked the provider.
+    /// WHY: provider diagnostics carry `PathId`s; interning the logical source path here keeps
+    ///      every returned ID resolvable by the caller's frozen path table.
+    pub path_fork: &'a mut PathInternerFork,
     pub string_table: &'a mut StringTable,
 }
 
@@ -115,7 +122,7 @@ impl std::fmt::Debug for ExternalImportProviderContext<'_> {
         formatter
             .debug_struct("ExternalImportProviderContext")
             .field("package_registry", &"...")
-            .field("cache", &self.cache)
+            .field("path_fork", &"...")
             .field("string_table", &"...")
             .finish()
     }

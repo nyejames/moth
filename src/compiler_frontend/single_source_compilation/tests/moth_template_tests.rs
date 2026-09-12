@@ -157,6 +157,8 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     source_files
         .retain_text(markdown_id, "Nested intro body.".to_owned())
         .expect("markdown source should retain its text");
+    let mut path_fork = source_files.fork_path_interner();
+
     let file_id = |source_files: &SourceDatabase, path: &Path| {
         source_files
             .get_by_canonical_path(path)
@@ -170,6 +172,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         template_source,
         &style_directives,
         &mut string_table,
+        &mut path_fork,
     );
     let (prepared_markdown, markdown_span_builder) = prepare_bundle_source(
         &source_files,
@@ -177,7 +180,11 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         "Nested intro body.",
         &style_directives,
         &mut string_table,
+        &mut path_fork,
     );
+    // The bundle compiler forks from its source database, so publish the preparation fork's
+    // complete path domain before handing that database to the bundle owner.
+    source_files.adopt_path_builder(path_fork.clone_path_builder());
 
     // This is the Stage 0 fact the caller supplies: one content target, one resource source and
     // the site root's no-target outcome, keyed by the prepared occurrence identities.
@@ -302,6 +309,7 @@ fn prepare_bundle_source(
     source_code: &str,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
     let source_id = source_files
         .get_by_canonical_path(source_path)
@@ -319,7 +327,6 @@ fn prepare_bundle_source(
     };
 
     let options = HeaderParseOptions::default();
-    let mut path_fork = PathInternerFork::empty();
     let context = FrontendFilePrepareContext {
         source_files,
         style_directives,
@@ -337,10 +344,10 @@ fn prepare_bundle_source(
         span_builder,
         result,
         ..
-    } = CompilerFrontend::prepare_file_frontend_local(&context, input, string_table, &mut path_fork);
+    } = CompilerFrontend::prepare_file_frontend_local(&context, input, string_table, path_fork);
     let mut prepared = result.expect("bundle source preparation should succeed");
     prepared
-        .freeze_path_syntax(string_table, &mut path_fork)
+        .freeze_path_syntax(string_table, path_fork)
         .expect("bundle source should freeze its path syntax");
     (prepared, span_builder)
 }

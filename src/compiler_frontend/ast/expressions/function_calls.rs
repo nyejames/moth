@@ -39,7 +39,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableResolver};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Input bundle for `parse_function_call` to avoid long argument lists.

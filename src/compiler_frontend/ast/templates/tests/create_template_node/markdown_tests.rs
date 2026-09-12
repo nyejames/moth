@@ -6,14 +6,13 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 fn markdown_formats_only_template_body_content() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[\"prefix\", $md:\n# Hello\n]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let context = new_constant_context(token_stream.src_path.to_owned());
+    let mut path_fork = PathInternerFork::empty();
+    let mut token_stream = template_tokens_from_source("[\"prefix\", $md:\n# Hello\n]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template should parse");
 
     assert!(matches!(

@@ -17,9 +17,9 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
         .expect("test path should be UTF-8");
     let file_tokens = tokenize(&source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
-    let mut outputs = [prepare_file_from_tokens(file_tokens, &file_path, &options, &mut string_table, 0, 0, &mut span_builder, &mut PathInternerFork::empty())
+    let mut outputs = [prepare_file_from_tokens(file_tokens, &file_path, &options, &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
     .expect("preparation should succeed")];
-    let prepared = prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
+    let prepared = prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut path_fork)
     .expect("header syntax should aggregate");
     let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
         .expect("a later source span should fit");
@@ -56,7 +56,7 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         .expect("test path should be UTF-8");
     let file_tokens = tokenize(&source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
-    let mut outputs = [prepare_file_from_tokens(file_tokens, &file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut PathInternerFork::empty())
+    let mut outputs = [prepare_file_from_tokens(file_tokens, &file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
     .expect("preparation should succeed")];
     let literal_span = outputs[0]
         .headers
@@ -66,7 +66,7 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         .expect("the function body should retain its long literal")
         .span;
 
-    let diagnostics = match prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty()) {
+    let diagnostics = match prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut path_fork) {
         Err(failure) => expect_aggregation_diagnostics(failure),
         Ok(_) => panic!("a nested config qualifier should fail aggregation"),
     };
@@ -140,13 +140,14 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
                 0,
                 0,
                 &mut builders[index],
+                &mut path_fork,
             )
             .expect("declaration shells prepare"),
         );
     }
-    let failure = prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
-    .err()
-    .expect("nested qualifiers fail aggregation");
+    let failure = prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut path_fork)
+        .err()
+        .expect("nested qualifiers fail aggregation");
     let diagnostics = expect_aggregation_diagnostics(failure).into_diagnostics();
     assert_eq!(diagnostics.len(), 2);
     for (index, diagnostic) in diagnostics.iter().enumerate() {
@@ -177,7 +178,7 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
         options: &options,
         style_directives: &styles,
     };
-    let failure = prepare_test_source_file(source, path, &context, &mut strings, 0, 0, &mut spans)
+    let failure = prepare_test_source_file(source, path, &context, &mut strings, 0, 0, &mut spans, &mut path_fork)
         .err()
         .expect("continued clause must diagnose statement");
     let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
@@ -279,7 +280,7 @@ fn dependency_shell_with_compilation_root_identity_prepares() {
     let file_tokens = tokenize("@core/math\n", interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
 
-    let output = prepare_file_from_tokens(file_tokens, &file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut PathInternerFork::empty())
+    let output = prepare_file_from_tokens(file_tokens, &file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
     .expect("a dependency shell with a compilation-root identity should prepare");
 
     assert_eq!(output.file_id, SourceId::COMPILATION_ROOT);

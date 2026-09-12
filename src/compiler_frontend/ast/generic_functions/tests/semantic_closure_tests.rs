@@ -121,6 +121,7 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         .get_mut(&alias_path)
         .expect("the alias row should be present");
     alias.target_type_id = TypeId(u32::MAX);
+    let alias_declaration_span = alias.declaration_span;
 
     let freeze_result = prepared
         .preparation
@@ -134,13 +135,19 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
     };
 
     assert_eq!(error.error_type, ErrorType::Compiler);
+    // The message renders the alias path through PathId's debug form (the fixture has no
+    // production path-name spelling at the freeze boundary), so assert the message identifies
+    // the exact retained alias row this test corrupted.
     assert!(
-        error.msg.contains("Count") && error.msg.contains("completed-target invariant"),
+        error.msg.contains("completed-target invariant")
+            && error.msg.contains(&format!("{alias_path:?}")),
         "unexpected alias freeze error: {error:?}"
     );
-    // The alias declaration retains authored provenance rather than falling back to file start.
-    assert!(
-        error.source_span.is_some(),
-        "the alias declaration span must survive transport",
+    // The alias declaration retains authored provenance rather than falling back to file start:
+    // the transported span must be exactly the alias's declaration span.
+    assert_eq!(
+        error.source_span,
+        alias_declaration_span,
+        "the alias declaration span must survive transport unchanged",
     );
 }

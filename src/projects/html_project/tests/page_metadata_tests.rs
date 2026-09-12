@@ -60,12 +60,14 @@ fn string_constant(name: &str, value: &str) -> HirModuleConst {
 
 fn add_const_fact(
     module: &mut HirModule,
+    path_fork: &mut PathInternerFork,
     name: &str,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) {
-    let mut path_fork = PathInternerFork::empty();
-    let declaration_path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
+    let declaration_path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
     module.const_facts.declarations.insert(
         declaration_path.clone(),
         HirConstDeclarationFact {
@@ -300,6 +302,7 @@ fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
     }];
     add_const_fact(
         &mut module,
+        &mut path_fork,
         "page_favicon",
         Some(metadata_span),
         &mut string_table,

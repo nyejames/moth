@@ -72,9 +72,12 @@ CURRENT_SLICE:
   diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
 - Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
   `PathInternerFork`, merge tails merge strings then paths, publication remaps retained `PathId`s,
-  diagnosed lanes retain issuing path tables, imported nominals intern defining names.
-- Validation evidence: `cargo check -p moth --lib` and `cargo test -p moth --lib --no-run` pass;
-  path_interner 21 passed; create_project_modules 312 passed.
+  diagnosed lanes retain issuing path tables, imported nominals intern defining names, and
+  provider diagnostics use the caller-owned discovery fork.
+- Validation evidence: `cargo test -p moth --lib -- --test-threads=1` and `cargo test -p moth --lib`
+  each pass 4,997 tests; `cargo check -p moth --lib` and
+  `cargo check -p moth --lib --features timers` pass; focused path, diagnostic, frontend fixture,
+  provider and HTML/template lanes pass their scoped tests.
 - Non-goals: Phase 3 token-store work; diagnostic compact-record work.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,

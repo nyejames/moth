@@ -15,8 +15,11 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-fn intern_path(components: &[&str], string_table: &mut StringTable) -> PathId {
-    let mut path_fork = PathInternerFork::empty();
+fn intern_path(
+    components: &[&str],
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> PathId {
     path_fork
         .try_intern_components(
             &components
@@ -44,9 +47,9 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let entry_root = intern_path(&["entry-root"], &mut string_table);
-    let helper_root = intern_path(&["helper-root"], &mut string_table);
-    let helper_mod_file = intern_path(&["helper", "@mod.moth"], &mut string_table);
+    let entry_root = intern_path(&["entry-root"], &mut string_table, &mut path_fork);
+    let helper_root = intern_path(&["helper-root"], &mut string_table, &mut path_fork);
+    let helper_mod_file = intern_path(&["helper", "@mod.moth"], &mut string_table, &mut path_fork);
     let consumer_file = helper_mod_file.clone();
 
     let mut file_module_membership = FxHashMap::default();
@@ -54,7 +57,7 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
     file_module_membership.insert(entry_root.clone(), entry_root.clone());
 
     let boundaries = vec![ModuleRootBoundary {
-        dependency_prefix: intern_path(&["helper"], &mut string_table),
+        dependency_prefix: intern_path(&["helper"], &mut string_table, &mut path_fork),
         module_root: helper_root.clone(),
         root_file: helper_mod_file.clone(),
     }];
@@ -63,7 +66,7 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &consumer_file,
-        header_path: &intern_path(&["impl", "helper"], &mut string_table),
+        header_path: &intern_path(&["impl", "helper"], &mut string_table, &mut path_fork),
         source_package_public_exports: &FxHashMap::default(),
         file_package_membership: &FxHashMap::default(),
         module_root_public_exports: &module_root_public_exports,
@@ -90,23 +93,23 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let entry_root = intern_path(&["entry-root"], &mut string_table);
-    let child_root = intern_path(&["child-root"], &mut string_table);
-    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table);
-    let page_file = intern_path(&["page.moth"], &mut string_table);
+    let entry_root = intern_path(&["entry-root"], &mut string_table, &mut path_fork);
+    let child_root = intern_path(&["child-root"], &mut string_table, &mut path_fork);
+    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table, &mut path_fork);
+    let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
 
     let mut file_module_membership = FxHashMap::default();
     file_module_membership.insert(page_file.clone(), entry_root.clone());
     file_module_membership.insert(child_mod_file.clone(), child_root.clone());
 
     let boundaries = vec![ModuleRootBoundary {
-        dependency_prefix: intern_path(&["child"], &mut string_table),
+        dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
         module_root: child_root.clone(),
         root_file: child_mod_file.clone(),
     }];
 
     let greet_name = string_table.intern("greet");
-    let greet_source = intern_path(&["child", "greet.moth"], &mut string_table);
+    let greet_source = intern_path(&["child", "greet.moth"], &mut string_table, &mut path_fork);
     let mut child_exports = FxHashSet::default();
     child_exports.insert(PublicExportEntry {
         export_name: greet_name,
@@ -120,7 +123,7 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
-        header_path: &intern_path(&["child", "greet"], &mut string_table),
+        header_path: &intern_path(&["child", "greet"], &mut string_table, &mut path_fork),
         source_package_public_exports: &FxHashMap::default(),
         file_package_membership: &FxHashMap::default(),
         module_root_public_exports: &module_root_public_exports,
@@ -144,17 +147,17 @@ fn cross_module_child_dependency_missing_symbol_is_not_exported() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let entry_root = intern_path(&["entry-root"], &mut string_table);
-    let child_root = intern_path(&["child-root"], &mut string_table);
-    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table);
-    let page_file = intern_path(&["page.moth"], &mut string_table);
+    let entry_root = intern_path(&["entry-root"], &mut string_table, &mut path_fork);
+    let child_root = intern_path(&["child-root"], &mut string_table, &mut path_fork);
+    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table, &mut path_fork);
+    let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
 
     let mut file_module_membership = FxHashMap::default();
     file_module_membership.insert(page_file.clone(), entry_root.clone());
     file_module_membership.insert(child_mod_file.clone(), child_root.clone());
 
     let boundaries = vec![ModuleRootBoundary {
-        dependency_prefix: intern_path(&["child"], &mut string_table),
+        dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
         module_root: child_root.clone(),
         root_file: child_mod_file.clone(),
     }];
@@ -163,7 +166,7 @@ fn cross_module_child_dependency_missing_symbol_is_not_exported() {
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
-        header_path: &intern_path(&["child", "private"], &mut string_table),
+        header_path: &intern_path(&["child", "private"], &mut string_table, &mut path_fork),
         source_package_public_exports: &FxHashMap::default(),
         file_package_membership: &FxHashMap::default(),
         module_root_public_exports: &module_root_public_exports,
@@ -185,13 +188,13 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let entry_root = intern_path(&["entry-root"], &mut string_table);
-    let child_root = intern_path(&["child-root"], &mut string_table);
-    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table);
-    let page_file = intern_path(&["page.moth"], &mut string_table);
+    let entry_root = intern_path(&["entry-root"], &mut string_table, &mut path_fork);
+    let child_root = intern_path(&["child-root"], &mut string_table, &mut path_fork);
+    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table, &mut path_fork);
+    let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
     let export_name = string_table.intern("public_name");
     let source_name = string_table.intern("provider_name");
-    let diagnostic_path = intern_path(&["child", "provider_name"], &mut string_table);
+    let diagnostic_path = intern_path(&["child", "provider_name"], &mut string_table, &mut path_fork);
     let selection =
         DependencySelectionId::new(DependencyShellId::new(SourceId::from_index(4), 9), 3);
 
@@ -200,7 +203,7 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
     file_module_membership.insert(child_mod_file.clone(), child_root.clone());
 
     let boundaries = vec![ModuleRootBoundary {
-        dependency_prefix: intern_path(&["child"], &mut string_table),
+        dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
         module_root: child_root.clone(),
         root_file: child_mod_file,
     }];
@@ -217,7 +220,7 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
     let mut module_root_public_exports = FxHashMap::default();
     module_root_public_exports.insert(child_root, child_exports);
 
-    let header_path = intern_path(&["child", "public_name"], &mut string_table);
+    let header_path = intern_path(&["child", "public_name"], &mut string_table, &mut path_fork);
     let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
         header_path: &header_path,
@@ -250,16 +253,16 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let entry_root = intern_path(&["entry-root"], &mut string_table);
-    let utils_root = intern_path(&["lib", "utils-root"], &mut string_table);
-    let utils_mod_file = intern_path(&["lib", "utils", "@mod.moth"], &mut string_table);
+    let entry_root = intern_path(&["entry-root"], &mut string_table, &mut path_fork);
+    let utils_root = intern_path(&["lib", "utils-root"], &mut string_table, &mut path_fork);
+    let utils_mod_file = intern_path(&["lib", "utils", "@mod.moth"], &mut string_table, &mut path_fork);
 
     let mut file_module_membership = FxHashMap::default();
     file_module_membership.insert(utils_mod_file.clone(), utils_root.clone());
     file_module_membership.insert(entry_root.clone(), entry_root.clone());
 
     let boundaries = vec![ModuleRootBoundary {
-        dependency_prefix: intern_path(&["lib", "utils"], &mut string_table),
+        dependency_prefix: intern_path(&["lib", "utils"], &mut string_table, &mut path_fork),
         module_root: utils_root.clone(),
         root_file: utils_mod_file.clone(),
     }];
@@ -268,7 +271,7 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &utils_mod_file,
-        header_path: &intern_path(&["internal", "empty_values"], &mut string_table),
+        header_path: &intern_path(&["internal", "empty_values"], &mut string_table, &mut path_fork),
         source_package_public_exports: &FxHashMap::default(),
         file_package_membership: &FxHashMap::default(),
         module_root_public_exports: &module_root_public_exports,
@@ -295,12 +298,12 @@ fn consumer_without_module_membership_uses_empty_prefix() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let child_root = intern_path(&["child-root"], &mut string_table);
-    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table);
-    let unknown_consumer = intern_path(&["unknown.moth"], &mut string_table);
+    let child_root = intern_path(&["child-root"], &mut string_table, &mut path_fork);
+    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table, &mut path_fork);
+    let unknown_consumer = intern_path(&["unknown.moth"], &mut string_table, &mut path_fork);
 
     let boundaries = vec![ModuleRootBoundary {
-        dependency_prefix: intern_path(&["child"], &mut string_table),
+        dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
         module_root: child_root.clone(),
         root_file: child_mod_file.clone(),
     }];
@@ -309,7 +312,7 @@ fn consumer_without_module_membership_uses_empty_prefix() {
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &unknown_consumer,
-        header_path: &intern_path(&["child", "greet"], &mut string_table),
+        header_path: &intern_path(&["child", "greet"], &mut string_table, &mut path_fork),
         source_package_public_exports: &FxHashMap::default(),
         file_package_membership: &FxHashMap::default(),
         module_root_public_exports: &module_root_public_exports,

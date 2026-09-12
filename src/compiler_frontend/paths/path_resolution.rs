@@ -369,7 +369,11 @@ impl ProjectPathResolver {
         path_fork: &PathInternerFork,
         string_table: &StringTable,
     ) -> Option<PathBuf> {
-        let first_component = path_fork.component(dependency_path)?;
+        let mut first_component_path = dependency_path;
+        while path_fork.depth(first_component_path) > 1 {
+            first_component_path = path_fork.parent(first_component_path)?;
+        }
+        let first_component = path_fork.component(first_component_path)?;
         let segment = string_table.resolve(first_component);
         self.source_package_roots.roots().get(segment).cloned()
     }

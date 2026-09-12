@@ -16,7 +16,7 @@ use crate::compiler_frontend::compiler_messages::DeferredFeatureReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::InvalidChoiceVariantReason;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword, reserved_trait_keyword_error,
+    reserved_trait_keyword_error,
     reserved_trait_keyword_or_dispatch_mismatch,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;

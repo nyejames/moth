@@ -16,7 +16,7 @@ fn truncated_template_head_stream_returns_missing_closing_delimiter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
-    let context = new_constant_context(scope.to_owned());
+    let context = new_constant_context(scope.to_owned(), &path_fork);
 
     let mut token_stream = FileTokens::new(
         scope,
@@ -39,11 +39,9 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[html_defaults.color]",
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut token_stream = template_tokens_from_source("[html_defaults.color]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let scope = token_stream.src_path.clone();
 
     let mut type_environment = TypeEnvironment::new();
@@ -91,7 +89,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&scope, &[declaration]);
+    let context = constant_template_context(&scope, &[declaration], &path_fork);
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
@@ -182,24 +180,22 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut shell_tokens =
-        template_tokens_from_source("[:<ul>[$slot]</ul>]", &mut string_table, &mut span_builder);
-    let shell_context = new_constant_context(shell_tokens.src_path.to_owned());
+        template_tokens_from_source("[:<ul>[$slot]</ul>]", &mut string_table, &mut span_builder, &mut path_fork);
+    let shell_context = new_constant_context(shell_tokens.src_path.to_owned(), &path_fork);
     let shell_template =
         Template::new(&mut shell_tokens, &shell_context, vec![], &mut string_table, &mut path_fork)
             .expect("slot shell should parse");
 
-    let mut token_stream = template_tokens_from_source(
-        "[:
-            before
-            [list_shell, loop keep_going:
-                [break]
-                <li>hidden</li>
-            ]
-            after
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut token_stream = template_tokens_from_source("[:
+        before
+        [list_shell, loop keep_going:
+            [break]
+            <li>hidden</li>
+        ]
+        after
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let scope = token_stream.src_path.clone();
     let list_shell_name = string_table.intern("list_shell");
     let keep_going_name = string_table.intern("keep_going");
@@ -331,15 +327,13 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if show_banner:
-            Visible
-        [else]
-            Hidden
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut token_stream = template_tokens_from_source("[if show_banner:
+        Visible
+    [else]
+        Hidden
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let show_banner = string_table.intern("show_banner");
     let declaration = Declaration {
         id: path_fork.try_intern_child(token_stream.src_path, show_banner).expect("test path fits"),
@@ -347,7 +341,7 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&token_stream.src_path, &[declaration]);
+    let context = constant_template_context(&token_stream.src_path, &[declaration], &path_fork);
 
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -365,15 +359,13 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if show_banner:
-            Visible
-        [else]
-            Hidden
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut token_stream = template_tokens_from_source("[if show_banner:
+        Visible
+    [else]
+        Hidden
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let show_banner = string_table.intern("show_banner");
     let flags_scope = path_fork.try_intern_portable_path("flags.moth", &mut string_table).expect("test path fits");
     let imported_path = path_fork.try_intern_child(flags_scope, show_banner).expect("test path fits");
@@ -383,7 +375,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
         binding_span: None,
         config_qualifier: None,
     };
-    let context = imported_const_template_context(&token_stream.src_path, declaration, show_banner);
+    let context = imported_const_template_context(&token_stream.src_path, declaration, show_banner, &path_fork);
 
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -404,12 +396,10 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     let wrapper_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut card_tokens = template_tokens_from_source(
-        "[:<card>[$slot]</card>]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let card_context = new_constant_context(card_tokens.src_path.to_owned());
+    let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let card_context = new_constant_context(card_tokens.src_path.to_owned(), &path_fork);
     let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
 
@@ -423,14 +413,12 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source(
-        "[card, if false:
-            Visible
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let mut context = constant_template_context(&token_stream.src_path, &declarations);
+    let mut token_stream = template_tokens_from_source("[card, if false:
+        Visible
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let mut context = constant_template_context(&token_stream.src_path, &declarations, &path_fork);
     // Production scopes in one module share one module-local TIR store. Keep
     // the declaration fixture on that topology so the wrapper reference stays
     // resolvable without compatibility reconstruction.
@@ -559,15 +547,13 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[loop 0 to 2 |i|:
-            [if show_item:
-                [i]
-            ]
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut token_stream = template_tokens_from_source("[loop 0 to 2 |i|:
+        [if show_item:
+            [i]
+        ]
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let show_item = string_table.intern("show_item");
     let declaration = Declaration {
         id: path_fork.try_intern_child(token_stream.src_path, show_item).expect("test path fits"),
@@ -575,7 +561,7 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&token_stream.src_path, &[declaration]);
+    let context = constant_template_context(&token_stream.src_path, &[declaration], &path_fork);
 
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -607,12 +593,10 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     let wrapper_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut card_tokens = template_tokens_from_source(
-        "[:<card>[$slot]</card>]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let card_context = new_constant_context(card_tokens.src_path.to_owned());
+    let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let card_context = new_constant_context(card_tokens.src_path.to_owned(), &path_fork);
     let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
 
@@ -626,14 +610,12 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source(
-        "[card, loop 0 to 0 |i|:
-            [i]
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let context = constant_template_context(&token_stream.src_path, &declarations)
+    let mut token_stream = template_tokens_from_source("[card, loop 0 to 0 |i|:
+        [i]
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -653,12 +635,10 @@ fn const_required_template_loop_wraps_aggregate_once() {
     let wrapper_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut card_tokens = template_tokens_from_source(
-        "[:<card>[$slot]</card>]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let card_context = new_constant_context(card_tokens.src_path.to_owned());
+    let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let card_context = new_constant_context(card_tokens.src_path.to_owned(), &path_fork);
     let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
 
@@ -672,14 +652,12 @@ fn const_required_template_loop_wraps_aggregate_once() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source(
-        "[card, loop 0 to 2 |i|:
-            [i]
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let context = constant_template_context(&token_stream.src_path, &declarations)
+    let mut token_stream = template_tokens_from_source("[card, loop 0 to 2 |i|:
+        [i]
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -723,14 +701,12 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[loop keep_going:
-            Never
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let mut context = new_constant_context(token_stream.src_path.clone());
+    let mut token_stream = template_tokens_from_source("[loop keep_going:
+        Never
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -775,14 +751,12 @@ fn const_required_template_loop_reports_non_const_collection_source() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[loop items |item|:
-            [item]
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let mut context = new_constant_context(token_stream.src_path.clone());
+    let mut token_stream = template_tokens_from_source("[loop items |item|:
+        [item]
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let collection_type_id =
         type_environment.intern_collection(type_environment.builtins().string, None);
@@ -829,14 +803,12 @@ fn const_required_template_loop_reports_non_const_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[loop 0 to 1 |i|:
-            [value]
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let mut context = new_constant_context(token_stream.src_path.clone());
+    let mut token_stream = template_tokens_from_source("[loop 0 to 1 |i|:
+        [value]
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -922,14 +894,12 @@ fn const_required_construction_preparation_is_reused_by_folding() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if true:
-            Visible
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let context = new_constant_context(token_stream.src_path.clone());
+    let mut token_stream = template_tokens_from_source("[if true:
+        Visible
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
 
     reset_ast_counters();
     let construction =
@@ -1022,7 +992,7 @@ fn const_required_template_option_capture_present_folds_then_branch() {
     let mut path_fork = PathInternerFork::empty();
     let context_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
-    let context = new_constant_context(context_scope.clone());
+    let context = new_constant_context(context_scope.clone(), &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
@@ -1062,7 +1032,7 @@ fn const_required_template_option_capture_absent_folds_else_branch() {
     let mut path_fork = PathInternerFork::empty();
     let context_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
-    let context = new_constant_context(context_scope.clone());
+    let context = new_constant_context(context_scope.clone(), &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
@@ -1100,11 +1070,9 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if maybe_name is |name|:Hello [name]]",
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut token_stream = template_tokens_from_source("[if maybe_name is |name|:Hello [name]]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let maybe_name = string_table.intern("maybe_name");
 
     let mut type_environment = TypeEnvironment::new();
@@ -1121,7 +1089,7 @@ fn const_required_template_option_capture_inlines_present_source_const() {
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&token_stream.src_path, &[declaration]);
+    let context = constant_template_context(&token_stream.src_path, &[declaration], &path_fork);
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
@@ -1145,15 +1113,13 @@ fn const_required_template_option_capture_inlines_absent_source_const() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if maybe_name is |name|:
-            Hello [name]
-        [else]
-            Guest
-        ]",
-        &mut string_table,
-        &mut span_builder,
-    );
+    let mut token_stream = template_tokens_from_source("[if maybe_name is |name|:
+        Hello [name]
+    [else]
+        Guest
+    ]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
     let maybe_name = string_table.intern("maybe_name");
 
     let mut type_environment = TypeEnvironment::new();
@@ -1170,7 +1136,7 @@ fn const_required_template_option_capture_inlines_absent_source_const() {
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&token_stream.src_path, &[declaration]);
+    let context = constant_template_context(&token_stream.src_path, &[declaration], &path_fork);
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
@@ -1194,12 +1160,10 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if maybe_name is |name|: [name]]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let mut context = new_constant_context(token_stream.src_path.clone());
+    let mut token_stream = template_tokens_from_source("[if maybe_name is |name|: [name]]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let maybe_name_type_id = type_environment.intern_option(type_environment.builtins().string);
@@ -1242,12 +1206,10 @@ fn const_required_template_if_rejects_runtime_local_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source(
-        "[if show_banner: Visible]",
-        &mut string_table,
-        &mut span_builder,
-    );
-    let mut context = new_constant_context(token_stream.src_path.clone());
+    let mut token_stream = template_tokens_from_source("[if show_banner: Visible]",
+    &mut string_table,
+    &mut span_builder, &mut path_fork);
+    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
     let show_banner = string_table.intern("show_banner");
     context.add_var(
         Declaration {

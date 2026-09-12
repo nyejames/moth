@@ -82,6 +82,9 @@ impl DiagnosticPayload {
             | DiagnosticPayload::NotExportedByPublicSurface { .. }
             | DiagnosticPayload::MissingModuleRootPublicSurface { .. }
             | DiagnosticPayload::CrossModuleImportNotExported { .. } => {}
+            DiagnosticPayload::ImportNameCollision { name } => {
+                *name = remap.get(*name);
+            }
 
             DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
             | DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. } => {}

@@ -167,17 +167,20 @@ assert!(matches!(
 )); }
 
 #[test]
-fn excludes_real_slot_insert_helpers_from_hir_but_keeps_wrapper_constants_visible() { let mut path_fork = super::PathInternerFork::empty(); let source = r#"
+fn excludes_real_slot_insert_helpers_from_hir_but_keeps_wrapper_constants_visible() { let source = r#"
 layout #= [:<h1>[$slot("title")]</h1><p>[$slot]</p>]
 stored_title #= [$insert("title"): Stored title]
 rendered #= [layout: [stored_title] Body]
 "#;
-let (ast, mut parsed_path_fork, string_table) = parse_single_file_ast(source);
+let (ast, mut parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let stored_title_path = parsed_path_fork
+    .try_intern_portable_path("stored_title", &mut string_table)
+    .expect("helper component should fit the parsed fork");
 let helper = ast
     .const_values
     .iter_module_constant_views()
     .find(|row| {
-        parsed_path_fork.render_portable(*row.path, &string_table, &mut Vec::new()) == "stored_title"
+        parsed_path_fork.ends_with(*row.path, stored_title_path)
     })
     .expect("slot-insert helper should be retained in the AST store");
 let helper_name =
@@ -189,7 +192,6 @@ assert_eq!(
 );
 assert!(!helper_metadata.hir_visible);
 
-let mut string_table = string_table;
 let (module, _) = lower_ast(ast, &mut string_table, &mut parsed_path_fork)
     .expect("real slot-insert helper should be excluded before HIR lowering");
 assert!(

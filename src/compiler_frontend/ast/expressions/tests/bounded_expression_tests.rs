@@ -28,13 +28,21 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
 use std::sync::Arc;
 
-fn test_scope(string_table: &mut StringTable) -> (PathId, ScopeContext) {
-    let mut path_fork = PathInternerFork::empty();
+fn test_scope(
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> (PathId, ScopeContext) {
     let scope = path_fork.try_intern_portable_path("test.moth", string_table).expect("test path fits");
+    let mut scratch = Vec::new();
+    assert_eq!(
+        path_fork.render_portable(scope, string_table, &mut scratch),
+        "test.moth",
+        "scope PathId must be owned by the caller's fork",
+    );
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(vec![], path_fork) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -84,7 +92,7 @@ fn create_expression_until_for_test(
 fn bounded_expression_empty_at_delimiter_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table);
+    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     let tokens = vec![
         token(TokenKind::Comma, &scope),
@@ -123,7 +131,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
 fn bounded_expression_parses_simple_literal() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table);
+    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     let tokens = vec![
         numeric_token("42", &scope, &mut string_table),
@@ -155,7 +163,7 @@ fn bounded_expression_parses_simple_literal() {
 fn bounded_expression_nested_parentheses() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table);
+    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     let tokens = vec![
         numeric_token("1", &scope, &mut string_table),
@@ -194,7 +202,7 @@ fn bounded_expression_nested_parentheses() {
 fn bounded_expression_nested_curly_braces() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table);
+    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     // A collection literal `{2, 3}` followed by a comma.
     // The comma inside the collection must not terminate the bounded expression.
@@ -231,7 +239,7 @@ fn bounded_expression_nested_curly_braces() {
 fn bounded_expression_missing_delimiter_reaches_eof() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table);
+    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     let tokens = vec![
         numeric_token("1", &scope, &mut string_table),

@@ -23,29 +23,29 @@ use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-fn borrow_check_source(source: &str) { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+fn borrow_check_source(source: &str) { let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("source should pass borrow checking"); }
 
 #[test]
-fn collection_loop_mutation_of_iterable_reports_shared_mutable_conflict() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn collection_loop_mutation_of_iterable_reports_shared_mutable_conflict() { let source = r#"
 items ~{Int} = {1, 2, 3}
 loop items |item|:
 ~items.push(4)
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("mutating a collection while iterating it should fail");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict); }
 
 #[test]
-fn collection_loop_mutable_helper_call_on_iterable_reports_shared_mutable_conflict() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn collection_loop_mutable_helper_call_on_iterable_reports_shared_mutable_conflict() { let source = r#"
 mutate |values ~{Int}|:
 ~values.push(4)
 ;
@@ -55,32 +55,32 @@ mutate(~items)
 ;
 after = items.length()
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("a mutable helper call on the active iterable should fail");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict); }
 
 #[test]
-fn collection_loop_mutation_through_iterable_alias_reports_shared_mutable_conflict() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn collection_loop_mutation_through_iterable_alias_reports_shared_mutable_conflict() { let source = r#"
 items ~{Int} = {1, 2, 3}
 alias ~= items
 loop items |item|:
 ~alias.push(4)
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("mutating an alias of the active iterable should fail");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict); }
 
 #[test]
-fn nested_collection_loop_mutation_of_outer_iterable_reports_shared_mutable_conflict() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn nested_collection_loop_mutation_of_outer_iterable_reports_shared_mutable_conflict() { let source = r#"
 outer ~{Int} = {1, 2, 3}
 inner ~{Int} = {4, 5, 6}
 loop outer |outer_item|:
@@ -89,16 +89,16 @@ loop inner |inner_item|:
 ;
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("the outer iterable must stay protected inside a nested loop");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict); }
 
 #[test]
-fn nested_collection_loop_mutation_of_inner_iterable_reports_shared_mutable_conflict() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn nested_collection_loop_mutation_of_inner_iterable_reports_shared_mutable_conflict() { let source = r#"
 outer ~{Int} = {1, 2, 3}
 inner ~{Int} = {4, 5, 6}
 loop outer |outer_item|:
@@ -107,16 +107,16 @@ loop inner |inner_item|:
 ;
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("the inner iterable must stay protected inside a nested loop");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict); }
 
 #[test]
-fn collection_loop_mutation_after_exit_is_valid() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); borrow_check_source(
+fn collection_loop_mutation_after_exit_is_valid() { borrow_check_source(
     r#"
 items ~{Int} = {1, 2, 3}
 loop items |item|:
@@ -126,7 +126,7 @@ loop items |item|:
 ); }
 
 #[test]
-fn collection_loop_mutation_of_unrelated_root_is_valid() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); borrow_check_source(
+fn collection_loop_mutation_of_unrelated_root_is_valid() { borrow_check_source(
     r#"
 items ~{Int} = {1, 2, 3}
 other ~{Int} = {4, 5}
@@ -137,7 +137,7 @@ loop items |item|:
 ); }
 
 #[test]
-fn collection_loop_item_call_borrows_source_while_iterable_carrier_is_live() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn collection_loop_item_call_borrows_source_while_iterable_carrier_is_live() { let source = r#"
 render_card |card String| -> String:
 return [: [card]]
 ;
@@ -150,10 +150,10 @@ loop cards |card|:
 return [: [output]</section>]
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("an independent output accumulator should not conflict with the iterable");
 
 let item_argument = hir
@@ -192,7 +192,7 @@ assert_eq!(
 ); }
 
 #[test]
-fn projected_collection_loop_item_call_borrows_source_while_carrier_is_live() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn projected_collection_loop_item_call_borrows_source_while_carrier_is_live() { let source = r#"
 Listing = |
 cards {String},
 |
@@ -209,10 +209,10 @@ loop listing.cards |card|:
 return [: [output]</section>]
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a projected collection source should keep its carrier root live");
 
 let item_argument = hir
@@ -251,7 +251,7 @@ assert_eq!(
 ); }
 
 #[test]
-fn collection_loop_mutation_of_source_copy_is_valid() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); borrow_check_source(
+fn collection_loop_mutation_of_source_copy_is_valid() { borrow_check_source(
     r#"
 items ~{Int} = {1, 2, 3}
 copied = copy items
@@ -262,7 +262,7 @@ loop copied |item|:
 ); }
 
 #[test]
-fn loop_body_rebinding_its_alias_allows_source_mutation() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); // The map alias is redefined at the top of every iteration, so the value that reaches the
+fn loop_body_rebinding_its_alias_allows_source_mutation() { // The map alias is redefined at the top of every iteration, so the value that reaches the
 // mutation is dead on every path, including the one that arrives over the back-edge.
 borrow_check_source(
     r#"
@@ -279,7 +279,7 @@ return totals
 ); }
 
 #[test]
-fn loop_body_alias_live_across_back_edge_blocks_source_mutation() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); // Same back-edge, but the alias is issued once before the loop and read again on every later
+fn loop_body_alias_live_across_back_edge_blocks_source_mutation() { // Same back-edge, but the alias is issued once before the loop and read again on every later
 // iteration. Killing a redefined alias must not also release a genuinely live one.
 let source = r#"
 items ~{String} = {"a"}
@@ -289,16 +289,16 @@ first = shared.get(0) catch then "missing"
 ~items.push(first)
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("an alias read on every iteration should block mutating its source");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict); }
 
 #[test]
-fn branch_join_future_use_preserves_alias_conflict_after_linear_expiry() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn branch_join_future_use_preserves_alias_conflict_after_linear_expiry() { let source = r#"
 items ~{Int} = {1, 2, 3}
 alias = items
 outer ~= true
@@ -314,33 +314,32 @@ else
 ;
 value = alias
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("CFG future use through a branch join should preserve the alias conflict");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict); }
 
 #[test]
-fn projected_assignment_rooted_in_user_local_preserves_source_alias_conflict() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let (hir, mut string_table, _) = projected_assignment_branch_fixture();
+fn projected_assignment_rooted_in_user_local_preserves_source_alias_conflict() { let (hir, mut string_table, _, path_fork) = projected_assignment_branch_fixture();
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("a user-local projected mutation should preserve the source alias conflict");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict); }
 
 #[test]
-fn projected_assignment_rooted_in_compiler_temp_uses_linear_expiry() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let (mut hir, mut string_table, point_local) = projected_assignment_branch_fixture();
+fn projected_assignment_rooted_in_compiler_temp_uses_linear_expiry() { let (mut hir, mut string_table, point_local, path_fork) = projected_assignment_branch_fixture();
 hir.side_table
     .bind_local_origin(point_local, HirLocalOriginKind::CompilerTemp, None, None);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("compiler-temporary projected mutation should use linear expiry"); }
 
-fn projected_assignment_branch_fixture() -> (HirModule, StringTable, LocalId) {
-    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+fn projected_assignment_branch_fixture() -> (HirModule, StringTable, LocalId, PathInternerFork) {
     let source = r#"
 Point = |
     value Int,
@@ -360,7 +359,7 @@ else
 ;
 value = alias.value
 "#;
-    let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let point_local = hir
         .blocks
@@ -370,5 +369,5 @@ value = alias.value
         .map(|local| local.id)
         .expect("projected assignment root should be a named local");
 
-    (hir, string_table, point_local)
+    (hir, string_table, point_local, path_fork)
 }

@@ -340,11 +340,11 @@ fn compile_fixture(
         .collect::<Vec<_>>();
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let source_files = Arc::new(
         SourceDatabase::build(all_paths.iter(), &entry_path, None, &mut string_table)
             .expect("fixture source identities should build"),
     );
+    let mut path_fork = source_files.fork_path_interner();
     let file_id_for = |path: &str| {
         source_files
             .get_by_canonical_path(&PathBuf::from(path))
@@ -404,12 +404,17 @@ fn compile_fixture(
         output
             .freeze_path_syntax(&string_table, &mut path_fork)
             .expect("prepared template should satisfy the path invariant");
+        prepared_outputs.push(output);
+    }
+
+    for (path, source) in markdown_files {
+        let path_buf = PathBuf::from(path);
+        let interned_path = path_fork.try_intern_filesystem_path(&path_buf, &mut string_table)
+            .expect("test path should be UTF-8");
         let mut output = prepare_plain_markdown_file(
             PlainMarkdownPrepareInput {
                 source_code: source,
-                source_file: path_fork
-                    .try_intern_filesystem_path(&path_buf, &mut string_table)
-                    .expect("test path should be UTF-8"),
+                source_file: interned_path,
                 file_id: file_id_for(path),
                 canonical_os_path: None,
             },
@@ -477,10 +482,10 @@ fn compile_fixture(
         }
     }
 
-    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut PathInternerFork::empty())
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut path_fork)
     .expect("header syntax preparation should succeed");
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
-    let headers = bind_module_headers(prepared_syntax, &external_package_registry, &ExternalImportResolutionTable::default(), &SourceProviderDependencySet::default(), None, source_files.as_ref(), &mut string_table, &mut PathInternerFork::empty())
+    let headers = bind_module_headers(prepared_syntax, &external_package_registry, &ExternalImportResolutionTable::default(), &SourceProviderDependencySet::default(), None, source_files.as_ref(), &mut string_table, &mut path_fork)
     .expect("header binding should succeed");
 
     let mut frontend = CompilerFrontend::new(

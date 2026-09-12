@@ -778,6 +778,7 @@ impl ModulePreparationContext<'_> {
             // diagnosed path, so no clone is needed to carry the diagnostics.
             let table = std::mem::take(string_table);
             let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
+            batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
             batch.prepend_diagnostics(warnings);
             return Err(PremergeFailure::Diagnosed(batch));
         }
@@ -811,6 +812,7 @@ impl ModulePreparationContext<'_> {
                         // becomes the sole owner with no diagnostic clone.
                         let table = std::mem::take(string_table);
                         let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
+                        batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
                         batch.prepend_diagnostics(warnings);
                         PremergeFailure::Diagnosed(batch)
                     }
@@ -1124,7 +1126,8 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 // Move the discovery table into the batch; this source failed, so the
                 // discovery owner hands its table to the diagnosed lane instead of cloning.
                 let table = std::mem::take(&mut self.string_table);
-                let batch = error.into_premerge_batch(table);
+                let mut batch = error.into_premerge_batch(table);
+                batch.attach_path_table_if_missing(Arc::new(self.path_fork.snapshot_table()));
                 return Err(PremergeFailure::Diagnosed(batch));
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
@@ -1195,8 +1198,9 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                     HeaderPreparationFailure::Diagnosed(bag) => {
                         // `finish` owns `self`, so move its table and warnings into the batch
                         // instead of cloning the local table to carry the diagnostics.
-                        let batch = PremergeDiagnosticBatch::from_bag(bag, self.string_table);
-                        let mut batch = batch;
+                        let mut batch =
+                            PremergeDiagnosticBatch::from_bag(bag, self.string_table);
+                        batch.attach_path_table_if_missing(Arc::new(self.path_fork.snapshot_table()));
                         batch.prepend_diagnostics(self.warnings);
                         PremergeFailure::Diagnosed(batch)
                     }

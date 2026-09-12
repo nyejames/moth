@@ -18,9 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathInternError, PathInternerFork,
-};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::package_registration::{
     register_parsed_js_module, required_runtime_imports_from_parsed,
@@ -84,11 +82,13 @@ impl ExternalImportProvider for JsExternalImportProvider {
 
         let parsed = parse_js_module(&source, &RuntimeModuleRegistry::v1());
 
-        let mut path_fork = PathInternerFork::empty();
-        let js_source_path = match path_fork.try_intern_portable_path(
-            request.logical_source_path.as_str(),
-            context.string_table,
-        ) {
+        let js_source_path = match context
+            .path_fork
+            .try_intern_portable_path(
+                request.logical_source_path.as_str(),
+                context.string_table,
+            )
+        {
             Ok(path) => path,
             Err(PathInternError::NonUtf8(non_utf8)) => {
                 return Err(CompilerMessages::from_error_ref(

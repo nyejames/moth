@@ -50,7 +50,7 @@ INFERRED #= 1\n"
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
-        &mut PathInternerFork::empty(),
+        &mut path_fork,
         0,
         0,
         &mut spans,
@@ -122,11 +122,18 @@ INFERRED #= 1\n"
     );
 
     let mut merged = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let mut remapped_path_fork = PathInternerFork::empty();
     merged.intern("unrelated");
+    let remap = merged.merge_from(&strings);
+    let path_remap = remapped_path_fork
+        .merge_delta_from(&path_fork, &remap)
+        .expect("parsed type paths should remap");
     prepared
-        .remap_string_ids(&merged.merge_from(&strings))
+        .remap_string_ids(&remap)
         .expect("parsed type strings should remap");
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("parsed type paths should remap");
 
     drop(sources);
     let earlier_source = PathBuf::from("a-earlier.moth");
@@ -141,9 +148,11 @@ INFERRED #= 1\n"
         final_id, source_id,
         "canonical membership changes the provisional identity"
     );
-    let final_path = path_fork.try_intern_portable_path("parsed-type-spans.moth", &mut merged).expect("test path fits");
+    let final_path = remapped_path_fork
+        .try_intern_portable_path("parsed-type-spans.moth", &mut merged)
+        .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut path_fork)
+        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
         .expect("retained source should rebind");
 
     let mut database = SourceDatabaseBuilder::new(final_sources);
@@ -225,7 +234,7 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
-        &mut PathInternerFork::empty(),
+        &mut path_fork,
         0,
         0,
         &mut spans,
@@ -320,11 +329,18 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
     }
 
     let mut merged = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let mut remapped_path_fork = PathInternerFork::empty();
     merged.intern("unrelated");
+    let remap = merged.merge_from(&strings);
+    let path_remap = remapped_path_fork
+        .merge_delta_from(&path_fork, &remap)
+        .expect("generic paths should remap");
     prepared
-        .remap_string_ids(&merged.merge_from(&strings))
+        .remap_string_ids(&remap)
         .expect("generic strings should remap");
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("generic paths should remap");
 
     drop(sources);
     let earlier_source = PathBuf::from("a-earlier.moth");
@@ -339,9 +355,11 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         final_id, source_id,
         "canonical membership changes the provisional identity"
     );
-    let final_path = path_fork.try_intern_portable_path("generic-anchor-spans.moth", &mut merged).expect("test path fits");
+    let final_path = remapped_path_fork
+        .try_intern_portable_path("generic-anchor-spans.moth", &mut merged)
+        .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut path_fork)
+        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
         .expect("retained source should rebind");
 
     let mut database = SourceDatabaseBuilder::new(final_sources);

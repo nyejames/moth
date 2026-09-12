@@ -170,6 +170,7 @@ fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
     let long_bound = format!("d{}", "é".repeat(600));
     let source = format!("-- é🦋\nidentity type T is {long_bound} |value T| -> T:\n;\n");
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -190,6 +191,7 @@ fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
         0,
         0,
         &mut span_builder,
+        &mut path_fork,
     )
     .err()
     .expect("a lowercase generic bound should be rejected");
@@ -319,11 +321,13 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
             .expect("const fragment metadata")
             .span;
         let mut outputs = [output];
-        let prepared =
-            prepare_header_syntax(&mut outputs, string_table, &mut |source, diagnostic| {
-                diagnostic.capture_preparation_span(source)
-            }, &mut PathInternerFork::empty())
-            .expect("header syntax should aggregate");
+        let prepared = prepare_header_syntax(
+            &mut outputs,
+            string_table,
+            &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+            &mut path_fork,
+        )
+        .expect("header syntax should aggregate");
 
         let resolver = span_builder.resolver_for(source_id);
         let header_range = header_name_span
@@ -429,12 +433,14 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
 #[test]
 fn top_level_const_template_uses_selected_dependency_alias_path() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file_with_fork(
         "@widgets content as panel\n#[panel]\n",
         &file_path,
         &file_path,
         &mut string_table,
+        &mut path_fork,
     );
 
     let const_template_header = output
@@ -442,10 +448,11 @@ fn top_level_const_template_uses_selected_dependency_alias_path() {
         .iter()
         .find(|header| matches!(header.kind, HeaderKind::ConstTemplate { .. }))
         .expect("expected top-level const template header");
+    let mut path_scratch = Vec::new();
     let hint_paths = const_template_header
         .local_ordering_hints
         .iter()
-        .map(|hint| format!("{:?}", hint.path()))
+        .map(|hint| path_fork.render_portable(hint.path(), &string_table, &mut path_scratch))
         .collect::<Vec<_>>();
 
     assert_eq!(hint_paths, vec!["widgets/content"]);

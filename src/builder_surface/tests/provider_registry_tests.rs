@@ -25,6 +25,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -216,9 +217,11 @@ fn dummy_provider_resolves_import_with_all_fields() {
     let mut registry = ExternalPackageRegistry::default();
     let mut cache = ExternalImportProviderCache::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut context = ExternalImportProviderContext {
         package_registry: &mut registry,
         cache: &mut cache,
+        path_fork: &mut path_fork,
         string_table: &mut string_table,
     };
 
