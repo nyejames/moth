@@ -192,7 +192,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Core text package]
             [: Partial]
-            [: Targeted runtime, JS helper, arity, type-error, edge-case, unsupported-builder and Wasm-unsupported coverage.]
+            [: Targeted runtime, JS helper, arity, type-error, exact-output Unicode and negative-predicate edge-case, unsupported-builder and Wasm-unsupported coverage.]
             [: JS / HTML]
             [: [$html:<code>@core/text</code>] currently exposes length, emptiness, containment, prefix and suffix checks. [$html:<code>text.length</code>] counts Unicode scalar values with the same unit as [$html:<code>Char</code>]. The accepted next v1 slice adds scalar-indexed character access and slicing, first/last search positions, match counting, Unicode-whitespace trimming and literal replacement after native result slots and Core const evaluation land. Collection-valued split/join/lines/character surfaces wait for stable collection-valued binding signatures. Fallible [$html:<code>char_at</code>] and [$html:<code>slice</code>] can gain Rust parity immediately but compile-time evaluation waits for an accepted fallible Core evaluator. Unicode casing, case folding, normalization and grapheme operations wait for a pinned Moth-owned Unicode data policy rather than inheriting host Unicode versions. Regex and locale-sensitive text remain separate future design areas.]
         ]

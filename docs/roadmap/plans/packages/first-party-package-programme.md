@@ -17,23 +17,23 @@ plans under this directory.
 ## Current-state capsule
 
 ```text
-STATUS: active programme, parked on its compiler prerequisite
-CURRENT_SLICE: bounded pre-checkpoint hardening of the five existing `@core/text` functions - existing-behaviour coverage and allocation-free `length` counting, no new package API
-BLOCKERS: the Text v1 expansion waits for the native result-slot and Core const-eval compiler checkpoint; `just validate` also fails in `ci-clippy-native` on `clippy::result_large_err` boundaries owned by the source/token/diagnostic data-layout plan and on further lint findings in that plan's in-flight path-table fork work
-NEXT_ACTION: finish the hardening slice, then settle the red clippy lane with the roadmap owner and close Phase 0 on a green gate before Phase 2 starts from main with `core-text.md`
+STATUS: active programme; isolated existing-ABI package work runs alongside data-layout Phases 2 and 3
+CURRENT_SLICE: none - the pre-checkpoint hardening of the five shipped `@core/text` functions is delivered
+BLOCKERS: package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; `just validate` also fails in `ci-clippy-native` on `clippy::result_large_err` boundaries owned by the source/token/diagnostic data-layout plan and on further lint findings in that plan's in-flight path-table fork work
+NEXT_ACTION: choose the next isolated existing-ABI package slice, and keep Phase 0 open until the data-layout plan restores a green gate
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
 phase starts. Do not pin a moving programme to a baseline commit in this file.
 
-One bounded pre-checkpoint slice is in scope while the programme waits: hardening the five existing
-`@core/text` functions through existing-behaviour coverage and an allocation-free `length` scan. It
-adds no package API, no result-slot or const-eval capability and no new compiler surface, so it does
-not start Phase 2 and does not change the checkpoint order below.
+The pre-checkpoint hardening slice for the five shipped `@core/text` functions is delivered:
+exact-output coverage for the existing behaviour and an allocation-free `length` scan. It added no
+package API, no result-slot or const-eval capability and no new compiler surface, so Phase 2 has not
+started and the checkpoint order below is unchanged.
 
 ## Roadmap position and lifecycle
 
-The foundation and documentation baseline is merged into main. Phase 1 is delivered there and Phase 0's implementation is merged with only its `just validate` gate outstanding. The programme now waits on the compiler checkpoint below rather than running package phases alongside compiler data-layout work. The roadmap owns shared checkpoints and serial order. Each package slice keeps its own compiler prerequisites and the merge-isolation rules below.
+The foundation and documentation baseline is merged into main. Phase 1 is delivered there and Phase 0's implementation is merged with only its `just validate` gate outstanding. The roadmap records that isolated package work fitting the existing external ABI may run alongside data-layout Phases 2 and 3, while any slice needing result slots or Core const evaluation waits for the compiler checkpoint below. The roadmap owns shared checkpoints and serial order. Each package slice keeps its own compiler prerequisites and the merge-isolation rules below.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
 `docs/roadmap/plans/packages/` and are linked from the tracker in this file.
@@ -426,7 +426,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
 | 0 | Package foundations | this plan | Implementation merged; open on the red `just validate` clippy lane | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
-| 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; bounded pre-checkpoint hardening of the five shipped functions in progress | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
+| 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
 | 4 | `@core/time` | `core-time.md` | TODO: create when activated | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
@@ -644,9 +644,10 @@ current phase. Package work must not box shared diagnostic payloads to make the 
 That red lane is a recorded external blocker, not a waiver. A code-bearing package phase cannot
 finish its mandatory gate while it is red, so Phase 0 stays open on validation alone: its
 implementation, audits and every other gate lane are complete and merged, and the phase closes when
-`just validate` runs green. Root-cause removal is the data-layout plan's final phase, so the
-sequencing choice between waiting for that correction and accepting a scoped temporary allowance
-belongs to the roadmap owner. Record the decision in the roadmap before Phase 2 starts.
+`just validate` runs green. Root-cause removal is the data-layout plan's final phase. The roadmap
+owner has since accepted that isolated package work on the existing external ABI proceeds during
+data-layout Phases 2 and 3 rather than waiting for that correction, so such a slice reports the red
+lane and its own green `just validate-common` evidence instead of claiming a closed gate.
 
 ### Phase 1 - activate the living package workflow
 

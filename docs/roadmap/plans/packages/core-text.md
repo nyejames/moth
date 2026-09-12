@@ -16,20 +16,23 @@ functions until a separate language decision changes binding-backed receiver met
 ### Current-state capsule
 
 ```text
-STATUS: v1 designed and queued; bounded pre-checkpoint hardening of the existing five functions in progress
-CURRENT_SLICE: strengthen existing-behaviour coverage for the five shipped functions and replace `Array.from` counting in `__moth_text_length`
+STATUS: v1 designed and queued; pre-checkpoint hardening of the existing five functions delivered
+CURRENT_SLICE: none - the v1 expansion waits for its compiler prerequisite
 BLOCKERS: the v1 expansion still waits for the compiler-owned native result-slot and Core const-eval prerequisite
-NEXT_ACTION: finish the hardening slice below, then after the prerequisite lands audit its final Text evaluator owner and run this plan's Phase 0 from current main
+NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner and run this plan's Phase 0 from current main
 ```
 
 The package-foundation baseline this plan waited on is merged, so the compiler prerequisite is the
 only remaining blocker owned here. The umbrella programme owns cross-cutting blockers for every
 code-bearing phase, including the current red `just validate` clippy lane.
 
-The hardening slice is deliberately narrow. It may strengthen existing-behaviour tests for the five
-shipped functions and remove the `length` helper's temporary array, and it must leave registration
-shape, inline-lowering conversion, error codes, new APIs, result slots and constant evaluation to the
-phases below.
+The pre-checkpoint hardening slice is delivered. `__moth_text_length` now counts scalars with a
+single-pass `charCodeAt` scan, and both successful `tests/cases/core_text_*` cases assert their whole
+rendered line, covering non-matching and case-differing predicates, a combining sequence, non-BMP
+scalars in every position, the lowest surrogate pair with independent upper lead and trail bounds,
+decomposed-against-precomposed search, literal `.` matching, whitespace against emptiness and a
+non-empty pattern in empty text. Registration shape, inline-lowering conversion, error codes, new
+APIs, result slots and constant evaluation remain with the phases below.
 
 The prerequisite compiler work establishes truthful zero/one/many result slots, adds
 `ExternalConstEvalOp`, adds one AST-owned Core constant-evaluation path and proves it with the existing
@@ -382,8 +385,9 @@ engine-specific branches from one microbenchmark.
 
 ## Current work
 
-Implementation starts only after the native result-slot and Core const-evaluation prerequisite has
-landed and this worktree has adopted it.
+The v1 expansion phases below start only after the native result-slot and Core const-evaluation
+prerequisite has landed and this worktree has adopted it. The delivered pre-checkpoint hardening
+recorded in the capsule is the one accepted exception, and it added no API.
 
 ### Phase 0 - refresh owners and freeze contracts
 
