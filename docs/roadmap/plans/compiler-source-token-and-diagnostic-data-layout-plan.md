@@ -7,10 +7,8 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Phase 1 is delivered on main. The 2026-09-11 data-layout regression investigation on
-> `diagnostic-data-layout-changes` found no reproducible throughput regression versus the last
-> recorded CLI baseline. Mixed-freeze ownership (DLR-04) and consuming-warning drain (DLR-05) landed
-> as correctness/cleanup. Resume Phase 2 on this continuation branch. Package work proceeds in
+> Phase 1 is delivered on main. Phase 2 complete-path interning is delivered on
+> `diagnostic-data-layout-changes`. Next is Phase 3 token-store work. Package work proceeds in
 > parallel. The roadmap retains the separate checkpoint before Phase 4.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
@@ -68,27 +66,25 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 2 Slice 2B is delivered on `diagnostic-data-layout-changes`. Next: Slice 2C1
-  tokenizer and dependency `InternedPath` owners migrate onto `PathId`.
-- Goal: reuse existing string-table fork/merge tails for `PathId`, with strings merged before path
-  nodes, source logical paths remaining identity, and `InternedPath` still the unmigrated owner.
+- Phase: Phase 2 is delivered on `diagnostic-data-layout-changes`. Next: Phase 3 Slice 3A token
+  array layout selection.
+- Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
+  diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
 - Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
-  `PathInternerFork`, `merge_file_preparation_chunks` and `publish_compiled_module` merge strings
-  then paths, and `adopt_path_builder` restores the sibling before freeze. Check-only and discovery
-  preparation discard empty path forks with their transient string tables. Generated materialisation
-  forks from the enclosing module path fork. `PathNodeCount` increments only on destination intern.
-- Validation evidence: focused path_interner 20, source 59, module_preparation 21 passed.
-  Independent audit required findings fixed except project early-return adopt (deferred: split
-  borrow, no worker PathIds in 2B).
-- Non-goals: 2C InternedPath migration; 2D deletion; token-store work.
+  `PathInternerFork`, merge tails merge strings then paths, publication remaps retained `PathId`s,
+  diagnosed lanes retain issuing path tables, imported nominals intern defining names.
+- Validation evidence: `cargo check -p moth --lib` and `cargo test -p moth --lib --no-run` pass;
+  path_interner 21 passed; create_project_modules 312 passed.
+- Non-goals: Phase 3 token-store work; diagnostic compact-record work.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
 `eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and
-`3c9c776a8`; Slice 2A is `15fe3049f`.
+`3c9c776a8`; Slice 2A is `15fe3049f`; Slice 2B is `2bac27b34`; Slice 2C is `d040f08de`; Slice 2D is
+`379c77fb0`.
 
 CURRENT_WORKSPACE_STATE:
-- Phase 1 remains complete. Slice 2A and 2B path-table APIs and merge wiring are in the worktree.
-- `InternedPath` is still the unmigrated complete-path owner outside source-slot `PathId`s.
+- Phase 1 remains complete. Phase 2 PathId cutover and InternedPath deletion are committed.
+- Next work is Phase 3 fixed tokens and source-owned retained syntax.
 
 HISTORICAL_ACCEPTED_SLICES:
 Phase 0 and Phase 1 are complete on main. Per-slice delivery, review and validation logs live in
@@ -806,40 +802,40 @@ adding a contended global interner or another scheduling system.
 Each checked batch is an independent accepted slice. Delete old fields and conversion helpers in the
 same batch.
 
-- [ ] **2C1 — tokenizer and dependencies:** tokenized path rows, clause-owned dependency aliases,
+- [x] **2C1 — tokenizer and dependencies:** tokenized path rows, clause-owned dependency aliases,
   dependency-shell provider paths and path diagnostics
-- [ ] **2C2 — headers and graph facts:** header identities, dependency collections, exports, module symbols, path resolution and source/package identities
-- [ ] **2C3 — semantic types and interfaces:** parsed type paths, nominal/type lookup maps, traits, generic identities and public-surface facts; keep stable semantic origin IDs as the cross-package authority and remap or context-own every display `PathId` at interface binding
-- [ ] **2C4 — AST/TIR/HIR metadata:** declarations, scopes, constants, template metadata, HIR/link facts and build metadata
-- [ ] **2C5 — diagnostics and support:** diagnostic places/path facts, renderers, test support, snapshots and debug output
-- [ ] replace retained per-header `HashSet<InternedPath>` dependency storage with deterministic sorted/deduplicated `PathId` slices or typed arena ranges; temporary sets may exist only while collecting
+- [x] **2C2 — headers and graph facts:** header identities, dependency collections, exports, module symbols, path resolution and source/package identities
+- [x] **2C3 — semantic types and interfaces:** parsed type paths, nominal/type lookup maps, traits, generic identities and public-surface facts; keep stable semantic origin IDs as the cross-package authority and remap or context-own every display `PathId` at interface binding
+- [x] **2C4 — AST/TIR/HIR metadata:** declarations, scopes, constants, template metadata, HIR/link facts and build metadata
+- [x] **2C5 — diagnostics and support:** diagnostic places/path facts, renderers, test support, snapshots and debug output
+- [x] replace retained per-header `HashSet<InternedPath>` dependency storage with deterministic sorted/deduplicated `PathId` slices or typed arena ranges; temporary sets may exist only while collecting
 
 ### Slice 2D — Delete vector-backed canonical paths
 
-- [ ] delete `InternedPath`, its vector constructors and string-ID remap implementation
-- [ ] delete repeated path clones and allocation-based parent/append/join helpers
-- [ ] remove `HashMap<InternedPath, ...>`/`HashSet<InternedPath>` owners in favour of PathId keys
-- [ ] keep `PathBuf` only at filesystem boundaries and source cold data
-- [ ] update codebase index and module docs
+- [x] delete `InternedPath`, its vector constructors and string-ID remap implementation
+- [x] delete repeated path clones and allocation-based parent/append/join helpers
+- [x] remove `HashMap<InternedPath, ...>`/`HashSet<InternedPath>` owners in favour of PathId keys
+- [x] keep `PathBuf` only at filesystem boundaries and source cold data
+- [x] update codebase index and module docs
 
 ### Phase 2 — Audit / style-guide review / validation
 
 Complete the common phase close, plus:
 
-- [ ] audit one path identity domain per compilation context and no detached raw path ID crosses a project/package boundary
-- [ ] audit source paths stay stable while worker-created paths remap deterministically
-- [ ] audit no path identity is reconstructed from rendered text
-- [ ] audit no lock or `Arc` exists per path
-- [ ] review path APIs for explicit context and no hidden allocation
-- [ ] run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests
+- [x] audit one path identity domain per compilation context and no detached raw path ID crosses a project/package boundary
+- [x] audit source paths stay stable while worker-created paths remap deterministically
+- [x] audit no path identity is reconstructed from rendered text
+- [x] audit no lock or `Arc` exists per path
+- [x] review path APIs for explicit context and no hidden allocation
+- [x] run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests
 - [ ] record path bytes, allocation/remap counts and timing
 
 ### Phase 2 exit criteria
 
-- [ ] `PathId` is the only complete logical path identity
-- [ ] `InternedPath` is deleted
-- [ ] common compiler records carry IDs rather than owned component vectors
-- [ ] path construction and merge order are deterministic
+- [x] `PathId` is the only complete logical path identity
+- [x] `InternedPath` is deleted
+- [x] common compiler records carry IDs rather than owned component vectors
+- [x] path construction and merge order are deterministic
 
 ---
 

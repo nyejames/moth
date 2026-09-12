@@ -13,9 +13,8 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
 use crate::compiler_frontend::datatypes::{ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 
 // -------------------------------
 //  Function signature resolution
@@ -27,7 +26,7 @@ pub(crate) fn resolve_function_signature(
     signature: &FunctionSignature,
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_resolution_context: &mut TypeResolutionContext<'_>,
-    path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> TypeResolutionResult<ResolvedFunctionSignature> {
     let this_name = string_table.intern("this");
@@ -90,6 +89,7 @@ pub(crate) fn resolve_function_signature(
                 generic_parameter_list_id,
                 type_resolution_context.type_environment,
                 parameter.value.span,
+                path_fork,
                 string_table,
             )?;
 
@@ -142,6 +142,7 @@ fn receiver_key_for_resolved_parameter(
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> TypeResolutionResult<ReceiverKey> {
     if let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(receiver_type_id)
@@ -158,6 +159,7 @@ fn receiver_key_for_resolved_parameter(
                         receiver_type_id,
                         type_environment,
                         span,
+                        path_fork,
                         string_table,
                     )
                 });
@@ -168,6 +170,7 @@ fn receiver_key_for_resolved_parameter(
             receiver_type_id,
             type_environment,
             span,
+            path_fork,
             string_table,
         ));
     }
@@ -180,6 +183,7 @@ fn receiver_key_for_resolved_parameter(
                 receiver_type_id,
                 type_environment,
                 span,
+                path_fork,
                 string_table,
             )
         })
@@ -238,9 +242,10 @@ fn generic_receiver_type_diagnostic(
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    let type_name = receiver_type_name(receiver_type_id, type_environment, string_table);
+    let type_name = receiver_type_name(receiver_type_id, type_environment, path_fork, string_table);
     CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::GenericReceiverType {
             function_name: function_name_id,
@@ -255,9 +260,10 @@ fn unsupported_receiver_type_diagnostic(
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    let type_name = receiver_type_name(receiver_type_id, type_environment, string_table);
+    let type_name = receiver_type_name(receiver_type_id, type_environment, path_fork, string_table);
     CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name: function_name_id,
@@ -270,9 +276,10 @@ fn unsupported_receiver_type_diagnostic(
 fn receiver_type_name(
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> StringId {
     let spelling = diagnostic_type_spelling(receiver_type_id, type_environment);
-    let path_table = PathInternerBuilder::new().freeze();
+    let path_table = path_fork.snapshot_table();
     string_table.intern(&spelling.display_with_table(string_table, &path_table))
 }
