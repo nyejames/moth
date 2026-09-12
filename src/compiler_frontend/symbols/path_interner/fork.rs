@@ -9,7 +9,11 @@ use super::builder::{PathInternError, PathNode};
 use super::id::PathId;
 use crate::compiler_frontend::symbols::interned_path::NonUtf8PathComponent;
 use crate::compiler_frontend::symbols::string_interning::{
-    FrozenStringTable, StringId, StringTable, StringTableResolver,
+    FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
+};
+use super::remap::PathIdRemap;
+use crate::compiler_frontend::instrumentation::{
+    FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
@@ -17,7 +21,6 @@ use std::sync::Arc;
 
 /// Immutable prefix shared by every path fork in one parallel wave.
 #[derive(Debug)]
-#[allow(dead_code)] // Slice 2B wires module workers to this shared path base.
 struct PathTableBase {
     nodes: Box<[PathNode]>,
     depths: Box<[u32]>,
@@ -26,13 +29,26 @@ struct PathTableBase {
 
 /// Reusable source for cheap module-local path forks that share one inherited prefix.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Slice 2B wires module workers to this fork source.
 pub struct PathInternerForkSource {
     base: Arc<PathTableBase>,
 }
 
-#[allow(dead_code)] // Slice 2B wires module workers to this fork source.
 impl PathInternerForkSource {
+    /// Construct a standalone empty path fork for legacy frontend callers that do not
+    /// participate in a boundary path table.
+    #[allow(dead_code)] // Test-only standalone fork; production forks from the boundary builder.
+    pub fn empty() -> PathInternerFork {
+        Self::new(
+            vec![PathNode {
+                parent: None,
+                component: StringId::from_index(0),
+            }]
+            .into_boxed_slice(),
+            vec![0].into_boxed_slice(),
+            FxHashMap::default(),
+        )
+        .fork_for_module()
+    }
     pub(super) fn new(
         nodes: Box<[PathNode]>,
         depths: Box<[u32]>,
@@ -48,6 +64,7 @@ impl PathInternerForkSource {
     }
 
     /// Return the number of inherited path nodes shared by every fork.
+    #[allow(dead_code)] // Test-only prefix assertion; production carries base_len on the fork.
     pub fn base_len(&self) -> usize {
         self.base.nodes.len()
     }
@@ -70,7 +87,6 @@ impl PathInternerForkSource {
 /// prefix in append order. A fork never freezes into its own identity domain; deltas merge into
 /// the root builder before the consuming freeze.
 #[derive(Debug)]
-#[allow(dead_code)] // Slice 2B wires module workers to this path delta.
 pub struct PathInternerFork {
     base: Arc<PathTableBase>,
     base_len: usize,
@@ -79,8 +95,12 @@ pub struct PathInternerFork {
     lookup: FxHashMap<(PathId, StringId), PathId>,
 }
 
-#[allow(dead_code)] // Slice 2B wires module workers to this path delta.
 impl PathInternerFork {
+    /// Construct an empty standalone fork for callers outside a boundary merge.
+    #[allow(dead_code)] // Test-only standalone fork; production forks from the boundary builder.
+    pub fn empty() -> Self {
+        PathInternerForkSource::empty()
+    }
     /// Return the inherited prefix length this fork was created from.
     pub fn base_len(&self) -> usize {
         self.base_len
@@ -92,6 +112,7 @@ impl PathInternerFork {
     }
 
     /// Return whether `path` was issued by this fork or its inherited base.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn contains(&self, path: PathId) -> bool {
         path.index() < self.len()
     }
@@ -112,6 +133,7 @@ impl PathInternerFork {
     }
 
     /// Return the parent path, or `None` for the root.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn parent(&self, path: PathId) -> Option<PathId> {
         let index = path.index();
 
@@ -134,6 +156,7 @@ impl PathInternerFork {
     }
 
     /// Return the final component, or `None` for the root path.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn component(&self, path: PathId) -> Option<StringId> {
         if path == PathId::ROOT {
             return None;
@@ -186,6 +209,7 @@ impl PathInternerFork {
     }
 
     /// Return whether `path` descends from `prefix` without allocating.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn starts_with(&self, path: PathId, prefix: PathId) -> bool {
         let path_depth = self.depth(path);
         let prefix_depth = self.depth(prefix);
@@ -206,6 +230,7 @@ impl PathInternerFork {
     }
 
     /// Return whether `path` ends with `suffix` without allocating.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn ends_with(&self, path: PathId, suffix: PathId) -> bool {
         let path_depth = self.depth(path);
         let suffix_depth = self.depth(suffix);
@@ -234,6 +259,7 @@ impl PathInternerFork {
     }
 
     /// Fill `scratch` with `path`'s components in forward order and return that slice.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn resolve_components<'a>(
         &self,
         path: PathId,
@@ -261,6 +287,7 @@ impl PathInternerFork {
     }
 
     /// Render a path with portable forward-slash separators.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_portable(
         &self,
         path: PathId,
@@ -271,6 +298,7 @@ impl PathInternerFork {
     }
 
     /// Render a path using immutable strings after the identity freeze boundary.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_portable_frozen(
         &self,
         path: PathId,
@@ -280,6 +308,7 @@ impl PathInternerFork {
         self.render_portable_with(path, string_table, scratch)
     }
 
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     fn render_portable_with<T: StringTableResolver + ?Sized>(
         &self,
         path: PathId,
@@ -300,6 +329,7 @@ impl PathInternerFork {
     }
 
     /// Render a path as a native `PathBuf` by pushing each resolved component.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_native(
         &self,
         path: PathId,
@@ -310,6 +340,7 @@ impl PathInternerFork {
     }
 
     /// Render a native path using immutable strings after the freeze boundary.
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_native_frozen(
         &self,
         path: PathId,
@@ -319,6 +350,7 @@ impl PathInternerFork {
         self.render_native_with(path, string_table, scratch)
     }
 
+    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     fn render_native_with<T: StringTableResolver + ?Sized>(
         &self,
         path: PathId,
@@ -362,7 +394,6 @@ impl PathInternerFork {
         });
         self.depths.push(child_depth);
         self.lookup.insert((parent, component), child);
-
         Some(child)
     }
 
@@ -370,6 +401,7 @@ impl PathInternerFork {
     ///
     /// Caller-owned `scratch` carries the forward component walk. `None` reports authored
     /// exhaustion of the compact path-node domain.
+    #[allow(dead_code)] // Phase 2 migrates semantic path producers to this fork surface.
     pub fn try_join(
         &mut self,
         prefix: PathId,
@@ -392,6 +424,7 @@ impl PathInternerFork {
     }
 
     /// Intern a filesystem path using the exact component semantics shared with `InternedPath`.
+    #[allow(dead_code)] // Phase 2 migrates semantic path producers to this fork surface.
     pub fn try_intern_filesystem_path(
         &mut self,
         path: &Path,
@@ -416,6 +449,7 @@ impl PathInternerFork {
     }
 
     /// Intern a portable forward-slash path without changing its exact separator spelling.
+    #[allow(dead_code)] // Phase 2 migrates semantic path producers to this fork surface.
     pub fn try_intern_portable_path(
         &mut self,
         spelling: &str,
@@ -436,5 +470,89 @@ impl PathInternerFork {
         }
 
         Ok(path)
+    }
+    /// Snapshot this fork's full table (inherited prefix plus local delta) into a reusable
+    /// source for sub-forks, such as file-preparation chunks forked from one module-local fork.
+    pub fn fork_source(&self) -> PathInternerForkSource {
+        let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
+        nodes.extend_from_slice(&self.base.nodes);
+        nodes.extend_from_slice(&self.nodes);
+        let mut depths = Vec::with_capacity(self.base.depths.len() + self.depths.len());
+        depths.extend_from_slice(&self.base.depths);
+        depths.extend_from_slice(&self.depths);
+        let mut lookup = self.base.lookup.clone();
+        lookup.extend(self.lookup.iter().map(|(key, value)| (*key, *value)));
+        PathInternerForkSource::new(
+            nodes.into_boxed_slice(),
+            depths.into_boxed_slice(),
+            lookup,
+        )
+    }
+
+    /// Merge one sub-fork delta (forked from this fork's snapshot) into this fork.
+    ///
+    /// WHAT: re-interns each sub-fork-local node through this fork's lookup so independently
+    ///       interned complete paths collapse to one module-local `PathId`.
+    /// WHY: file-preparation chunks fork from one module-local snapshot and merge back before
+    ///      the module delta merges into the boundary builder. String components are rewritten
+    ///      through `string_remap` first, mirroring the boundary merge. Merge order is the
+    ///      caller's canonical chunk order.
+    pub fn merge_delta_from(
+        &mut self,
+        delta: &PathInternerFork,
+        string_remap: &StringIdRemap,
+    ) -> Result<PathIdRemap, PathInternError> {
+        let delta_base_len = delta.base_len();
+        debug_assert!(delta_base_len <= self.len());
+        debug_assert!(delta_base_len <= delta.len());
+        #[cfg(debug_assertions)]
+        for index in 0..delta_base_len {
+            let expected = PathId::try_from_index(index)
+                .expect("a fork base must address its own prefix");
+            debug_assert_eq!(self.try_parent(expected), delta.try_parent(expected));
+            debug_assert_eq!(self.try_component(expected), delta.try_component(expected));
+            debug_assert_eq!(self.try_depth(expected), delta.try_depth(expected));
+        }
+        increment_frontend_counter(FrontendCounter::PathDeltaMergeCalls);
+        add_frontend_counter(FrontendCounter::PathDeltaEntriesScanned, delta.local_len());
+        let local_len = delta.local_len();
+        let mut mapped_suffix = Vec::with_capacity(local_len);
+        let mut is_identity = true;
+        let mut non_identity_entries = 0usize;
+        for offset in 0..local_len {
+            let old_index = delta_base_len + offset;
+            let node = delta.local_node(offset);
+            let parent = node.parent.expect("a worker-local node must carry a parent");
+            let parent_index = parent.index();
+            let remapped_parent = if parent_index < delta_base_len {
+                parent
+            } else {
+                let parent_offset = parent_index - delta_base_len;
+                debug_assert!(
+                    parent_offset < offset,
+                    "a delta parent must precede its child in node-index order"
+                );
+                mapped_suffix[parent_offset]
+            };
+            let remapped_component = string_remap.get(node.component);
+            let merged = self
+                .try_intern_child(remapped_parent, remapped_component)
+                .ok_or(PathInternError::TableFull)?;
+            if merged.index() != old_index {
+                is_identity = false;
+                non_identity_entries += 1;
+            }
+            mapped_suffix.push(merged);
+        }
+        if is_identity {
+            increment_frontend_counter(FrontendCounter::PathDeltaIdentityRemaps);
+        } else {
+            increment_frontend_counter(FrontendCounter::PathDeltaNonIdentityRemaps);
+            add_frontend_counter(
+                FrontendCounter::PathDeltaNonIdentityEntries,
+                non_identity_entries,
+            );
+        }
+        Ok(PathIdRemap::new(delta_base_len, mapped_suffix, is_identity))
     }
 }

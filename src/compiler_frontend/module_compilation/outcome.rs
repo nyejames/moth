@@ -12,6 +12,7 @@ use crate::compiler_frontend::module_compilation::generated::GeneratedFunctionDe
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 /// Typed result of one retained module's semantic compilation.
 ///
 /// `Success` carries the complete unmerged semantic result plus its local string-table delta.
@@ -46,6 +47,10 @@ pub(crate) struct ModuleSemanticResult {
     /// semantic compilation. Merged into the build table once per module so downstream consumers
     /// see a single remapped table.
     pub(crate) string_table: StringTable,
+    /// The module-local path fork carrying every `PathId` interned through semantic
+    /// compilation. Merged into the build table once per module after the string delta,
+    /// so source-prefix identities stay stable.
+    pub(crate) path_fork: PathInternerFork,
     /// The closed and publication-validated semantic interface. Provider-owned re-export facts
     /// have already joined through immutable completed interfaces, so the graph can publish this
     /// value directly after the deterministic string-table merge.

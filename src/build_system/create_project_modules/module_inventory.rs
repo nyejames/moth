@@ -30,6 +30,7 @@ use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
+use crate::compiler_frontend::symbols::path_interner::{PathInternerBuilder, PathInternerForkSource};
 use crate::projects::settings::Config;
 use rustc_hash::FxHashMap;
 
@@ -75,6 +76,7 @@ struct ModuleEntrySeed {
 struct ModuleCompilationJobDraft {
     module_id: ModuleId,
     string_table_base_len: usize,
+    path_base_len: usize,
     prepared: PreparedModule,
     #[cfg(feature = "timers")]
     timing_module_key: crate::timing::TimingModuleKey,
@@ -92,6 +94,8 @@ pub(crate) struct ModuleCompilationJob {
     #[cfg(test)]
     pub(crate) stable_origin: StableModuleOriginIdentity,
     pub(crate) string_table_base_len: usize,
+    /// Prefix length used when merging this job's local path fork.
+    pub(crate) path_base_len: usize,
     pub(crate) prepared: PreparedModule,
     #[cfg(feature = "timers")]
     pub(crate) timing_module_key: crate::timing::TimingModuleKey,
@@ -119,6 +123,8 @@ pub(crate) struct CheckOnlyModuleCompilationJob {
     pub(crate) owner_module_id: ModuleId,
     /// Prefix length used when merging this job's local string table.
     pub(crate) string_table_base_len: usize,
+    /// Prefix length used when merging this job's local path fork.
+    pub(crate) path_base_len: usize,
     /// Provider-module bindings resolved for retained clauses in this source only.
     pub(crate) provider_bindings: Vec<CheckOnlyProviderBinding>,
     /// Source-package bindings resolved for retained clauses in this source only.
@@ -236,6 +242,7 @@ impl ModuleCompilationSchedule {
         external_imports: &mut ExternalImportDiscoveryState<'_>,
         directory_dependency_resolution: DirectoryDependencyResolution<'_>,
         string_table: &mut StringTable,
+        path_interner: &mut PathInternerBuilder,
         selected_source_texts: &mut SelectedSourceTextMap,
     ) -> Result<(), PremergeFailure> {
         let specs = std::mem::take(&mut self.check_only_specs);
@@ -248,6 +255,7 @@ impl ModuleCompilationSchedule {
             project_path_resolver: Some(project_path_resolver.clone()),
         };
         let fork_source = string_table.fork_source();
+        let path_fork_source = path_interner.fork_source();
         for spec in specs {
             let CheckOnlyModuleSpec {
                 owner_module_id,
@@ -269,6 +277,7 @@ impl ModuleCompilationSchedule {
                 Arc::clone(&self.source_module_origins),
                 stable_origin,
                 &fork_source,
+                &path_fork_source,
                 selected_source_texts,
             )?);
         }
@@ -320,6 +329,7 @@ pub(crate) fn discover_all_modules_in_project(
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
+    path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PremergeFailure> {
     let mut selected_source_texts = SelectedSourceTextMap::default();
@@ -336,6 +346,7 @@ pub(crate) fn discover_all_modules_in_project(
         false,
         &mut selected_source_texts,
         string_table,
+        path_interner,
         #[cfg(feature = "timers")]
         timing_boundary,
     )
@@ -358,6 +369,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
+    path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PremergeFailure> {
     discover_all_modules_in_boundary(
@@ -374,6 +386,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
         include_check_only,
         selected_source_texts,
         string_table,
+        path_interner,
         #[cfg(feature = "timers")]
         timing_boundary,
     )
@@ -395,6 +408,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
+    path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PremergeFailure> {
     discover_all_modules_in_boundary(
@@ -411,6 +425,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
         include_check_only,
         selected_source_texts,
         string_table,
+        path_interner,
         #[cfg(feature = "timers")]
         timing_boundary,
     )
@@ -431,6 +446,7 @@ fn discover_all_modules_in_boundary(
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
+    path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PremergeFailure> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
@@ -481,6 +497,7 @@ fn discover_all_modules_in_boundary(
         resource_inputs,
         include_check_only,
         string_table,
+        path_interner,
         #[cfg(feature = "timers")]
         timing_boundary,
     )?;
@@ -608,6 +625,7 @@ fn prepare_check_only_module(
     source_module_origins: Arc<SourceModuleOriginTable>,
     stable_origin: StableModuleOriginIdentity,
     fork_source: &StringTableForkSource,
+    path_fork_source: &PathInternerForkSource,
     selected_source_texts: &mut SelectedSourceTextMap,
 ) -> Result<CheckOnlyModuleCompilationJob, PremergeFailure> {
     let candidate_source_ids = compiler_source_ids_for_indices(
@@ -651,10 +669,11 @@ fn prepare_check_only_module(
         .enumerate()
         .map(|(order, source_index)| (*source_index, order))
         .collect::<FxHashMap<_, _>>();
-
     let entry_file_path = source.canonical_path().to_path_buf();
     let fork = fork_source.fork_for_module();
     let (local_string_table, string_table_base_len) = fork.into_parts();
+    let path_fork = path_fork_source.fork_for_module();
+    let path_base_len = path_fork.base_len();
     let mut syntax = preparation_context.begin_syntax_discovery(
         stable_origin,
         RegisteredModuleSources {
@@ -664,6 +683,7 @@ fn prepare_check_only_module(
         &entry_file_path,
         Some(FileRole::Normal),
         local_string_table,
+        path_fork,
         selected_source_texts,
         #[cfg(feature = "timers")]
         None,
@@ -909,6 +929,7 @@ fn prepare_check_only_module(
     Ok(CheckOnlyModuleCompilationJob {
         owner_module_id,
         string_table_base_len,
+        path_base_len,
         provider_bindings,
         source_package_dependencies,
         external_packages: Arc::new(isolated_external_packages),
@@ -1029,6 +1050,7 @@ fn order_discovered_modules_by_compile_waves(
                 #[cfg(test)]
                 stable_origin,
                 string_table_base_len: draft.string_table_base_len,
+                path_base_len: draft.path_base_len,
                 prepared: draft.prepared,
                 #[cfg(feature = "timers")]
                 timing_module_key: draft.timing_module_key,
@@ -1072,6 +1094,7 @@ fn discover_modules_serial_provider_capable(
     resource_inputs: &mut ResourceInputRegistry,
     include_check_only: bool,
     string_table: &mut StringTable,
+    path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationJobBatch, PremergeFailure> {
     let ModuleDiscoveryContext {
@@ -1089,6 +1112,7 @@ fn discover_modules_serial_provider_capable(
     let mut source_package_dependencies = Vec::new();
     let mut check_only_specs = Vec::new();
     let fork_source = string_table.fork_source();
+    let path_fork_source = path_interner.fork_source();
     let preparation_context = ModulePreparationContext {
         source_files,
         style_directives,
@@ -1143,6 +1167,7 @@ fn discover_modules_serial_provider_capable(
 
         let fork = fork_source.fork_for_module();
         let (local_string_table, string_table_base_len) = fork.into_parts();
+        let path_fork = path_fork_source.fork_for_module();
         let mut syntax = preparation_context.begin_syntax_discovery(
             stable_origin.clone(),
             RegisteredModuleSources {
@@ -1152,6 +1177,7 @@ fn discover_modules_serial_provider_capable(
             &seed.entry_path,
             None,
             local_string_table,
+            path_fork,
             selected_source_texts,
             #[cfg(feature = "timers")]
             timing_context,
@@ -1340,9 +1366,11 @@ fn discover_modules_serial_provider_capable(
                 stable_origin: stable_origin.clone(),
             });
         }
+        let path_base_len = prepared.semantic.path_fork.base_len();
         drafts.push(ModuleCompilationJobDraft {
             module_id: seed.module_id,
             string_table_base_len,
+            path_base_len,
             prepared,
             #[cfg(feature = "timers")]
             timing_module_key,

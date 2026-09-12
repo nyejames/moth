@@ -210,9 +210,11 @@ fn materialise_generated_request<'build>(
     }));
 
     let first_nested_sidecar = transaction.sidecar_count();
+    let generated_path_fork = compiler.path_fork.fork_source().fork_for_module();
     let mut generated_compiler = CompilerFrontend::new(
         context.options.clone(),
         generated_string_table,
+        generated_path_fork,
         context.style_directives,
         &context.external_packages,
         context.project_path_resolver,

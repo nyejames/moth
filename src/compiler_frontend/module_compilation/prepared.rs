@@ -19,6 +19,7 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -64,6 +65,11 @@ pub(crate) struct PreparedModuleInput {
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
     /// Local module string table forked for this module during file preparation.
     pub(crate) string_table: StringTable,
+    /// Local module path fork carrying every `PathId` interned during file preparation.
+    /// Merged into the boundary builder once per module alongside the string table, so
+    /// downstream consumers see single remapped identities. Source-prefix `PathId`s stay
+    /// identity through the merge.
+    pub(crate) path_fork: PathInternerFork,
     /// Warnings accumulated during file preparation.
     pub(crate) warnings: Vec<CompilerDiagnostic>,
     /// Number of source files in the module, for arena capacity estimation.

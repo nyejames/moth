@@ -27,6 +27,7 @@ use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::Config;
@@ -129,14 +130,23 @@ pub(super) fn publish_compiled_module(
     expected_origin: &StableModuleOriginIdentity,
     compiled: ModuleSemanticResult,
     string_table_base_len: usize,
+    path_base_len: usize,
     string_table: &mut StringTable,
+    path_interner: &mut PathInternerBuilder,
 ) -> Result<(), CompilerError> {
     let remap = string_table.merge_delta_from(&compiled.string_table, string_table_base_len);
+    debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
+    let _path_remap = path_interner
+        .merge_delta_from(&compiled.path_fork, &remap)
+        .map_err(|error| {
+            CompilerError::compiler_error(format!("module path merge failed: {error:?}"))
+        })?;
     let ModuleSemanticResult {
         mut module,
         mut generated_delta,
         resource_source_associations,
         string_table: _,
+        path_fork: _,
         public_interface,
     } = compiled;
     if !remap.is_identity() {
@@ -224,6 +234,7 @@ struct SourcePackageModuleInventory {
     root_module_id: ModuleId,
     path_resolver: ProjectPathResolver,
     source_files: SourceDatabaseBuilder,
+    path_interner: PathInternerBuilder,
     graph: ProjectModuleGraph,
     schedule: module_inventory::ModuleCompilationSchedule,
     /// Canonical source facts merged before transient jobs fork their string-table base.
@@ -241,6 +252,7 @@ struct SourcePackageCheckOnlyInventory {
     dependency_prefix: String,
     path_resolver: ProjectPathResolver,
     source_files: SourceDatabaseBuilder,
+    path_interner: PathInternerBuilder,
     check_only_jobs: Vec<module_inventory::CheckOnlyModuleCompilationJob>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
@@ -707,6 +719,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 string_table,
             )?;
         let (project_source_files, mut project_source_spans) = project_sources.split();
+        let mut project_path_interner = project_source_files.clone_path_builder();
         let mut selected_source_texts = SelectedSourceTextMap::default();
         let config_globals = builder_surface.config_globals().clone();
 
@@ -755,6 +768,7 @@ fn compile_directory_frontend_in_premerge_lane(
             let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
             let mut package_selected_source_texts = SelectedSourceTextMap::default();
             let (package_source_files, mut package_source_spans) = package_sources.split();
+            let mut path_interner = package_source_files.clone_path_builder();
             timing_scope_attributed!(
                 timing_guard_build_boundary_inventory_2,
                 crate::timing::TimingMetric::BoundaryInventory,
@@ -774,6 +788,7 @@ fn compile_directory_frontend_in_premerge_lane(
                     mode.includes_check_only(),
                     &mut package_selected_source_texts,
                     string_table,
+                    &mut path_interner,
                     #[cfg(feature = "timers")]
                     timing_boundary,
                 );
@@ -816,6 +831,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 root_module_id,
                 path_resolver: package_path_resolver,
                 source_files: package_sources,
+                path_interner,
                 graph: package_graph,
                 schedule: package_waves,
                 canonical_source_facts,
@@ -857,6 +873,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 mode.includes_check_only(),
                 &mut selected_source_texts,
                 string_table,
+                &mut project_path_interner,
                 #[cfg(feature = "timers")]
                 project_timing_boundary,
             );
@@ -912,6 +929,7 @@ fn compile_directory_frontend_in_premerge_lane(
                     &mut external_imports,
                     package_resolution,
                     string_table,
+                    &mut inventory.path_interner,
                     &mut selected_source_texts,
                 );
                 let _ = source_spans;
@@ -949,6 +967,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 string_table,
+                &mut project_path_interner,
                 &mut selected_source_texts,
             )
         } else {
@@ -1056,7 +1075,8 @@ fn compile_directory_frontend_in_premerge_lane(
                 package_identity,
                 root_module_id,
                 path_resolver,
-                source_files,
+                mut source_files,
+                mut path_interner,
                 graph,
                 schedule,
                 canonical_source_facts: source_facts,
@@ -1113,6 +1133,7 @@ fn compile_directory_frontend_in_premerge_lane(
                         &source_package_dependencies,
                         &mut resource_inputs,
                         string_table,
+                        &mut path_interner,
                     )?;
                 let mut dependency_prefixes = Vec::new();
                 let mut seen_dependency_prefixes = FxHashSet::default();
@@ -1136,7 +1157,10 @@ fn compile_directory_frontend_in_premerge_lane(
             })();
             let (build_config_values, batches) = match result {
                 Ok(value) => value,
-                Err(failure) => return Err(finalize_package_failure(failure, source_files)),
+                Err(failure) => {
+                    source_files.sources_mut().adopt_path_builder(path_interner);
+                    return Err(finalize_package_failure(failure, source_files));
+                }
             };
             source_package_check_only_inventories.push(SourcePackageCheckOnlyInventory {
                 dependency_prefix,
@@ -1148,6 +1172,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 canonical_source_facts: source_facts,
                 build_config_values,
                 batches,
+                path_interner,
             });
         }
         completed_source_packages.validate_dependency_edges()?;
@@ -1157,7 +1182,7 @@ fn compile_directory_frontend_in_premerge_lane(
         for inventory in source_package_check_only_inventories {
             let SourcePackageCheckOnlyInventory {
                 dependency_prefix,
-                source_files,
+                mut source_files,
                 path_resolver,
                 check_only_jobs,
                 provider_bindings,
@@ -1165,6 +1190,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 canonical_source_facts,
                 build_config_values,
                 mut batches,
+                mut path_interner,
             } = inventory;
             let result: Result<_, PremergeFailure> = (|| {
                 let package_id = completed_source_packages
@@ -1201,6 +1227,7 @@ fn compile_directory_frontend_in_premerge_lane(
                         &provider_bindings,
                         &source_package_dependencies,
                         string_table,
+                        &mut path_interner,
                     )?;
                 Ok((package_id, check_only_batches))
             })();
@@ -1208,6 +1235,7 @@ fn compile_directory_frontend_in_premerge_lane(
             // and failures convert/attach exactly once with this snapshot. A finished
             // source keeps a failure package-scoped; a failed finish keeps the deferred
             // failure authoritative and chains the finish failure beside it.
+            source_files.sources_mut().adopt_path_builder(path_interner);
             let finish_outcome = source_files.finish();
             let (result, finalized_source) = match (result, finish_outcome) {
                 (result, Ok(finished)) => (result, finished),
@@ -1277,6 +1305,7 @@ fn compile_directory_frontend_in_premerge_lane(
             &project_source_package_dependencies,
             &mut resource_inputs,
             string_table,
+            &mut project_path_interner,
         )?;
         for batch in project_batches {
             transient_batches.push(TransientPremergeBatch::project(batch));
@@ -1285,6 +1314,10 @@ fn compile_directory_frontend_in_premerge_lane(
         timing_guard_build_boundary_compile_2.finish();
         #[cfg(feature = "timers")]
         timing_guard_stage0_directory_compile.finish();
+
+        project_sources
+            .sources_mut()
+            .adopt_path_builder(project_path_interner);
         Ok(ProjectFrontendCompilation::new_with_transient_messages(
             project_boundary,
             completed_source_packages,
@@ -1292,12 +1325,12 @@ fn compile_directory_frontend_in_premerge_lane(
             transient_batches,
         )?)
     })();
+    let finish_outcome = project_sources.finish();
     // Finalize the project source owner beside the semantic result. A finished source keeps
     // current attachment behavior; a failed finish has no snapshot, so the semantic
     // failure stays authoritative and the finish failure chains beside it for the
     // public tail to render. A successful result with a failed finish surfaces only
     // the finish infrastructure error.
-    let finish_outcome = project_sources.finish();
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {

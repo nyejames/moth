@@ -65,6 +65,7 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -546,6 +547,7 @@ fn discover_modules_for_test_with_resource_inputs(
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let schedule_result = {
         let (source_files, mut source_spans) = source_owner.split();
+        let mut path_interner = source_files.clone_path_builder();
         discover_all_modules_in_project_with_check_only(
             config,
             resolver,
@@ -559,6 +561,7 @@ fn discover_modules_for_test_with_resource_inputs(
             false,
             &mut selected_source_texts,
             &mut string_table,
+            &mut path_interner,
             #[cfg(feature = "timers")]
             crate::timing::NO_TIMING_BOUNDARY,
         )
@@ -654,6 +657,7 @@ fn discover_modules_for_test_with_providers(
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let schedule_result = {
         let (source_files, mut source_spans) = source_owner.split();
+        let mut path_interner = source_files.clone_path_builder();
         discover_all_modules_in_project_with_check_only(
             config,
             resolver,
@@ -667,6 +671,7 @@ fn discover_modules_for_test_with_providers(
             false,
             &mut selected_source_texts,
             &mut string_table,
+            &mut path_interner,
             #[cfg(feature = "timers")]
             crate::timing::NO_TIMING_BOUNDARY,
         )
@@ -974,6 +979,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             &mut span_view,
             &entry_file_path,
             local_string_table,
+            PathInternerFork::empty(),
             source_byte_count,
             None,
         )
@@ -986,6 +992,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             &mut span_view,
             &entry_file_path,
             local_string_table,
+            PathInternerFork::empty(),
             source_byte_count,
         )
         .expect("synthetic outputs should prepare against the retained source table");
@@ -1059,6 +1066,7 @@ fn discover_modules_and_graph_for_test(
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let modules = {
         let (source_files, mut source_spans) = source_owner.split();
+        let mut path_interner = source_files.clone_path_builder();
         discover_all_modules_in_project_with_check_only(
             config,
             resolver,
@@ -1072,6 +1080,7 @@ fn discover_modules_and_graph_for_test(
             false,
             &mut selected_source_texts,
             &mut string_table,
+            &mut path_interner,
             #[cfg(feature = "timers")]
             crate::timing::NO_TIMING_BOUNDARY,
         )

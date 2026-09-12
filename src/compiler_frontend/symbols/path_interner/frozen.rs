@@ -16,7 +16,7 @@ use std::path::PathBuf;
 ///
 /// The table owns only parent links, component IDs and depths. The builder owns the reverse
 /// lookup while paths are being interned, then moves this table out when it freezes.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathTable {
     nodes: Vec<PathNode>,
     depths: Vec<u32>,

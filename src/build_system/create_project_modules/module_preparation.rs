@@ -32,6 +32,7 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
+use crate::compiler_frontend::symbols::path_interner::{PathInternerFork, PathInternerForkSource};
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -86,10 +87,10 @@ const FILE_PREPARATION_TARGET_TASKS_PER_THREAD: usize = 2;
 /// WHY: chunking only helps if each scheduled task does enough serial file preparation to amortize
 /// fork and scheduling overhead.
 const FILE_PREPARATION_MIN_CHUNK_SIZE: usize = 4;
-
 struct FilePreparationChunk {
     chunk_index: usize,
     local_string_table: StringTable,
+    local_path_fork: PathInternerFork,
     results: Vec<PreparedFileResult>,
     span_builders: Vec<(SourceId, ExtendedSpanBuilder)>,
 }
@@ -297,6 +298,9 @@ pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
     /// boundary. Cloning this handle does not duplicate the boundary-wide rows.
     source_module_origins: Arc<SourceModuleOriginTable>,
     string_table: StringTable,
+    /// Module-local path delta forked from the boundary builder. Discovery interns no
+    /// `PathId`s in this slice; the fork travels to the merge tail after the string delta.
+    path_fork: PathInternerFork,
     prepared_outputs: Vec<Option<FileFrontendPrepareOutput>>,
     resolved_file_references: ResolvedFileReferenceTable,
     warnings: Vec<CompilerDiagnostic>,
@@ -334,6 +338,7 @@ impl ModulePreparationContext<'_> {
         entry_file_path: &Path,
         entry_file_role: Option<FileRole>,
         string_table: StringTable,
+        path_fork: PathInternerFork,
         selected_source_texts: &'texts mut SelectedSourceTextMap,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<ModuleSyntaxDiscovery<'a, 'texts>, PremergeFailure> {
@@ -352,6 +357,7 @@ impl ModulePreparationContext<'_> {
             source_module_origins: registered_sources.source_module_origins,
             string_table,
             prepared_outputs,
+            path_fork,
             resolved_file_references: ResolvedFileReferenceTable::new(),
             warnings: Vec::new(),
             source_byte_count: 0,
@@ -389,6 +395,7 @@ impl ModulePreparationContext<'_> {
         source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
         mut string_table: StringTable,
+        mut path_fork: PathInternerFork,
         source_byte_count: usize,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<PreparedModule, PremergeFailure> {
@@ -420,6 +427,7 @@ impl ModulePreparationContext<'_> {
             {
                 self.prepare_module_files(
                     &mut string_table,
+                    &mut path_fork,
                     module,
                     source_spans,
                     entry_file_path,
@@ -451,7 +459,7 @@ impl ModulePreparationContext<'_> {
         )?;
 
         // Retain the deterministic preparation context so semantic compilation can continue
-        // against the same string table and boundary source identities.
+        // against the same string table, path fork and boundary source identities.
         Ok(PreparedModule {
             semantic: PreparedModuleInput {
                 active_root_file_id,
@@ -460,6 +468,7 @@ impl ModulePreparationContext<'_> {
                 prepared_header_syntax,
                 resolved_file_references: ResolvedFileReferenceTable::new(),
                 string_table,
+                path_fork,
                 warnings,
                 source_file_count: module_file_count,
                 source_byte_count,
@@ -523,6 +532,7 @@ impl ModulePreparationContext<'_> {
     fn prepare_module_files(
         &self,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
         module: Vec<PreparedSourceInput>,
         source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
@@ -537,12 +547,14 @@ impl ModulePreparationContext<'_> {
             entry_file_role: None,
             active_root_role,
         };
-
         // Create one shared fork source for all file-preparation workers. Each scheduled chunk
         // gets a local table forked from this immutable base, so preparation never needs mutable
         // access to the module string table during tokenization or header parsing.
         let fork_source = string_table.fork_source();
         let base_len = fork_source.base_len();
+        // Path chunks fork from the module-local path snapshot so worker `PathId`s share the
+        // module prefix and merge back in canonical chunk order after the string delta.
+        let path_fork_source = path_fork.fork_source();
 
         // Offsets are only relevant for the active module root, and there is exactly one root per
         // module. Imported and ordinary files produce zero const templates and runtime fragments, so
@@ -574,6 +586,7 @@ impl ModulePreparationContext<'_> {
         let mut preparation_chunks = Self::prepare_module_file_chunks(
             module,
             &fork_source,
+            &path_fork_source,
             &prepare_context,
             const_template_offset,
             runtime_fragment_offset,
@@ -589,6 +602,7 @@ impl ModulePreparationContext<'_> {
 
         Self::merge_file_preparation_chunks(
             string_table,
+            path_fork,
             preparation_chunks,
             module_file_count,
             base_len,
@@ -604,6 +618,7 @@ impl ModulePreparationContext<'_> {
     ///      source was never prepared and an occupied slot means one was prepared twice.
     fn merge_file_preparation_chunks(
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
         mut preparation_chunks: Vec<FilePreparationChunk>,
         module_file_count: usize,
         base_len: usize,
@@ -620,7 +635,6 @@ impl ModulePreparationContext<'_> {
         let mut diagnostics = Vec::new();
         let mut const_fragment_source_count = 0usize;
         let mut runtime_fragment_source_count = 0usize;
-
         for chunk in preparation_chunks {
             let remap = string_table.merge_delta_from(&chunk.local_string_table, base_len);
             let remap_is_identity = remap.is_identity();
@@ -630,6 +644,17 @@ impl ModulePreparationContext<'_> {
             } else {
                 add_frontend_counter(FrontendCounter::FilePreparationNonIdentityRemapCount, 1);
             }
+            // Merge the path delta after the string delta so worker `StringId` components
+            // rewrite through this chunk's string remap. Source-prefix `PathId`s stay
+            // identity; an empty worker delta is an identity remap with no payload walk.
+            let _path_remap = path_fork
+                .merge_delta_from(&chunk.local_path_fork, &remap)
+                .map_err(|error| {
+                    PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+                        "file preparation path merge failed: {error:?}"
+                    )))
+                })?;
+
 
             for prepared_file in chunk.results {
                 match prepared_file.result {
@@ -774,6 +799,7 @@ impl ModulePreparationContext<'_> {
     fn prepare_module_file_chunks(
         module: Vec<PreparedSourceInput>,
         fork_source: &StringTableForkSource,
+        path_fork_source: &PathInternerForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
         runtime_fragment_offset: usize,
@@ -793,6 +819,7 @@ impl ModulePreparationContext<'_> {
                 },
                 files.enumerate(),
                 fork_source,
+                path_fork_source,
                 prepare_context,
                 const_template_offset,
                 runtime_fragment_offset,
@@ -809,6 +836,7 @@ impl ModulePreparationContext<'_> {
                         },
                         std::iter::once((file_index, file)),
                         fork_source,
+                        path_fork_source,
                         prepare_context,
                         const_template_offset,
                         runtime_fragment_offset,
@@ -837,6 +865,7 @@ impl ModulePreparationContext<'_> {
                             plan,
                             files,
                             fork_source,
+                            path_fork_source,
                             prepare_context,
                             const_template_offset,
                             runtime_fragment_offset,
@@ -851,11 +880,13 @@ impl ModulePreparationContext<'_> {
         plan: FilePreparationChunkPlan,
         module: impl IntoIterator<Item = (usize, (PreparedSourceInput, ExtendedSpanBuilder))>,
         fork_source: &StringTableForkSource,
+        path_fork_source: &PathInternerForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
         runtime_fragment_offset: usize,
     ) -> FilePreparationChunk {
         let (mut local_string_table, _) = fork_source.fork_for_module().into_parts();
+        let local_path_fork = path_fork_source.fork_for_module();
         let mut results = Vec::with_capacity(plan.file_range.len());
         let mut span_builders = Vec::with_capacity(plan.file_range.len());
 
@@ -914,6 +945,7 @@ impl ModulePreparationContext<'_> {
         FilePreparationChunk {
             chunk_index: plan.chunk_index,
             local_string_table,
+            local_path_fork,
             results,
             span_builders,
         }
@@ -1133,6 +1165,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 prepared_header_syntax,
                 resolved_file_references: self.resolved_file_references,
                 string_table: self.string_table,
+                path_fork: self.path_fork,
                 warnings: self.warnings,
                 source_file_count,
                 source_byte_count: self.source_byte_count,

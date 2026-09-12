@@ -199,14 +199,13 @@ fn prepare_discovery_output(
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
-    source_files: &SourceDatabase,
+    source_files: &mut SourceDatabase,
     string_table: &mut StringTable,
 ) -> SourcePreparationDelta {
     // Fork a local string table so preparation never mutates the shared table while merging.
     let fork_source = string_table.fork_source();
     let base_len = fork_source.base_len();
     let (mut local_table, _) = fork_source.fork_for_module().into_parts();
-
     let entry_file_id = source_files
         .get_by_canonical_path(entry_file_path)
         .map(|identity| identity.id);
@@ -226,7 +225,6 @@ fn prepare_discovery_output(
     let mut outcome =
         CompilerFrontend::prepare_file_frontend_local(&prepare_context, input, &mut local_table);
     let remap = string_table.merge_delta_from(&local_table, base_len);
-
     outcome.result = match outcome.result {
         Ok(mut output) => output
             .remap_string_ids(&remap)

@@ -36,6 +36,7 @@ use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
@@ -259,6 +260,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
+        PathInternerFork::empty(),
         &style_directives,
         &external_package_registry,
         None,
@@ -580,6 +582,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &mut span_owners,
         &canonical_entry,
         local_table,
+        PathInternerFork::empty(),
         source_byte_count,
         None,
     );
@@ -590,6 +593,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &mut span_owners,
         &canonical_entry,
         local_table,
+        PathInternerFork::empty(),
         source_byte_count,
     );
     let prepared = prepared_result.expect("module preparation should succeed");
@@ -794,6 +798,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &mut span_owners,
         &canonical_entry,
         local_table,
+        PathInternerFork::empty(),
         source_byte_count,
         None,
     );
@@ -804,6 +809,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &mut span_owners,
         &canonical_entry,
         local_table,
+        PathInternerFork::empty(),
         source_byte_count,
     );
     let prepared = prepared_result.expect("API-only module preparation should succeed");
@@ -1028,6 +1034,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
+        PathInternerFork::empty(),
         &style_directives,
         &external_package_registry,
         None,
@@ -1104,6 +1111,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
+            &mut PathInternerFork::empty(),
             input_files,
             &mut span_owners.split().1,
             &canonical_a,
@@ -1336,6 +1344,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
+        PathInternerFork::empty(),
         &style_directives,
         &external_package_registry,
         None,
@@ -1356,6 +1365,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
+            &mut PathInternerFork::empty(),
             input_files,
             &mut span_owners.split().1,
             &entry_file_path,
@@ -1438,6 +1448,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
         super::ModulePreparationContext::prepare_module_file_chunks(
             std::mem::take(&mut fixture.input_files),
             &fork_source,
+            &PathInternerFork::empty().fork_source(),
             &prepare_context,
             0,
             0,
@@ -1454,6 +1465,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
 
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut fixture.frontend.string_table,
+        &mut PathInternerFork::empty(),
         chunks,
         input_file_count,
         base_len,
@@ -1501,6 +1513,7 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
+            &mut PathInternerFork::empty(),
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
@@ -1601,6 +1614,7 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
             super::ModulePreparationContext::prepare_module_file_chunks(
                 std::mem::take(&mut fixture.input_files),
                 &fork_source,
+                &PathInternerFork::empty().fork_source(),
                 &prepare_context,
                 0,
                 0,
@@ -1665,6 +1679,7 @@ fn chunked_file_preparation_preserves_warning_source_order() {
     let (_headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
+            &mut PathInternerFork::empty(),
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
@@ -1765,6 +1780,7 @@ fn dummy_preparation_chunk(
         chunk_index,
         local_string_table,
         results,
+        local_path_fork: PathInternerFork::empty(),
         span_builders,
     }
 }
@@ -1781,6 +1797,7 @@ fn assert_malformed_chunks_rejected(
 
     let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
+        &mut PathInternerFork::empty(),
         chunks,
         module_file_count,
         0,
@@ -1923,6 +1940,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let first_chunk = super::FilePreparationChunk {
         chunk_index: 0,
         local_string_table: first_local_table,
+        local_path_fork: PathInternerFork::empty(),
         results: vec![super::PreparedFileResult {
             file_index: 0,
             string_domain: super::PreparedFileStringDomain::ChunkLocal,
@@ -1933,6 +1951,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let second_chunk = super::FilePreparationChunk {
         chunk_index: 1,
         local_string_table: second_local_table,
+        local_path_fork: PathInternerFork::empty(),
         results: vec![
             super::PreparedFileResult {
                 file_index: 1,
@@ -1953,6 +1972,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     source_owner.retain_span_builder(second_id, second_spans);
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
+        &mut PathInternerFork::empty(),
         vec![first_chunk, second_chunk],
         3,
         base_len,
@@ -2078,6 +2098,7 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
     preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
+            &mut PathInternerFork::empty(),
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
@@ -2129,6 +2150,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
+            &mut PathInternerFork::empty(),
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,

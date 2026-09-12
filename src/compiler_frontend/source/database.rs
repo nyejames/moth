@@ -293,6 +293,29 @@ impl SourceDatabase {
         self.path_interner.paths()
     }
 
+    /// Clone the registration prefix into a compilation-owned sibling builder.
+    ///
+    /// WHAT: copies the source-registration path nodes once so file preparation and module
+    ///       compilation can fork and merge `PathId` deltas without mutating the `Arc`-shared
+    ///       lookup database.
+    /// WHY: source logical `PathId`s are the identity prefix: the clone preserves their numeric
+    ///      identities, worker deltas append after them, and the sibling is adopted back before
+    ///      the freeze so the frozen table is the full build table. Cloning happens once per
+    ///      compilation boundary, never per intern.
+    pub(crate) fn clone_path_builder(&self) -> PathInternerBuilder {
+        self.path_interner.clone()
+    }
+
+    /// Adopt a compilation-owned sibling builder back before the freeze.
+    ///
+    /// WHAT: replaces the registration prefix table with the sibling's merged full table.
+    /// WHY: the sibling shares the source prefix, so adopted source-slot `PathId`s keep their
+    ///      numeric identities while merged module-local nodes join the frozen table.
+    pub(crate) fn adopt_path_builder(&mut self, builder: PathInternerBuilder) {
+        debug_assert!(self.path_interner.len() <= builder.len());
+        self.path_interner = builder;
+    }
+
     /// Reconstruct the legacy path view for a registered source identity.
     ///
     /// This is a temporary migration bridge. The source slot stores only its `PathId`, so the

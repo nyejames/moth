@@ -51,6 +51,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, FrozenIdentityHandle
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -494,6 +495,7 @@ fn compile_fixture(
     let mut frontend = CompilerFrontend::new(
         FrontendOptions::default(),
         string_table,
+        PathInternerFork::empty(),
         &style_directives,
         &external_package_registry,
         None,

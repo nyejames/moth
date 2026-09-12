@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independent() {
     let forward = synthetic_identity_fixture(&["alpha", "beta"]);
@@ -299,6 +300,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
             &mut span_view,
             &entry_file_path,
             local_string_table,
+            PathInternerFork::empty(),
             source_byte_count,
             None,
         )
@@ -311,6 +313,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
             &mut span_view,
             &entry_file_path,
             local_string_table,
+            PathInternerFork::empty(),
             source_byte_count,
         )
         .expect("retained synthetic outputs should prepare once");

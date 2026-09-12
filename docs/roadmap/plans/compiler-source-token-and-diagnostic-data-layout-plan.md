@@ -68,31 +68,28 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 2 Slice 2A is delivered on `diagnostic-data-layout-changes`. Next: Slice 2B
-  deterministic path-identity merges at the existing string-table fork/merge boundaries.
-- Goal: keep the dense parent/component `PathId` table as the only complete-path intern, with
-  module-local deltas, remaps and a consuming freeze, while `InternedPath` remains until 2D.
-- Current code evidence: `PathInternerBuilder::fork_source` snapshots an `Arc` base; each
-  `PathInternerFork` interns an append-only suffix; `merge_delta_from` rewrites `StringId`s then
-  re-interns local nodes and returns `PathIdRemap`. Prefix `PathId`s stay identity. Parent, prefix,
-  suffix and join walk interned nodes without cloning component vectors. `PathTable` renders
-  portable `/` spellings and native `PathBuf` values through string lookup. Consuming `freeze`
-  drops reverse lookup. SourceDatabase registration and freeze flow is unchanged.
-- Validation evidence: focused `cargo test -p moth --lib compiler_frontend::symbols::path_interner`
-  20 passed. Independent read-only audit: clean, no required findings.
-- Non-goals: 2B production wiring and path counters; 2C `InternedPath` owner migration; 2D deletion;
-  token-store work; diagnostic schema/report redesign. DLR-02, DLR-03 and DLR-06 remain unmeasured
-  deferred cleanup.
+- Phase: Phase 2 Slice 2B is delivered on `diagnostic-data-layout-changes`. Next: Slice 2C1
+  tokenizer and dependency `InternedPath` owners migrate onto `PathId`.
+- Goal: reuse existing string-table fork/merge tails for `PathId`, with strings merged before path
+  nodes, source logical paths remaining identity, and `InternedPath` still the unmigrated owner.
+- Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
+  `PathInternerFork`, `merge_file_preparation_chunks` and `publish_compiled_module` merge strings
+  then paths, and `adopt_path_builder` restores the sibling before freeze. Check-only and discovery
+  preparation discard empty path forks with their transient string tables. Generated materialisation
+  forks from the enclosing module path fork. `PathNodeCount` increments only on destination intern.
+- Validation evidence: focused path_interner 20, source 59, module_preparation 21 passed.
+  Independent audit required findings fixed except project early-return adopt (deferred: split
+  borrow, no worker PathIds in 2B).
+- Non-goals: 2C InternedPath migration; 2D deletion; token-store work.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
 `eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and
-`3c9c776a8`; the plan sequence is committed through the final review-correction checkpoint.
+`3c9c776a8`; Slice 2A is `15fe3049f`.
 
 CURRENT_WORKSPACE_STATE:
-- Phase 1 source, token, diagnostic, renderer and ownership corrections remain complete.
-- Slice 2A path-table fork, remap, freeze and allocation-free identity operations are in the
-  worktree and ready to wire at existing merge boundaries.
+- Phase 1 remains complete. Slice 2A and 2B path-table APIs and merge wiring are in the worktree.
 - `InternedPath` is still the unmigrated complete-path owner outside source-slot `PathId`s.
+
 HISTORICAL_ACCEPTED_SLICES:
 Phase 0 and Phase 1 are complete on main. Per-slice delivery, review and validation logs live in
 Git. The compact Phase 0/1 summary below keeps standing contracts, later-phase prerequisites and
@@ -796,13 +793,13 @@ adding a contended global interner or another scheduling system.
 
 ### Slice 2B — Reuse existing deterministic identity merges
 
-- [ ] mirror the existing string-table immutable-base fork at module scope only where PathIds must exist during module compilation
-- [ ] merge string IDs before path nodes because path records contain `StringId`
-- [ ] merge path deltas in the same file/chunk and module order already used by frontend orchestration
-- [ ] remap PathIds exactly once at each existing merge boundary
-- [ ] keep source logical paths in the immutable build base so they never remap
-- [ ] do not add a new scheduler, global lock, atomic ID allocator or generic interner framework
-- [ ] extend existing counters for path nodes, unique complete paths, depth, merges and remaps
+- [x] mirror the existing string-table immutable-base fork at module scope only where PathIds must exist during module compilation
+- [x] merge string IDs before path nodes because path records contain `StringId`
+- [x] merge path deltas in the same file/chunk and module order already used by frontend orchestration
+- [x] remap PathIds exactly once at each existing merge boundary
+- [x] keep source logical paths in the immutable build base so they never remap
+- [x] do not add a new scheduler, global lock, atomic ID allocator or generic interner framework
+- [x] extend existing counters for path nodes, unique complete paths, depth, merges and remaps
 
 ### Slice group 2C — Migrate compiler path owners
 

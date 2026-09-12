@@ -7,6 +7,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
 use super::super::module_artifact_store::ModuleArtifactStore;
@@ -53,6 +54,7 @@ pub(super) fn compile_check_only_jobs_after_canonical(
     provider_bindings: &[ResolvedDependencyEdge],
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     string_table: &mut StringTable,
+    path_interner: &mut PathInternerBuilder,
 ) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
     let mut provider_materialisations =
         seed_completed_package_materialisations(context.completed_packages())?;
@@ -77,5 +79,6 @@ pub(super) fn compile_check_only_jobs_after_canonical(
         &source_package_dependency_index,
         &build_config_index,
         string_table,
+        path_interner,
     )
 }

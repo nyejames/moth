@@ -109,6 +109,7 @@ pub struct StringIdRemap {
 }
 
 impl StringIdRemap {
+
     pub fn get(&self, old: StringId) -> StringId {
         let old_index = old.0 as usize;
         if old_index < self.identity_prefix_len {

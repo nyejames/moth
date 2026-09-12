@@ -330,6 +330,7 @@ fn compile_single_file_frontend_with_target(
     // immutable database beside the retained span builders, and the builder stays the exclusive
     // owner that finalizes every table after the last span producer returns.
     let (source_files, mut source_spans) = source_owner.split();
+    let mut path_interner = source_files.clone_path_builder();
 
     // Share the effective external package registry immutably for the rest of the frontend
     // pipeline so each stage does not need its own deep clone.
@@ -342,6 +343,8 @@ fn compile_single_file_frontend_with_target(
 
         let string_table_fork = string_table.fork_for_module();
         let (local_table, base_len) = string_table_fork.into_parts();
+        let path_fork = path_interner.fork_source().fork_for_module();
+        let path_base_len = path_fork.base_len();
 
         timing_scope_attributed!(
             timing_guard_boundary_compile,
@@ -395,6 +398,7 @@ fn compile_single_file_frontend_with_target(
             &mut source_spans,
             &entry_path,
             local_table,
+            path_fork,
             source_byte_count,
             timing_module_context,
         );
@@ -405,6 +409,7 @@ fn compile_single_file_frontend_with_target(
             &mut source_spans,
             &entry_path,
             local_table,
+            path_fork,
             source_byte_count,
         );
         let mut prepared = prepare_result?;
@@ -525,7 +530,9 @@ fn compile_single_file_frontend_with_target(
                     &graph_stable_origin,
                     *compiled,
                     base_len,
+                    path_base_len,
                     string_table,
+                    &mut path_interner,
                 )?;
                 Vec::new()
             }
@@ -560,6 +567,7 @@ fn compile_single_file_frontend_with_target(
     // current attachment behavior; a failed finish keeps the semantic failure
     // authoritative and chains the finish failure beside it instead of replacing it.
     // A successful result with a failed finish surfaces only the finish error.
+    source_owner.sources_mut().adopt_path_builder(path_interner);
     let finish_outcome = source_owner.finish();
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),

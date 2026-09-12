@@ -35,6 +35,7 @@ use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 
 use crate::projects::settings::Config;
 
@@ -65,6 +66,7 @@ use super::{
 struct DirectoryModuleTaskResult {
     module_id: ModuleId,
     string_table_base_len: usize,
+    path_base_len: usize,
     outcome: DirectoryModuleTaskOutcome,
 }
 
@@ -525,6 +527,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         let module_inventory::ModuleCompilationJob {
             module_id,
             string_table_base_len: base_len,
+            path_base_len,
             prepared,
             #[cfg(feature = "timers")]
             timing_module_key,
@@ -541,6 +544,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             self.compile_prepared(
                 module_id,
                 base_len,
+                path_base_len,
                 prepared,
                 known_generated,
                 None,
@@ -556,6 +560,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             self.compile_prepared(
                 module_id,
                 base_len,
+                path_base_len,
                 prepared,
                 known_generated,
                 None,
@@ -571,6 +576,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         &self,
         module_id: ModuleId,
         base_len: usize,
+        path_base_len: usize,
         prepared: PreparedModule,
         known_generated: KnownGeneratedFunctions<'_>,
         build_config_values_override: Option<&ResolvedBuildConfigMap>,
@@ -596,6 +602,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 return DirectoryModuleTaskResult {
                     module_id,
                     string_table_base_len: base_len,
+                    path_base_len,
                     outcome,
                 };
             }
@@ -604,6 +611,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 return DirectoryModuleTaskResult {
                     module_id,
                     string_table_base_len: base_len,
+                    path_base_len,
                     outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
                 };
             }
@@ -623,6 +631,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 return DirectoryModuleTaskResult {
                     module_id,
                     string_table_base_len: base_len,
+                    path_base_len,
                     outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
                 };
             }
@@ -690,6 +699,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             module_id,
             string_table_base_len: base_len,
             outcome,
+            path_base_len,
         }
     }
 }
@@ -701,6 +711,7 @@ fn compile_check_only_job(
 ) -> DirectoryModuleTaskResult {
     let module_inventory::CheckOnlyModuleCompilationJob {
         owner_module_id: module_id,
+        path_base_len,
         string_table_base_len: base_len,
         provider_bindings,
         source_package_dependencies,
@@ -716,6 +727,7 @@ fn compile_check_only_job(
     ) {
         Ok(Some(_provider)) => {
             return DirectoryModuleTaskResult {
+                path_base_len,
                 module_id,
                 string_table_base_len: base_len,
                 outcome: DirectoryModuleTaskOutcome::Blocked,
@@ -726,6 +738,7 @@ fn compile_check_only_job(
             return DirectoryModuleTaskResult {
                 module_id,
                 string_table_base_len: base_len,
+                path_base_len,
                 outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
             };
         }
@@ -772,6 +785,7 @@ fn compile_check_only_job(
             return DirectoryModuleTaskResult {
                 module_id,
                 string_table_base_len: base_len,
+                path_base_len,
                 outcome,
             };
         }
@@ -783,6 +797,7 @@ fn compile_check_only_job(
             module_id,
             base_len,
             prepared,
+            path_base_len,
             known_generated,
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
@@ -797,6 +812,7 @@ fn compile_check_only_job(
         compile_context.compile_prepared(
             module_id,
             base_len,
+            path_base_len,
             prepared,
             known_generated,
             Some(&check_only_build_config_values),
@@ -821,6 +837,7 @@ pub(super) fn compile_check_only_batches(
     source_package_dependency_index: &rustc_hash::FxHashMap<(ModuleId, DependencyShellId), usize>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
     _string_table: &mut StringTable,
+    _path_interner: &mut PathInternerBuilder,
 ) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
     // successful artefacts, interfaces, generated deltas and resource associations are discarded.
@@ -849,14 +866,20 @@ pub(super) fn compile_check_only_batches(
                 build_config_index,
             )
         };
+        let path_base_len = outcome.path_base_len;
         match outcome.outcome {
             DirectoryModuleTaskOutcome::Success(compiled) => {
                 let ModuleSemanticResult {
                     module,
                     generated_delta,
                     string_table: module_string_table,
+                    path_fork,
                     ..
                 } = *compiled;
+                debug_assert_eq!(path_fork.base_len(), path_base_len);
+                // Check-only string tables stay on the transient batch and merge at the final
+                // render tail. Discard the path fork with them rather than retaining discarded
+                // PathIds in the frozen build table.
                 let mut warnings = module.metadata.warnings;
                 warnings.extend(
                     generated_delta
@@ -899,6 +922,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
+    path_interner: &mut PathInternerBuilder,
 ) -> Result<(CompiledGraphBoundary, Vec<PremergeDiagnosticBatch>), PremergeFailure> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
@@ -1017,7 +1041,9 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                         graph.node(outcome.module_id).stable_origin(),
                         *compiled,
                         outcome.string_table_base_len,
+                        outcome.path_base_len,
                         string_table,
+                        path_interner,
                     )?;
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
@@ -1058,6 +1084,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
         &source_package_dependency_index,
         &build_config_index,
         string_table,
+        path_interner,
     )?;
 
     let diagnosed_provider_exists = !diagnosed.is_empty()

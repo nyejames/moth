@@ -19,6 +19,7 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
     symbol, test_source_location,
@@ -96,6 +97,7 @@ fn frontend_check_borrows_propagates_failures() {
     let mut frontend = CompilerFrontend::new(
         FrontendOptions::default(),
         string_table,
+        PathInternerFork::empty(),
         &style_directives,
         &external_package_registry,
         None,

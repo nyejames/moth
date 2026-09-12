@@ -160,6 +160,16 @@ pub(crate) enum FrontendCounter {
     StringTableDeltaNonIdentityRemaps,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     StringTableDeltaNonIdentityEntries,
+    // Path-table fork/merge volume (Phase 2 Slice 2B). Node count totals interned nodes
+    // including ROOT; max depth is a gauge updated on intern via fetch_max.
+    PathNodeCount,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    PathMaxDepth,
+    PathDeltaMergeCalls,
+    PathDeltaEntriesScanned,
+    PathDeltaIdentityRemaps,
+    PathDeltaNonIdentityRemaps,
+    PathDeltaNonIdentityEntries,
     ModuleRemapStringIdsCalls,
     FilePrepareOutputRemapCalls,
     FilePrepareErrorRemapCalls,
@@ -327,12 +337,18 @@ mod detailed {
     static STRING_TABLE_DELTA_IDENTITY_REMAPS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_NON_IDENTITY_REMAPS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_NON_IDENTITY_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static PATH_NODE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static PATH_MAX_DEPTH: AtomicUsize = AtomicUsize::new(0);
+    static PATH_DELTA_MERGE_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static PATH_DELTA_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0);
+    static PATH_DELTA_IDENTITY_REMAPS: AtomicUsize = AtomicUsize::new(0);
+    static PATH_DELTA_NON_IDENTITY_REMAPS: AtomicUsize = AtomicUsize::new(0);
+    static PATH_DELTA_NON_IDENTITY_ENTRIES: AtomicUsize = AtomicUsize::new(0);
     static FILE_PREPARE_OUTPUT_REMAP_CALLS: AtomicUsize = AtomicUsize::new(0);
     static FILE_PREPARE_ERROR_REMAP_CALLS: AtomicUsize = AtomicUsize::new(0);
     static ALREADY_GLOBAL_PREPARED_OUTPUT_REMAP_SKIP_COUNT: AtomicUsize = AtomicUsize::new(0);
     static PREPARED_FILE_INVARIANT_VALIDATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static FILE_PREPARE_NON_IDENTITY_PAYLOAD_REMAPS: AtomicUsize = AtomicUsize::new(0);
-
     #[cfg(test)]
     thread_local! {
         /// Whether this test thread is intentionally capturing global frontend counters.
@@ -390,6 +406,13 @@ mod detailed {
         }
 
         atomic_counter(counter).fetch_add(amount, Ordering::Relaxed);
+    }
+    pub(crate) fn record_path_max_depth(depth: u32) {
+        #[cfg(test)]
+        if !test_counter_capture_active() {
+            return;
+        }
+        atomic_counter(FrontendCounter::PathMaxDepth).fetch_max(depth as usize, Ordering::Relaxed);
     }
 
     pub(crate) fn log_frontend_counters() {
@@ -519,6 +542,13 @@ mod detailed {
             FrontendCounter::StringTableDeltaIdentityRemaps,
             FrontendCounter::StringTableDeltaNonIdentityRemaps,
             FrontendCounter::StringTableDeltaNonIdentityEntries,
+            FrontendCounter::PathNodeCount,
+            FrontendCounter::PathMaxDepth,
+            FrontendCounter::PathDeltaMergeCalls,
+            FrontendCounter::PathDeltaEntriesScanned,
+            FrontendCounter::PathDeltaIdentityRemaps,
+            FrontendCounter::PathDeltaNonIdentityRemaps,
+            FrontendCounter::PathDeltaNonIdentityEntries,
             FrontendCounter::ModuleRemapStringIdsCalls,
             FrontendCounter::FilePrepareOutputRemapCalls,
             FrontendCounter::FilePrepareErrorRemapCalls,
@@ -835,6 +865,13 @@ mod detailed {
             FrontendCounter::StringTableDeltaNonIdentityEntries => {
                 &STRING_TABLE_DELTA_NON_IDENTITY_ENTRIES
             }
+            FrontendCounter::PathNodeCount => &PATH_NODE_COUNT,
+            FrontendCounter::PathMaxDepth => &PATH_MAX_DEPTH,
+            FrontendCounter::PathDeltaMergeCalls => &PATH_DELTA_MERGE_CALLS,
+            FrontendCounter::PathDeltaEntriesScanned => &PATH_DELTA_ENTRIES_SCANNED,
+            FrontendCounter::PathDeltaIdentityRemaps => &PATH_DELTA_IDENTITY_REMAPS,
+            FrontendCounter::PathDeltaNonIdentityRemaps => &PATH_DELTA_NON_IDENTITY_REMAPS,
+            FrontendCounter::PathDeltaNonIdentityEntries => &PATH_DELTA_NON_IDENTITY_ENTRIES,
 
             FrontendCounter::ModuleRemapStringIdsCalls => &MODULE_REMAP_STRING_IDS_CALLS,
 
@@ -1183,6 +1220,13 @@ mod detailed {
             FrontendCounter::StringTableDeltaNonIdentityEntries => {
                 "string_table_delta_non_identity_entries"
             }
+            FrontendCounter::PathNodeCount => "path_node_count",
+            FrontendCounter::PathMaxDepth => "path_max_depth",
+            FrontendCounter::PathDeltaMergeCalls => "path_delta_merge_calls",
+            FrontendCounter::PathDeltaEntriesScanned => "path_delta_entries_scanned",
+            FrontendCounter::PathDeltaIdentityRemaps => "path_delta_identity_remaps",
+            FrontendCounter::PathDeltaNonIdentityRemaps => "path_delta_non_identity_remaps",
+            FrontendCounter::PathDeltaNonIdentityEntries => "path_delta_non_identity_entries",
 
             FrontendCounter::ModuleRemapStringIdsCalls => "module_remap_string_ids_calls",
 
@@ -1274,7 +1318,7 @@ mod detailed {
 #[cfg(feature = "benchmark_counters")]
 pub(crate) use detailed::{
     add_frontend_counter, increment_frontend_counter, log_frontend_counters,
-    reset_frontend_counters,
+    record_path_max_depth, reset_frontend_counters,
 };
 
 #[cfg(all(test, feature = "benchmark_counters", feature = "timers"))]
@@ -1291,3 +1335,5 @@ pub(crate) fn add_frontend_counter(_counter: FrontendCounter, _amount: usize) {}
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn log_frontend_counters() {}
+#[cfg(not(feature = "benchmark_counters"))]
+pub(crate) fn record_path_max_depth(_depth: u32) {}

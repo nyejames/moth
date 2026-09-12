@@ -54,6 +54,7 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
 use std::cell::RefCell;
@@ -75,12 +76,15 @@ mod test_support {
     #[inline(always)]
     pub(super) fn record_prepare(_source: &FrontendFilePrepareSource<'_>) {}
 }
-
 pub(crate) struct CompilerFrontend<'a> {
     /// The shared registry handle remains owned by the enclosing compilation boundary.
     pub(crate) external_package_registry: &'a Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) string_table: StringTable,
+    /// Module-local path delta forked from the boundary builder. Semantic stages intern no
+    /// `PathId`s in this slice; the fork travels to the merge tail so string deltas merge
+    /// before path nodes.
+    pub(crate) path_fork: PathInternerFork,
     pub(crate) project_path_resolver: Option<&'a ProjectPathResolver>,
     pub(crate) options: FrontendOptions,
     /// Immutable source identities registered once by the enclosing compilation boundary and
@@ -92,6 +96,7 @@ impl<'a> CompilerFrontend<'a> {
     pub(crate) fn new(
         options: FrontendOptions,
         string_table: StringTable,
+        path_fork: PathInternerFork,
         style_directives: &'a StyleDirectiveRegistry,
         external_package_registry: &'a Arc<ExternalPackageRegistry>,
         project_path_resolver: Option<&'a ProjectPathResolver>,
@@ -101,6 +106,7 @@ impl<'a> CompilerFrontend<'a> {
             external_package_registry,
             style_directives,
             string_table,
+            path_fork,
             project_path_resolver,
             options,
             source_files,

@@ -11,6 +11,9 @@ use super::id::PathId;
 use super::remap::PathIdRemap;
 use crate::compiler_frontend::symbols::interned_path::NonUtf8PathComponent;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::instrumentation::{
+    FrontendCounter, add_frontend_counter, increment_frontend_counter, record_path_max_depth,
+};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 use std::path::Path;
@@ -27,7 +30,7 @@ pub(super) struct PathNode {
 ///
 /// The table is shared with reader operations while the builder is live. Its `lookup` map is used
 /// only while interning and is dropped when the table freezes.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PathInternerBuilder {
     table: PathTable,
     lookup: FxHashMap<(PathId, StringId), PathId>,
@@ -36,6 +39,7 @@ pub struct PathInternerBuilder {
 impl PathInternerBuilder {
     /// Create an empty interner whose first node is the root path.
     pub fn new() -> Self {
+        increment_frontend_counter(FrontendCounter::PathNodeCount);
         Self {
             table: PathTable::new(),
             lookup: FxHashMap::default(),
@@ -48,7 +52,6 @@ impl PathInternerBuilder {
     }
 
     /// Return the number of path nodes interned so far, including the root.
-    #[allow(dead_code)] // Slice 2B wires path-table sizing into module compilation.
     pub fn len(&self) -> usize {
         self.table.len()
     }
@@ -61,6 +64,8 @@ impl PathInternerBuilder {
             Entry::Occupied(entry) => Some(*entry.get()),
             Entry::Vacant(entry) => {
                 let child = self.table.try_append_child(parent, component)?;
+                increment_frontend_counter(FrontendCounter::PathNodeCount);
+                record_path_max_depth(self.table.depth(child));
                 Some(*entry.insert(child))
             }
         }
@@ -147,7 +152,6 @@ impl PathInternerBuilder {
     ///
     /// Building the shared base copies the current nodes once. Each fork after that clones only
     /// an `Arc` and starts with an empty local delta.
-    #[allow(dead_code)] // Slice 2B creates one shared path fork source per module wave.
     pub fn fork_source(&self) -> PathInternerForkSource {
         let (nodes, depths) = self.table.snapshot();
 
@@ -163,7 +167,6 @@ impl PathInternerBuilder {
     ///       identity; only the local suffix remaps. Merge order is the caller's canonical order.
     ///
     /// Returns [`PathInternError::TableFull`] when a new destination node cannot be addressed.
-    #[allow(dead_code)] // Slice 2B merges module-local path deltas in canonical order.
     pub fn merge_delta_from(
         &mut self,
         delta: &PathInternerFork,
@@ -173,6 +176,8 @@ impl PathInternerBuilder {
 
         debug_assert!(base_len <= self.table.len());
         debug_assert!(base_len <= delta.len());
+        increment_frontend_counter(FrontendCounter::PathDeltaMergeCalls);
+        add_frontend_counter(FrontendCounter::PathDeltaEntriesScanned, delta.local_len());
 
         #[cfg(debug_assertions)]
         for index in 0..base_len {
@@ -191,6 +196,7 @@ impl PathInternerBuilder {
         let local_len = delta.local_len();
         let mut mapped_suffix = Vec::with_capacity(local_len);
         let mut is_identity = true;
+        let mut non_identity_entries = 0usize;
 
         for offset in 0..local_len {
             let old_index = base_len + offset;
@@ -220,9 +226,19 @@ impl PathInternerBuilder {
 
             if merged.index() != old_index {
                 is_identity = false;
+                non_identity_entries += 1;
             }
 
             mapped_suffix.push(merged);
+        }
+        if is_identity {
+            increment_frontend_counter(FrontendCounter::PathDeltaIdentityRemaps);
+        } else {
+            increment_frontend_counter(FrontendCounter::PathDeltaNonIdentityRemaps);
+            add_frontend_counter(
+                FrontendCounter::PathDeltaNonIdentityEntries,
+                non_identity_entries,
+            );
         }
 
         Ok(PathIdRemap::new(base_len, mapped_suffix, is_identity))

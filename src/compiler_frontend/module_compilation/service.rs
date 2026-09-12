@@ -117,6 +117,7 @@ pub(crate) fn compile_module(
         prepared_header_syntax,
         resolved_file_references,
         string_table,
+        path_fork,
         warnings,
         source_file_count,
         source_byte_count,
@@ -136,10 +137,10 @@ pub(crate) fn compile_module(
             ))
         })?
         .clone();
-
     let mut compiler = CompilerFrontend::new(
         context.options.clone(),
         string_table,
+        path_fork,
         context.style_directives,
         &context.external_packages,
         context.project_path_resolver,
@@ -181,12 +182,14 @@ pub(crate) fn compile_module(
                 resource_source_associations,
             } = *output;
             let string_table = compiler.string_table;
+            let path_fork = compiler.path_fork;
             Ok(ModuleCompilationOutcome::Success(Box::new(
                 ModuleSemanticResult {
                     module,
                     generated_delta,
                     resource_source_associations,
                     string_table,
+                    path_fork,
                     public_interface,
                 },
             )))
@@ -232,6 +235,7 @@ pub(crate) fn compile_module_for_boracle(
         prepared_header_syntax,
         resolved_file_references,
         string_table,
+        path_fork,
         warnings,
         source_file_count,
         source_byte_count,
@@ -249,6 +253,7 @@ pub(crate) fn compile_module_for_boracle(
     let mut compiler = CompilerFrontend::new(
         context.options.clone(),
         string_table,
+        path_fork,
         context.style_directives,
         &context.external_packages,
         context.project_path_resolver,

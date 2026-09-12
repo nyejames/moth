@@ -36,6 +36,7 @@ use crate::compiler_frontend::style_directives::{
     TemplateHeadCompatibility,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
 use crate::compiler_frontend::tokenizer::tokens::{
     FileTokens, TemplateBodyMode, TokenizerEntryMode,
@@ -62,6 +63,7 @@ impl FrontendServices {
         let mut compiler = CompilerFrontend::new(
             self.options.clone(),
             std::mem::take(&mut self.string_table),
+            PathInternerFork::empty(),
             &self.style_directives,
             &self.external_package_registry,
             self.project_path_resolver.as_ref(),

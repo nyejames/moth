@@ -9,19 +9,19 @@ use super::id::PathId;
 
 /// Mapping from `PathId`s in one fork to `PathId`s in the merged destination table.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Slice 2B wires path-ID remaps into module compilation.
 pub struct PathIdRemap {
     /// IDs below this length are known to be identical in source and destination tables.
+    #[allow(dead_code)] // Phase 2C remaps PathId payloads; Slice 2B merges keep prefix identity.
     identity_prefix_len: usize,
 
     /// Remapped IDs for the source suffix after `identity_prefix_len`.
+    #[allow(dead_code)] // Phase 2C remaps PathId payloads; Slice 2B merges keep prefix identity.
     mapped_suffix: Vec<PathId>,
 
-    /// Cached identity result for the full remap.
+    #[allow(dead_code)] // Phase 2C remaps PathId payloads; Slice 2B merges keep prefix identity.
     is_identity: bool,
 }
 
-#[allow(dead_code)] // Slice 2B wires path-ID remaps into module compilation.
 impl PathIdRemap {
     pub(super) fn new(
         identity_prefix_len: usize,
@@ -36,6 +36,7 @@ impl PathIdRemap {
     }
 
     /// Rewrite one fork-issued identity into its merged destination identity.
+    #[allow(dead_code)] // Phase 2C remaps PathId payloads; Slice 2B merges keep prefix identity.
     pub fn get(&self, old: PathId) -> PathId {
         let old_index = old.index();
 
@@ -47,16 +48,19 @@ impl PathIdRemap {
     }
 
     /// Return the inherited prefix length that maps to itself.
+    #[allow(dead_code)] // Phase 2C remaps PathId payloads; Slice 2B merges keep prefix identity.
     pub fn identity_prefix_len(&self) -> usize {
         self.identity_prefix_len
     }
 
     /// Return the number of remapped worker-local nodes.
+    #[allow(dead_code)] // Phase 2C remaps PathId payloads; Slice 2B merges keep prefix identity.
     pub fn mapped_len(&self) -> usize {
         self.mapped_suffix.len()
     }
 
     /// Return whether every source ID maps to the same numeric ID in the destination.
+    #[allow(dead_code)] // Phase 2C remaps PathId payloads; Slice 2B merges keep prefix identity.
     pub fn is_identity(&self) -> bool {
         self.is_identity
     }
