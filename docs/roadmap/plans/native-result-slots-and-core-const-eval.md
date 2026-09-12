@@ -16,7 +16,7 @@ Implementation observations and file paths below are navigation aids, not frozen
 ```text
 STATUS: queued, design approved
 CURRENT_SLICE: activation and merged-baseline audit
-BLOCKERS: diagnostics Phase 3 completion and merge, then wiring v1 plan completion. The package-foundations baseline is merged on main; its Phase 0 remains open only on the repository-wide red `just validate` clippy lane.
+BLOCKERS: diagnostics Phase 3 completion and merge, then wiring v1 plan completion. The package-foundations baseline is merged on main; its Phase 0 remains open only on the red `ci-clippy-native` lane, which the data-layout plan owns.
 NEXT_ACTION: finish the remaining prerequisite merges into main, create a fresh worktree, then run Phase 0
 ```
 

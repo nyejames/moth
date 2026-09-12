@@ -804,8 +804,8 @@ fn compile_check_only_job(
         compile_context.compile_prepared(
             module_id,
             base_len,
-            prepared,
             path_base_len,
+            prepared,
             known_generated,
             Some(&check_only_build_config_values),
             Some(&provider_bindings),

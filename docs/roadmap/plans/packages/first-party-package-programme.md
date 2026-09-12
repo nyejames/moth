@@ -18,13 +18,18 @@ plans under this directory.
 
 ```text
 STATUS: active programme, parked on its compiler prerequisite
-CURRENT_SLICE: none - Phase 1 is delivered; Phase 0 implementation is merged and stays open only on the red `just validate` clippy lane
-BLOCKERS: package implementation waits for the native result-slot and Core const-eval compiler checkpoint; `just validate` also fails repository-wide on pre-existing `clippy::result_large_err` owned by the source/token/diagnostic data-layout plan
-NEXT_ACTION: settle the red clippy lane with the roadmap owner and close Phase 0 on a green gate, then start Phase 2 from main with `core-text.md` once the compiler checkpoint lands
+CURRENT_SLICE: bounded pre-checkpoint hardening of the five existing `@core/text` functions - existing-behaviour coverage and allocation-free `length` counting, no new package API
+BLOCKERS: the Text v1 expansion waits for the native result-slot and Core const-eval compiler checkpoint; `just validate` also fails in `ci-clippy-native` on `clippy::result_large_err` boundaries owned by the source/token/diagnostic data-layout plan and on further lint findings in that plan's in-flight path-table fork work
+NEXT_ACTION: finish the hardening slice, then settle the red clippy lane with the roadmap owner and close Phase 0 on a green gate before Phase 2 starts from main with `core-text.md`
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
 phase starts. Do not pin a moving programme to a baseline commit in this file.
+
+One bounded pre-checkpoint slice is in scope while the programme waits: hardening the five existing
+`@core/text` functions through existing-behaviour coverage and an allocation-free `length` scan. It
+adds no package API, no result-slot or const-eval capability and no new compiler surface, so it does
+not start Phase 2 and does not change the checkpoint order below.
 
 ## Roadmap position and lifecycle
 
@@ -421,7 +426,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
 | 0 | Package foundations | this plan | Implementation merged; open on the red `just validate` clippy lane | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
-| 1 | `@core/text` | [core-text.md](./core-text.md) | Designed, queued behind native result slots and Core const evaluation | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
+| 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; bounded pre-checkpoint hardening of the five shipped functions in progress | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
 | 4 | `@core/time` | `core-time.md` | TODO: create when activated | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
@@ -627,11 +632,14 @@ runtime glue is emitted from those owned sources, and both routes reach the repo
 review. A green guard result therefore proves lexical module-loading cleanliness, and host-driven
 loading is a named manual review boundary.
 
-Phase 0's mandatory `just validate` gate currently fails on `clippy::result_large_err` across 102
-build-system, frontend and benchmark `Result` boundaries. The root cause is diagnostic and error
-payload layout owned by `compiler-source-token-and-diagnostic-data-layout-plan.md`, whose exit
-criteria require removing it without boxing or lint suppression. Package work must not box shared
-diagnostic payloads to make the gate green.
+Phase 0's mandatory `just validate` gate currently fails in `ci-clippy-native`. The lint build of
+the library test target reports 102 denied findings: 96 `clippy::result_large_err` boundaries across
+`build_system`, `compiler_frontend` and `projects`, plus four `too_many_arguments` and two
+`needless_range_loop` findings in the in-flight path-table fork work. No benchmark `Result` boundary
+remains in that count. The `result_large_err` root cause is diagnostic and error payload layout
+owned by `compiler-source-token-and-diagnostic-data-layout-plan.md`, whose exit criteria require
+removing it without boxing or lint suppression, and the remaining six findings belong to that plan's
+current phase. Package work must not box shared diagnostic payloads to make the gate green.
 
 That red lane is a recorded external blocker, not a waiver. A code-bearing package phase cannot
 finish its mandatory gate while it is red, so Phase 0 stays open on validation alone: its
