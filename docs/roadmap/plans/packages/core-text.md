@@ -24,15 +24,17 @@ NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner 
 
 The package-foundation baseline this plan waited on is merged, so the compiler prerequisite is the
 only remaining blocker owned here. The umbrella programme owns cross-cutting blockers for every
-code-bearing phase, including the current red `just validate` clippy lane.
+code-bearing phase, including the inherited data-layout base that currently fails `just validate`.
 
 The pre-checkpoint hardening slice is delivered. `__moth_text_length` now counts scalars with a
 single-pass `charCodeAt` scan, and both successful `tests/cases/core_text_*` cases assert their whole
 rendered line, covering non-matching and case-differing predicates, a combining sequence, non-BMP
 scalars in every position, the lowest surrogate pair with independent upper lead and trail bounds,
 decomposed-against-precomposed search, literal `.` matching, whitespace against emptiness and a
-non-empty pattern in empty text. Registration shape, inline-lowering conversion, error codes, new
-APIs, result slots and constant evaluation remain with the phases below.
+non-empty pattern in empty text. Those two cases now own behaviour only; helper reachability moved
+to `tests/cases/core_text_helper_reachability`, which exercises `length` alone. Registration shape,
+inline-lowering conversion, error codes, new APIs, result slots and constant evaluation remain with
+the phases below.
 
 The prerequisite compiler work establishes truthful zero/one/many result slots, adds
 `ExternalConstEvalOp`, adds one AST-owned Core constant-evaluation path and proves it with the existing
@@ -66,8 +68,10 @@ Current implementation debt relevant to this slice:
   lowering path instead
 - `src/builder_surface/core_packages/text.rs` uses a homogeneous tuple table and repeated parameter
   cloning that will become noisy once signatures, error channels and const-eval metadata diverge
-- the existing Text integration fixtures assert those wrapper helper names, coupling tests to an
-  implementation shape that should disappear
+- `tests/cases/core_text_helper_reachability` is the intended permanent owner of Text helper
+  reachability; it exercises only `length` and asserts the other four helper bodies stay absent,
+  so a later phase that replaces a wrapper with an inline lowering updates that case rather than
+  deleting the contract
 
 ## Implementation notes
 

@@ -18,9 +18,9 @@ plans under this directory.
 
 ```text
 STATUS: active programme; isolated existing-ABI package work runs alongside data-layout Phases 2 and 3
-CURRENT_SLICE: none - the pre-checkpoint hardening of the five shipped `@core/text` functions is delivered
-BLOCKERS: package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; `just validate` also fails in `ci-clippy-native` on `clippy::result_large_err` boundaries owned by the source/token/diagnostic data-layout plan and on further lint findings in that plan's in-flight path-table fork work
-NEXT_ACTION: choose the next isolated existing-ABI package slice, and keep Phase 0 open until the data-layout plan restores a green gate
+CURRENT_SLICE: none - the `@core/text` hardening correction pass is delivered, and `@core/math` is not activated yet
+BLOCKERS: package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout Phase 2 base `34bd000d5` fails `just validate`, `cargo test -p moth --lib` and seven of eight feature lanes, so no package slice can produce a green gate until its owner repairs that build
+NEXT_ACTION: activate `@core/math` with its living plan, tracker row and out-of-order reason, then run its existing-ABI inventory, coverage and registration slice
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -632,22 +632,26 @@ runtime glue is emitted from those owned sources, and both routes reach the repo
 review. A green guard result therefore proves lexical module-loading cleanliness, and host-driven
 loading is a named manual review boundary.
 
-Phase 0's mandatory `just validate` gate currently fails in `ci-clippy-native`. The lint build of
-the library test target reports 102 denied findings: 96 `clippy::result_large_err` boundaries across
-`build_system`, `compiler_frontend` and `projects`, plus four `too_many_arguments` and two
-`needless_range_loop` findings in the in-flight path-table fork work. No benchmark `Result` boundary
-remains in that count. The `result_large_err` root cause is diagnostic and error payload layout
-owned by `compiler-source-token-and-diagnostic-data-layout-plan.md`, whose exit criteria require
-removing it without boxing or lint suppression, and the remaining six findings belong to that plan's
-current phase. Package work must not box shared diagnostic payloads to make the gate green.
+Phase 0's mandatory `just validate` gate fails, and the failure grew when this branch was rebased
+onto the data-layout Phase 2 checkpoint `34bd000d5`. Measured on that base and on the current
+package tip alike: `ci-clippy-native` cannot finish because its all-targets lint build reports four
+compile errors beside 1326 denied lint findings, `cargo test -p moth --lib` reports 851 failures
+concentrated in path interning, public-interface projection and path resolution, and seven of eight
+`just test-feature-matrix` lanes fail. An identical run inside a clean worktree at `34bd000d5`
+reproduces the same 851 failures, and the four compile errors sit in files this branch never
+touches, so the breakage is the in-flight path-table fork work owned by
+`compiler-source-token-and-diagnostic-data-layout-plan.md`, not package work. It supersedes the
+earlier record of 102 denied lints, 96 of them `clippy::result_large_err`, whose root cause that
+plan still owns. Package work must not box shared diagnostic payloads, mass-format in-flight
+sources or narrow the gate to make it green.
 
-That red lane is a recorded external blocker, not a waiver. A code-bearing package phase cannot
+That red gate is a recorded external blocker, not a waiver. A code-bearing package phase cannot
 finish its mandatory gate while it is red, so Phase 0 stays open on validation alone: its
 implementation, audits and every other gate lane are complete and merged, and the phase closes when
-`just validate` runs green. Root-cause removal is the data-layout plan's final phase. The roadmap
-owner has since accepted that isolated package work on the existing external ABI proceeds during
-data-layout Phases 2 and 3 rather than waiting for that correction, so such a slice reports the red
-lane and its own green `just validate-common` evidence instead of claiming a closed gate.
+`just validate` runs green. The roadmap owner has accepted that isolated package work on the
+existing external ABI proceeds during data-layout Phases 2 and 3 rather than waiting, so such a
+slice reports the inherited failure with its own focused evidence instead of claiming a closed gate.
+The inherited breakage above is broader than a lint allowance and is escalated to that plan's owner.
 
 ### Phase 1 - activate the living package workflow
 
@@ -662,18 +666,22 @@ Delivered and merged:
 
 No `@core/text` implementation belongs in this phase, and none landed.
 
-### Compiler foundation checkpoint before package implementation
+### Compiler foundation checkpoint for result-slot-dependent package work
 
-After the package-foundation baseline is validated and merged, pause package expansion while the
-compiler-owned native result-slot and Core constant-evaluation work lands. It must provide:
+The compiler-owned native result-slot and Core constant-evaluation work is a capability gate, not a
+programme-wide pause. It gates the `@core/text` v1 slice and any other package slice that needs
+truthful result slots or compile-time Core evaluation. Package work on the existing external ABI,
+including hardening and current-surface expansion of an already registered package, proceeds while
+that work lands. It must provide:
 
 - truthful zero/one/many result slots through AST/HIR/backend-neutral analysis
 - the typed `ExternalConstEvalOp` metadata and one AST-owned dispatch path
 - Rust evaluation of the existing five `@core/text` operations
 - JS/Rust semantic parity tests and runtime-helper elimination for folded calls
 
-Resume this programme only from `main` containing that checkpoint. Adopt its final owners directly
-and remove any planning assumptions made obsolete by the implementation.
+Start a result-slot-dependent phase only from `main` containing that checkpoint. Adopt its final
+owners directly and remove any planning assumptions made obsolete by the implementation. Pause
+package work altogether only while the shared result representation is actually changing under it.
 
 ### Phase 2 - `@core/text` current v1 slice
 
