@@ -68,34 +68,31 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 1 is complete. The 2026-09-11 regression investigation closed without a measured
-  timing patch. Next: Phase 2 on `diagnostic-data-layout-changes` after this investigation's
-  evidence in `benchmarks/frontend-optimization-results.md`. Package work proceeds in parallel.
-- Goal: retain the compact plain diagnostic boundary, final `SourceId`/`SourceSpan` ownership and
-  deterministic publication while preserving exact authored spans and typed infrastructure failures.
-- Current code evidence: mixed frozen/transitional message aggregation keeps existing frozen rows
-  when converting remaining source rows. Consuming render conversion moves artefact and sidecar
-  warnings. `SourceDatabaseBuilder::finish` returns an owned database. `TokenStream::next` advances
-  byte offsets. Domain-less handles stay with the project default range while package handles
-  resolve only through exact package rows.
-- Validation evidence: 2026-09-11 clean-tree `just bench-check` **-2ms avg** (0 slower), frontend
-  **-8ms avg** (0 slower), data-layout **-4ms avg**, scaling within budget. Clean memory-probe
-  retention is empty; warned/diagnosed reports retain snapshots. `just validate` passed after the
-  cleanup checkpoint `debe6db61`.
-- Accepted investigation checkpoints: measurement `958585972`; mixed-freeze `97bf5ee28`; warning
-  drain and leftover API prune `debe6db61`.
-- Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign. DLR-02,
-  DLR-03 and DLR-06 remain unmeasured deferred cleanup.
+- Phase: Phase 2 Slice 2A is delivered on `diagnostic-data-layout-changes`. Next: Slice 2B
+  deterministic path-identity merges at the existing string-table fork/merge boundaries.
+- Goal: keep the dense parent/component `PathId` table as the only complete-path intern, with
+  module-local deltas, remaps and a consuming freeze, while `InternedPath` remains until 2D.
+- Current code evidence: `PathInternerBuilder::fork_source` snapshots an `Arc` base; each
+  `PathInternerFork` interns an append-only suffix; `merge_delta_from` rewrites `StringId`s then
+  re-interns local nodes and returns `PathIdRemap`. Prefix `PathId`s stay identity. Parent, prefix,
+  suffix and join walk interned nodes without cloning component vectors. `PathTable` renders
+  portable `/` spellings and native `PathBuf` values through string lookup. Consuming `freeze`
+  drops reverse lookup. SourceDatabase registration and freeze flow is unchanged.
+- Validation evidence: focused `cargo test -p moth --lib compiler_frontend::symbols::path_interner`
+  20 passed. Independent read-only audit: clean, no required findings.
+- Non-goals: 2B production wiring and path counters; 2C `InternedPath` owner migration; 2D deletion;
+  token-store work; diagnostic schema/report redesign. DLR-02, DLR-03 and DLR-06 remain unmeasured
+  deferred cleanup.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
 `eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and
 `3c9c776a8`; the plan sequence is committed through the final review-correction checkpoint.
 
 CURRENT_WORKSPACE_STATE:
-- Phase 1 source, token, diagnostic, renderer and ownership corrections are complete and validated.
-- The 2026-09-11 investigation did not reproduce the 19:18 CLI print; do not treat later speedups as
-  that record's cause.
-- Phase 2 is the next slice on this continuation branch.
+- Phase 1 source, token, diagnostic, renderer and ownership corrections remain complete.
+- Slice 2A path-table fork, remap, freeze and allocation-free identity operations are in the
+  worktree and ready to wire at existing merge boundaries.
+- `InternedPath` is still the unmigrated complete-path owner outside source-slot `PathId`s.
 HISTORICAL_ACCEPTED_SLICES:
 Phase 0 and Phase 1 are complete on main. Per-slice delivery, review and validation logs live in
 Git. The compact Phase 0/1 summary below keeps standing contracts, later-phase prerequisites and
@@ -789,13 +786,13 @@ adding a contended global interner or another scheduling system.
 
 ### Slice 2A — Extend the final path-table foundation beyond source registration
 
-- [ ] keep the exact dense parent/component representation introduced in Phase 1; do not replace it with a second interner
-- [ ] add module-local delta, remap and consuming frozen-table support needed by later compiler stages
-- [ ] make parent/append/join identity operations allocation-free after interning
-- [ ] add a consuming freeze operation that drops reverse lookup state when no further interning occurs
-- [ ] define portable and native rendering through `PathTable` plus string lookup
-- [ ] classify path domains before migration: compiler logical/semantic component paths may share the table, filesystem paths remain cold `Path` values and rendered free text is never interned as a path
-- [ ] add layout, depth, prefix/suffix, equality, domain-wrapper and invalid-context tests
+- [x] keep the exact dense parent/component representation introduced in Phase 1; do not replace it with a second interner
+- [x] add module-local delta, remap and consuming frozen-table support needed by later compiler stages
+- [x] make parent/append/join identity operations allocation-free after interning
+- [x] add a consuming freeze operation that drops reverse lookup state when no further interning occurs
+- [x] define portable and native rendering through `PathTable` plus string lookup
+- [x] classify path domains before migration: compiler logical/semantic component paths may share the table, filesystem paths remain cold `Path` values and rendered free text is never interned as a path
+- [x] add layout, depth, prefix/suffix, equality, domain-wrapper and invalid-context tests
 
 ### Slice 2B — Reuse existing deterministic identity merges
 

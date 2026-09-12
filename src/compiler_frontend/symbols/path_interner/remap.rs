@@ -1,0 +1,63 @@
+//! Compact remapping from worker-local path identities to merged identities.
+//!
+//! WHAT: rewrites `PathId` handles issued by one module-local fork into the destination builder
+//!       after a deterministic delta merge.
+//! WHY:  inherited prefix identities stay stable across workers, while locally interned suffix
+//!       nodes may collide with paths merged from earlier workers.
+
+use super::id::PathId;
+
+/// Mapping from `PathId`s in one fork to `PathId`s in the merged destination table.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Slice 2B wires path-ID remaps into module compilation.
+pub struct PathIdRemap {
+    /// IDs below this length are known to be identical in source and destination tables.
+    identity_prefix_len: usize,
+
+    /// Remapped IDs for the source suffix after `identity_prefix_len`.
+    mapped_suffix: Vec<PathId>,
+
+    /// Cached identity result for the full remap.
+    is_identity: bool,
+}
+
+#[allow(dead_code)] // Slice 2B wires path-ID remaps into module compilation.
+impl PathIdRemap {
+    pub(super) fn new(
+        identity_prefix_len: usize,
+        mapped_suffix: Vec<PathId>,
+        is_identity: bool,
+    ) -> Self {
+        Self {
+            identity_prefix_len,
+            mapped_suffix,
+            is_identity,
+        }
+    }
+
+    /// Rewrite one fork-issued identity into its merged destination identity.
+    pub fn get(&self, old: PathId) -> PathId {
+        let old_index = old.index();
+
+        if old_index < self.identity_prefix_len {
+            return old;
+        }
+
+        self.mapped_suffix[old_index - self.identity_prefix_len]
+    }
+
+    /// Return the inherited prefix length that maps to itself.
+    pub fn identity_prefix_len(&self) -> usize {
+        self.identity_prefix_len
+    }
+
+    /// Return the number of remapped worker-local nodes.
+    pub fn mapped_len(&self) -> usize {
+        self.mapped_suffix.len()
+    }
+
+    /// Return whether every source ID maps to the same numeric ID in the destination.
+    pub fn is_identity(&self) -> bool {
+        self.is_identity
+    }
+}

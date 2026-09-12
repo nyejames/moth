@@ -1,7 +1,7 @@
 //! Dense path-table storage and lookup-only operations.
 //!
-//! WHAT: resolves parents and components, then renders portable spellings from dense path nodes
-//!       while accepting caller-owned scratch storage for component walks.
+//! WHAT: resolves parents and components, then renders portable and native spellings from dense
+//!       path nodes while accepting caller-owned scratch storage for component walks.
 //! WHY:  the mutable builder and frozen readers share one parent-linked table, while filesystem
 //!       `PathBuf` and source snapshot identity remain separate owners.
 
@@ -10,6 +10,7 @@ use super::id::PathId;
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringTable, StringTableResolver,
 };
+use std::path::PathBuf;
 
 /// Immutable path trie storage shared by the mutable builder and frozen readers.
 ///
@@ -21,6 +22,7 @@ pub struct PathTable {
     depths: Vec<u32>,
 }
 
+#[allow(dead_code)] // Slice 2B wires complete path operations into module compilation.
 impl PathTable {
     pub(super) fn new() -> Self {
         // The root's absent parent is the table terminator. Its component is a valid-shaped
@@ -54,9 +56,24 @@ impl PathTable {
         Some(child)
     }
 
+    /// Return the number of path nodes in this table, including the root.
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Return whether `path` was issued by this table.
+    pub fn contains(&self, path: PathId) -> bool {
+        path.index() < self.nodes.len()
+    }
+
     /// Return the parent path, or `None` for the root.
     pub fn parent(&self, path: PathId) -> Option<PathId> {
         self.nodes[path.index()].parent
+    }
+
+    /// Return the parent path, or `None` when `path` is the root or was not issued here.
+    pub fn try_parent(&self, path: PathId) -> Option<PathId> {
+        self.nodes.get(path.index())?.parent
     }
 
     /// Return the final component, or `None` for the root path.
@@ -67,9 +84,76 @@ impl PathTable {
         Some(self.nodes[path.index()].component)
     }
 
+    /// Return the final component, or `None` for the root and for foreign IDs.
+    pub fn try_component(&self, path: PathId) -> Option<StringId> {
+        if path == PathId::ROOT {
+            return None;
+        }
+        Some(self.nodes.get(path.index())?.component)
+    }
+
     /// Return the number of components in `path`.
     pub fn depth(&self, path: PathId) -> u32 {
         self.depths[path.index()]
+    }
+
+    /// Return the depth, or `None` when `path` was not issued by this table.
+    pub fn try_depth(&self, path: PathId) -> Option<u32> {
+        self.depths.get(path.index()).copied()
+    }
+
+    /// Return whether `path` descends from `prefix` without allocating.
+    ///
+    /// The check lifts `path` to the prefix depth through parent links, then compares identities.
+    /// Equal paths share the prefix, and the root prefixes every path.
+    pub fn starts_with(&self, path: PathId, prefix: PathId) -> bool {
+        let path_depth = self.depth(path);
+        let prefix_depth = self.depth(prefix);
+
+        if prefix_depth > path_depth {
+            return false;
+        }
+
+        let mut current = path;
+
+        for _ in 0..(path_depth - prefix_depth) {
+            current = self
+                .parent(current)
+                .expect("a non-root path must carry a parent");
+        }
+
+        current == prefix
+    }
+
+    /// Return whether `path` ends with `suffix` without allocating.
+    ///
+    /// Both tips walk towards the root together while their components match. Only a suffix at
+    /// the tip counts; an interior-only match is not a suffix.
+    pub fn ends_with(&self, path: PathId, suffix: PathId) -> bool {
+        let path_depth = self.depth(path);
+        let suffix_depth = self.depth(suffix);
+
+        if suffix_depth > path_depth {
+            return false;
+        }
+
+        let mut path_cursor = path;
+        let mut suffix_cursor = suffix;
+
+        for _ in 0..suffix_depth {
+            if self.component(path_cursor) != self.component(suffix_cursor) {
+                return false;
+            }
+
+            path_cursor = self
+                .parent(path_cursor)
+                .expect("a non-root path must carry a parent");
+            suffix_cursor = self
+                .parent(suffix_cursor)
+                .expect("a non-root path must carry a parent");
+        }
+
+        true
     }
 
     /// Fill `scratch` with `path`'s components in forward order and return that slice.
@@ -139,5 +223,56 @@ impl PathTable {
             rendered.push_str(string_table.resolve(*component));
         }
         rendered
+    }
+
+    /// Render a path as a native `PathBuf` by pushing each resolved component.
+    ///
+    /// The root renders as an empty `PathBuf`. No rendered text is stored on the node.
+    pub fn render_native(
+        &self,
+        path: PathId,
+        string_table: &StringTable,
+        scratch: &mut Vec<StringId>,
+    ) -> PathBuf {
+        self.render_native_with(path, string_table, scratch)
+    }
+
+    /// Render a native path using immutable strings after the freeze boundary.
+    pub fn render_native_frozen(
+        &self,
+        path: PathId,
+        string_table: &FrozenStringTable,
+        scratch: &mut Vec<StringId>,
+    ) -> PathBuf {
+        self.render_native_with(path, string_table, scratch)
+    }
+
+    fn render_native_with<T: StringTableResolver + ?Sized>(
+        &self,
+        path: PathId,
+        string_table: &T,
+        scratch: &mut Vec<StringId>,
+    ) -> PathBuf {
+        let components = self.resolve_components(path, scratch);
+
+        if components.is_empty() {
+            return PathBuf::new();
+        }
+
+        let mut native = PathBuf::new();
+
+        for component in components {
+            native.push(string_table.resolve(*component));
+        }
+
+        native
+    }
+
+    /// Clone the dense node arrays into an immutable fork base.
+    pub(super) fn snapshot(&self) -> (Box<[PathNode]>, Box<[u32]>) {
+        (
+            self.nodes.clone().into_boxed_slice(),
+            self.depths.clone().into_boxed_slice(),
+        )
     }
 }
