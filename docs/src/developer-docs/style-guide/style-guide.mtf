@@ -215,7 +215,6 @@ Don't use advanced Rust features just to make code shorter.
 
 Avoid:
 - nested iterator chains with side effects
-- clever `Option` / `Result` combinator pipelines for validation logic
 - large closures with mutation
 - broad generic helpers that hide compiler-stage ownership
 - macro abstractions for ordinary compiler flow
@@ -249,18 +248,6 @@ Keep macro usage minimal. Use small declarative macros only where they clearly r
 - Use `clippy` and the default Rust formatter.
 - Keep unused variables and dead code to a minimum.
 - Any lint suppression must be justified and documented. Use `allow(dead_code)` only for clearly identified planned work or test-only code.
-
-### Section banners
-
-Use section banners only for real phase boundaries in long functions, large files or complex orchestration such as parsing, lowering, template folding, dependency resolution, diagnostic rendering or build flow.
-
-Use exactly this format:
-
-[codeblock, $code("rust"):
-    // ------------------------
-    //  Resolve template slots
-    // ------------------------
-]
 
 The banner has three lines. The title starts with `//  ` and uses title case or a clear imperative name. The top and bottom start with `// ` and their dashes extend equally beyond the title on both sides. Do not use banners around small helpers or to hide a file that should be split.
 
