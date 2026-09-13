@@ -689,8 +689,10 @@ No `@core/text` implementation belongs in this phase, and none landed.
 The compiler-owned native result-slot and Core constant-evaluation work is a capability gate, not a
 programme-wide pause. It gates the `@core/text` v1 slice and any other package slice that needs
 truthful result slots or compile-time Core evaluation. Package work on the existing external ABI,
-including hardening and current-surface expansion of an already registered package, proceeds while
-that work lands. It must provide:
+including hardening and current-surface expansion of an already registered package, is not gated by
+this checkpoint and proceeded while that work landed. It is nonetheless stopped right now by the
+user's pause recorded in the capsule, which is a scheduling decision rather than a capability one.
+The checkpoint must provide:
 
 - truthful zero/one/many result slots through AST/HIR/backend-neutral analysis
 - the typed `ExternalConstEvalOp` metadata and one AST-owned dispatch path
@@ -698,8 +700,10 @@ that work lands. It must provide:
 - JS/Rust semantic parity tests and runtime-helper elimination for folded calls
 
 Start a result-slot-dependent phase only from `main` containing that checkpoint. Adopt its final
-owners directly and remove any planning assumptions made obsolete by the implementation. Pause
-package work altogether only while the shared result representation is actually changing under it.
+owners directly and remove any planning assumptions made obsolete by the implementation. This
+checkpoint alone would pause package work only while the shared result representation is actually
+changing under it; the current pause is the user's and lasts until accepted data-layout Phase 3
+completes.
 
 ### Phase 2 - `@core/text` current v1 slice
 
@@ -723,8 +727,9 @@ surface needed no new compiler capability. Delivered: existing-behaviour coverag
 eighteen functions, the registration cleanup, and the accepted scalar expansion of thirteen
 functions and three constants over the same external ABI. The numerical contract the expansion
 depends on was published in the canonical reference before any of it was implemented, so every new
-assertion rests on a published sentence. One inherited exception survives: the boundary case still
-fixes `exp(1.0)` to an exact decimal, which the contract treats as a target-defined approximation.
+assertion rests on a published sentence. The three assertions that still fixed an approximating
+result to an exact decimal - `cbrt(27)`, `hypot(3, 4)` and the aliased `exp(1.0)` - became bounded
+comparisons after an external pause review, so no exception survives.
 A Wasm lowering set and const-eval folding remain open, each needing its own accepted decision.
 
 Mandatory closeout: full phase gate plus finite-result, domain edge and integration coverage.

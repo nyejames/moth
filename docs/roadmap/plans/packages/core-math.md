@@ -146,11 +146,16 @@ examples and the nearest-`Float` constant rule.
 Two properties are worth remembering when the contract next changes. The radian bounds in
 `core_math_basic_functions` and `core_math_transcendental_functions` are satisfiable only under
 radians, so a non-radian decision would invalidate them rather than merely loosen them. And exact
-rendered output survives in three groups, only the first of which the reference promises:
+values survive in three groups, only the first of which the reference promises:
 
-- the six constants and the five named identities, which the precision statement promises exactly;
-- the selection and rounding functions, whose results are exact by definition, and `sqrt(16)`,
-  because square root is an exactly rounded IEEE operation;
+- the six constants and the five named identities, which the precision statement promises exactly,
+  including the folded `PI / 2.0` artifact decimal asserted by
+  `core_math_external_constants_const_context`, `core_math_direct_selection_dependency` and
+  `namespace_binding_external_package_success`;
+- the sign, selection and rounding functions - `abs`, `min`, `max`, `clamp`, `floor`, `ceil`,
+  `round` and `trunc`, plus the `abs` and `clamp` control flow at the end of
+  `core_math_basic_functions` - whose results are exact by definition, and `sqrt(16)`, because
+  square root is an exactly rounded IEEE operation;
 - the fixed points of the approximating functions in `core_math_transcendental_functions`, where
   `expm1(0)`, `log1p(0)`, `cosh(0)`, `tanh(0)`, `asinh(0)`, `acosh(1)` and `atanh(0)` render
   exactly. This is a target-dependent assertion, not a contract one: the host specification fixes
