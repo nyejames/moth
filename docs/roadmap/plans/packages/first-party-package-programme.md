@@ -632,20 +632,27 @@ runtime glue is emitted from those owned sources, and both routes reach the repo
 review. A green guard result therefore proves lexical module-loading cleanliness, and host-driven
 loading is a named manual review boundary.
 
-Phase 0's mandatory `just validate` gate fails, and the failure grew when this branch was rebased
-onto the data-layout Phase 2 checkpoint `34bd000d5`. Measured on the current package tip:
-`ci-clippy-native` cannot finish because its all-targets lint build reports four
-compile errors beside 1326 denied lint findings, `cargo test -p moth --lib` reports 851 failures
-concentrated in path interning, public-interface projection and path resolution, and seven of eight
-`just test-feature-matrix` lanes fail. The pristine base cannot run the feature matrix at all: its
-own timers lane fails to compile on the argument-order defect recorded below. A worktree at
-`34bd000d5` carrying only that one-line repair reproduces the failures exactly - 8 lanes run, 1
-passed, 7 failed, and the same 851 library failures - and the four lint compile errors sit in files
-this branch never touches, so the breakage is the in-flight path-table fork work owned by
-`compiler-source-token-and-diagnostic-data-layout-plan.md`, not package work. It supersedes the
-earlier record of 102 denied lints, 96 of them `clippy::result_large_err`, whose root cause that
-plan still owns. Package work must not box shared diagnostic payloads, mass-format in-flight
-sources or narrow the gate to make it green.
+Phase 0's mandatory `just validate` gate still fails, but the failure shrank when this branch merged
+the published data-layout work (`diagnostic-data-layout-changes`, `1e39f7678`) to stay in sync.
+Measured on the merged package tip: `cargo test -p moth --lib` passes 5003 tests with no failures,
+`just test-feature-matrix` passes six of eight lanes, and `ci-clippy-native` still cannot finish.
+Everything that remains red sits in files this branch never touches:
+
+- `ci-clippy-native` denies 18 lib and 893 lib-test findings, nearly all of them unused `path_fork`
+  variables and unused `PathId`/`PathInternerFork` imports left by the in-flight path-table fork
+  work, plus one `empty_line_after_doc_comments`.
+- the `timers-counters` lane fails to compile on two `E0061` arity errors in
+  `create_project_modules_benchmark_tests.rs` and a missing `path_table` field in
+  `generated/tests/convergence_tests.rs`.
+- the `dev-output` lane fails to compile on `E0599` in `ast/expressions/mutation.rs`, where a
+  `show_eval` path calls `to_string` on a `PathId` that implements no `Display`.
+
+The breakage is therefore owned by `compiler-source-token-and-diagnostic-data-layout-plan.md`, not
+by package work. Two earlier records are superseded: the 851 library failures and seven failing
+lanes measured before this merge, and the 102 denied lints before that. `clippy::result_large_err`
+no longer appears anywhere in the lint output, so the specific lint that plan owed the package
+programme is resolved upstream. Package work must not box shared diagnostic payloads, mass-format
+in-flight sources or narrow the gate to make it green.
 
 That red gate is a recorded external blocker, not a waiver. A code-bearing package phase cannot
 finish its mandatory gate while it is red, so Phase 0 stays open on validation alone: its
@@ -653,16 +660,14 @@ implementation, audits and every other gate lane are complete and merged, and th
 `just validate` runs green. The roadmap owner has accepted that isolated package work on the
 existing external ABI proceeds during data-layout Phases 2 and 3 rather than waiting, so such a
 slice reports the inherited failure with its own focused evidence instead of claiming a closed gate.
-The inherited breakage above is broader than a lint allowance and is escalated to that plan's owner,
-whose Phase 2 audit checklist still records "run path/dependency/module/type/diagnostic tests and
-serial/parallel determinism tests" as ticked for this same checkpoint. That entry is the record the
+The remaining breakage above is escalated to that plan's owner, whose Phase 2 audit checklist still
+records "run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests" as
+ticked for a checkpoint whose own feature lanes do not build. That entry is the record the
 measurement contradicts; only that plan may correct it.
 
-One repair on this branch belongs to that owner and is not yet upstream: the `compile_prepared` call
-inside `compile_check_only_job`
-(`src/build_system/create_project_modules/compilation/canonical.rs`) passed `prepared` and
-`path_base_len` in the callee's reverse order, which broke the `timers` feature build.
-Report it rather than reapplying it - the next published data-layout checkpoint may already carry it.
+The `compile_prepared` argument-order repair this branch carried is no longer outstanding: the
+merged data-layout work contains the identical swap in `compile_check_only_job`, so the two sides
+converged and nothing remains to upstream.
 
 ### Phase 1 - activate the living package workflow
 

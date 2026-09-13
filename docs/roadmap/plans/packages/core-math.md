@@ -217,13 +217,12 @@ representable results use exact rendered output. Where an assertion necessarily 
 semantics the canonical reference leaves open, record it in the pinned list above rather than
 treating it as settled contract.
 
-This slice could not close the mandatory `just validate` gate: the inherited data-layout base fails
-the all-targets lint build, `cargo test -p moth --lib` and seven of eight feature lanes. The pristine
-base cannot run the feature matrix at all - its own timers lane fails to compile on the
-argument-order defect the programme plan records - and a base worktree carrying only that one-line
-repair reproduces the same 1-passed/7-failed lanes and the same 851 library failures.
-Its focused evidence is `cargo run -- tests --tag math` (13/13),
-`--tag core-packages` (31/31), `cargo run -- check docs --terse`, `cargo check -p moth --lib` and
+The hardening slice could not close the mandatory `just validate` gate, and after this branch merged
+the published data-layout work the inherited failure is narrower: library tests pass, six of eight
+feature lanes pass, and `ci-clippy-native` plus the `timers-counters` and `dev-output` lanes stay red
+on data-layout files. The programme plan owns that record. Focused evidence for the hardening slice
+was `cargo run -- tests --tag math` (13/13), `--tag core-packages` (31/31),
+`cargo run -- check docs --terse`, `cargo check -p moth --lib` and
 `rustfmt --check` on `math.rs`, with the registration rewrite mutation-proved: every registered
 function, constant, arity, ABI type and access kind has at least one killed mutant.
 
