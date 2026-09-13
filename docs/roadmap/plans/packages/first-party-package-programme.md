@@ -632,26 +632,29 @@ runtime glue is emitted from those owned sources, and both routes reach the repo
 review. A green guard result therefore proves lexical module-loading cleanliness, and host-driven
 loading is a named manual review boundary.
 
-Phase 0's mandatory `just validate` gate remains open on the warning-denied native Clippy lane. On
-the current merged tree, `cargo test --workspace --quiet -- --format terse` passes 5,986 tests;
-`just test-feature-matrix` passes all 8/8 standard lanes; `just feature-lane-check` reports zero
-findings; `just source-audit` audits 1,389 files with zero findings; `just first-party-deps`
-visits 21 files and 80 JavaScript sources with zero findings; the documentation and timer-erasure
-checks pass; and `bench-ci` passes all 82 benchmark preflight cases.
+Historical Phase 0 package validation snapshot (checkpoint-specific; not current-state evidence):
+Phase 0's mandatory `just validate` gate was open on the warning-denied native Clippy lane. At that
+snapshot, `cargo test --workspace --quiet -- --format terse` passed 5,986 tests;
+`just test-feature-matrix` passed all 8/8 standard lanes; `just feature-lane-check` reported zero
+findings; `just source-audit` audited 1,389 files with zero findings; `just first-party-deps`
+visited 21 files and 80 JavaScript sources with zero findings; the documentation and timer-erasure
+checks passed; and `bench-ci` passed all 82 benchmark preflight cases.
 
-The integration suite reports 1,937/1,959 correct with 22 failures. Running the same suite on
-`main` reports the same 22 failing cases, so the diagnostics refactor introduces no additional
-integration failures. The package-owned focused cases remain green: `--tag math` is 14/14,
-`--tag time` is 29/29 and `--tag core-packages` is 42/42. `bench-scaling` passes its constant and
-nominal series but the inherited generic-instantiation series fits n^1.82 against its n^1.70
+The integration suite reported 1,937/1,959 correct with 22 failures. Running the same suite on
+`main` reported the same 22 failing cases, so the diagnostics refactor introduced no additional
+integration failures. The package-owned focused cases were green: `--tag math` was 14/14,
+`--tag time` was 29/29 and `--tag core-packages` was 42/42. `bench-scaling` passed its constant
+and nominal series but the inherited generic-instantiation series fitted n^1.82 against its n^1.70
 budget.
 
-The remaining Clippy findings are warning-denied unused imports, variables and mutability in the
-merged compiler/test tree, and the broad formatter check reports inherited unformatted files.
-These are upstream shared-tree validation blockers rather than package API or runtime failures.
-The package implementation does not alter diagnostic payloads, source/path ownership, HIR call
-representation or build-graph construction. The package work is therefore synchronized and
-validated, but the programme stays paused and Phase 0 remains open on the gate alone.
+The remaining Clippy findings were warning-denied unused imports, variables and mutability in the
+merged compiler/test tree, and the broad formatter check reported inherited unformatted files.
+These were upstream shared-tree validation blockers rather than package API or runtime failures.
+The package implementation did not alter diagnostic payloads, source/path ownership, HIR call
+representation or build-graph construction. This snapshot predates the accepted Phase 2
+continuation synchronization recorded in the capsule above; it does not establish current branch
+validation. The programme remains paused, and the current open exceptions are recorded in the
+data-layout plan's current-state capsule.
 
 ### Phase 1 - activate the living package workflow
 
