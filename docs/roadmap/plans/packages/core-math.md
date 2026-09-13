@@ -112,7 +112,8 @@ Coverage now exercises all 18 functions: exactly representable results use exact
 transcendental results use a justified error bound computed in Moth, and the non-finite lane owns
 logarithm-of-zero and logarithm-of-negative alongside the existing negative `sqrt` and overflowing
 `exp`. Where the canonical reference is silent, the assertion is recorded in the pinned list below
-rather than claimed as contract. Constant coverage is unchanged and remains emission-only.
+rather than claimed as contract. Constant coverage was emission-only at this point; the final review
+replaced it with a labelled exact comparison per symbol.
 
 ### Phase C - registration cleanup (delivered)
 

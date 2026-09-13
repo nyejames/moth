@@ -1,9 +1,9 @@
 //! `@core/time` package registration.
 //!
 //! WHAT: registers the typed time surface for builders that opt into it.
-//! WHY: replaces the old ambiguous `now_millis()` / `now_seconds()` API with explicit
-//!      monotonic and wall-clock concepts that are safer for games, animations, and
-//!      real-world timestamps.
+//! WHY: elapsed time and wall-clock time are different concepts with different
+//!      failure modes, so each has its own opaque handle type and its own
+//!      functions rather than a single ambiguous millisecond number.
 //!
 //! Registered types:
 //! - `Duration`: signed elapsed amount, represented as milliseconds internally.

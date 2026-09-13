@@ -12,5 +12,4 @@ path = "index.html"
 kind = "html"
 must_contain = [
     "function __moth_time_timestamp_from_iso_string(",
-    "function __moth_time_to_iso_string(",
 ]

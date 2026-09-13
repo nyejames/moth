@@ -1,4 +1,4 @@
-@core/time Duration, duration_from_milliseconds, duration_scale, as_milliseconds, is_negative
+@core/time Duration, duration_from_milliseconds, duration_scale, clamp, as_milliseconds, is_negative
 
 -- Scaling past the finite Float range produces an ordinary opaque Duration:
 -- this infallible path observes the overflowed value without reading it as a
@@ -16,9 +16,29 @@ read_overflow || -> Float, Error!:
     return as_milliseconds(huge)
 ;
 
+-- Scaling an overflowed duration by zero leaves a quantity that is not a
+-- number. It propagates through clamp, is_negative answers from the same
+-- comparison as any other duration, and the Float accessor rejects it.
+clamp_not_a_number || -> Bool:
+    nan = duration_scale(duration_scale(duration_from_milliseconds(1.0e100), 1.0e300), 0.0)
+    bounded = clamp(nan, duration_from_milliseconds(5.0), duration_from_milliseconds(1.0))
+    return is_negative(bounded)
+;
+
+read_not_a_number || -> Float, Error!:
+    nan = duration_scale(duration_scale(duration_from_milliseconds(1.0e100), 1.0e300), 0.0)
+    bounded = clamp(nan, duration_from_milliseconds(5.0), duration_from_milliseconds(1.0))
+    return as_milliseconds(bounded)
+;
+
 opaque = survive_scale()
 overflow = read_overflow() catch |err|:
     then err.code
 ;
 
-[:duration_overflow opaque=[opaque] code=[overflow]]
+not_a_number_negative = clamp_not_a_number()
+not_a_number = read_not_a_number() catch |nan_err|:
+    then nan_err.code
+;
+
+[:duration_overflow opaque=[opaque] code=[overflow] nan_negative=[not_a_number_negative] nan_code=[not_a_number]]

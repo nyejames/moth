@@ -278,7 +278,9 @@ Fractional seconds resolve to milliseconds. Digits beyond the third are truncate
 
 Duration arithmetic is addition, subtraction and multiplication of millisecond quantities. It is exact while the operands and the result stay within the whole numbers a `Float` represents exactly, a range far wider than the renderable window; beyond that it rounds like any other `Float` arithmetic, so adding one millisecond to a duration of `1e16` milliseconds returns the same duration. Because the arithmetic functions return opaque values, a result that leaves the finite `Float` range is not rejected where the arithmetic happens: it is rejected with builtin error code 304 when the duration is read as a `Float` by `as_seconds` or `as_milliseconds`, at the shared external `Float` boundary.
 
-`clamp(duration, min, max)` is the composition `min(max(duration, min), max)`. When `min` exceeds `max` the upper bound wins, so the result is `max`.
+`clamp(duration, min, max)` is the composition `min(max(duration, min), max)`, so when `min` exceeds `max` the upper bound wins and the result is `max`.
+
+A duration whose quantity has already left the finite range carries that state until it is read. Repeated arithmetic can even leave a quantity that is not a number, by scaling an overflowed duration by zero. `abs` and `clamp` pass such a quantity through, `is_negative` answers from the same comparison with zero as it does for any duration, and both the composition rule above and the reversed-bound result apply only while the operands hold a number. The value is rejected with builtin error code 304 at the first `Float` accessor that reads it.
 
 Every `Float` reaching this package is already finite, because `NaN` and the infinities are never valid Moth `Float` values, so the package validates no argument of its own. The four `Float`-returning accessors `as_seconds`, `as_milliseconds`, `unix_seconds` and `unix_milliseconds` are checked by that shared boundary.
 

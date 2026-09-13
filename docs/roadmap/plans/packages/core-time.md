@@ -142,9 +142,10 @@ Candidates only. Nothing here is accepted API.
 1. **A Wasm lowering set.** Now that the grammar, the calendar rules, the truncation rule and the
    window are published rather than inherited from the host parser, a second backend can implement
    the same contract instead of duplicating unspecified behaviour. It needs a target decision first.
-2. **Duration range rules.** `abs` of the most negative representable value and the saturation
-   behaviour of the arithmetic functions are still unstated; the contract currently describes exact
-   millisecond arithmetic and defers overflow to the read boundary.
+2. **Duration range rules.** `abs` of the most negative representable value is still unstated, and so
+   is the behaviour of `abs`, `clamp` and `is_negative` on a duration whose millisecond quantity has
+   already left the finite `Float` range. The contract states where exact arithmetic ends and defers
+   overflow rejection to the read boundary, so what remains is a decision about saturation.
 
 ## Longer-term candidates
 
@@ -175,7 +176,7 @@ Primary owners:
 
 | Contract | Owner |
 |---|---|
-| Whole-surface acceptance and HTML-Wasm rejection of a reachable call | `tests/cases/core_time_functions` |
+| Acceptance of every function except the parser and the arithmetic surface, the reversed-bound `clamp` result, HTML-Wasm rejection of a reachable call, and emission of the render helper | `tests/cases/core_time_functions` |
 | Duration conversion values and construction lowering shape | `tests/cases/core_time_duration_conversions_success` |
 | The same duration semantics through free-function call shape | `tests/cases/core_time_duration_free_functions_success` |
 | Monotonic lane, observed as non-negative deltas | `tests/cases/core_time_mark_delta_success` |
@@ -186,6 +187,7 @@ Primary owners:
 | Calendar rejection, and the time-of-day, offset-hour and offset-minute ranges rejected independently so neither offset field can hide behind the other | `tests/cases/core_time_timestamp_parse_invalid_calendar_day_rejected`, `core_time_timestamp_parse_field_out_of_range_rejected` |
 | Numeric-offset conversion in both signs, and fractional truncation proved by a fourth digit that would carry into the next second under rounding | `tests/cases/core_time_timestamp_parse_offset_fraction_success` |
 | The renderable window on both paths: accepted endpoints, endpoint round-trips and the post-offset rejection | `tests/cases/core_time_timestamp_parse_window_boundary` |
+| Emission of the parse helper | `tests/cases/core_time_timestamp_parse_success`, the only case that pins it |
 | Rendering rejection outside the window, including the fractional edge that proves the check precedes truncation | `tests/cases/core_time_to_iso_string_out_of_range_rejected` |
 | Arithmetic values, argument order and composition | `tests/cases/core_time_duration_arithmetic_success` |
 | Arithmetic overflow: the scaled duration stays an ordinary opaque value on an infallible path, then becomes code 304 where it is read as a `Float` | `tests/cases/core_time_duration_overflow_at_float_boundary` |
@@ -202,7 +204,10 @@ This slice could not close the mandatory `just validate` gate: the inherited dat
 the all-targets lint build and two feature lanes. The programme plan owns that record. Focused
 evidence was `cargo run -- tests --tag time` (29/29), `--tag core-packages` (42/42), the full
 `cargo run -- tests` at the inherited failure count, `cargo run -- check docs --terse`,
-`cargo check -p moth --lib` and `rustfmt --check` on every touched Rust file.
+`cargo check -p moth --lib` with its 31 inherited warnings, and `rustfmt --check` on every touched
+Rust file except `src/compiler_frontend/ast/expressions/tests/eval_expression_tests.rs`, whose two
+unformatted hunks at lines 68-75 and 132-139 arrived with the data-layout merge and sit outside every
+region this batch touched.
 
 The final review closed three coverage gaps and two contract overstatements. The offset fields were
 only exercised through the combined `+99:99` sample, which either half of the range check could
@@ -212,10 +217,17 @@ milliseconds, so `.9999Z` was added: rounding would carry into the next second. 
 observed nothing before the failing accessor, so it now reads the scaled duration on an infallible
 path through `is_negative` first, proving the overflowed value is an ordinary opaque `Duration` and
 that code 304 comes from the `Float` read. The contract's unqualified exact-arithmetic sentence was
-corrected, because adding one millisecond to `1e16` milliseconds returns the same duration, and the
-`clamp` reversed-bound result is now stated the way `math.mtf` states its own. Helper-definition
-artifact assertions were removed from the semantic and rejection cases, leaving
-`core_time_functions` as the single owner of helper emission.
+corrected, because adding one millisecond to `1e16` milliseconds returns the same duration.
+
+The integration audit then falsified the first `clamp` correction: scaling an overflowed duration by
+zero leaves a quantity that is not a number, and `Math.min(Math.max(...))` returns that quantity
+rather than the upper bound. The reference now states the reversed-bound result for durations that
+hold a number and states separately that `abs` and `clamp` pass a non-finite quantity through until
+a `Float` accessor rejects it with code 304, which `core_time_duration_overflow_at_float_boundary`
+observes end to end. Helper-emission ownership was split rather than merged, because
+`core_time_functions` never calls the parser: it owns the render helper, and
+`core_time_timestamp_parse_success` owns the parse helper. The duplicate `must_contain` blocks in
+the conversion, catch, semantic and rejection cases are gone.
 
 ## History
 
