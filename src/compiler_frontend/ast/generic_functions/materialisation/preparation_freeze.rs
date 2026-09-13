@@ -64,20 +64,19 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 use crate::compiler_frontend::symbols::string_interning::{
-    StringId, StringIdRemap, StringTable, StringTableForkSource,
+    StringId, StringIdRemap, StringTable,
 };
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::{OnceCell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 /// Self-contained immutable semantic context owned by one successful declaring module.
 #[derive(Clone)]
 pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) string_table: StringTable,
-    pub(super) string_table_fork_source: OnceCell<StringTableForkSource>,
     pub(crate) entry_dir: PathId,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
@@ -279,34 +278,34 @@ impl ModuleMaterialisationPreparationBuilder {
 }
 
 impl ModuleMaterialisationPreparation {
-    pub(super) fn string_table_fork_source(&self) -> &StringTableForkSource {
-        self.string_table_fork_source
-            .get_or_init(|| self.string_table.fork_source())
-    }
-
-    /// Fork one generated-local table from the requester's immutable module prefix.
+    /// Fork one generated-local table from the live compiler identity prefix.
     ///
-    /// The preparation table may acquire a local suffix in future construction phases, so merge
-    /// that delta explicitly instead of assuming the fork source still covers the whole table.
-    pub(super) fn fork_materialisation_string_table(&self) -> (StringTable, StringIdRemap) {
-        let (mut string_table, base_len) = self
-            .string_table_fork_source()
-            .fork_for_module()
-            .into_parts();
-        let requester_string_remap = string_table.merge_delta_from(&self.string_table, base_len);
-        (string_table, requester_string_remap)
-    }
-
-    /// Merge one generated-local table back into the compiler that owns this requester.
-    ///
-    /// Both tables inherit the preparation's immutable prefix. They may have independent suffixes,
-    /// so only those suffixes need interning and remapping when the sidecar rejoins its batch.
-    pub(crate) fn merge_materialisation_string_table_into(
+    /// Provider rebasing can extend the compiler table after this preparation was frozen. The
+    /// requester rows must remain an exact prefix so their path/string IDs stay valid; generated
+    /// work then inherits the current table that backs the live path fork.
+    pub(super) fn fork_materialisation_string_table(
         &self,
-        target: &mut StringTable,
-        materialised: &StringTable,
-    ) -> StringIdRemap {
-        target.merge_delta_from(materialised, self.string_table_fork_source().base_len())
+        boundary_string_table: &StringTable,
+    ) -> Result<(StringTable, StringIdRemap, usize), CompilerError> {
+        let requester_len = self.string_table.len();
+        let compatible_prefix = boundary_string_table.len() >= requester_len
+            && self
+                .string_table
+                .iter()
+                .zip(boundary_string_table.iter())
+                .all(|((requester_id, requester), (boundary_id, boundary))| {
+                    requester_id == boundary_id && requester == boundary
+                });
+        if !compatible_prefix {
+            return Err(CompilerError::compiler_error(
+                "generated materialisation requester string table is not an exact prefix of the live boundary string table",
+            ));
+        }
+
+        let boundary_len = boundary_string_table.len();
+        let string_table = boundary_string_table.clone_preserving_inherited_prefix();
+        let requester_string_remap = StringIdRemap::identity(requester_len);
+        Ok((string_table, requester_string_remap, boundary_len))
     }
 
     pub(super) fn freeze(
@@ -1399,7 +1398,6 @@ impl ModuleMaterialisationPreparation {
 
         Ok(Self {
             string_table: string_table.clone_preserving_inherited_prefix(),
-            string_table_fork_source: OnceCell::new(),
             entry_dir,
             module_origin,
             module_resources,

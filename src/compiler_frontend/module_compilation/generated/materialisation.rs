@@ -176,6 +176,7 @@ fn materialise_generated_request_inner<'build>(
                 &request.identity,
                 requester_context,
                 request.call_span,
+                &compiler.string_table,
                 &mut compiler.path_fork,
                 #[cfg(feature = "timers")]
                 request.timing_context,
@@ -232,6 +233,7 @@ fn materialise_generated_request_inner<'build>(
                         identity: &request.identity,
                         requester_context,
                         requester_call_span: request.call_span,
+                        boundary_string_table: &compiler.string_table,
                         path_fork: &mut compiler.path_fork,
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
@@ -250,6 +252,7 @@ fn materialise_generated_request_inner<'build>(
                         identity: &request.identity,
                         requester_context,
                         requester_call_span: request.call_span,
+                        boundary_string_table: &compiler.string_table,
                         path_fork: &mut compiler.path_fork,
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
@@ -268,6 +271,7 @@ fn materialise_generated_request_inner<'build>(
     let MaterialisedGenericAst {
         build_result,
         string_table: generated_string_table,
+        string_table_base_len,
         instance_path,
     } = materialised;
     let AstBuildResult {
@@ -433,9 +437,9 @@ fn materialise_generated_request_inner<'build>(
             materialisation_context: None,
         },
     };
-    let generated_remap = requester_context.merge_materialisation_string_table_into(
-        &mut compiler.string_table,
+    let generated_remap = compiler.string_table.merge_delta_from(
         &generated_compiler.string_table,
+        string_table_base_len,
     );
     let generated_path_remap = compiler
         .path_fork

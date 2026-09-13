@@ -207,6 +207,7 @@ impl ModuleMaterialisationPreparation {
         identity: &GeneratedFunctionIdentity,
         requester_context: &ModuleMaterialisationPreparation,
         requester_call_span: Option<SourceSpan>,
+        boundary_string_table: &StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
@@ -293,8 +294,9 @@ impl ModuleMaterialisationPreparation {
             ));
         }
 
-        let (mut string_table, requester_string_remap) =
-            requester_context.fork_materialisation_string_table();
+        let (mut string_table, requester_string_remap, string_table_base_len) = self
+            .fork_materialisation_string_table(boundary_string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, boundary_string_table))?;
         let source_file = template.source_file.clone();
         let materialised_body = stable_body
             .materialise(source_file, path_fork, &mut string_table)
@@ -384,6 +386,7 @@ impl ModuleMaterialisationPreparation {
         Ok(MaterialisedGenericAst {
             build_result,
             string_table,
+            string_table_base_len,
             instance_path,
         })
     }

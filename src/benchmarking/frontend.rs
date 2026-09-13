@@ -96,11 +96,11 @@ pub struct FrontendBenchmarkRetention {
     pub diagnostic_label_slots: usize,
     /// Distinct frozen identity contexts reachable from range rows or donor-only handles.
     pub retained_identity_contexts: usize,
-    /// Distinct final path-table allocations reachable from retained module views.
+    /// Distinct path-table owners reachable from the returned diagnostic report.
     pub path_table_count: usize,
-    /// Actual retained `PathNode` rows across the deduplicated path tables.
+    /// Actual retained `PathNode` rows across those deduplicated path tables.
     pub path_table_node_rows: usize,
-    /// Backing vector capacity bytes for the deduplicated path tables.
+    /// Backing vector capacity bytes for those deduplicated path tables.
     pub path_table_storage_bytes: usize,
 }
 

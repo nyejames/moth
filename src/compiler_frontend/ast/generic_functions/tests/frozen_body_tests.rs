@@ -825,6 +825,48 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
     )
 }
 
+#[test]
+fn generated_materialisation_keeps_live_path_string_pair_aligned() {
+    let fixture = resource_body_materialisation_fixture();
+    let mut boundary_strings = fixture.preparation.string_table.clone();
+    let mut boundary_paths = fixture.owner_path_fork.fork_source().fork_for_module();
+    let provider_path = boundary_paths
+        .try_intern_portable_path("provider-only/generated", &mut boundary_strings)
+        .expect("the provider path should fit");
+
+    let (generated_strings, requester_remap, boundary_base_len) = fixture
+        .preparation
+        .fork_materialisation_string_table(&boundary_strings)
+        .expect("the requester table should remain a live-table prefix");
+    assert!(requester_remap.is_identity());
+    assert_eq!(boundary_base_len, boundary_strings.len());
+
+    let generated_paths = boundary_paths.fork_source().fork_for_module();
+    assert_eq!(
+        generated_paths.render_portable(provider_path, &generated_strings, &mut Vec::new()),
+        "provider-only/generated",
+        "generated paths must resolve through the current boundary string table"
+    );
+}
+
+#[test]
+fn generated_materialisation_rejects_an_incompatible_string_prefix() {
+    let fixture = resource_body_materialisation_fixture();
+    let incompatible_strings = StringTable::new();
+    let error = fixture
+        .preparation
+        .fork_materialisation_string_table(&incompatible_strings)
+        .expect_err("an incompatible requester prefix must be rejected");
+
+    assert!(
+        error
+            .msg
+            .contains("not an exact prefix of the live boundary string table"),
+        "the invariant failure should identify the incompatible string domain: {}",
+        error.msg
+    );
+}
+
 fn retained_template(
     path: PathId,
     declaration_identity: GeneratedDeclarationIdentity,
@@ -1172,6 +1214,7 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
             ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
             requester_context: &fixture.preparation,
             requester_call_span: None,
+            boundary_string_table: &fixture.preparation.string_table,
             external_package_registry: fixture.preparation.external_package_registry.as_ref(),
             style_directives: &fixture.preparation.style_directives,
             build_profile: fixture.preparation.build_profile,
@@ -1367,6 +1410,7 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
             ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
             requester_context: &fixture.preparation,
             requester_call_span: None,
+            boundary_string_table: &fixture.preparation.string_table,
             external_package_registry: fixture.preparation.external_package_registry.as_ref(),
             style_directives: &fixture.preparation.style_directives,
             build_profile: fixture.preparation.build_profile,
@@ -1454,6 +1498,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                 ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
+                boundary_string_table: &fixture.preparation.string_table,
                 external_package_registry: fixture
                     .preparation
                     .external_package_registry
@@ -1618,6 +1663,7 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                 ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
+                boundary_string_table: &fixture.preparation.string_table,
                 external_package_registry: fixture
                     .preparation
                     .external_package_registry

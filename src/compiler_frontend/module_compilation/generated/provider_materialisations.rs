@@ -24,10 +24,11 @@ pub(crate) struct PublishedMaterialisation {
     pub(crate) template_index: usize,
     /// Whether this context was published from a different identity domain.
     ///
-    /// Local same-boundary publications share the requester's path/string domain, so
-    /// materialisation uses the retained context directly. Completed source-package seeds and
-    /// any other cross-boundary publication re-intern by spelling through
-    /// [`ModuleMaterialisationContext::rebased_for_requester`] for every request.
+    /// Same-boundary publications normally share the requester's path/string domain and can use
+    /// the retained context directly. If the provider was published after the requester forked,
+    /// the current boundary pair is supplied and materialisation rebases from that pair instead.
+    /// Completed source-package seeds and any other cross-boundary publication re-intern by
+    /// spelling through [`ModuleMaterialisationContext::rebased_for_requester`] for every request.
     pub(crate) rebase_required: bool,
 }
 

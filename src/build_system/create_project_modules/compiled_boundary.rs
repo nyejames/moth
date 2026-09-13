@@ -22,9 +22,11 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
-#[cfg(feature = "data_layout_memory_probe")]
-use crate::compiler_frontend::source::SourceDatabaseRetentionMetrics;
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::source::{
+    FrozenIdentityHandle, SourceDatabaseRetentionMetrics,
+};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -966,6 +968,11 @@ impl TransientPremergeBatch {
 /// The source fields count only frozen source owners reachable from the returned diagnostic
 /// vessel. Diagnostic fields count records and label slots, while `retained_identity_contexts`
 /// counts distinct frozen identity allocations reachable through range rows or donor-only handles.
+/// The `path_table_*` fields count distinct path-table owners reachable from that same returned
+/// vessel: the frozen identity contexts behind range rows or donor-only handles, explicit
+/// `RenderPathContext` tables, and any transitional source-context table still present after
+/// freezing. Successful-module executable views are deliberately not counted; a table only
+/// reachable from executable rows without a diagnostic owner is not report-retained storage.
 /// A clean result returns zeroes because the render boundary intentionally skips freezing when
 /// there is nothing to render.
 #[cfg(feature = "data_layout_memory_probe")]
@@ -977,7 +984,7 @@ pub(crate) struct FrozenRenderRetentionMetrics {
     pub(crate) diagnostic_records: usize,
     pub(crate) diagnostic_label_slots: usize,
     pub(crate) retained_identity_contexts: usize,
-    /// Distinct final path-table allocations reachable from successful module and sidecar views.
+    /// Distinct path-table owners reachable from the returned diagnostic report.
     pub(crate) path_table_count: usize,
     /// Actual retained `PathNode` rows across those deduplicated path tables.
     pub(crate) path_table_node_rows: usize,
@@ -992,16 +999,54 @@ impl FrozenRenderRetentionMetrics {
         self.extended_span_rows += metrics.extended_span_rows;
         self.source_identity_slots += metrics.source_identity_slots;
     }
+    /// Count distinct path-table owners reachable from the returned diagnostic report.
 
-    fn add_path_tables(&mut self, boundary: &CompiledGraphBoundary, seen: &mut FxHashSet<usize>) {
-        for module in boundary.successful_module_views() {
-            let path_table = &module.executable.path_table;
-            let address = Arc::as_ptr(path_table) as usize;
+    /// WHAT: walks the exact owner set the diagnostic renderer can still dereference after the
+    ///       render tail: the frozen identity contexts behind range rows or donor-only handles,
+    ///       the explicit `RenderPathContext` tables, and any transitional
+    ///       `RenderSourceContext` table still present. Deduplication is by table pointer.
+    /// WHY: the report is the retention owner after the build boundary drops; counting
+    ///      executable-row tables instead would describe storage the returned report cannot
+    ///      reach, including all-diagnosed results with no successful module at all.
+    fn add_report_path_tables(&mut self, messages: &CompilerMessages) {
+        let mut seen = FxHashSet::<usize>::default();
+        let mut add = |path_table: &PathTable| {
+            let address = path_table as *const PathTable as usize;
             if seen.insert(address) {
                 self.path_table_count += 1;
                 self.path_table_node_rows += path_table.len();
                 self.path_table_storage_bytes += path_table.storage_bytes();
             }
+        };
+        let mut add_identity = |identity: &FrozenIdentityContext| {
+            add(identity.paths());
+        };
+        for frozen_context in &messages.render_frozen_contexts {
+            add_identity(&frozen_context.identity);
+        }
+        for diagnostic in messages.diagnostic_slice() {
+            if let Some(identity) = diagnostic
+                .primary_frozen_identity_handle
+                .as_ref()
+                .and_then(FrozenIdentityHandle::get)
+            {
+                add_identity(identity);
+            }
+            for label in &diagnostic.labels {
+                if let Some(identity) =
+                    label.frozen_identity_handle.as_ref().and_then(FrozenIdentityHandle::get)
+                {
+                    add_identity(identity);
+                }
+            }
+        }
+        if let Some(path_contexts) = messages.render_path_contexts.as_deref() {
+            for path_context in path_contexts {
+                add(path_context.path_table.as_ref());
+            }
+        }
+        for source_context in &messages.render_source_contexts {
+            add(source_context.source_database.paths());
         }
     }
 }
@@ -1259,14 +1304,6 @@ impl ProjectFrontendCompilation {
                 .sum(),
             ..FrozenRenderRetentionMetrics::default()
         };
-        #[cfg(feature = "data_layout_memory_probe")]
-        {
-            let mut path_table_addresses = FxHashSet::default();
-            retention.add_path_tables(&project, &mut path_table_addresses);
-            for package in &source_packages {
-                retention.add_path_tables(&package.boundary, &mut path_table_addresses);
-            }
-        }
         #[cfg(not(feature = "data_layout_memory_probe"))]
         let retention = ();
 
@@ -1416,6 +1453,10 @@ impl ProjectFrontendCompilation {
                     retention.add_source(*source_metrics);
                 }
             }
+            // Path-table ownership mirrors the identity scan above: the returned report, not the
+            // dropped build boundary, is the retention owner. A range row shares its owner's
+            // table, so deduplication by table pointer keeps repeated rows from inflating counts.
+            retention.add_report_path_tables(&messages);
         }
         Ok((messages, retention))
     }

@@ -250,6 +250,7 @@ impl GenericTemplateArtefact {
             identity,
             requester_context,
             requester_call_span,
+            boundary_string_table,
             path_fork,
             external_package_registry,
             style_directives,
@@ -258,8 +259,9 @@ impl GenericTemplateArtefact {
             #[cfg(feature = "timers")]
             timing_context,
         } = input;
-        let (mut string_table, requester_string_remap) =
-            requester_context.fork_materialisation_string_table();
+        let (mut string_table, requester_string_remap, string_table_base_len) = requester_context
+            .fork_materialisation_string_table(boundary_string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, boundary_string_table))?;
 
         let source_file = self.source_file;
         let function_path = self.function_path;
@@ -365,6 +367,7 @@ impl GenericTemplateArtefact {
         Ok(MaterialisedGenericAst {
             build_result,
             string_table,
+            string_table_base_len,
             instance_path,
         })
     }

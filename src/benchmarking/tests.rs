@@ -390,6 +390,28 @@ fn frontend_benchmark_reports_invalid_syntax() {
         "invalid-syntax benchmark should report a syntax diagnostic code: {:?}",
         report.diagnostic_codes
     );
+    #[cfg(feature = "data_layout_memory_probe")]
+    {
+        // Invalid syntax leaves no successful module, so the retained report's only path-table
+        // owner is the source identity context frozen beside the diagnosed batch. These fields
+        // describe diagnostic-report owners, not executable rows, so an all-diagnosed result
+        // must still retain its table.
+        assert!(
+            report.retention.path_table_count > 0,
+            "an all-diagnosed benchmark must retain its source identity path table: {:?}",
+            report.retention
+        );
+        assert!(
+            report.retention.path_table_node_rows >= report.retention.path_table_count,
+            "every retained path table must include its root row: {:?}",
+            report.retention
+        );
+        assert!(
+            report.retention.path_table_storage_bytes > 0,
+            "retained path-table storage must report backing allocation bytes: {:?}",
+            report.retention
+        );
+    }
     assert!(report.total_ms.is_finite() && report.total_ms >= 0.0);
     #[cfg(feature = "timers")]
     assert!(!report.stages.is_empty());
