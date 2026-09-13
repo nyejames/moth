@@ -202,8 +202,6 @@ BLOCKERS / RISKS:
 - Phase 1G/1H cutover and closeout are accepted; no local diagnostic boxing or lint-workaround guidance may be reintroduced
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery
 - compact-ID merge order must remain deterministic across file and module parallelism
-- Config preparation and AST success warnings still lack a complete build-boundary handoff.
-  Preserve them in 1F2; the source ownership checkpoint does not claim to repair that warning loss.
 - The first source-freeze experiment was deliberately rejected after mapping the final owner
   boundary: a `FrozenSourceDatabase` without an immediate render/identity consumer would create a
   dead parallel owner and warnings. Revisit source freezing together with that terminal owner.
@@ -746,9 +744,10 @@ remain accepted choices for later phases; the ambiguity-failing legacy path look
 bridge and ended with Phase 2. None of these choices permits a parallel framework.
 
 #### Later-phase prerequisites (R10)
-- [ ] **R10a — diagnostic identity ownership (Phase 4, Slice 4A):** make stable `reason_key`s
-  part of the final diagnostic schema rather than an interim compiler-owned payload convention.
-  Integrated into Slice 4A.
+- [ ] **R10a — diagnostic identity ownership (Phase 4, Slice 4A):** make the optional stable
+  `reason_key` contract part of the final diagnostic schema. Preserve every existing reason key
+  independently of rendered wording; diagnostics without a reason-key contract remain `None`.
+  Do not manufacture keys merely because the schema can store one. Integrated into Slice 4A.
 - [ ] **R10b — draft/durable type separation (Phase 4, Slice 4B):** define distinct draft and
   durable diagnostic fact/core types so a pre-compaction `TypeId` cannot masquerade as a durable
   fact. Integrated into Slice 4B.
@@ -985,13 +984,15 @@ command/report owner is the sole warning-storage owner in this phase; `Compilati
 as the final warning owner is installed by Phase 5 alone, and this phase must not introduce that
 result model early.
 
-### Slice 4A — Declare the complete diagnostic schema with stable reason keys
+### Slice 4A — Declare the complete diagnostic schema with optional stable reason keys
 
 - [ ] inventory every current stable diagnostic family from the fresh reactivation inventory
 - [ ] assign explicit non-zero internal `DiagnosticCode` values; never derive them from enum order
 - [ ] preserve each external `MOTH-*` code, category, title and default severity
-- [ ] give every diagnostic a stable `reason_key` in the final schema, independent of wording and
-  of Rust identifier spellings; reason keys survive wording changes and are the R10a contract
+- [ ] make the schema's stable `reason_key` contract optional; preserve every existing reason key
+  exactly and independently of rendered wording. Diagnostics without a reason-key contract remain
+  `None`; do not manufacture a reason key merely because the schema can store one. Validate
+  uniqueness and well-formedness for every defined key (R10a)
 - [ ] declare fact-word meaning, optional codecs, allowed extra kind, secondary-label roles,
   type-rewrite markers and renderer entry once per diagnostic
 - [ ] replace compiler-generated prose stored in payload/label string fields with typed
@@ -1208,14 +1209,16 @@ Review the complete ledger before broad signature changes.
 
 Define the final type first, then migrate these independent batches:
 
-- [ ] **5C0 — canonical example and context contract:** before implementing any batch, update the
-  `InfrastructureFailure` example in `docs/compiler-data-layout-design.md` so it explicitly carries
-  identity-vs-filesystem context: a retained `SourceSpan`/`PathId`/`StringId` always has its
-  matching frozen identity context, while a pre-source filesystem failure carries ordinary
-  filesystem context and no compact ID. Record this as the accepted R10c context ownership
-- [ ] **5C1 — data and rendering:** compact typed kind/stage, optional exact source or owned
-  filesystem-path context, deterministic typed detail slice and terminal/terse/dev-server
-  renderers
+- [ ] **5C0 — verify the canonical context contract:** before implementing any batch, reconcile
+  the published `InfrastructureFailure` example in `docs/compiler-data-layout-design.md` against
+  the fresh Phase 5 inventory. It must encode one typed identity-vs-filesystem context: every
+  retained `SourceSpan`/`PathId`/`StringId` has its matching frozen identity context, while a
+  pre-source filesystem failure carries ordinary filesystem context and no compact ID. Modify the
+  canonical example only if the inventory exposes a missing context class; record the accepted
+  R10c context ownership.
+- [ ] **5C1 — data and rendering:** compact typed kind/stage, exactly one `InfrastructureContext`
+  value (identity context with optional exact source span, or filesystem context with owned
+  path/tool facts), deterministic typed detail slice and terminal/terse/dev-server renderers
 - [ ] **5C2 — filesystem/build:** source open/read, canonicalization, output writing, manifests,
   permissions and other expected operating-system failures
 - [ ] **5C3 — providers/backends:** tool invocation, provider loading, backend emission/validation
@@ -1447,7 +1450,8 @@ For each experiment:
 - [ ] delete migration modules, adapters, aliases and deprecated constructors
 - [ ] delete stale remap/clone helpers and obsolete counters
 - [ ] delete tests that protect only removed API shapes
-- [ ] confirm no `#[allow(clippy::result_large_err)]`, including the temporary allowances in `src/lib.rs` and `xtask/src/benchmark_execution.rs`, and no boxed diagnostic boundary remains
+- [ ] confirm no `#[allow(clippy::result_large_err)]` allowance or boxed-common-diagnostic
+  workaround has been reintroduced
 - [ ] run ordinary dead-code/unused checks through Clippy
 
 ### Slice 7D — Converge authority and policy documentation
@@ -1482,7 +1486,9 @@ For each experiment:
 - [ ] confirm stable diagnostic codes, source spans and renderer identity across terminal/terse/dev server
 - [ ] confirm successful artifacts/goldens are unchanged except explicitly authorized output
 - [ ] run docs check and release build
-- [ ] run native/Linux/Windows Clippy with warnings denied after removing the temporary `result_large_err` suppressions from `src/lib.rs` and `xtask/src/benchmark_execution.rs`, and confirm the large-error lint is absent without boxing the common diagnostic
+- [ ] run native/Linux/Windows Clippy with warnings denied and confirm no
+  `#[allow(clippy::result_large_err)]` allowance or boxed-common-diagnostic workaround has been
+  reintroduced
 - [ ] run full `just validate`
 - [ ] run the complete five-run recorded benchmark protocol
 - [ ] compare against Phase 0 and each material phase

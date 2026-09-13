@@ -1409,19 +1409,32 @@ Properties:
 Expected environmental and host failures use a separate typed result:
 
 ```rust
+pub enum InfrastructureContext {
+    Identity {
+        identity: Arc<FrozenIdentityContext>,
+        source: Option<SourceSpan>,
+    },
+    Filesystem(FileSystemContext),
+}
+
 pub struct InfrastructureFailure {
     kind: InfrastructureFailureKind,
     stage: InfrastructureStage,
-    identity: Option<(SourceSpan, Arc<FrozenIdentityContext>)>,
-    filesystem: Option<FileSystemContext>,
+    context: InfrastructureContext,
     message: Box<str>,
     details: Box<[InfrastructureDetail]>,
 }
 ```
 
-`FileSystemContext` is the ordinary pre-source/non-source owner of paths and OS/tool error facts.
-At most one of `identity` and `filesystem` is `Some`: an identity-context failure never also
-carries filesystem context, and a filesystem-context failure never carries a compact compiler ID.
+`InfrastructureContext` encodes exactly one context shape. `Identity` is required for every
+retained `SourceSpan`, `PathId` or `StringId`, and its frozen context is shared with the owning
+report or source identity. `source` is optional because an identity-context failure may retain a
+path or string ID without an authored source span. `Filesystem` is the ordinary pre-source,
+non-source, host and tool owner of paths and OS/tool error facts; add another context variant only
+if the Phase 5 inventory proves a context class that these two variants cannot represent.
+
+An identity-context failure never also carries filesystem context, and a filesystem-context failure
+never carries a compact compiler ID.
 
 An operational failure carries exactly one context shape, never both:
 
