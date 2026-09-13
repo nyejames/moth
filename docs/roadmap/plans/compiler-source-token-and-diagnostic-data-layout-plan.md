@@ -66,9 +66,9 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 2 is complete on `diagnostic-data-layout-changes`; final review corrections now cover
-  generated path/string pairing and report-owner path retention. Next: Phase 3 Slice 3A token array
-  layout selection.
+- Phase: Phase 2 is complete on `diagnostic-data-layout-changes`; final review corrections are
+  committed in `aed38042f`, covering generated path/string pairing and report-owner path retention.
+  Next: Phase 3 Slice 3A token array layout selection.
 - Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
   diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
 - Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
@@ -77,15 +77,18 @@ CURRENT_SLICE:
   materialisation keeps the live string/path pair through nested requests, and final report metrics
   count only path tables reachable from diagnostic owners.
 - Validation evidence: targeted capacity, ownership, materialisation and invariant suites pass;
-  `cargo test --workspace --quiet -- --format terse` passes 5,981 tests; the exact all-feature
-  workspace check compiles with warnings; feature-lane-check reports 0 findings; source audit
-  reports 1,389 files audited with 0 findings; docs check reports no errors or warnings; bench-ci
-  covers 82 preflight cases and frontend timing averages -3 ms; timers-erasure-check passes.
+  `cargo test --workspace --quiet -- --format terse` passes 5,983 tests; the exact all-feature
+  workspace check compiles with warnings; the clean and warning-heavy retention probes complete
+  successfully with 0 and 1 retained path tables respectively; feature-lane-check reports 0
+  findings; source audit reports 1,389 files audited with 0 findings; docs check reports no errors
+  or warnings; bench-ci covers 82 preflight cases and frontend timing averages -3 ms;
+  timers-erasure-check passes.
   The recorded `just validate` attempt reaches native clippy but fails on the repository's
   warning-denied set. validate-common integration reports 31/1,959 baseline-equivalent failures,
   and bench-scaling's generic-instantiation budget remains over target in both current (n^1.82)
   and pre-cleanup baseline (n^1.77). These limitations are recorded in the benchmark evidence.
-- Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`.
+- Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
+  `aed38042f`.
 - Non-goals: Phase 3 token-store work; diagnostic compact-record work.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
@@ -95,7 +98,8 @@ Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 remains complete. Phase 2 PathId cutover, generated identity pairing and report-owner
-  retention metrics are implemented and awaiting the final integration checkpoint.
+  retention metrics are implemented and committed; refreshed probe evidence is recorded. Final
+  integration audit is the remaining Phase 2 closeout step.
 - Next work is Phase 3 fixed tokens and source-owned retained syntax.
 
 HISTORICAL_ACCEPTED_SLICES:

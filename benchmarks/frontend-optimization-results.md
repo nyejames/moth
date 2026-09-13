@@ -3602,9 +3602,9 @@ Resume the original layout plan at Phase 2 on this branch.
 ## Data Layout Migration - Phase 2 Path Identity Retention Probe (2026-09-11)
 
 This Phase 2 checkpoint measures path identity ownership after the shared-boundary publication
-change and invariant cleanup. The implementation checkpoint is `8fc783a9d` on branch
-`diagnostic-data-layout-changes`; the documentation and final-gate changes are recorded after that
-checkpoint. Environment: Apple M1 Pro, `aarch64-apple-darwin`, Rust 1.97.1.
+change, invariant cleanup, generated identity pairing, and report-owner metric correction. The
+implementation/review-correction checkpoint is `aed38042f` on branch
+`diagnostic-data-layout-changes`. Environment: Apple M1 Pro, `aarch64-apple-darwin`, Rust 1.97.1.
 
 Each row is one direct probe invocation:
 
@@ -3621,16 +3621,16 @@ attribution; `total_ms` and stage values are single-run timings, not medians.
 
 | Workload | Outcome | Errors / warnings | Total ms | Boundary compile ms | Frontend prepare ms | Frontend semantic ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `benchmarks/adversarial/import-external-churn` | Success | 0 / 0 | 76.372625 | 42.025417 | 3.995749 | 41.037625 |
-| `benchmarks/data-layout/warning-heavy.moth` | Success | 0 / 39 | 21.412042 | 6.803875 | 0.362333 | 6.324209 |
+| `benchmarks/adversarial/import-external-churn` | Success | 0 / 0 | 80.359250 | 42.001792 | 3.831250 | 41.028709 |
+| `benchmarks/data-layout/warning-heavy.moth` | Success | 0 / 39 | 22.321042 | 7.419000 | 0.469458 | 6.857458 |
 
 | Workload | Unique path nodes | Retained table count / node rows / storage bytes | Path-table copies / copied rows / copied bytes | Full string-table clones | Path merges / entries scanned | Identity remaps (identity / non-identity) | Live / peak / after-drop bytes |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `import-external-churn` | 371 | 0 / 0 / 0 | 8 / 416 / 4,992 | 2 | 2 / 356 | 2 / 0 | 27,212 / 1,938,984 / 1,502 |
-| `warning-heavy.moth` | 77 | 1 / 78 / 936 | 7 / 100 / 1,200 | 1 | 3 / 76 | 3 / 0 | 30,127 / 2,047,168 / 1,479 |
+| `warning-heavy.moth` | 77 | 1 / 78 / 1,536 | 7 / 100 / 1,200 | 1 | 3 / 76 | 3 / 0 | 30,127 / 2,047,168 / 1,479 |
 
 The clean result intentionally drops its render context, so its retained path-table metrics are
-zero. The warning-heavy result retains one final path table with 78 node rows and 936 bytes of
+zero. The warning-heavy result retains one final path table with 78 node rows and 1,536 bytes of
 vector capacity for its 39 diagnostics. Multi-module Arc-sharing coverage
 (`directory_project_discovers_multiple_entry_modules` and
 `installed_path_table_is_shared_by_every_completed_sidecar`) verifies that completed modules and
