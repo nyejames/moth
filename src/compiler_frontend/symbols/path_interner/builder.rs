@@ -10,10 +10,10 @@ use super::frozen::PathTable;
 use super::id::PathId;
 use super::remap::PathIdRemap;
 use super::NonUtf8PathComponent;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::instrumentation::{
-    FrontendCounter, add_frontend_counter, increment_frontend_counter, record_path_max_depth,
+    add_frontend_counter, increment_frontend_counter, record_path_max_depth, FrontendCounter,
 };
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 use std::path::Path;
@@ -82,30 +82,6 @@ impl PathInternerBuilder {
         }
     }
 
-    /// Walk the interned components of `suffix` onto `prefix` without allocating the identity.
-    ///
-    /// Caller-owned `scratch` carries the forward component walk. `None` reports authored
-    /// exhaustion of the compact path-node domain.
-    #[allow(dead_code)] // Slice 2B wires allocation-free path joins into module compilation.
-    pub fn try_join(
-        &mut self,
-        prefix: PathId,
-        suffix: PathId,
-        scratch: &mut Vec<StringId>,
-    ) -> Option<PathId> {
-        self.table.resolve_components(suffix, scratch);
-
-        let suffix_len = scratch.len();
-        let mut joined = prefix;
-
-        for index in 0..suffix_len {
-            let component = scratch[index];
-            joined = self.try_intern_child(joined, component)?;
-        }
-
-        Some(joined)
-    }
-
     /// Intern a filesystem path using the exact component semantics of the path table.
     ///
     /// Filesystem components are validated as strict UTF-8 before their string IDs enter the
@@ -139,7 +115,6 @@ impl PathInternerBuilder {
     /// therefore interned exactly like non-empty components; only the empty spelling denotes root.
     /// Backslashes are ordinary component text because this API accepts portable logical spelling
     /// rather than a filesystem path.
-    #[allow(dead_code)] // Phase 2 migrates semantic path producers to this table.
     pub fn try_intern_portable_path(
         &mut self,
         spelling: &str,

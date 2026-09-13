@@ -411,10 +411,7 @@ fn fork_shares_base_identities_and_continues_local_suffix() {
 
     // Filesystem interning in the fork converts components without storing a `PathBuf`.
     let filesystem_path = fork
-        .try_intern_filesystem_path(
-            std::path::Path::new("base/leaf/child"),
-            &mut string_table,
-        )
+        .try_intern_filesystem_path(std::path::Path::new("base/leaf/child"), &mut string_table)
         .expect("fork filesystem interning must succeed");
     assert_eq!(filesystem_path, local);
 }
@@ -445,8 +442,7 @@ fn forked_merges_collapse_shared_paths_in_either_order() {
     let string_source = strings.fork_source();
     let path_source = builder.fork_source();
 
-    let (mut first_strings, first_string_base) =
-        string_source.fork_for_module().into_parts();
+    let (mut first_strings, first_string_base) = string_source.fork_for_module().into_parts();
     let mut first_fork = path_source.fork_for_module();
     let first_paths = intern_fork_paths(
         &mut first_fork,
@@ -454,8 +450,7 @@ fn forked_merges_collapse_shared_paths_in_either_order() {
         &["shared/new", "only-first"],
     );
 
-    let (mut second_strings, second_string_base) =
-        string_source.fork_for_module().into_parts();
+    let (mut second_strings, second_string_base) = string_source.fork_for_module().into_parts();
     let mut second_fork = path_source.fork_for_module();
     let second_paths = intern_fork_paths(
         &mut second_fork,
@@ -500,8 +495,7 @@ fn forked_merges_collapse_shared_paths_in_either_order() {
     let string_source = strings.fork_source();
     let path_source = builder.fork_source();
 
-    let (mut first_strings, first_string_base) =
-        string_source.fork_for_module().into_parts();
+    let (mut first_strings, first_string_base) = string_source.fork_for_module().into_parts();
     let mut first_fork = path_source.fork_for_module();
     let first_paths = intern_fork_paths(
         &mut first_fork,
@@ -509,8 +503,7 @@ fn forked_merges_collapse_shared_paths_in_either_order() {
         &["shared/new", "only-first"],
     );
 
-    let (mut second_strings, second_string_base) =
-        string_source.fork_for_module().into_parts();
+    let (mut second_strings, second_string_base) = string_source.fork_for_module().into_parts();
     let mut second_fork = path_source.fork_for_module();
     let second_paths = intern_fork_paths(
         &mut second_fork,
@@ -550,8 +543,7 @@ fn string_ids_remap_during_path_merge() {
     let string_source = strings.fork_source();
     let path_source = builder.fork_source();
 
-    let (mut worker_strings, string_base_len) =
-        string_source.fork_for_module().into_parts();
+    let (mut worker_strings, string_base_len) = string_source.fork_for_module().into_parts();
     let mut worker_fork = path_source.fork_for_module();
 
     // This component exists only in the worker string table.
@@ -561,7 +553,10 @@ fn string_ids_remap_during_path_merge() {
         .expect("fork interning must succeed");
 
     let string_remap = strings.merge_delta_from(&worker_strings, string_base_len);
-    assert_eq!(string_remap.get(worker_component), strings.intern("worker-only-component"));
+    assert_eq!(
+        string_remap.get(worker_component),
+        strings.intern("worker-only-component")
+    );
 
     let path_remap = builder
         .merge_delta_from(&worker_fork, &string_remap)
@@ -632,7 +627,10 @@ fn portable_and_native_rendering_share_components() {
     expected.push("navbar");
     assert_eq!(native, expected);
 
-    assert_eq!(table.render_portable(PathId::ROOT, &string_table, &mut scratch), "");
+    assert_eq!(
+        table.render_portable(PathId::ROOT, &string_table, &mut scratch),
+        ""
+    );
     assert_eq!(
         table.render_native(PathId::ROOT, &string_table, &mut scratch),
         PathBuf::new()
@@ -654,52 +652,10 @@ fn portable_and_native_rendering_share_components() {
     );
 }
 
-#[test]
-fn join_and_append_match_child_by_child_identity() {
-    let mut string_table = StringTable::new();
-    let mut builder = PathInternerBuilder::new();
-    let prefix = builder
-        .try_intern_portable_path("a/b", &mut string_table)
-        .unwrap();
-    let suffix = builder
-        .try_intern_portable_path("c/d", &mut string_table)
-        .unwrap();
-    let direct = builder
-        .try_intern_portable_path("a/b/c/d", &mut string_table)
-        .unwrap();
-
-    let mut scratch = Vec::new();
-    let joined = builder
-        .try_join(prefix, suffix, &mut scratch)
-        .expect("join must succeed");
-
-    assert_eq!(joined, direct);
-
-    let component = string_table.intern("e");
-    let appended = builder
-        .try_intern_child(joined, component)
-        .expect("append must succeed");
-    let direct_appended = builder
-        .try_intern_portable_path("a/b/c/d/e", &mut string_table)
-        .unwrap();
-
-    assert_eq!(appended, direct_appended);
-
-    // Joining the empty suffix leaves the prefix unchanged.
-    let mut scratch = Vec::new();
-    let rejoined = builder
-        .try_join(prefix, PathId::ROOT, &mut scratch)
-        .expect("empty join must succeed");
-
-    assert_eq!(rejoined, prefix);
-}
-
 #[cfg(unix)]
 mod non_utf8_filesystem_conversion {
     use super::*;
-    use crate::compiler_frontend::symbols::path_interner::{
-        NonUtf8PathComponent, PathInternError,
-    };
+    use crate::compiler_frontend::symbols::path_interner::{NonUtf8PathComponent, PathInternError};
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
@@ -782,10 +738,7 @@ fn merge_rejects_structurally_divergent_base_rows() {
 
     assert!(matches!(
         error,
-        PathInternError::BaseMismatch {
-            base_len: 3,
-            ..
-        }
+        PathInternError::BaseMismatch { base_len: 3, .. }
     ));
 }
 
@@ -844,8 +797,8 @@ fn merge_rejection_leaves_no_delta_counter_trace() {
     // leave the delta counters untouched, so the increments sit behind complete local
     // validation rather than ahead of it.
     use crate::compiler_frontend::instrumentation::{
-        FrontendCounter, capture_frontend_counters_for_test, frontend_counter_test_values,
-        lock_counter_test, reset_frontend_counters,
+        capture_frontend_counters_for_test, frontend_counter_test_values, lock_counter_test,
+        reset_frontend_counters, FrontendCounter,
     };
     let _guard = lock_counter_test();
     let _capture = capture_frontend_counters_for_test();

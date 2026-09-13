@@ -52,9 +52,7 @@ pub(crate) use test_exhaustion::ForcedExhaustionGuard;
 mod tests;
 
 pub(crate) use builder::{PathInternError, PathInternerBuilder};
-#[allow(unused_imports)] // Slice 2B wires path forks into module compilation.
 pub(crate) use fork::{PathInternerFork, PathInternerForkSource};
 pub(crate) use frozen::PathTable;
 pub(crate) use id::PathId;
-#[allow(unused_imports)] // Slice 2B wires path remaps into module compilation.
 pub(crate) use remap::PathIdRemap;

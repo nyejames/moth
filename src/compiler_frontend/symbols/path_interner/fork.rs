@@ -5,13 +5,13 @@
 //! WHY:  parallel workers must share inherited source paths by numeric identity while keeping
 //!       their own append-only suffix, mirroring the string-table fork pattern.
 
-use super::NonUtf8PathComponent;
 use super::builder::{PathInternError, PathInternerBuilder, PathNode};
 use super::frozen::PathTable;
 use super::id::PathId;
 use super::remap::PathIdRemap;
+use super::NonUtf8PathComponent;
 use crate::compiler_frontend::instrumentation::{
-    FrontendCounter, add_frontend_counter, increment_frontend_counter, record_path_table_copy,
+    add_frontend_counter, increment_frontend_counter, record_path_table_copy, FrontendCounter,
 };
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
@@ -37,7 +37,6 @@ pub struct PathInternerForkSource {
 impl PathInternerForkSource {
     /// Construct a standalone empty path fork for legacy frontend callers that do not
     /// participate in a boundary path table.
-    #[allow(dead_code)] // Test-only standalone fork; production forks from the boundary builder.
     pub fn empty() -> PathInternerFork {
         Self::new(
             vec![PathNode {
@@ -65,7 +64,6 @@ impl PathInternerForkSource {
     }
 
     /// Return the number of inherited path nodes shared by every fork.
-    #[allow(dead_code)] // Test-only prefix assertion; production carries base_len on the fork.
     pub fn base_len(&self) -> usize {
         self.base.nodes.len()
     }
@@ -97,22 +95,7 @@ pub struct PathInternerFork {
 }
 
 impl PathInternerFork {
-    /// Recreate an empty local fork over this fork's inherited base.
-    ///
-    /// This is used only when a direct preparation caller supplied a standalone fork while its
-    /// retained outputs were issued from the authoritative source-table prefix.  Keeping the
-    /// inherited nodes and lookup intact preserves the original `PathId` domain.
-    pub(crate) fn inherited_fork(&self) -> PathInternerFork {
-        PathInternerForkSource::new(
-            self.base.nodes.clone(),
-            self.base.depths.clone(),
-            self.base.lookup.clone(),
-        )
-        .fork_for_module()
-    }
-
     /// Construct an empty standalone fork for callers outside a boundary merge.
-    #[allow(dead_code)] // Test-only standalone fork; production forks from the boundary builder.
     pub fn empty() -> Self {
         PathInternerForkSource::empty()
     }
@@ -130,13 +113,12 @@ impl PathInternerFork {
     ///
     /// This proves range only, not provenance: an independent domain can reuse the same index
     /// with different path components. Cross-domain ownership requires the issuing string table.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn contains(&self, path: PathId) -> bool {
         path.index() < self.len()
     }
 
     /// Return the number of worker-local nodes interned after the inherited prefix.
-    pub(super) fn local_len(&self) -> usize {
+    pub(crate) fn local_len(&self) -> usize {
         self.nodes.len()
     }
 
@@ -173,7 +155,6 @@ impl PathInternerFork {
     }
 
     /// Return the parent path, or `None` for the root.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn parent(&self, path: PathId) -> Option<PathId> {
         let index = path.index();
 
@@ -196,7 +177,6 @@ impl PathInternerFork {
     }
 
     /// Return the final component, or `None` for the root path.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn component(&self, path: PathId) -> Option<StringId> {
         if path == PathId::ROOT {
             return None;
@@ -249,7 +229,6 @@ impl PathInternerFork {
     }
 
     /// Return whether `path` descends from `prefix` without allocating.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn starts_with(&self, path: PathId, prefix: PathId) -> bool {
         let path_depth = self.depth(path);
         let prefix_depth = self.depth(prefix);
@@ -270,11 +249,9 @@ impl PathInternerFork {
     }
 
     /// Return whether `path` ends with `suffix` without allocating.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn ends_with(&self, path: PathId, suffix: PathId) -> bool {
         let path_depth = self.depth(path);
         let suffix_depth = self.depth(suffix);
-
         if suffix_depth > path_depth {
             return false;
         }
@@ -326,7 +303,6 @@ impl PathInternerFork {
     }
 
     /// Render a path with portable forward-slash separators.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_portable(
         &self,
         path: PathId,
@@ -337,7 +313,6 @@ impl PathInternerFork {
     }
 
     /// Render a path using immutable strings after the identity freeze boundary.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_portable_frozen(
         &self,
         path: PathId,
@@ -347,7 +322,6 @@ impl PathInternerFork {
         self.render_portable_with(path, string_table, scratch)
     }
 
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     fn render_portable_with<T: StringTableResolver + ?Sized>(
         &self,
         path: PathId,
@@ -368,7 +342,6 @@ impl PathInternerFork {
     }
 
     /// Render a path as a native `PathBuf` by pushing each resolved component.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_native(
         &self,
         path: PathId,
@@ -379,7 +352,6 @@ impl PathInternerFork {
     }
 
     /// Render a native path using immutable strings after the freeze boundary.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_native_frozen(
         &self,
         path: PathId,
@@ -389,7 +361,6 @@ impl PathInternerFork {
         self.render_native_with(path, string_table, scratch)
     }
 
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     fn render_native_with<T: StringTableResolver + ?Sized>(
         &self,
         path: PathId,
