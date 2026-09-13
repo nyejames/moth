@@ -94,7 +94,7 @@ fn parses_multiline_inferred_collection_literal_with_constructor_items() {
         entries_decl
             .value
             .diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+            .display_with_table(&string_table, &path_fork.snapshot_table()),
         "{Entry}"
     );
 }
@@ -130,7 +130,7 @@ fn parses_empty_collection_with_explicit_element_type() {
         readings_decl
             .value
             .diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+            .display_with_table(&string_table, &path_fork.snapshot_table()),
         "{Reading}"
     );
 }

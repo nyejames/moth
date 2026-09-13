@@ -204,7 +204,21 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
         &resolver,
         &source_packages,
         Some("helper"),
-        |resolution, string_table, provider_paths| {
+        |namespace_set, source_tree_index, package_prefix, string_table, provider_paths, path_fork| {
+            let package_source_tree_index = namespace_set
+                .source_package_boundaries()
+                .find(|(prefix, _)| *prefix == package_prefix.expect("package boundary prefix"))
+                .map(|(_, index)| index)
+                .expect("requested source package boundary should be indexed");
+            // The resolution's fork is rebound to the caller-owned discovery fork inside
+            // `handle_provider_capable_dependency`, so a throwaway interner is sufficient here.
+            let throwaway_fork = PathInternerFork::empty();
+            let resolution = DirectoryDependencyResolution::package(
+                namespace_set,
+                package_prefix.expect("package boundary prefix"),
+                package_source_tree_index,
+                &throwaway_fork,
+            );
             let provider = provider_root(&["project"], provider_paths);
             let mut external_packages = ExternalPackageRegistry::new();
             let providers = ExternalImportProviderRegistry::empty();
@@ -224,16 +238,16 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
                 DependencyClauseKind::Namespace,
                 &declaring_source,
                 &resolver,
-                resolution.path_fork(),
+                path_fork,
                 &mut external_imports,
-                *resolution,
+                resolution,
                 string_table,
             ) else {
                 panic!("source-package @project dependency must be rejected");
             };
             let failure = error.into_failure(
                 string_table,
-                std::sync::Arc::new(resolution.path_fork().snapshot_table()),
+                std::sync::Arc::new(path_fork.snapshot_table()),
             );
             let messages = failure.into_messages(string_table);
             let diagnostic = first_error_diagnostic(&messages);

@@ -39,7 +39,7 @@ pub(crate) fn entry_and_start(
         .try_intern_portable_path("@page.moth", string_table)
         .expect("test entry path fits");
     let start_name = path_fork
-        .try_intern_portable_path(IMPLICIT_START_FUNC_NAME, string_table)
+        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
         .expect("test start path fits");
     (entry_path, start_name)
 }

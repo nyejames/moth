@@ -14,7 +14,6 @@ use crate::compiler_frontend::headers::types::{
     FileRole, HeaderBuildContext, HeaderParseContext, HeaderParseFailure, TopLevelConstFragment,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 
 pub(super) fn handle_hash_item(

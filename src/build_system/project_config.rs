@@ -20,7 +20,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidCon
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
+use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
@@ -141,7 +141,15 @@ pub(crate) fn compile_project_config_file(
             None,
             string_table,
         )
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+        .map_err(|error| match error {
+            SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
+                CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                string_table.clone(),
+            ),
+            SourceDatabaseError::Infrastructure(error) => {
+                CompilerMessages::from_error_ref(error, string_table)
+            }
+        })?;
 
     let source_code = match extract_source_code(&canonical_config_path, string_table) {
         Ok(source_code) => source_code,

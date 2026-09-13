@@ -189,13 +189,18 @@ impl ModuleCompilerMetadata {
         }
     }
 
-    /// WHY: warnings remap exactly once. Const-fragment spans are global and carry no interned
-    ///      identity, values are already owned folded strings, root activity has no interned
-    ///      fields, and the entry path is a `PathBuf`.
+    /// WHY: every retained field remaps exactly once. Const-fragment spans are global and carry
+    ///      no interned identity, values are already owned folded strings, root activity has no
+    ///      interned fields, and the entry path is a `PathBuf`.
     ///
-    /// Materialisation metadata owns self-contained strings and stable semantic identities, so
-    /// this remap covers only executable presentation fields that retain local `StringId` values.
+    /// Warnings may carry `PathId` payloads issued against the module-local path fork, so they
+    /// remap with the materialisation context. Materialisation metadata owns self-contained
+    /// strings and stable semantic identities; this remap covers the fields that retain local
+    /// `PathId` values.
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for warning in &mut self.warnings {
+            warning.remap_path_ids(remap);
+        }
         if let Some(context) = &mut self.materialisation_context {
             Arc::make_mut(context).remap_path_ids(remap);
         }

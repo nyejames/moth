@@ -771,7 +771,7 @@ fn prepare_check_only_module(
                     project_path_resolver,
                     syntax_path_fork,
                     &mut isolated_external_imports,
-                    directory_dependency_resolution.with_path_fork(syntax_path_fork),
+                    directory_dependency_resolution,
                     syntax_string_table,
                 )
             };
@@ -1276,7 +1276,7 @@ fn discover_modules_serial_provider_capable(
                         project_path_resolver,
                         syntax_path_fork,
                         external_imports,
-                        directory_dependency_resolution.with_path_fork(syntax_path_fork),
+                        directory_dependency_resolution,
                         syntax_string_table,
                     )
                 };

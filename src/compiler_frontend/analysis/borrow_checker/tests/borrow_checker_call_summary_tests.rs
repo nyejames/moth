@@ -62,7 +62,6 @@ use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallReactiveEffect, PublicCallTransferEffect, PublicCallTransferEligibility,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 fn function_call_node(
     name: PathId,
@@ -169,7 +168,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![target, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("public call summary construction should succeed");
 
 assert_eq!(
@@ -287,7 +286,7 @@ let start = function_node(
 let mut hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
 hir.functions[0].params.push(LocalId(999_999));
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("partial parameter metadata should fail summary construction");
 assert_infrastructure_error_contains(
     &error,
@@ -362,7 +361,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![mutator, wrapper, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("mutable parameter call path should validate");
 let wrapper_id = hir
     .functions
@@ -385,17 +384,20 @@ assert_eq!(
 ); }
 
 #[test]
-fn public_call_summary_tracks_mixed_argument_access_by_position() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"mutator |shared Int, mutable ~Int|:
+fn public_call_summary_tracks_mixed_argument_access_by_position() { let source = r#"mutator |shared Int, mutable ~Int|:
 ;
 
 wrapper |shared Int, mutable ~Int|:
 mutator(shared, ~mutable)
 ;"#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+let entry_path = ast.entry_path;
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let wrapper_name = symbol("wrapper", &mut path_fork, &mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let wrapper_name = path_fork
+    .try_intern_child(entry_path, string_table.intern("wrapper"))
+    .expect("test path fits");
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("mixed shared and mutable call arguments should validate");
 
 let wrapper_id = hir
@@ -427,7 +429,6 @@ fn local_call_mutation_summary_in_order(
     callee_body: &str,
     callee_declared_first: bool,
 ) -> (PublicCallMutationEffect, PublicCallMutationEffect) {
-    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let callee = format!("mutator |input ~Int|:\n{callee_body}\n;\n");
     let wrapper = "wrapper |value ~Int|:\n    mutator(~value)\n;\n";
     let source = if callee_declared_first {
@@ -435,11 +436,16 @@ fn local_call_mutation_summary_in_order(
     } else {
         format!("{wrapper}\n{callee}")
     };
-    let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(&source);
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+    let entry_path = ast.entry_path;
     let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
-    let mutator_name = symbol("mutator", &mut path_fork, &mut string_table);
-    let wrapper_name = symbol("wrapper", &mut path_fork, &mut string_table);
+    let mutator_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("mutator"))
+        .expect("test path fits");
+    let wrapper_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("wrapper"))
+        .expect("test path fits");
     let mutator_id = hir
         .functions
         .iter()
@@ -460,7 +466,7 @@ fn local_call_mutation_summary_in_order(
         })
         .expect("wrapper function should lower to HIR")
         .id;
-    let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("local mutation summary fixture should validate");
 
     let mutator_mutation = report
@@ -482,7 +488,7 @@ fn local_call_mutation_summary_in_order(
 }
 
 #[test]
-fn local_mutation_summary_keeps_unwritten_mutable_callee_order_independent() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); for callee_declared_first in [true, false] {
+fn local_mutation_summary_keeps_unwritten_mutable_callee_order_independent() { for callee_declared_first in [true, false] {
     let (mutator_mutation, wrapper_mutation) =
         local_call_mutation_summary_in_order("", callee_declared_first);
     assert_eq!(mutator_mutation, PublicCallMutationEffect::NoWrite);
@@ -490,7 +496,7 @@ fn local_mutation_summary_keeps_unwritten_mutable_callee_order_independent() { l
 } }
 
 #[test]
-fn local_mutation_summary_propagates_writes_order_independently() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); for callee_declared_first in [true, false] {
+fn local_mutation_summary_propagates_writes_order_independently() { for callee_declared_first in [true, false] {
     let (mutator_mutation, wrapper_mutation) =
         local_call_mutation_summary_in_order("    input = 1", callee_declared_first);
     assert_eq!(mutator_mutation, PublicCallMutationEffect::Writes);
@@ -498,15 +504,18 @@ fn local_mutation_summary_propagates_writes_order_independently() { let mut path
 } }
 
 #[test]
-fn public_call_summary_map_set_only_writes_receiver_parameter() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"mutate |scores ~{String = String}, key String, value String|:
+fn public_call_summary_map_set_only_writes_receiver_parameter() { let source = r#"mutate |scores ~{String = String}, key String, value String|:
 ~scores.set(key, value) catch:
 ;
 ;"#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+let entry_path = ast.entry_path;
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let mutate_name = symbol("mutate", &mut path_fork, &mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let mutate_name = path_fork
+    .try_intern_child(entry_path, string_table.intern("mutate"))
+    .expect("test path fits");
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("map set with mutable receiver should validate");
 
 let function_id = hir
@@ -597,11 +606,11 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![reader, start], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("optional transfer of an immutable shared parameter should fall back to borrowing"); }
 
 #[test]
-fn path_dependent_optional_call_records_transfer_or_borrow_without_invalidating_source() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"inspect |value String|:
+fn path_dependent_optional_call_records_transfer_or_borrow_without_invalidating_source() { let source = r#"inspect |value String|:
 ;
 
 optional_transfer |flag Bool, op_name String|:
@@ -614,10 +623,10 @@ else
 sentinel = 0
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("path-dependent optional transfer should fall back to borrowing");
 
 let op_name_local = hir
@@ -678,7 +687,7 @@ assert!(
 ); }
 
 #[test]
-fn unused_alias_before_final_shared_call_falls_back_to_borrow() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn unused_alias_before_final_shared_call_falls_back_to_borrow() { let source = r#"
 inspect |value String|:
 ;
 
@@ -687,10 +696,10 @@ alias = source
 inspect(source)
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("an unused alias must not make a final shared call invalid");
 
 let source_local = hir
@@ -816,11 +825,11 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("reassigning the source binding should detach it from the returned alias"); }
 
 #[test]
-fn slot_backed_alias_result_rebinding_to_another_alias_detaches_old_root() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"Point = |
+fn slot_backed_alias_result_rebinding_to_another_alias_detaches_old_root() { let source = r#"Point = |
 x Int,
 |
 
@@ -836,11 +845,11 @@ other_returned ~= identity(other)
 returned = other_returned
 original.x = 4
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
 
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("slot-backed result rebinding should detach its previous allocation root"); }
 
 #[test]
@@ -975,7 +984,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![source, forward, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("fallible alias forwarding should validate declared success alias metadata");
 
 for (function_name, expected_alias) in [
@@ -1088,7 +1097,7 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("fresh callee returns should not alias caller roots");
 let fresh_function_id = hir
     .functions
@@ -1224,12 +1233,12 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![imprecise_return, forward, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("fallible external return should validate");
 let mut reversed_hir = hir.clone();
 reversed_hir.functions.reverse();
 let reversed_report =
-    run_borrow_checker(&reversed_hir, &external_package_registry, &string_table)
+    run_borrow_checker(&reversed_hir, &external_package_registry, &path_fork, &string_table)
         .expect("reversed fallible external return should validate");
 
 for analysis in [&report.analysis, &reversed_report.analysis] {
@@ -1253,16 +1262,19 @@ for analysis in [&report.analysis, &reversed_report.analysis] {
 } }
 
 #[test]
-fn checked_numeric_return_local_retains_fresh_alias_summary() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn checked_numeric_return_local_retains_fresh_alias_summary() { let source = r#"
 increment |input Int| -> Int, Error!:
 return input + 1
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
-let increment_name = symbol("increment", &mut path_fork, &mut string_table);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+let entry_path = ast.entry_path;
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let increment_name = path_fork
+    .try_intern_child(entry_path, string_table.intern("increment"))
+    .expect("test path fits");
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("checked numeric return should validate");
 
 let function_id = hir
@@ -1284,16 +1296,19 @@ let summary = report
 assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Fresh); }
 
 #[test]
-fn map_remove_return_local_retains_fresh_alias_summary() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn map_remove_return_local_retains_fresh_alias_summary() { let source = r#"
 remove_value |scores ~{String = String}| -> String, Error!:
 return ~scores.remove("key")!
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
-let remove_value_name = symbol("remove_value", &mut path_fork, &mut string_table);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+let entry_path = ast.entry_path;
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let remove_value_name = path_fork
+    .try_intern_child(entry_path, string_table.intern("remove_value"))
+    .expect("test path fits");
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("map remove return should validate");
 
 let function_id = hir
@@ -1315,7 +1330,7 @@ let summary = report
 assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Fresh); }
 
 #[test]
-fn multi_return_alias_summary_conservatively_unions_returned_elements() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn multi_return_alias_summary_conservatively_unions_returned_elements() { let source = r#"
 Point = |
 x Int,
 |
@@ -1332,10 +1347,10 @@ copy_one |value Point| -> Point, Point:
 return value, copy value
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("multi-return alias summaries should validate");
 
 let summary_for = |name: &str| {
@@ -1371,15 +1386,15 @@ assert_eq!(
 ); }
 
 #[test]
-fn recursive_return_summary_stays_unknown() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"
+fn recursive_return_summary_stays_unknown() { let source = r#"
 recursive |value Int| -> Int:
 return recursive(value)
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("recursive summary cycle should remain a valid conservative analysis");
 let recursive_id = hir
     .functions
@@ -1499,7 +1514,7 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("reassigning the source binding should preserve the returned allocation alias"); }
 
 #[test]
@@ -1564,7 +1579,7 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("single mutable argument call should be accepted"); }
 
 #[test]
@@ -1647,7 +1662,7 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table).expect(
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table).expect(
     "fresh mutable call args should be treated as independent locals, not aliases of other args",
 ); }
 
@@ -1701,7 +1716,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("mutable host parameter should enforce mutable access");
 assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace); }
 
@@ -1755,7 +1770,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("mutable host parameter should accept mutable local argument"); }
 
 #[test]
@@ -1808,7 +1823,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("shared host parameter should not force mutable access"); }
 
 #[test]
@@ -1908,7 +1923,7 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("two mutable args to the same root should fail");
 assert_borrow_error_kind(&error, BorrowDiagnosticKind::MultipleMutableBorrows); }
 
@@ -1996,7 +2011,7 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("shared then mutable access to same root in a call must fail");
 let payload = assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
 let DiagnosticPayload::SharedMutableConflict {
@@ -2089,7 +2104,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("external AliasArgs result should remain rebindable as a caller slot");
 let original_local = hir
     .blocks
@@ -2231,7 +2246,7 @@ let start_mismatch = function_node(
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_missing, start_mismatch], entry_path), &mut string_table, &mut path_fork);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("missing host or mismatched signature should fail");
 assert_infrastructure_error_contains(
     &error,
@@ -2314,7 +2329,7 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("immutable argument passed to mutable user param and reused must fail");
 assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace); }
 
@@ -2369,7 +2384,7 @@ let start = function_node(
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
 
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("out-of-range return alias metadata should fail at call site");
 assert_infrastructure_error_contains(
     &error,
@@ -2455,7 +2470,7 @@ let caller = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table).expect(
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table).expect(
     "same-line mutable call + later reuse should borrow (not move) when ordered by statement",
 ); }
 
@@ -2616,5 +2631,5 @@ let start_function = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![rhs_function, start_function], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &string_table)
+run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("rhs-only mutable short-circuit call with later merge use should stay borrowed"); }

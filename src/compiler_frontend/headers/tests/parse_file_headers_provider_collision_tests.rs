@@ -7,13 +7,15 @@ use super::*;
 fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
+    let mut path_fork = PathInternerFork::empty();
     // Preparation takes no registry input, so a declaration that reuses a prelude symbol name
     // still parses into a retained declaration shell during provider-independent preparation.
-    let (output, mut span_builder) = prepare_single_file(
+    let (output, mut span_builder) = prepare_single_file_with_fork(
         "prelude_fn |x Int| -> Int:\n    return x\n;\n",
         &file_path,
         &file_path,
         &mut string_table,
+        &mut path_fork,
     );
     assert!(
         output
@@ -38,6 +40,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
         &ExternalImportResolutionTable::default(),
         None,
         &mut string_table,
+        &mut path_fork,
     );
     let binding_error = match result {
         Ok(_) => panic!("binding should reject a declaration that collides with a prelude symbol"),
@@ -61,13 +64,15 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
 fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_binding() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
+    let mut path_fork = PathInternerFork::empty();
     // A generic parameter reusing a prelude type name parses during provider-independent
     // preparation; the collision is provider-dependent and is validated during binding.
-    let (output, mut span_builder) = prepare_single_file(
+    let (output, mut span_builder) = prepare_single_file_with_fork(
         "Box type PreludeType = |\n    value PreludeType,\n|\n",
         &file_path,
         &file_path,
         &mut string_table,
+        &mut path_fork,
     );
     assert!(
         output
@@ -85,6 +90,7 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
         &ExternalImportResolutionTable::default(),
         None,
         &mut string_table,
+        &mut path_fork,
     );
     let binding_error = match result {
         Ok(_) => panic!("binding should reject a generic parameter naming a prelude type"),
@@ -108,11 +114,13 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
 fn direct_selection_does_not_reserve_provider_basename_for_generic_parameter() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) = prepare_single_file(
+    let mut path_fork = PathInternerFork::empty();
+    let (output, _span_builder) = prepare_single_file_with_fork(
         "@core/Math add\nidentity type Math |value Math| -> Math:\n    return value\n;\n",
         &file_path,
         &file_path,
         &mut string_table,
+        &mut path_fork,
     );
 
     assert!(

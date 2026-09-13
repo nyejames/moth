@@ -20,6 +20,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::projects::html_project::external_js::js_import_provider::{
     JsExternalImportProvider, js_provider_package_path,
 };
@@ -55,9 +56,11 @@ fn resolve_widget_via_provider(
 
     let mut registry = ExternalPackageRegistry::new();
     let mut cache = ExternalImportProviderCache::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut context = ExternalImportProviderContext {
         package_registry: &mut registry,
         cache: &mut cache,
+        path_fork: &mut path_fork,
         string_table,
     };
 

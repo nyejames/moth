@@ -19,10 +19,10 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 pub(crate) fn run_borrow_checker(
     module: &HirModule,
     external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> Result<BorrowCheckReport, BorrowCheckError> {
-    let path_fork = PathInternerFork::empty();
-    check_borrows(module, external_package_registry, &path_fork, string_table)
+    check_borrows(module, external_package_registry, path_fork, string_table)
 }
 
 pub(crate) fn assert_borrow_error_kind(

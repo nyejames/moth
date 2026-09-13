@@ -43,6 +43,12 @@ mod id;
 mod remap;
 
 #[cfg(test)]
+pub(crate) mod test_exhaustion;
+
+#[cfg(test)]
+pub(crate) use test_exhaustion::ForcedExhaustionGuard;
+
+#[cfg(test)]
 mod tests;
 
 pub(crate) use builder::{PathInternError, PathInternerBuilder};

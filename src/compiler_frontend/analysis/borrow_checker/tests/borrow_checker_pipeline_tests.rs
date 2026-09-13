@@ -19,7 +19,6 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
     symbol, test_source_location,
@@ -93,7 +92,7 @@ let source_files = Arc::new(SourceDatabase::empty());
 let mut frontend = CompilerFrontend::new(
     FrontendOptions::default(),
     string_table,
-    PathInternerFork::empty(),
+    path_fork,
     &style_directives,
     &external_package_registry,
     None,
@@ -159,7 +158,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-let borrow_analysis = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let borrow_analysis = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("borrow checking should pass");
 let function_link_facts =
     crate::compiler_frontend::hir::reachability::collect_module_function_link_facts(&hir)
@@ -170,7 +169,7 @@ let module = Module {
     resource_table: ModuleResourceTable::new(),
     type_environment:
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
-    borrow_analysis, path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+    borrow_analysis, path_table: Arc::new(path_fork.snapshot_table()), },
     link_facts: ModuleLinkFacts {
         external_package_registry: Arc::clone(&external_package_registry),
         external_import_candidates: Vec::new(),

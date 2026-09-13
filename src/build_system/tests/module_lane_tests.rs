@@ -182,13 +182,14 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     // Seed the merged table so the local "start_entry" id shifts during merge, proving the remap
     // is actually applied rather than being an identity no-op.
     let mut merged_string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     merged_string_table.intern("prefix");
     let remap = merged_string_table.merge_from(&local_string_table);
     assert!(
         !remap.is_identity(),
         "test remap must shift the local string id"
     );
+    let mut path_table = path_fork.snapshot_table();
+    path_table.remap_string_ids(&remap);
 
     let asset_path = PathBuf::from("assets/drawing.js");
     let function_link_facts = collect_module_function_link_facts(&hir_module)
@@ -219,7 +220,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         executable: ModuleExecutable { hir: hir_module,
         resource_table: ModuleResourceTable::new(),
         type_environment: TypeEnvironment::new(),
-        borrow_analysis, path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        borrow_analysis, path_table: Arc::new(path_table), },
         link_facts,
         metadata: ModuleCompilerMetadata {
             entry_point: entry_point.clone(),
@@ -230,6 +231,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
             materialisation_context: None,
         },
     };
+    module.remap_string_ids(&remap);
 
     let resolved_name = module
         .executable

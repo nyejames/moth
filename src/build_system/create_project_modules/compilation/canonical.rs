@@ -878,29 +878,8 @@ pub(super) fn compile_check_only_batches(
         let path_base_len = outcome.path_base_len;
         match outcome.outcome {
             DirectoryModuleTaskOutcome::Success(compiled) => {
-                let ModuleSemanticResult {
-                    module,
-                    generated_delta,
-                    string_table: module_string_table,
-                    path_fork,
-                    ..
-                } = *compiled;
-                debug_assert_eq!(path_fork.base_len(), path_base_len);
-                // Check-only string tables stay on the transient batch and merge at the final
-                // render tail. Discard the path fork with them rather than retaining discarded
-                // PathIds in the frozen build table.
-                let mut warnings = module.metadata.warnings;
-                warnings.extend(
-                    generated_delta
-                        .records()
-                        .iter()
-                        .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
-                );
-                if !warnings.is_empty() {
-                    // Retain the module-local table; the final render tail merges it
-                    // exactly once via `append_messages_preserving_context`.
-                    let batch =
-                        PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
+                debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
+                if let Some(batch) = check_only_success_batch(*compiled) {
                     transient_batches.push(batch);
                 }
             }
@@ -921,6 +900,44 @@ pub(super) fn compile_check_only_batches(
     }
     Ok(transient_batches)
 }
+
+/// Build the transient warning batch one successful check-only unit contributes.
+///
+/// WHAT: collects the unit's own warnings plus every generated sidecar warning exactly as the
+///       canonical check-only success arm does, keeps the module-local string table on the
+///       batch, and attaches the issuing path fork's snapshot so warning `PathId`s issued
+///       against the check-only fork keep a table that renders them after the final render
+///       tail's component remap.
+/// WHY: the only crossing state for a check-only unit is its diagnostics; keeping the
+///      construction in one production helper lets the regression test route through the real
+///      branch instead of re-implementing the path-table attachment.
+pub(super) fn check_only_success_batch(
+    compiled: ModuleSemanticResult,
+) -> Option<PremergeDiagnosticBatch> {
+    let ModuleSemanticResult {
+        module,
+        generated_delta,
+        string_table: module_string_table,
+        path_fork,
+        ..
+    } = compiled;
+    let mut warnings = module.metadata.warnings;
+    warnings.extend(
+        generated_delta
+            .records()
+            .iter()
+            .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
+    );
+    if warnings.is_empty() {
+        return None;
+    }
+    // Retain the module-local table; the final render tail merges it exactly once via
+    // `append_messages_preserving_context`.
+    let mut batch = PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
+    batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
+    Some(batch)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_module_waves_in_premerge_lane(
     context: BoundaryCompilationContext<'_>,

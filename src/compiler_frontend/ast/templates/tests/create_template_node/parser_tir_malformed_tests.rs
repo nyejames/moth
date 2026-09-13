@@ -20,12 +20,13 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
-        template_tokens_from_source(source, &mut string_table, &mut span_builder);
-    let context = new_constant_context(token_stream.src_path.clone());
+        template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
 
     expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("template source should fail to parse"),
     )
 }
@@ -35,8 +36,9 @@ fn parse_template_diagnostic_with_replaced_body_token(
 ) -> (CompilerDiagnostic, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
-        template_tokens_from_source(source, &mut string_table, &mut span_builder);
+        template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     // Normal template-body lexing emits text, newline, nested-template, and close tokens only.
     // Replace the retained text token to exercise the parser's defensive unexpected-token lane
     // while keeping its authored UTF-8 span and source identity intact.
@@ -46,10 +48,10 @@ fn parse_template_diagnostic_with_replaced_body_token(
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("template source should contain a body token");
     body_token.kind = TokenKind::Comma;
-    let context = new_constant_context(token_stream.src_path.clone());
+    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("template source should fail to parse"),
     );
     (diagnostic, span_builder)
@@ -60,12 +62,13 @@ fn parse_template_diagnostic_with_span_builder(
 ) -> (CompilerDiagnostic, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
-        template_tokens_from_source(source, &mut string_table, &mut span_builder);
-    let context = new_constant_context(token_stream.src_path.clone());
+        template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut PathInternerFork::empty())
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("template source should fail to parse"),
     );
     (diagnostic, span_builder)

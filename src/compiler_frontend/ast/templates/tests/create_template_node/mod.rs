@@ -51,6 +51,7 @@ fn template_tokens_from_source(
     source: &str,
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
+    path_fork: &mut PathInternerFork,
 ) -> FileTokens {
     let style_directives = frontend_test_style_directives();
     template_tokens_from_source_with_style_directives(
@@ -58,6 +59,7 @@ fn template_tokens_from_source(
         &style_directives,
         string_table,
         span_builder,
+        path_fork,
     )
 }
 
@@ -66,10 +68,21 @@ fn template_tokens_from_source_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
+    path_fork: &mut PathInternerFork,
 ) -> FileTokens {
-    let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", string_table).expect("test path fits");
-    let mut tokens = tokenize(source, scope, crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile, style_directives, string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, span_builder)
+    let scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", string_table)
+        .expect("test path fits");
+    let mut tokens = tokenize(
+        source,
+        scope,
+        crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
+        style_directives,
+        string_table,
+        path_fork,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        span_builder,
+    )
     .expect("tokenization should succeed");
 
     tokens.index = tokens
@@ -91,6 +104,7 @@ fn template_tokens_from_source_with_directives(
     directives: &[StyleDirectiveSpec],
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
+    path_fork: &mut PathInternerFork,
 ) -> FileTokens {
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
@@ -99,6 +113,7 @@ fn template_tokens_from_source_with_directives(
         &registry,
         string_table,
         span_builder,
+        path_fork,
     );
 
     tokens.index = tokens
@@ -120,20 +135,21 @@ fn with_test_path_context(
         .with_source_file_scope(source_scope.to_owned())
 }
 
-fn new_constant_context(scope: PathId) -> ScopeContext {
+fn new_constant_context(scope: PathId, path_fork: &PathInternerFork) -> ScopeContext {
     let style_directives = frontend_test_style_directives();
-    new_constant_context_with_style_directives(scope, &style_directives)
+    new_constant_context_with_style_directives(scope, &style_directives, path_fork)
 }
 
 fn new_constant_context_with_style_directives(
     scope: PathId,
     style_directives: &StyleDirectiveRegistry,
+    path_fork: &PathInternerFork,
 ) -> ScopeContext {
     let parent = with_test_path_context(
         ScopeContext::new_for_tests(
             ContextKind::Constant,
             scope.to_owned(),
-            Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+            Rc::new(TopLevelDeclarationTable::new(vec![], path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
             0,
@@ -143,6 +159,7 @@ fn new_constant_context_with_style_directives(
     );
     ScopeContext::new_constant(scope, &parent)
 }
+
 
 fn fold_template_in_context(
     template: &Template,
@@ -219,17 +236,21 @@ fn effective_tir_kind(template: &Template, context: &ScopeContext) -> TemplateTy
         .clone()
 }
 
-fn runtime_template_context(scope: &PathId, string_table: &mut StringTable) -> ScopeContext {
+fn runtime_template_context(
+    scope: &PathId,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> ScopeContext {
     let style_directives = frontend_test_style_directives();
-    runtime_template_context_with_style_directives(scope, &style_directives, string_table)
+    runtime_template_context_with_style_directives(scope, &style_directives, string_table, path_fork)
 }
 
 fn runtime_template_context_with_style_directives(
     scope: &PathId,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ScopeContext {
-    let mut path_fork = PathInternerFork::empty();
     let value_name = string_table.intern("value");
     let declaration = Declaration {
         id: path_fork
@@ -248,7 +269,7 @@ fn runtime_template_context_with_style_directives(
         ScopeContext::new_for_tests(
             ContextKind::Template,
             scope.to_owned(),
-            Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
+            Rc::new(TopLevelDeclarationTable::new(vec![declaration], path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
             0,
@@ -258,21 +279,26 @@ fn runtime_template_context_with_style_directives(
     )
 }
 
-fn constant_template_context(scope: &PathId, declarations: &[Declaration]) -> ScopeContext {
+fn constant_template_context(
+    scope: &PathId,
+    declarations: &[Declaration],
+    path_fork: &PathInternerFork,
+) -> ScopeContext {
     let style_directives = frontend_test_style_directives();
-    constant_template_context_with_style_directives(scope, declarations, &style_directives)
+    constant_template_context_with_style_directives(scope, declarations, &style_directives, path_fork)
 }
 
 fn constant_template_context_with_style_directives(
     scope: &PathId,
     declarations: &[Declaration],
     style_directives: &StyleDirectiveRegistry,
+    path_fork: &PathInternerFork,
 ) -> ScopeContext {
     with_test_path_context(
         ScopeContext::new_for_tests(
             ContextKind::Constant,
             scope.to_owned(),
-            Rc::new(TopLevelDeclarationTable::new(declarations.to_vec(), &PathInternerFork::empty())),
+            Rc::new(TopLevelDeclarationTable::new(declarations.to_vec(), path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
             0,
@@ -299,10 +325,12 @@ fn folded_template_output_with_style_directives(
         style_directives,
         &mut string_table,
         &mut span_builder,
+        &mut path_fork,
     );
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
         style_directives,
+        &path_fork,
     );
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -343,6 +371,7 @@ fn template_parse_rendered_error_with_style_directives(
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
         style_directives,
+        &path_fork,
     );
 
     let error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -404,17 +433,20 @@ fn template_warnings_with_style_directives(
         style_directives,
         &mut string_table,
         &mut span_builder,
+        &mut path_fork,
     );
     let context = if runtime_context {
         runtime_template_context_with_style_directives(
             &token_stream.src_path,
             style_directives,
             &mut string_table,
+            &mut path_fork,
         )
     } else {
         new_constant_context_with_style_directives(
             token_stream.src_path.to_owned(),
             style_directives,
+            &path_fork,
         )
     };
 

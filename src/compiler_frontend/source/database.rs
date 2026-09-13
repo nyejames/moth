@@ -20,7 +20,7 @@ use super::span::{ExtendedSpanBuilder, ExtendedSpanTable};
 use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 #[cfg(test)]
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerBuilder, PathInternerFork, PathTable,
@@ -154,7 +154,7 @@ impl SourceDatabase {
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerError>
+    ) -> Result<Self, SourceDatabaseError>
     where
         I: IntoIterator,
         I::IntoIter: ExactSizeIterator,
@@ -186,7 +186,7 @@ impl SourceDatabase {
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, SourceDatabaseError> {
         Self::from_registration_index_sorted_by_logical_path_with_path_builder(
             registration_index,
             entry_file_path,
@@ -206,7 +206,7 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
         path_interner: PathInternerBuilder,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, SourceDatabaseError> {
         let mut database = Self {
             slots: vec![compilation_root_slot()],
             loaded: Vec::new(),
@@ -238,7 +238,7 @@ impl SourceDatabase {
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, SourceDatabaseError> {
         let mut database = Self::empty();
         database.append_ordered_registration_index(
             registration_index,
@@ -260,7 +260,7 @@ impl SourceDatabase {
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), SourceDatabaseError> {
         let rows = logical_rows_for_registration_index(
             registration_index,
             entry_file_path,
@@ -273,7 +273,7 @@ impl SourceDatabase {
         &mut self,
         rows: Vec<(PathBuf, SourceKind, LogicalSourcePath)>,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), SourceDatabaseError> {
         // Canonical ordering precedes both path interning and source identity assignment.
         let interned_rows = rows
             .into_iter()
@@ -284,14 +284,16 @@ impl SourceDatabase {
                     .map_err(map_path_intern_error)?;
                 Ok((canonical, kind, path_id))
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, SourceDatabaseError>>()?;
 
         for (canonical, kind, path_id) in interned_rows {
             if self.canonical_to_id.contains_key(&canonical) {
-                return Err(CompilerError::compiler_error(format!(
-                    "Source identity inventory registered canonical source path {} more than once",
-                    canonical.display(),
-                )));
+                return Err(SourceDatabaseError::Infrastructure(
+                    CompilerError::compiler_error(format!(
+                        "Source identity inventory registered canonical source path {} more than once",
+                        canonical.display(),
+                    )),
+                ));
             }
 
             self.push_slot(canonical, path_id, kind)?;
@@ -351,36 +353,35 @@ impl SourceDatabase {
     /// Re-intern a registered source's logical path into a caller-owned path fork.
     ///
     /// Source registration owns its own append-only table while discovery is assembling the
-    /// closure. Tokenization and header preparation may use a different fork, so the numeric
-    /// source path must be walked by components rather than copied as a foreign `PathId`.
+    /// closure is complete. Tokenization and header preparation may use a different fork, so the
+    /// numeric source path must be walked by components rather than copied as a foreign
+    /// `PathId`. Fork-table exhaustion is the same authored capacity rejection as registration.
     pub(crate) fn logical_path_in_fork(
         &self,
         source: SourceId,
         path_fork: &mut PathInternerFork,
-    ) -> Result<PathId, CompilerError> {
+    ) -> Result<PathId, SourceDatabaseError> {
         let logical_path = self
             .get(source)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                SourceDatabaseError::Infrastructure(CompilerError::compiler_error(format!(
                     "source identity {} is absent while re-interning its logical path",
                     source.index()
-                ))
+                )))
             })?
             .logical_path;
         let table = self.paths();
         let depth = table.try_depth(logical_path).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            SourceDatabaseError::Infrastructure(CompilerError::compiler_error(format!(
                 "source identity {} carries an invalid logical path",
                 source.index()
-            ))
+            )))
         })?;
         let mut components = Vec::with_capacity(depth as usize);
         table.resolve_components(logical_path, &mut components);
-        path_fork.try_intern_components(&components).ok_or_else(|| {
-            CompilerError::compiler_error(
-                "path table exhausted while re-interning a source logical path",
-            )
-        })
+        path_fork.try_intern_components(&components).ok_or(
+            SourceDatabaseError::Capacity(SourceCapacityError::LogicalPathTableFull),
+        )
     }
 
 
@@ -627,7 +628,7 @@ impl SourceDatabase {
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
-    ) -> Result<SourceId, CompilerError> {
+    ) -> Result<SourceId, SourceDatabaseError> {
         let logical = logical_source_path(&canonical_path, entry_file_path, project_path_resolver)?;
         let path_id = self
             .path_interner
@@ -644,43 +645,52 @@ impl SourceDatabase {
                 let requested_path =
                     self.paths()
                         .render_portable(path_id, string_table, &mut scratch);
-                return Err(CompilerError::compiler_error(format!(
-                    "Source identity inventory registered canonical source path {} under \
-                     conflicting logical paths {} and {}",
-                    canonical_path.display(),
-                    existing_path,
-                    requested_path,
-                )));
+                return Err(SourceDatabaseError::Infrastructure(
+                    CompilerError::compiler_error(format!(
+                        "Source identity inventory registered canonical source path {} under \
+                         conflicting logical paths {} and {}",
+                        canonical_path.display(),
+                        existing_path,
+                        requested_path,
+                    )),
+                ));
             }
             if let Some(stored_kind) = slot.kind
                 && stored_kind != kind
             {
-                return Err(CompilerError::compiler_error(format!(
-                    "Source identity inventory registered canonical source path {} under \
-                     conflicting kinds {:?} and {:?}",
-                    canonical_path.display(),
-                    stored_kind,
-                    kind,
-                )));
+                return Err(SourceDatabaseError::Infrastructure(
+                    CompilerError::compiler_error(format!(
+                        "Source identity inventory registered canonical source path {} under \
+                         conflicting kinds {:?} and {:?}",
+                        canonical_path.display(),
+                        stored_kind,
+                        kind,
+                    )),
+                ));
             }
             return Ok(slot.id);
         }
         self.push_slot(canonical_path, path_id, kind)
     }
 
-    /// Append one slot and return the identity its position assigns.
-    ///
-    /// Authored registration must stay fallible: a project supplying more sources than the
-    /// compact identity table can address aborts deterministically with the typed
-    /// source-capacity failure instead of wrapping an index or panicking.
     fn push_slot(
         &mut self,
         canonical_path: PathBuf,
         logical_path: PathId,
         kind: SourceKind,
-    ) -> Result<SourceId, CompilerError> {
-        let id = SourceId::try_from_index(self.slots.len())
-            .ok_or_else(|| identity_table_capacity_error("source identity slots"))?;
+    ) -> Result<SourceId, SourceDatabaseError> {
+        #[cfg(test)]
+        if crate::compiler_frontend::symbols::path_interner::test_exhaustion::forced_exhaustion()
+        {
+            // Test-only: reject the new source identity so tests reach the exhaustion boundary
+            // without registering the full compact source domain.
+            return Err(SourceDatabaseError::Capacity(
+                SourceCapacityError::SourceIdentityTableFull,
+            ));
+        }
+        let id = SourceId::try_from_index(self.slots.len()).ok_or(
+            SourceDatabaseError::Capacity(SourceCapacityError::SourceIdentityTableFull),
+        )?;
         self.canonical_to_id.insert(canonical_path.clone(), id);
         self.slots.push(SourceSlot {
             id,
@@ -693,12 +703,19 @@ impl SourceDatabase {
         Ok(id)
     }
 
-    /// Resolve one physical source slot.
+    /// Drop one registered source slot without touching the path table (test-only).
     ///
-    /// The compilation root is addressed by [`SourceId::COMPILATION_ROOT`] but is not a physical
-    /// source, so it is never returned here. A consumer that reaches this with the root holds an
-    /// identity from the wrong domain, and absence lets it fail in its own lane rather than
-    /// reading a pathless slot as though it were a file.
+    /// Identity exhaustion tests re-register a path whose node already exists; removing the slot
+    /// keeps the path interner a pure lookup so the forced gate can fail the identity allocation.
+    #[cfg(test)]
+    pub(crate) fn remove_for_test_reuse(&mut self, canonical_path: &PathBuf) -> Option<()> {
+        let id = self.canonical_to_id.remove(canonical_path)?;
+        let index = id.index();
+        (index < self.slots.len() && self.slots[index].id == id).then(|| {
+            self.slots.remove(index);
+        })
+    }
+
     pub fn get(&self, id: SourceId) -> Option<&SourceSlot> {
         let slot = self.slots.get(id.index())?;
         (slot.provenance != SourceProvenance::CompilationRoot).then_some(slot)
@@ -1073,7 +1090,6 @@ fn logical_rows_for_registration_index(
 ) -> Result<Vec<(PathBuf, SourceKind, LogicalSourcePath)>, CompilerError> {
     let rows_iter = registration_index.rows();
     let mut rows = Vec::with_capacity(rows_iter.len());
-
     for (canonical, kind) in rows_iter {
         let logical = logical_source_path(canonical, entry_file_path, project_path_resolver)?;
         rows.push((canonical.to_path_buf(), kind, logical));
@@ -1110,6 +1126,64 @@ fn logical_source_path(
     })
 }
 
+/// Typed source-capacity failure from one compact source-owned identity table.
+///
+/// Authored exhaustion is deterministic user-facing rejection: the project supplied more
+/// logical-path nodes or source files than the four-byte identity table can address. The
+/// carrying boundary converts the resource into the typed capacity diagnostic batch; every
+/// other database failure stays an infrastructure [`CompilerError`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SourceCapacityError {
+    /// The build-lifetime logical-path node table cannot address another entry.
+    LogicalPathTableFull,
+    /// The source-slot identity table cannot address another registered source.
+    SourceIdentityTableFull,
+}
+
+impl SourceCapacityError {
+    pub(crate) fn resource(self) -> crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource {
+        match self {
+            Self::LogicalPathTableFull => {
+                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::LogicalPathTable
+            }
+            Self::SourceIdentityTableFull => {
+                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::SourceIdentityTable
+            }
+        }
+    }
+}
+
+/// One source-database construction failure.
+///
+/// WHAT: separates authored compact-table exhaustion from every other registration,
+///       load and lifecycle failure.
+/// WHY: capacity rejection must reach the typed user diagnostic batch unchanged, while
+///      remaining failures stay on the infrastructure `CompilerError` lane. Wrapping both
+///      in one local sum keeps the three fallible construction APIs honest without
+///      introducing a `source -> compiler_messages` module cycle.
+#[derive(Debug, Clone)]
+pub(crate) enum SourceDatabaseError {
+    Capacity(SourceCapacityError),
+    Infrastructure(CompilerError),
+}
+
+impl From<CompilerError> for SourceDatabaseError {
+    fn from(error: CompilerError) -> Self {
+        Self::Infrastructure(error)
+    }
+}
+
+impl SourceDatabaseError {
+    pub(crate) fn infrastructure(self) -> CompilerError {
+        match self {
+            Self::Capacity(capacity) => CompilerError::compiler_error(format!(
+                "authored source capacity rejection reached an infrastructure lane: {capacity:?}"
+            )),
+            Self::Infrastructure(error) => error,
+        }
+    }
+}
+
 fn non_utf8_logical_path_error(logical_path: &Path) -> CompilerError {
     CompilerError::file_error(
         logical_path,
@@ -1119,26 +1193,20 @@ fn non_utf8_logical_path_error(logical_path: &Path) -> CompilerError {
     )
 }
 
+/// Translate one path-interning outcome into the owning database's failure lane.
+///
 /// Authored exhaustion of a compact identity table is a deterministic source failure: the
 /// project supplied more entries than the four-byte table can address, so compilation aborts
-/// with this typed capacity diagnostic instead of wrapping an index or panicking.
-fn identity_table_capacity_error(table: &'static str) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "this compilation needs more than u32::MAX {table}, but its compact identity table \
-         cannot address another entry"
-    ))
-    .with_error_type(ErrorType::File)
-}
-
-/// Translate one path-interning outcome into the owning database's failure lane: strict
-/// UTF-8 violations keep their existing file error, while compact-domain exhaustion
-/// becomes the typed source-capacity failure.
-fn map_path_intern_error(error: PathInternError) -> CompilerError {
+/// with the typed capacity failure instead of wrapping an index or panicking. Strict UTF-8
+/// violations keep their existing infrastructure file error.
+fn map_path_intern_error(error: PathInternError) -> SourceDatabaseError {
     match error {
         PathInternError::NonUtf8(NonUtf8PathComponent { path }) => {
-            non_utf8_logical_path_error(&path)
+            SourceDatabaseError::Infrastructure(non_utf8_logical_path_error(&path))
         }
-        PathInternError::TableFull => identity_table_capacity_error("logical path nodes"),
+        PathInternError::TableFull => {
+            SourceDatabaseError::Capacity(SourceCapacityError::LogicalPathTableFull)
+        }
     }
 }
 

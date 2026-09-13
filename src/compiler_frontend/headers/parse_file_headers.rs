@@ -181,6 +181,18 @@ pub(crate) fn prepare_file_from_tokens(
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    // Preflight the public preparation boundary: every PathId this function dereferences through
+    // the supplied fork must have been issued by it (or its inherited base). A stream carrying a
+    // foreign file-owned path table would otherwise reach unchecked depth/parent/component reads
+    // and panic on out-of-domain indices instead of reporting infrastructure failure.
+    if path_fork.try_depth(file_tokens.src_path).is_none() {
+        return Err(FileFrontendPrepareFailure::Infrastructure(
+            CompilerError::compiler_error(format!(
+                "token stream for {entry_file_path:?} carries source path {src:?} that was not issued by the supplied path table",
+                src = file_tokens.src_path,
+            )),
+        ));
+    }
     let fork_source = string_table.fork_source();
     let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
     let path_fork_source = path_fork.fork_source();

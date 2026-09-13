@@ -569,7 +569,7 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
         type_environment: consumer_type_environment,
         module_resources: ModuleResourceTable::new(),
         template_ir_store: Rc::new(RefCell::new(TemplateIrStore::new())),
-        path_fork: PathInternerFork::empty(),
+        path_fork,
     };
     let materialised = materialize_public_folded_value(
         &mut consumer_materialiser,

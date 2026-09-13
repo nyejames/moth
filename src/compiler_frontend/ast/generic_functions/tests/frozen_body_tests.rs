@@ -212,6 +212,20 @@ fn capture_test_body(
     )
     .expect("test body path rows should be resolved before capture")
 }
+/// Build a materialisation fork that retains the complete source path domain.
+///
+/// Frozen bodies keep build-wide `PathId`s directly, so an independent generated fork must inherit
+/// every source node rather than relying on equal numeric IDs. Its string table is cloned for the
+/// same reason: inherited path components retain their source-table `StringId`s.
+fn generated_materialisation_domain(
+    source_fork: &PathInternerFork,
+    source_table: &StringTable,
+) -> (PathInternerFork, StringTable) {
+    (
+        source_fork.fork_source().fork_for_module(),
+        source_table.clone(),
+    )
+}
 
 fn direct_content_body_fixture() -> (
     FileTokens,
@@ -317,9 +331,11 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
             ] if origin == &resource_origin)
     ));
 
-    let mut generated_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let generated_source_file = path_fork.try_intern_portable_path("@mod.moth", &mut generated_table).expect("test path fits");
+    let (mut path_fork, mut generated_table) =
+        generated_materialisation_domain(&path_fork, &source_table);
+    let generated_source_file = path_fork
+        .try_intern_portable_path("@mod.moth", &mut generated_table)
+        .expect("test path fits");
     let materialised = frozen
         .materialise(generated_source_file, &path_fork, &mut generated_table)
         .expect("frozen content body should materialise");
@@ -430,10 +446,11 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
 
     let source_file = original.src_path.clone();
     let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
-    let mut generated_table = StringTable::new();
-    let mut generated_path_fork = PathInternerFork::empty();
-    let generated_source_file =
-        generated_path_fork.try_intern_portable_path("src/@mod.moth", &mut generated_table).expect("test path fits");
+    let (mut generated_path_fork, mut generated_table) =
+        generated_materialisation_domain(&path_fork, &source_table);
+    let generated_source_file = generated_path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut generated_table)
+        .expect("test path fits");
     let materialised = frozen
         .materialise(generated_source_file, &generated_path_fork, &mut generated_table)
         .expect("frozen body should materialise");
@@ -510,10 +527,11 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
     );
 
     let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
-    let mut generated_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let generated_source_file =
-        path_fork.try_intern_portable_path("src/@mod.moth", &mut generated_table).expect("test path fits");
+    let (mut path_fork, mut generated_table) =
+        generated_materialisation_domain(&path_fork, &source_table);
+    let generated_source_file = path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut generated_table)
+        .expect("test path fits");
     let materialised = frozen
         .materialise(generated_source_file, &path_fork, &mut generated_table)
         .expect("the frozen body should retain its distinct declaration and file identities");
@@ -648,10 +666,11 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
         "the second referenced donor handle must be remapped"
     );
 
-    let mut generated_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let generated_source_file =
-        path_fork.try_intern_portable_path("src/@mod.moth", &mut generated_table).expect("test path fits");
+    let (mut path_fork, mut generated_table) =
+        generated_materialisation_domain(&path_fork, &source_table);
+    let generated_source_file = path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut generated_table)
+        .expect("test path fits");
     let materialised = frozen
         .materialise(generated_source_file, &path_fork, &mut generated_table)
         .expect("remapping fixture body should materialise");
@@ -829,6 +848,7 @@ fn retained_template(
 
 struct ResourceDefaultMaterialisationFixture {
     preparation: ModuleMaterialisationPreparation,
+    owner_path_fork: PathInternerFork,
     context: ModuleMaterialisationContext,
     identity: GeneratedFunctionIdentity,
     declaring_resources: ModuleResourceTable,
@@ -918,6 +938,7 @@ fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationF
     ResourceDefaultMaterialisationFixture {
         preparation,
         context,
+        owner_path_fork: path_fork,
         identity,
         declaring_resources,
         declaring_resource,
@@ -928,6 +949,7 @@ fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationF
 struct ResourceBodyMaterialisationFixture {
     preparation: ModuleMaterialisationPreparation,
     context: ModuleMaterialisationContext,
+    owner_path_fork: PathInternerFork,
     identity: GeneratedFunctionIdentity,
     resource_origin: StableResourceOriginId,
 }
@@ -1071,6 +1093,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
     ResourceBodyMaterialisationFixture {
         preparation,
         context,
+        owner_path_fork: path_fork,
         identity,
         resource_origin,
     }
@@ -1139,11 +1162,12 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
         "freezing must carry the stable resource origin, not a donor ResourceId"
     );
 
+    let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
     let materialised = fixture
         .context
         .materialise_ast_at(
             0,
-            ModuleMaterialisationInput { path_fork: &mut PathInternerFork::empty(), identity: &fixture.identity,
+            ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
             requester_context: &fixture.preparation,
             requester_call_span: None,
             external_package_registry: fixture.preparation.external_package_registry.as_ref(),
@@ -1170,8 +1194,9 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
         .expect("materialisation should emit the generated function");
     let generated_parameter = generated_signature
         .parameters
-        .first()
-        .expect("the generated signature should retain its suffix parameter");
+        .iter()
+        .find(|parameter| matches!(parameter.value.kind, ExpressionKind::StructuralString { .. }))
+        .expect("the generated signature should retain its suffix resource parameter");
     let sidecar_resource = structural_resource_handle(&generated_parameter.value);
 
     assert_eq!(
@@ -1263,21 +1288,31 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             .first()
             .expect("collision fixture should retain one path row")
             .path_syntax;
-        (frozen, compact_path_id)
+        let owner_path_fork = path_fork;
+        let owner_string_table = source_table;
+        (frozen, compact_path_id, owner_path_fork, owner_string_table)
     };
 
-    let (first_frozen, first_path_id) = capture("assets/first.svg");
-    let (second_frozen, second_path_id) = capture("assets/second.svg");
+    let (first_frozen, first_path_id, first_path_fork, first_string_table) =
+        capture("assets/first.svg");
+    let (second_frozen, second_path_id, second_path_fork, second_string_table) =
+        capture("assets/second.svg");
     assert_eq!(
         first_path_id, second_path_id,
         "independent body captures should restart compact handles at the same value"
     );
 
-    let materialise = |frozen: StableBodySyntax| {
-        let mut generated_table = StringTable::new();
-        let mut path_fork = PathInternerFork::empty();
-        let generated_source_file =
-            path_fork.try_intern_portable_path("@body.moth", &mut generated_table).expect("test path fits");
+    let materialise =
+        |(frozen, owner_path_fork, owner_string_table): (
+            StableBodySyntax,
+            PathInternerFork,
+            StringTable,
+        )| {
+        let (mut path_fork, mut generated_table) =
+            generated_materialisation_domain(&owner_path_fork, &owner_string_table);
+        let generated_source_file = path_fork
+            .try_intern_portable_path("@body.moth", &mut generated_table)
+            .expect("test path fits");
         let materialised = frozen
             .materialise(generated_source_file, &path_fork, &mut generated_table)
             .expect("collision fixture body should materialise");
@@ -1287,8 +1322,8 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             FrozenIdentityHandle::new(),
         )
     };
-    let first_body = materialise(first_frozen);
-    let second_body = materialise(second_frozen);
+    let first_body = materialise((first_frozen, first_path_fork, first_string_table));
+    let second_body = materialise((second_frozen, second_path_fork, second_string_table));
 
     let target_path = |body: &GenericFunctionBody, path_id: PathSyntaxId| {
         let reference = body
@@ -1322,11 +1357,12 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
 #[test]
 fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
     let fixture = resource_body_materialisation_fixture();
+    let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
     let materialised = fixture
         .context
         .materialise_ast_at(
             0,
-            ModuleMaterialisationInput { path_fork: &mut PathInternerFork::empty(), identity: &fixture.identity,
+            ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
             requester_context: &fixture.preparation,
             requester_call_span: None,
             external_package_registry: fixture.preparation.external_package_registry.as_ref(),
@@ -1408,11 +1444,12 @@ fn frozen_resource_body_captures_resolved_subset_before_materialisation() {
 fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
     let fixture = resource_body_materialisation_fixture();
     let materialise = || {
+        let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
         fixture
             .context
             .materialise_ast_at(
                 0,
-                ModuleMaterialisationInput { path_fork: &mut PathInternerFork::empty(), identity: &fixture.identity,
+                ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
                 external_package_registry: fixture
@@ -1493,7 +1530,7 @@ fn repeated_frozen_resource_default_projection_reuses_one_sidecar_handle() {
     let external_registry = ExternalPackageRegistry::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
-    let mut path_fork = PathInternerFork::empty();
+    let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
     let mut materialiser = GeneratedFoldedValueMaterialiser {
         type_environment: &mut type_environment,
         external_registry: &external_registry,
@@ -1571,11 +1608,12 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
     );
 
     let materialise_once = || {
+        let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
         fixture
             .context
             .materialise_ast_at(
                 0,
-                ModuleMaterialisationInput { path_fork: &mut PathInternerFork::empty(), identity: &fixture.identity,
+                ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
                 external_package_registry: fixture
@@ -1610,8 +1648,9 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
             .expect("materialisation should emit the generated function");
         let generated_parameter = generated_signature
             .parameters
-            .first()
-            .expect("the generated signature should retain its suffix parameter");
+            .iter()
+            .find(|parameter| matches!(parameter.value.kind, ExpressionKind::StructuralString { .. }))
+            .expect("the generated signature should retain its suffix resource parameter");
         structural_resource_handle(&generated_parameter.value)
     };
     let first_resource = generated_resource(&first_materialised);
@@ -1844,10 +1883,11 @@ fn invalid_frozen_path_handle_returns_compiler_error() {
     };
     *path_id = PathSyntaxId::NONE;
 
-    let mut generated_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let generated_source_file =
-        path_fork.try_intern_portable_path("src/@mod.moth", &mut generated_table).expect("test path fits");
+    let (mut path_fork, mut generated_table) =
+        generated_materialisation_domain(&path_fork, &source_table);
+    let generated_source_file = path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut generated_table)
+        .expect("test path fits");
     let error = frozen
         .materialise(generated_source_file, &path_fork, &mut generated_table)
         .expect_err("a stale frozen path handle must fail before downstream parsing");

@@ -36,7 +36,7 @@ use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
@@ -2228,4 +2228,55 @@ fn assert_counter_value(
         .unwrap_or(-1.0);
 
     assert_eq!(actual, expected, "counter `{name}` did not match");
+}
+
+#[test]
+fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
+    use crate::compiler_frontend::compiler_messages::{
+        PremergeFailure, SourceSpanCapacityResource,
+    };
+    use crate::compiler_frontend::symbols::path_interner::ForcedExhaustionGuard;
+
+    // The chunk's local fork owns one local path node, so the merge must allocate into the
+    // module fork; the gate rejects exactly that new allocation while lookups keep succeeding.
+    let chunk = dummy_preparation_chunk(0, vec![0]);
+    assert!(
+        chunk.local_path_fork.try_depth(PathId::ROOT).is_some(),
+        "fixture chunk must carry at least one interned path"
+    );
+
+    let mut string_table = StringTable::new();
+    let _gate = ForcedExhaustionGuard::new();
+    let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
+        &mut string_table,
+        &mut PathInternerFork::empty(),
+        vec![chunk],
+        1,
+        0,
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("authored path exhaustion must fail the chunk merge"),
+    };
+
+    let PremergeFailure::Diagnosed(batch) = error else {
+        panic!("authored chunk-merge exhaustion must produce the diagnosed capacity lane");
+    };
+    let (diagnostic_bag, taken_string_table, ..) = batch.into_parts();
+    let diagnostics = diagnostic_bag.diagnostics();
+    assert_eq!(diagnostics.len(), 1, "exhaustion must diagnose exactly once");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.payload,
+        DiagnosticPayload::SourceSpanCapacity {
+            start: 0,
+            length: u32::MAX,
+            resource: SourceSpanCapacityResource::LogicalPathTable,
+        }
+    );
+    assert_eq!(
+        diagnostic.severity,
+        crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+    );
+    // The merged table must move into the diagnosed batch as the owner of the interned ids.
+    let _owned_string_table = taken_string_table;
 }

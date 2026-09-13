@@ -97,7 +97,7 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
         executable: ModuleExecutable { hir: hir_module,
         resource_table: ModuleResourceTable::new(),
         type_environment: TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(path_fork.snapshot_table()), },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],

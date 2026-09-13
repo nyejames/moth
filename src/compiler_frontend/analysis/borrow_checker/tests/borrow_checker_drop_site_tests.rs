@@ -21,7 +21,6 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn emits_advisory_return_drop_sites() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
@@ -46,7 +45,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("borrow checking should succeed");
 
 let has_return_site = report
@@ -149,7 +148,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("borrow checking should succeed");
 
 let has_break_site = report

@@ -1,3 +1,4 @@
+use crate::builder_surface::SourceFileKind;
 use super::{
     BorrowAccessKind, BorrowDiagnosticKind, CompileTimeEvaluationErrorReason, CompilerDiagnostic,
     ConfigDiagnosticKind, DeferredFeatureDiagnosticKind, DeferredFeatureReason,
@@ -30,7 +31,7 @@ use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
-    SourceId, SourceSpan,
+    SourceId, SourceKind, SourceRegistrationIndex, SourceSpan,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -550,8 +551,13 @@ fn compiler_messages_with_infrastructure_error_preserve_warning_production_order
 fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let point_path = path_fork.try_intern_portable_path("Point", &mut string_table).expect("test path fits");
-    let status_path = path_fork.try_intern_portable_path("Status", &mut string_table).expect("test path fits");
+    let point_path = path_fork
+        .try_intern_portable_path("Point", &mut string_table)
+        .expect("test path fits");
+    let status_path = path_fork
+        .try_intern_portable_path("Status", &mut string_table)
+        .expect("test path fits");
+    let path_table = Arc::new(path_fork.snapshot_table());
 
     let mut first_environment = TypeEnvironment::new();
     let (_, point_type) = first_environment.register_nominal_struct(StructTypeDefinition {
@@ -571,6 +577,7 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
     let mut first_messages =
         CompilerMessages::from_diagnostics(vec![first_error], string_table.clone())
             .with_type_context_for_all_diagnostics(first_environment);
+    first_messages.attach_path_table_if_missing(Arc::clone(&path_table));
     first_messages.prepend_diagnostics_preserving_context(vec![warning]);
 
     let mut second_environment = TypeEnvironment::new();
@@ -587,8 +594,9 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
         TypeMismatchContext::ReturnValue,
         None,
     );
-    let second_messages = CompilerMessages::from_diagnostics(vec![second_error], string_table)
+    let mut second_messages = CompilerMessages::from_diagnostics(vec![second_error], string_table)
         .with_type_context_for_all_diagnostics(second_environment);
+    second_messages.attach_path_table_if_missing(path_table);
 
     first_messages.append_messages_preserving_context(second_messages);
     let rendered =
@@ -621,10 +629,23 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
     let mut frozen_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let frozen_name = frozen_table.intern("frozen-name");
-    let frozen_path = path_fork.try_intern_portable_path("FrozenType", &mut frozen_table).expect("test path fits");
+    let frozen_path = path_fork
+        .try_intern_portable_path("FrozenType", &mut frozen_table)
+        .expect("test path fits");
+    let frozen_registration =
+        SourceRegistrationIndex::from_rows(std::iter::empty::<(&Path, SourceKind)>());
+    let frozen_sources =
+        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
+            &frozen_registration,
+            Path::new("frozen.moth"),
+            None,
+            &mut frozen_table,
+            path_fork.clone_path_builder(),
+        )
+        .expect("frozen identity path table should build");
     let frozen_identity = Arc::new(FrozenIdentityContext::from_parts(
         frozen_table.clone(),
-        SourceDatabase::empty(),
+        frozen_sources,
     ));
 
     let make_frozen_messages = || {
@@ -659,7 +680,9 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
         let mut local_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let unfrozen_name = local_table.intern("unfrozen-name");
-        let unfrozen_path = path_fork.try_intern_portable_path("UnfrozenType", &mut local_table).expect("test path fits");
+        let unfrozen_path = path_fork
+            .try_intern_portable_path("UnfrozenType", &mut local_table)
+            .expect("test path fits");
         let mut type_environment = TypeEnvironment::new();
         let (_, unfrozen_type) = type_environment.register_nominal_struct(StructTypeDefinition {
             id: NominalTypeId(0),
@@ -668,7 +691,7 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
             generic_parameters: None,
             const_record: false,
         });
-        CompilerMessages::from_diagnostics(
+        let mut messages = CompilerMessages::from_diagnostics(
             vec![
                 CompilerDiagnostic::unknown_value_name(unfrozen_name, None),
                 CompilerDiagnostic::type_mismatch(
@@ -680,7 +703,9 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
             ],
             local_table,
         )
-        .with_type_context_for_all_diagnostics(type_environment)
+        .with_type_context_for_all_diagnostics(type_environment);
+        messages.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
+        messages
     };
 
     let make_mixed_messages = || {
@@ -784,6 +809,95 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
     assert!(rendered.contains("expected UnfrozenType"), "{rendered}");
 }
 
+#[test]
+fn append_and_remap_keep_frozen_path_tables_in_owner_domain() {
+    let mut frozen_table = StringTable::new();
+    let frozen_name = frozen_table.intern("frozen-name");
+    let mut frozen_path_fork = PathInternerFork::empty();
+    frozen_path_fork
+        .try_intern_portable_path("FrozenType", &mut frozen_table)
+        .expect("test path fits");
+    let frozen_registration =
+        SourceRegistrationIndex::from_rows(std::iter::empty::<(&Path, SourceKind)>());
+    let frozen_sources =
+        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
+            &frozen_registration,
+            Path::new("frozen.moth"),
+            None,
+            &mut frozen_table,
+            frozen_path_fork.clone_path_builder(),
+        )
+        .expect("frozen identity path table should build");
+    let frozen_identity = Arc::new(FrozenIdentityContext::from_parts(
+        frozen_table.clone(),
+        frozen_sources,
+    ));
+
+    // One local message set whose single path table serves both owner domains: rows 0..2 are
+    // frozen facts and rows 2..4 are premerge facts extending the same cloned string table.
+    let make_mixed_messages = || {
+        let mut local_table = frozen_table.clone();
+        let mut path_fork = PathInternerFork::empty();
+        let frozen_path = path_fork
+            .try_intern_portable_path("FrozenType", &mut local_table)
+            .expect("test path fits");
+        let unfrozen_name = local_table.intern("unfrozen-name");
+        let unfrozen_path = path_fork
+            .try_intern_portable_path("UnfrozenType", &mut local_table)
+            .expect("test path fits");
+        let diagnostics = vec![
+            CompilerDiagnostic::missing_import_target(frozen_path, None),
+            CompilerDiagnostic::unknown_value_name(frozen_name, None),
+            CompilerDiagnostic::missing_import_target(unfrozen_path, None),
+            CompilerDiagnostic::unknown_value_name(unfrozen_name, None),
+        ];
+        let mut messages = CompilerMessages::from_diagnostics(diagnostics, local_table);
+        messages.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
+        messages.render_frozen_contexts.push(RenderFrozenContext {
+            diagnostic_range: 0..2,
+            identity: Arc::clone(&frozen_identity),
+        });
+        messages
+    };
+
+    let assert_owner_paths_render = |rendered: &str| {
+        assert!(
+            rendered.contains("Cannot resolve dependency 'FrozenType'."),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Cannot resolve dependency 'UnfrozenType'."),
+            "{rendered}"
+        );
+        assert!(rendered.contains("frozen-name"), "{rendered}");
+        assert!(rendered.contains("unfrozen-name"), "{rendered}");
+    };
+
+    let mut standalone_messages = make_mixed_messages();
+    let mut standalone_table = StringTable::new();
+    standalone_table.intern("standalone-collision");
+    let standalone_remap = standalone_table.merge_from(standalone_messages.string_table.as_ref());
+    standalone_messages.remap_string_ids(&standalone_remap);
+    standalone_messages.string_table = Box::new(standalone_table);
+    let standalone_rendered =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &standalone_messages,
+        )
+        .join("\n");
+    assert_owner_paths_render(&standalone_rendered);
+
+    let mut aggregate_table = StringTable::new();
+    aggregate_table.intern("aggregate-collision");
+    let mut messages = CompilerMessages::empty(aggregate_table);
+    messages.append_messages_preserving_context(make_mixed_messages());
+    let rendered =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &messages,
+        )
+        .join("\n");
+    assert_owner_paths_render(&rendered);
+}
+
 fn colliding_owner_messages(
     name: &str,
     type_name: &str,
@@ -797,9 +911,19 @@ fn colliding_owner_messages(
     assert_eq!(name_id, StringId::from_index(0));
     let type_path = path_fork.try_intern_portable_path(type_name, &mut string_table).expect("test path fits");
 
+    let registration = SourceRegistrationIndex::from_rows(std::iter::once((
+        primary,
+        SourceKind::Compiler(SourceFileKind::Moth),
+    )));
     let mut source_database =
-        SourceDatabase::build(std::iter::once(primary), primary, None, &mut string_table)
-            .expect("colliding owner source identities should build");
+        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
+            &registration,
+            primary,
+            None,
+            &mut string_table,
+            path_fork.clone_path_builder(),
+        )
+        .expect("colliding owner source identities should build");
     let primary_source = source_database
         .get_by_canonical_path(primary)
         .expect("colliding owner entry should be registered")
@@ -812,13 +936,19 @@ fn colliding_owner_messages(
     let mut foreign_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let foreign_path = Path::new("/package/foreign.moth");
-    let mut foreign_database = SourceDatabase::build(
-        std::iter::once(foreign_path),
+    let foreign_registration = SourceRegistrationIndex::from_rows(std::iter::once((
         foreign_path,
-        None,
-        &mut foreign_table,
-    )
-    .expect("foreign source identities should build");
+        SourceKind::Compiler(SourceFileKind::Moth),
+    )));
+    let mut foreign_database =
+        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
+            &foreign_registration,
+            foreign_path,
+            None,
+            &mut foreign_table,
+            path_fork.clone_path_builder(),
+        )
+        .expect("foreign source identities should build");
     let foreign_source = foreign_database
         .get_by_canonical_path(foreign_path)
         .expect("foreign source should be registered")
@@ -1273,8 +1403,10 @@ fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
         TypeMismatchContext::Declaration,
         span(source_path),
     );
+    let path_table = path_fork.snapshot_table();
     let render_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
 
     let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
 
@@ -1296,9 +1428,10 @@ fn type_mismatch_terse_renderer_renders_type_names_with_context() {
         TypeMismatchContext::FunctionArgument,
         span(source_path),
     );
+    let path_table = path_fork.snapshot_table();
     let render_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
-
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
     let line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
     assert!(line.contains("expected Int"));
@@ -2100,7 +2233,7 @@ fn source_dependency_renderers_use_current_language_terminology() {
         ));
     }
 
-    let render_context = DiagnosticRenderContext::new(&string_table);
+    let render_context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
     let rendered_lines = terse::format_terse_diagnostics_with_context(&diagnostics, render_context);
     assert_eq!(
         rendered_lines.len(),
@@ -2197,8 +2330,10 @@ fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
         ),
         CompilerDiagnostic::deferred_feature(feature_name, span(source_path)),
     ];
+    let path_table = path_fork.snapshot_table();
     let render_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
 
     for diagnostic in &diagnostics {
         let terminal_guidance =
@@ -2972,8 +3107,10 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
         span,
     );
 
+    let path_table = path_fork.snapshot_table();
     let render_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
     let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
 
     assert!(

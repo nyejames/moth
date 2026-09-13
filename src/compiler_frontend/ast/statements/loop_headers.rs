@@ -872,6 +872,8 @@ fn declare_loop_binding(
     type_id: TypeId,
     parser: &mut LoopHeaderParser<'_, '_>,
 ) -> LoopHeaderResult<Declaration> {
+    ensure_not_keyword_shadow_identifier(binding_name.id, binding_name.span, parser.string_table)?;
+
     if parser
         .scope_context
         .has_visible_local_declaration(&binding_name.id)

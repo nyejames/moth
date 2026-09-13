@@ -77,7 +77,13 @@ pub(crate) fn compile_moth_template_with_registry(
     resource_inputs: &mut ResourceInputRegistry,
 ) -> Result<DirectTemplateRegistryCompile, CompilerMessages> {
     let mut path_fork = PathInternerFork::empty();
-    let sources = request.collect_sources(string_table, &mut path_fork)?;
+    let sources = match request.collect_sources(string_table, &mut path_fork) {
+        Ok(sources) => sources,
+        Err(mut messages) => {
+            messages.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
+            return Err(messages);
+        }
+    };
 
     // The project's directive vocabulary is the same for every source in one request, so it is
     // merged once rather than per document.

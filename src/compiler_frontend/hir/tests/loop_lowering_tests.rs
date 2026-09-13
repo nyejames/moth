@@ -228,11 +228,13 @@ fn lowers_range_loop_with_index_binding() { let mut path_fork = super::PathInter
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 let location = None;
 
+let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
+let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
 let range_loop = node(
     NodeKind::RangeLoop {
         bindings: LoopBindings {
-            item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
-            index: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+            item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
+            index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
         },
         range: range_loop_spec(
             Expression::int(0, location, ValueMode::ImmutableOwned),
@@ -669,11 +671,13 @@ fn lowers_collection_loop_optional_index_binding() { let mut path_fork = super::
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 let location = None;
 
+let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
+let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
 let collection_loop = node(
     NodeKind::CollectionLoop {
         bindings: LoopBindings {
-            item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
-            index: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+            item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
+            index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
         },
         iterable: collection_literal(location),
         body: vec![],
@@ -740,13 +744,14 @@ assert!(has_index_assign, "expected explicit user index assignment"); }
 #[test]
 fn lowers_range_loop_user_bindings_as_immutable_locals() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
+let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
 let location = None;
-
 let range_loop = node(
     NodeKind::RangeLoop {
         bindings: LoopBindings {
-            item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
-            index: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+            item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
+            index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
         },
         range: range_loop_spec(
             Expression::int(0, location, ValueMode::ImmutableOwned),
@@ -758,7 +763,6 @@ let range_loop = node(
     },
     location,
 );
-
 let start_fn = function_node(
     start_name,
     FunctionSignature {
@@ -789,11 +793,13 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() { let mut path_for
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 let location = None;
 
+let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
+let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
 let collection_loop = node(
     NodeKind::CollectionLoop {
         bindings: LoopBindings {
-            item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
-            index: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+            item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
+            index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
         },
         iterable: collection_literal(location),
         body: vec![],
@@ -1038,13 +1044,14 @@ assert!(matches!(
 
 #[test]
 fn nested_loop_targets_remain_correct() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 let location = None;
 
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let inner_item_symbol = super::symbol("inner_item", &mut path_fork, &mut string_table);
 let inner_loop = node(
     NodeKind::CollectionLoop {
         bindings: LoopBindings {
-            item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+            item: Some(loop_binding(inner_item_symbol, builtin_type_ids::INT)),
             index: None,
         },
         iterable: collection_literal(location),
@@ -1053,10 +1060,11 @@ let inner_loop = node(
     location,
 );
 
+let outer_item_symbol = super::symbol("outer_item", &mut path_fork, &mut string_table);
 let outer_loop = node(
     NodeKind::CollectionLoop {
         bindings: LoopBindings {
-            item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+            item: Some(loop_binding(outer_item_symbol, builtin_type_ids::INT)),
             index: None,
         },
         iterable: collection_literal(location),

@@ -126,7 +126,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("borrow checking should succeed");
 
 let start = &hir.functions[hir
@@ -237,7 +237,7 @@ entry_block.statements.push(HirStatement {
     span: None,
 });
 
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("borrow checking should succeed");
 
 let fact = report
@@ -316,7 +316,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("reborrow after last-use should pass");
 
 let second_statement_id =
@@ -389,7 +389,7 @@ let start_fn = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start_fn], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("inferred assignment transfer should pass");
 
 let source_local =
@@ -463,7 +463,7 @@ assert_eq!(
 //      and recursive aggregate-literal advisory transfer facts.
 
 #[test]
-fn map_get_operation_result_alias_retains_receiver_root() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); // WHAT: the first-class HIR map-operation result aliases the receiver root before catch
+fn map_get_operation_result_alias_retains_receiver_root() { // WHAT: the first-class HIR map-operation result aliases the receiver root before catch
 //      handling transfers the success value.
 // WHY: later conflict analysis reads this alias state; integration only sees the
 //      resulting conflict, not which root the get binding aliases.
@@ -472,10 +472,10 @@ score = scores.get("Priya") catch:
 then 0
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a get with no later mutation should pass");
 
 let scores_local = find_local_by_name(&hir, &path_fork, &string_table, "scores")
@@ -511,7 +511,7 @@ assert!(
 ); }
 
 #[test]
-fn map_remove_result_is_fresh_owned() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); // WHAT: the binding produced by fallible map `remove` is a fresh owned slot with no
+fn map_remove_result_is_fresh_owned() { // WHAT: the binding produced by fallible map `remove` is a fresh owned slot with no
 //      receiver alias root, unlike `get`.
 // WHY: the Fresh result-alias decision is a hidden transfer fact; if remove aliased
 //      the receiver, a later mutation would falsely conflict with the removed value.
@@ -520,10 +520,10 @@ removed = ~scores.remove("Priya") catch:
 then ""
 ;
 sentinel = 0"#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a remove with no later mutation should pass");
 
 let removed_local = find_local_by_name(&hir, &path_fork, &string_table, "removed")
@@ -560,7 +560,7 @@ assert!(
 ); }
 
 #[test]
-fn map_set_final_use_records_advisory_transfer_without_invalidating_roots() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); // WHAT: `set` MayConsumeShared on final-use non-copy key and value inputs records transfer advice.
+fn map_set_final_use_records_advisory_transfer_without_invalidating_roots() { // WHAT: `set` MayConsumeShared on final-use non-copy key and value inputs records transfer advice.
 // WHY: optional destruction responsibility must not rewrite mandatory source state.
 let source = r#"scores ~{String = String} = {}
 key ~= "key"
@@ -568,10 +568,10 @@ value ~= "hello"
 ~scores.set(key, value) catch:
 ;
 sentinel = 0"#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a final-use set with no later value use should pass");
 
 let set_statement_id = hir
@@ -645,7 +645,7 @@ for name in ["key", "value"] {
 } }
 
 #[test]
-fn map_set_later_use_keeps_mutable_inputs_borrowed() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); // WHAT: `set` MayConsumeShared on later-use key and value inputs borrows rather than moving.
+fn map_set_later_use_keeps_mutable_inputs_borrowed() { // WHAT: `set` MayConsumeShared on later-use key and value inputs borrows rather than moving.
 // WHY: last-use classification must not unconditionally move; the root stays live so
 //      the binding remains usable, which a regression to always-move would break.
 let source = r#"scores ~{String = String} = {}
@@ -656,10 +656,10 @@ value ~= "hello"
 key_label = key
 label = value
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a later-use mutable set should borrow and keep the value usable");
 
 let first_use_statement =
@@ -701,14 +701,14 @@ for name in ["key", "value"] {
 } }
 
 #[test]
-fn later_use_nested_map_literal_records_borrow_without_invalidating_root() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"value ~= "hello"
+fn later_use_nested_map_literal_records_borrow_without_invalidating_root() { let source = r#"value ~= "hello"
 scores ~{String = {String = String}} = {"outer" = {"inner" = value}}
 label = value
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a later-use nested literal should retain shared storage");
 
 let value_local = find_local_by_name(&hir, &path_fork, &string_table, "value")
@@ -740,15 +740,15 @@ assert!(
 ); }
 
 #[test]
-fn nested_map_literal_records_inner_transfer_without_invalidating_root() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); // WHAT: a nested map literal recursively records transfer advice for its inner value.
+fn nested_map_literal_records_inner_transfer_without_invalidating_root() { // WHAT: a nested map literal recursively records transfer advice for its inner value.
 // WHY: aggregate analysis must recurse while leaving mandatory source state intact.
 let source = r#"value ~= "hello"
 scores ~{String = {String = String}} = {"outer" = {"inner" = value}}
 sentinel = 0"#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a final-use nested literal with no later value use should pass");
 
 let value_local = find_local_by_name(&hir, &path_fork, &string_table, "value")
@@ -782,17 +782,17 @@ assert!(
 ); }
 
 #[test]
-fn retained_alias_result_borrows_named_final_use_argument() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let source = r#"alias |input String| -> String:
+fn retained_alias_result_borrows_named_final_use_argument() { let source = r#"alias |input String| -> String:
 return input
 ;
 value ~= "hello"
 result = alias(value)
 sentinel = 0
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a retained aliased result should borrow its final-use argument");
 
 let value_local = find_local_by_name(&hir, &path_fork, &string_table, "value")
@@ -840,7 +840,7 @@ assert!(
 ); }
 
 #[test]
-fn transparent_fallible_success_projection_preserves_retained_alias_root() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); // WHAT: a fallible success projection passed to an alias-retaining call is one direct
+fn transparent_fallible_success_projection_preserves_retained_alias_root() { // WHAT: a fallible success projection passed to an alias-retaining call is one direct
 //      place access, and the returned alias must retain that place's root.
 // WHY: optional transfer first records argument roots before deciding whether the call
 //      borrows or receives optional transfer responsibility; treating the unwrap as an aggregate
@@ -862,12 +862,15 @@ compute || -> User, Error!:
 return identity(load_user()!)
 ;
 "#;
-let (ast, _parsed_path_fork, mut string_table) = parse_single_file_ast(source);
+let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+let entry_path = ast.entry_path;
 let hir = lower_hir(ast, &mut string_table, &mut path_fork);
 let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("transparent fallible success projection should not self-conflict");
-let identity_name = symbol("identity", &mut path_fork, &mut string_table);
+let identity_name = path_fork
+    .try_intern_child(entry_path, string_table.intern("identity"))
+    .expect("test path fits");
 
 let identity_id = hir
     .functions
@@ -1128,7 +1131,7 @@ let start = function_node(
     None,
 );
 let hir = lower_hir(build_ast_with_registered_types(vec![unknown, caller, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("a retained unknown result should borrow a possible aliased argument");
 
 let unknown_function_id = hir

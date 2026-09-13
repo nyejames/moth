@@ -127,8 +127,11 @@ fn text_template(
 }
 
 /// Builds a bool-typed reference expression for selector/header overrides.
-fn bool_reference_expression(string_table: &mut StringTable, name: &str) -> Expression {
-    let mut path_fork = PathInternerFork::empty();
+fn bool_reference_expression(
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+    name: &str,
+) -> Expression {
     Expression::reference_with_type_id(
         path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
         DataType::Bool,
@@ -371,11 +374,16 @@ fn build_child_wrapper_template(
 fn build_expression_wrapper_template(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> (TemplateIrId, ExpressionSiteId) {
     let expression_site_id = store.next_expression_site_id();
     let expression_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(bool_reference_expression(string_table, "original")),
+            expression: Box::new(bool_reference_expression(
+                path_fork,
+                string_table,
+                "original",
+            )),
             origin: TemplateSegmentOrigin::Body,
             reactive_subscription: None,
             site_id: expression_site_id,
@@ -872,7 +880,7 @@ fn parent_root_expression_overlay_applies_inside_child() {
         let mut store_ref = store.borrow_mut();
         let child_context = TemplateViewContext::default();
         let child_site_id = store_ref.next_expression_site_id();
-        let child_expression = bool_reference_expression(&mut strings, "original");
+        let child_expression = bool_reference_expression(&mut path_fork, &mut strings, "original");
         let child_root = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::DynamicExpression {
                 expression: Box::new(child_expression),
@@ -1011,7 +1019,7 @@ fn runtime_child_reference_uses_structural_handoff() {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
         let child_site_id = store_ref.next_expression_site_id();
-        let child_expression = bool_reference_expression(&mut strings, "runtime");
+        let child_expression = bool_reference_expression(&mut path_fork, &mut strings, "runtime");
         let child_root = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::DynamicExpression {
                 expression: Box::new(child_expression),
@@ -1231,7 +1239,7 @@ fn inherited_wrapper_handoff_applies_wrapper_overlay() {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
         let (wrapper_template_id, expression_site_id) =
-            build_expression_wrapper_template(&mut store_ref, &mut strings);
+            build_expression_wrapper_template(&mut store_ref, &mut strings, &mut path_fork);
         let wrapper_context = expression_overlay_context(
             &mut store_ref,
             vec![(

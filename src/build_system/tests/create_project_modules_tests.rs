@@ -16,6 +16,7 @@ use crate::build_system::create_project_modules::module_namespace::{
 };
 use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::create_project_modules::source_package_discovery::build_source_package_boundary_indexes;
+use crate::build_system::create_project_modules::source_tree_index::SourceTreeIndex;
 use crate::build_system::project_config::{
     ProjectConfigParseServices, compile_project_config_file, load_project_config,
 };
@@ -28,6 +29,7 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::{PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
     DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
@@ -258,7 +260,15 @@ fn load_missing_source_paths_with_registered_paths_for_test(
         None,
         string_table,
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    .map_err(|error| match error {
+        SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
+            CompilerDiagnostic::source_table_capacity(capacity.resource()),
+            string_table.clone(),
+        ),
+        SourceDatabaseError::Infrastructure(error) => {
+            CompilerMessages::from_error_ref(error, string_table)
+        }
+    })?;
 
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let mut first_read_error = None;
@@ -423,7 +433,6 @@ fn parse_project_config_for_test(
 ) -> Result<(), CompilerMessages> {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
@@ -450,7 +459,6 @@ fn parse_project_config_for_test_with_html_keys(
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
             .frontend_surface();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
@@ -475,7 +483,6 @@ fn parse_project_config_for_test_with_packages(
     frontend_surface: &crate::builder_surface::BuilderSurface,
 ) -> Result<(), CompilerMessages> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
@@ -731,9 +738,12 @@ fn with_namespace_resolution(
     source_packages: &crate::builder_surface::SourcePackageRegistry,
     package_prefix: Option<&str>,
     body: impl FnOnce(
-        &DirectoryDependencyResolution,
+        &ModuleNamespaceSet,
+        &SourceTreeIndex,
+        Option<&str>,
         &mut StringTable,
         &[(String, PathId)],
+        &mut PathInternerFork,
     ),
 ) {
     let mut string_table = StringTable::new();
@@ -783,22 +793,14 @@ fn with_namespace_resolution(
             )
         })
         .collect::<Vec<_>>();
-    let resolution = if let Some(package_prefix) = package_prefix {
-        let package_source_tree_index = module_namespace_set
-            .source_package_boundaries()
-            .find(|(prefix, _)| *prefix == package_prefix)
-            .map(|(_, index)| index)
-            .expect("requested source package boundary should be indexed");
-        DirectoryDependencyResolution::package(
-            &module_namespace_set,
-            package_prefix,
-            package_source_tree_index,
-            &path_fork,
-        )
-    } else {
-        DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index, &path_fork)
-    };
-    body(&resolution, &mut string_table, &provider_paths);
+    body(
+        &module_namespace_set,
+        &source_tree_index,
+        package_prefix,
+        &mut string_table,
+        &provider_paths,
+        &mut path_fork,
+    );
 }
 
 /// Build a retained provider-root dependency for one shell.
@@ -1587,7 +1589,12 @@ fn direct_selection_resolves_cross_module_child_facade() {
         &resolver,
         &crate::builder_surface::SourcePackageRegistry::default(),
         None,
-        |resolution, string_table, provider_paths| {
+        |namespace_set, source_tree_index, _package_prefix, string_table, provider_paths, path_fork| {
+            let resolution = DirectoryDependencyResolution::project(
+                namespace_set,
+                source_tree_index,
+                path_fork,
+            );
             let provider = provider_root(&["child"], provider_paths);
             let resolved = resolution
                 .resolve_dependency(&provider, &declaring_source, string_table)
@@ -1646,7 +1653,12 @@ fn direct_selection_resolves_source_package_facade() {
         &resolver,
         &source_packages,
         None,
-        |resolution, string_table, provider_paths| {
+        |namespace_set, source_tree_index, _package_prefix, string_table, provider_paths, path_fork| {
+            let resolution = DirectoryDependencyResolution::project(
+                namespace_set,
+                source_tree_index,
+                path_fork,
+            );
             let provider = provider_root(&["helper"], provider_paths);
             let resolved = resolution
                 .resolve_dependency(&provider, &declaring_source, string_table)

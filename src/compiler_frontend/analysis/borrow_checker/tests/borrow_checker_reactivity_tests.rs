@@ -43,7 +43,6 @@ use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lowe
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::{external_packages::CallTarget, hir::reactivity::ReactiveSourceId};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn reactive_assignment_records_invalidation_after_initialization() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
@@ -84,7 +83,7 @@ let start = function_node(
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
 let source_id = reactive_source_id_for_path(&hir, &count_path);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("reactive reassignment should follow ordinary mutable assignment rules");
 
 let facts = all_reactive_invalidations(&report);
@@ -169,7 +168,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![render, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("reactive parameter summary should validate");
 let render_id = hir
     .functions
@@ -270,7 +269,7 @@ let start = function_node(
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
 let source_id = reactive_source_id_for_path(&hir, &count_path);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("subscriptions should not create active borrow lifetimes");
 
 let facts = all_reactive_invalidations(&report);
@@ -343,7 +342,7 @@ let start = function_node(
 
 let hir = lower_hir(build_ast_with_registered_types(vec![callee, start], entry_path), &mut string_table, &mut path_fork);
 let source_id = reactive_source_id_for_path(&hir, &count_path);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("reactive sources passed to mutable parameters use ordinary mutable rules");
 
 let facts = all_reactive_invalidations(&report);
@@ -451,7 +450,7 @@ let start = function_node(
 
 let hir = lower_hir(build_ast_with_registered_types(vec![inspect, start], entry_path), &mut string_table, &mut path_fork);
 let source_id = reactive_source_id_for_path(&hir, &count_path);
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("shared reactive source access should remain a read at final use");
 
 assert!(
@@ -520,7 +519,7 @@ let mut hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path)
 let source_id = reactive_source_id_for_path(&hir, &source_path);
 let statement_id = append_synthetic_field_write(&mut hir, source_id, None);
 
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("field write fact collection should preserve ordinary borrow rules");
 let facts = report
     .analysis
@@ -562,7 +561,7 @@ let start = function_node(
 );
 
 let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect_err("reactive parameter metadata must not make an immutable parameter mutable");
 
 assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace); }
@@ -594,7 +593,7 @@ let mut hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path)
 let source_id = reactive_source_id_for_path(&hir, &map_path);
 let (statement_id, value_id) = append_synthetic_map_clear(&mut hir, source_id, None);
 
-let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
+let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
     .expect("map mutation fact collection should preserve ordinary borrow rules");
 let facts = report
     .analysis

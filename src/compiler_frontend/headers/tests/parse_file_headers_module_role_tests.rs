@@ -75,25 +75,55 @@ fn typed_constant_retains_local_ordering_hint_for_declared_type() {
 fn struct_fields_retain_local_ordering_hints_for_named_field_types() {
     // WHY: struct fields whose types are user-defined names retain conservative hints that Stage 3
     // resolves so the named type is sorted before the struct that depends on it.
-    let (headers, string_table) = parse_single_file_headers_with_table(
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = PathBuf::from("src/@page.moth");
+    // WHY: `parse_single_file_headers_with_table` discards the `PathInternerFork` that owns the
+    // retained `PathId`s, so this fixture prepares through the fork-owning helper instead. The
+    // `@page.moth` name classifies the file as an imported module root, whose headers keep the
+    // root `PathId`, so struct identity must be resolved structurally rather than by comparing
+    // against `PathId::ROOT`.
+    let (output, _span_builder) = prepare_single_file_with_fork(
         "Point = |x Int, y Int|\nSpan = |start Point, end Point|\n",
+        &file_path,
+        &file_path,
+        &mut string_table,
+        &mut path_fork,
     );
 
-    let span_header = headers
+    // Select the Span struct by its authored field-type spelling, and the Point struct by its
+    // declaration-name component, so both identities come from the same fork's path table.
+    let span_header = output
         .headers
         .iter()
         .find(|header| {
-            matches!(header.kind, HeaderKind::Struct { .. })
-                && header.tokens.src_path != PathId::ROOT
+            let HeaderKind::Struct { fields, .. } = &header.kind else {
+                return false;
+            };
+            fields.iter().any(|field| {
+                matches!(&field.type_annotation, ParsedTypeRef::Named { name, .. }
+                    if string_table.resolve(*name) == "Point")
+            })
         })
         .expect("expected Span struct header");
+    let point_path = output
+        .headers
+        .iter()
+        .find_map(|header| {
+            if !matches!(header.kind, HeaderKind::Struct { .. }) {
+                return None;
+            }
+            let name = path_fork.component(header.tokens.src_path)?;
+            (string_table.resolve(name) == "Point").then_some(header.tokens.src_path)
+        })
+        .expect("expected Point struct header");
 
     assert!(
-        span_header
-            .local_ordering_hints
-            .iter()
-            .any(|dep| dep.path() != PathId::ROOT),
-        "Span must retain a local ordering hint for Point"
+        span_header.local_ordering_hints.iter().any(|dep| {
+            dep.origin() == LocalDeclarationOrderingHintOrigin::SourceOwned
+                && dep.path() == point_path
+        }),
+        "Span must retain a same-file ordering hint targeting the Point struct declaration path"
     );
 }
 

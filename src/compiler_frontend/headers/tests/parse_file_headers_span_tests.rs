@@ -30,7 +30,7 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         &canonical,
         &options,
         &mut strings,
-        &mut PathInternerFork::empty(),
+        &mut path_fork,
         0,
         0,
         &mut spans,
@@ -44,12 +44,18 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
     );
 
     let mut merged = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let mut remapped_path_fork = PathInternerFork::empty();
     merged.intern("unrelated");
     let remap = merged.merge_from(&strings);
+    let path_remap = remapped_path_fork
+        .merge_delta_from(&path_fork, &remap)
+        .expect("source paths should remap");
     prepared
         .remap_string_ids(&remap)
         .expect("prepared strings should remap");
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("prepared paths should remap");
     drop(sources);
     let earlier_source = PathBuf::from("a-earlier.moth");
     let final_sources =
@@ -63,9 +69,11 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         final_id, source_id,
         "canonical membership changes the provisional identity"
     );
-    let final_path = path_fork.try_intern_portable_path("dependency-spans.moth", &mut merged).expect("test path fits");
+    let final_path = remapped_path_fork
+        .try_intern_portable_path("dependency-spans.moth", &mut merged)
+        .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut path_fork)
+        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
         .expect("retained source should rebind");
     assert_eq!(
         prepared.file_dependency_clauses[0].dependency.span.local(),
@@ -158,7 +166,7 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
-        &mut PathInternerFork::empty(),
+        &mut path_fork,
         0,
         0,
         &mut spans,
@@ -200,12 +208,18 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .expect("choice shell");
 
     let mut merged = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let mut remapped_path_fork = PathInternerFork::empty();
     merged.intern("unrelated");
+    let remap = merged.merge_from(&strings);
+    let path_remap = remapped_path_fork
+        .merge_delta_from(&path_fork, &remap)
+        .expect("source paths should remap");
     prepared
-        .remap_string_ids(&merged.merge_from(&strings))
+        .remap_string_ids(&remap)
         .expect("shell strings should remap");
-
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("shell paths should remap");
     drop(sources);
     let earlier_source = PathBuf::from("a-earlier.moth");
     let final_sources =
@@ -219,9 +233,11 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         final_id, source_id,
         "canonical membership changes the provisional identity"
     );
-    let final_path = path_fork.try_intern_portable_path("member-spans.moth", &mut merged).expect("test path fits");
+    let final_path = remapped_path_fork
+        .try_intern_portable_path("member-spans.moth", &mut merged)
+        .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut path_fork)
+        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
         .expect("retained source should rebind");
     assert_eq!(prepared.file_id, final_id);
 
@@ -264,7 +280,7 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         member_name
     );
     assert_eq!(
-        path_fork
+        remapped_path_fork
             .component(signature.parameters[0].id)
             .map(|name| merged.resolve(name)),
         Some(member_name.as_str())
@@ -363,17 +379,20 @@ Generic of A must {trait_name}\n"
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
-        &mut PathInternerFork::empty(),
+        &mut path_fork,
         0,
         0,
         &mut spans,
     )
     .expect("trait shells should prepare");
 
-    let snapshot = |prepared: &FileFrontendPrepareOutput, table: &StringTable| {
+    let snapshot = |prepared: &FileFrontendPrepareOutput,
+                    table: &StringTable,
+                    path_fork: &PathInternerFork| {
         let mut anchors = Vec::new();
         let mut generated_header_names = Vec::new();
         let mut header_counts = [0usize; 4];
+        let mut path_scratch = Vec::new();
         for header in &prepared.headers {
             match &header.kind {
                 HeaderKind::Trait { declaration } => {
@@ -391,7 +410,11 @@ Generic of A must {trait_name}\n"
                             header_counts[3] += 1;
                         }
                     }
-                    generated_header_names.push(format!("{:?}", header.tokens.src_path));
+                    generated_header_names.push(path_fork.render_portable(
+                        header.tokens.src_path,
+                        table,
+                        &mut path_scratch,
+                    ));
                     anchors.push((
                         conformance.target.span,
                         table.resolve(conformance.target.name).to_owned(),
@@ -402,7 +425,11 @@ Generic of A must {trait_name}\n"
                 }
                 HeaderKind::TraitIncompatibility { incompatibility } => {
                     header_counts[2] += 1;
-                    generated_header_names.push(format!("{:?}", header.tokens.src_path));
+                    generated_header_names.push(path_fork.render_portable(
+                        header.tokens.src_path,
+                        table,
+                        &mut path_scratch,
+                    ));
                     anchors.push((
                         incompatibility.subject.span,
                         table.resolve(incompatibility.subject.name).to_owned(),
@@ -418,7 +445,7 @@ Generic of A must {trait_name}\n"
     };
 
     let (original_anchors, original_header_names, original_header_counts) =
-        snapshot(&prepared, &strings);
+        snapshot(&prepared, &strings, &path_fork);
     assert_eq!(original_header_counts, [1, 1, 1, 1]);
     assert_eq!(
         original_anchors.len(),
@@ -432,11 +459,18 @@ Generic of A must {trait_name}\n"
     );
 
     let mut merged = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let mut remapped_path_fork = PathInternerFork::empty();
     merged.intern("unrelated");
+    let remap = merged.merge_from(&strings);
+    let path_remap = remapped_path_fork
+        .merge_delta_from(&path_fork, &remap)
+        .expect("source paths should remap");
     prepared
-        .remap_string_ids(&merged.merge_from(&strings))
+        .remap_string_ids(&remap)
         .expect("trait shell strings should remap");
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("trait shell paths should remap");
 
     drop(sources);
     let earlier_source = PathBuf::from("a-earlier.moth");
@@ -451,9 +485,11 @@ Generic of A must {trait_name}\n"
         final_id, source_id,
         "canonical membership changes the provisional identity"
     );
-    let final_path = path_fork.try_intern_portable_path("trait-spans.moth", &mut merged).expect("test path fits");
+    let final_path = remapped_path_fork
+        .try_intern_portable_path("trait-spans.moth", &mut merged)
+        .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut path_fork)
+        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
         .expect("retained source should rebind");
 
     let mut database = SourceDatabaseBuilder::new(final_sources);
@@ -469,7 +505,7 @@ Generic of A must {trait_name}\n"
     };
 
     let (rebound_anchors, rebound_header_names, rebound_header_counts) =
-        snapshot(&prepared, &merged);
+        snapshot(&prepared, &merged, &remapped_path_fork);
     assert_eq!(rebound_header_counts, original_header_counts);
     assert_eq!(rebound_header_names, original_header_names);
     assert_eq!(rebound_anchors.len(), original_anchors.len());
