@@ -62,6 +62,7 @@ Avoid aliasing unless it clearly improves readability.
 - For multi-file modules, keep `mod.rs` as the entry point and structural map focused on orchestration, re-exports and documentation rather than core implementation. Simple leaf modules can remain in one file. Split by responsibility, not to satisfy a preferred file shape.
 - A reader should understand the module's responsibilities and important files by opening `mod.rs` first. Its documentation should explain structure and data flow and state what the module owns, important exclusions and why the pieces are arranged that way.
 - Prefer context structs for state with a shared purpose and lifetime when they simplify genuinely repetitive parameter lists.
+- Prefer direct data and control flow when another layer adds no invariant or ownership boundary. An abstraction should encode a meaningful state or identity, establish a real lifetime or stage boundary, remove non-trivial repeated behaviour, or simplify a current operation.
 - Keep new abstractions small, stage-local and easy to justify.
 
 For test-file placement, see `testing.mtf`.

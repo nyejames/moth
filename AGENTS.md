@@ -79,6 +79,7 @@ Core contracts:
 - Keep one owner for each fact and rule. Derive cheap secondary values rather than maintaining parallel state, and share behaviour only when its meaning and ownership match.
 - Do not move shared logic into a broad utility module unless it is genuinely shared and ownership remains clear.
 - Do not claim validation commands were run when they were not. Add or update focused tests for changed behaviour and regressions. Use the project's existing test structure. Run the relevant tests and required checks, and report failures or checks that could not run.
+- Avoid wrapper types, forwarding helpers and context objects whose main effect is another navigation step.
 - Use `./tmp` for temporary snippets and artefacts that should be untracked by git.
 
 Required workflow:
