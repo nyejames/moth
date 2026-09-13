@@ -429,7 +429,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage and registration cleanup delivered, expansion waiting on a user scope decision | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
-| 4 | `@core/time` | `core-time.md` | TODO: create when activated | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
+| 4 | `@core/time` | [core-time.md](./core-time.md) | Design checkpoint delivered: the existing surface is audited and eleven semantic decisions plus a correction set are recorded; no implementation accepted | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
 | 5 | `@web/canvas` | `web-canvas.md` | TODO: create when activated | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
 | 6 | `@core/io` | `core-io.md` | TODO: create when activated | Run a dedicated scope and prelude review, then close only the agreed common gaps |
@@ -710,7 +710,11 @@ Mandatory closeout: full phase gate plus finite-result, domain edge and integrat
 
 ### Phase 5 - `@core/time` current v1 slice
 
-Create and accept `core-time.md`, then complete the bounded duration and timestamp surface.
+`core-time.md` exists and records the audit of the shipped surface: the implementation defects with
+their owners, the assertions already pinned against canonical silence, and the semantic decisions a
+v1 needs. Implementation starts only after those decisions are settled with the user and published
+in the canonical reference, and the validity and portability corrections precede any arithmetic
+surface.
 
 Mandatory closeout: full phase gate plus deterministic parsing, conversion and monotonic-time
 contract coverage. Keep wall-clock tests independent of the machine's current date and time.
