@@ -14,7 +14,7 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticSeverity, InvalidExternalModuleReason,
+    DiagnosticSeverity, InvalidExternalModuleReason, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -103,9 +103,9 @@ impl ExternalImportProvider for JsExternalImportProvider {
                 ));
             }
             Err(PathInternError::TableFull) => {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "JS import path table exhausted while interning the logical source path",
+                return Err(CompilerMessages::from_diagnostic_ref(
+                    CompilerDiagnostic::source_table_capacity(
+                        SourceSpanCapacityResource::LogicalPathTable,
                     ),
                     context.string_table,
                 ));

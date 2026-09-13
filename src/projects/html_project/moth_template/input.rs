@@ -6,7 +6,9 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, SourceSpanCapacityResource,
+};
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
 };
@@ -243,7 +245,7 @@ fn no_common_ancestor_messages(
     let (first_interned, second_interned) = match (first_interned, second_interned) {
         (Ok(first), Ok(second)) => (first, second),
         (Err(failure), _) | (_, Err(failure)) => {
-            return CompilerMessages::from_error_ref(failure, string_table);
+            return failure;
         }
     };
     let diagnostic = CompilerDiagnostic::moth_template_inputs_share_no_common_ancestor(
@@ -256,26 +258,34 @@ fn no_common_ancestor_messages(
 }
 
 /// Intern one filesystem path for user-facing identity, failing non-UTF-8 paths like the
-/// duplicate-input check does.
+/// duplicate-input check does. Compact-table exhaustion is authored input rejection, so it maps
+/// to the typed source capacity diagnostic.
 fn intern_filesystem_path_identity(
     path: &Path,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<PathId, CompilerError> {
+) -> Result<PathId, CompilerMessages> {
+    let table = string_table.clone();
     path_fork
         .try_intern_filesystem_path(path, string_table)
         .map_err(|error| match error {
             PathInternError::NonUtf8(NonUtf8PathComponent { path: bad_path }) => {
-                CompilerError::file_error(
-                    &bad_path,
-                    format!(
-                        "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
-                         identity requires UTF-8 paths."
+                CompilerMessages::from_error(
+                    CompilerError::file_error(
+                        &bad_path,
+                        format!(
+                            "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
+                             identity requires UTF-8 paths."
+                        ),
                     ),
+                    table,
                 )
             }
-            PathInternError::TableFull => CompilerError::compiler_error(
-                "Moth template path identity table exhausted while interning a source path",
+            PathInternError::TableFull => CompilerMessages::from_diagnostic(
+                CompilerDiagnostic::source_table_capacity(
+                    SourceSpanCapacityResource::LogicalPathTable,
+                ),
+                table,
             ),
         })
 }
@@ -386,8 +396,7 @@ fn reject_duplicate_source_paths(
         let normalized = normalize_path_for_identity(&unit.source_path);
 
         if !seen_paths.insert(normalized.clone()) {
-            let path = intern_filesystem_path_identity(&normalized, path_fork, string_table)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let path = intern_filesystem_path_identity(&normalized, path_fork, string_table)?;
             diagnostics.push(CompilerDiagnostic::duplicate_moth_template_input_path(
                 path, None, None,
             ));

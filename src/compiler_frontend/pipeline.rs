@@ -25,12 +25,14 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
-    parse_file_headers_with_table,
+    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
+    SourcePreparationDelta, parse_file_headers_with_table,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
@@ -49,7 +51,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId,
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseError, SourceId,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -200,16 +202,31 @@ fn source_identity_facts(
     source_files: &SourceDatabase,
     source_path: &Path,
     path_fork: &mut PathInternerFork,
-) -> Result<(PathId, SourceId, Option<PathBuf>), CompilerError> {
+) -> Result<(PathId, SourceId, Option<PathBuf>), FileFrontendPrepareFailure> {
     let record = source_files
         .get_by_canonical_path(source_path)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
                 "source {source_path:?} was not registered before frontend preparation"
-            ))
+            )))
         })?;
     let source_id = record.id;
-    let logical_path = source_files.logical_path_in_fork(source_id, path_fork)?;
+    let logical_path = source_files
+        .logical_path_in_fork(source_id, path_fork)
+        .map_err(|error| match error {
+            // Re-interning the authored source's logical path is an authored allocation: the
+            // project's path table ran out while naming its own source, so the failure reaches
+            // the typed source-capacity diagnostic lane instead of the infrastructure lane.
+            SourceDatabaseError::Capacity(capacity) => {
+                FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                    warnings: Vec::new(),
+                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                })
+            }
+            SourceDatabaseError::Infrastructure(error) => {
+                FileFrontendPrepareFailure::Infrastructure(error)
+            }
+        })?;
 
     Ok((
         logical_path,
@@ -242,8 +259,7 @@ impl CompilerFrontend<'static> {
         span_builder: &mut ExtendedSpanBuilder,
     ) -> Result<FileTokens, FileFrontendPrepareFailure> {
         let (logical_path, source_id, canonical_os_path) =
-            source_identity_facts(source_files, module_path, path_fork)
-                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+            source_identity_facts(source_files, module_path, path_fork)?;
         let mut tokens = tokenize(
             source_code,
             logical_path,
@@ -282,8 +298,7 @@ impl CompilerFrontend<'static> {
                 source_path,
             } => {
                 let (logical_path, source_id, canonical_os_path) =
-                    source_identity_facts(context.source_files, &source_path, local_path_fork)
-                        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+                    source_identity_facts(context.source_files, &source_path, local_path_fork)?;
                 prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
                         source_code,
@@ -304,8 +319,7 @@ impl CompilerFrontend<'static> {
                 // lexical pass. Rebind it to the module source identity and parse headers without
                 // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
                 let (logical_path, source_id, canonical_os_path) =
-                    source_identity_facts(context.source_files, &source_path, local_path_fork)
-                        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+                    source_identity_facts(context.source_files, &source_path, local_path_fork)?;
                 tokens
                     .rebind_source_identity(logical_path, source_id, canonical_os_path)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;

@@ -21,6 +21,7 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::{
@@ -211,9 +212,17 @@ fn compile_single_file_frontend_with_target(
                 )));
             }
             Err(PathInternError::TableFull) => {
-                return Err(PremergeFailure::from(CompilerError::compiler_error(
-                    "path table exhausted while interning single-file entry path",
-                )));
+                // Authored exhaustion of the compact path table: the typed capacity diagnostic
+                // travels without a path snapshot, because the exhausted table owns no further
+                // PathId to render.
+                return Err(PremergeFailure::Diagnosed(
+                    PremergeDiagnosticBatch::from_diagnostic(
+                        CompilerDiagnostic::source_table_capacity(
+                            SourceSpanCapacityResource::LogicalPathTable,
+                        ),
+                        std::mem::take(string_table),
+                    ),
+                ));
             }
         };
         let extension = string_table.intern(extension_text);

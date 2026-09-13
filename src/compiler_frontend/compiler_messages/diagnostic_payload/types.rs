@@ -22,13 +22,17 @@ pub enum NameNamespace {
     TemplateSlot,
     ConfigKey,
 }
-/// Which compact source-span table rejected an authored range.
+/// Which compact source-owned table rejected an authored request.
 ///
-/// The source identity remains on the diagnostic's primary span; this fact records the
-/// exhausted source-owned capacity without allocating another extended row.
+/// Span resources keep the source identity on the diagnostic's primary span; this fact records
+/// the exhausted source-owned capacity without allocating another row. Path/identity resources
+/// name compact identity tables whose exhaustion has no meaningful authored span, so the
+/// diagnostic stays spanless rather than manufacturing source provenance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SourceSpanCapacityResource {
     ExtendedSpanTable,
+    LogicalPathTable,
+    SourceIdentityTable,
 }
 
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.

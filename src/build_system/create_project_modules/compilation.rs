@@ -17,13 +17,17 @@ use crate::compiler_frontend::build_config::{
     ResolvedBuildConfigMap,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
+};
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
+use crate::compiler_frontend::source::{
+    SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -133,13 +137,26 @@ pub(super) fn publish_compiled_module(
     path_base_len: usize,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<(), CompilerError> {
+) -> Result<(), PremergeFailure> {
     let remap = string_table.merge_delta_from(&compiled.string_table, string_table_base_len);
     debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
+    // Authored exhaustion during module publication is a deterministic source-capacity
+    // rejection: the module's own compiled paths are the authored entries that exhausted the
+    // table. Structural merge mismatches stay infrastructure.
     let path_remap = path_interner
         .merge_delta_from(&compiled.path_fork, &remap)
-        .map_err(|error| {
-            CompilerError::compiler_error(format!("module path merge failed: {error:?}"))
+        .map_err(|error| match error {
+            crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
+                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
+                    CompilerDiagnostic::source_table_capacity(
+                        SourceSpanCapacityResource::LogicalPathTable,
+                    ),
+                    std::mem::take(string_table),
+                ))
+            }
+            error => PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "module path merge failed: {error:?}"
+            ))),
         })?;
     let ModuleSemanticResult {
         mut module,
@@ -186,6 +203,7 @@ pub(super) fn publish_compiled_module(
         generated_delta,
         resource_source_associations,
     })
+    .map_err(PremergeFailure::Infrastructure)
 }
 
 /// Add one newly published module's generic templates to the boundary materialisation registry.
@@ -320,6 +338,22 @@ impl From<PremergeFailure> for DirectoryPremergeFailure {
 impl From<CompilerError> for DirectoryPremergeFailure {
     fn from(error: CompilerError) -> Self {
         Self::project(PremergeFailure::Infrastructure(error))
+    }
+}
+
+impl From<SourceDatabaseError> for DirectoryPremergeFailure {
+    fn from(error: SourceDatabaseError) -> Self {
+        match error {
+            SourceDatabaseError::Capacity(capacity) => Self::project(
+                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
+                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    StringTable::new(),
+                )),
+            ),
+            SourceDatabaseError::Infrastructure(error) => {
+                Self::project(PremergeFailure::Infrastructure(error))
+            }
+        }
     }
 }
 

@@ -397,6 +397,13 @@ impl PathInternerFork {
         if let Some(&existing) = self.base.lookup.get(&(parent, component)) {
             return Some(existing);
         }
+        #[cfg(test)]
+        if super::test_exhaustion::forced_exhaustion() {
+            // Test-only: a new node is rejected while every lookup above kept reusing its
+            // already-interned identity, so tests exercise exactly the allocation boundary.
+            return None;
+        }
+
 
         let parent_depth = self.depth(parent);
         let child_depth = parent_depth.checked_add(1)?;

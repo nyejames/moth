@@ -29,6 +29,7 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::{PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
     DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
@@ -259,7 +260,15 @@ fn load_missing_source_paths_with_registered_paths_for_test(
         None,
         string_table,
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    .map_err(|error| match error {
+        SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
+            CompilerDiagnostic::source_table_capacity(capacity.resource()),
+            string_table.clone(),
+        ),
+        SourceDatabaseError::Infrastructure(error) => {
+            CompilerMessages::from_error_ref(error, string_table)
+        }
+    })?;
 
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let mut first_read_error = None;

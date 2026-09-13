@@ -4,6 +4,7 @@ use super::discovery_provider_imports::{
     unsupported_external_extension_error,
 };
 use super::*;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternerFork,
 };
@@ -645,17 +646,19 @@ fn resolve_module_root_bare_dependency(
                 ),
             )),
             crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
-                SourceDiscoveryError::from(CompilerError::compiler_error(
-                    "path table exhausted while interning owning module path",
-                ))
+                SourceDiscoveryError::Diagnostic(
+                    CompilerDiagnostic::source_table_capacity(
+                        SourceSpanCapacityResource::LogicalPathTable,
+                    ),
+                )
             }
         })?;
     let mut scratch = Vec::new();
     let module_local_provider = path_fork
         .try_join(module_prefix, provider, &mut scratch)
         .ok_or_else(|| {
-            SourceDiscoveryError::from(CompilerError::compiler_error(
-                "path table exhausted while joining owning module dependency path",
+            SourceDiscoveryError::Diagnostic(CompilerDiagnostic::source_table_capacity(
+                SourceSpanCapacityResource::LogicalPathTable,
             ))
         })?;
 

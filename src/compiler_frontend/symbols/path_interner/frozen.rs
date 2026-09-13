@@ -54,6 +54,13 @@ impl PathTable {
         parent: PathId,
         component: StringId,
     ) -> Option<PathId> {
+        #[cfg(test)]
+        if super::test_exhaustion::forced_exhaustion() {
+            // Test-only: reject the new node so tests reach the exhaustion boundary without
+            // allocating the full compact domain. Callers that reuse an already-interned child
+            // never reach this method and keep succeeding.
+            return None;
+        }
         let child = PathId::try_from_index(self.nodes.len())?;
         let child_depth = self.depth(parent).checked_add(1)?;
 

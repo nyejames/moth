@@ -560,13 +560,20 @@ fn source_span_capacity_message(
     length: u32,
     resource: SourceSpanCapacityResource,
 ) -> String {
-    let resource_name = match resource {
-        SourceSpanCapacityResource::ExtendedSpanTable => "extended span table",
-    };
-    format!(
-        "This source needs an exact span at byte offset {start} with length {length}, but its \
-         {resource_name} cannot hold another long or late range."
-    )
+    match resource {
+        SourceSpanCapacityResource::ExtendedSpanTable => format!(
+            "This source needs an exact span at byte offset {start} with length {length}, but its \
+             extended span table cannot hold another long or late range."
+        ),
+        SourceSpanCapacityResource::LogicalPathTable => format!(
+            "This project needs more than {length} logical path entries in its compact path \
+             identity table; the four-byte path table cannot address another entry."
+        ),
+        SourceSpanCapacityResource::SourceIdentityTable => format!(
+            "This project needs more than {length} source files in its compact source identity \
+             table; the four-byte identity table cannot address another source."
+        ),
+    }
 }
 
 fn source_kind_name(source_kind: SourceFileKind) -> &'static str {

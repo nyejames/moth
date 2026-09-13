@@ -20,7 +20,7 @@ use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, ImportPublicSurfaceType, InvalidDependencyClauseReason,
-    InvalidReceiverDeclarationReason, ReservedNameOwner,
+    InvalidReceiverDeclarationReason, ReservedNameOwner, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -77,7 +77,8 @@ struct PublicExportDependencyResolutionInput<'a, 'provider> {
 /// Intern one filesystem-derived public-surface path without losing path components.
 ///
 /// Public-export construction sees several logical, canonical and module-root paths, but they all
-/// share the same exact-identity contract and infrastructure diagnostic lane.
+/// share the same exact-identity contract. Capacity exhaustion maps to the typed source
+/// capacity diagnostic; only non-UTF-8 spellings stay infrastructure.
 fn intern_public_surface_path(
     path: &Path,
     path_role: &str,
@@ -95,10 +96,10 @@ fn intern_public_surface_path(
                     ),
                 ),
             ),
-            PathInternError::TableFull => HeaderParseFailure::Infrastructure(
-                CompilerError::compiler_error(format!(
-                    "{path_role} exhausted the build path table"
-                )),
+            PathInternError::TableFull => HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::source_table_capacity(
+                    SourceSpanCapacityResource::LogicalPathTable,
+                ),
             ),
         })
 }

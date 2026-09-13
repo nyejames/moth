@@ -826,6 +826,23 @@ impl CompilerDiagnostic {
         )
     }
 
+    /// Report authored exhaustion of one compact source-owned identity table.
+    ///
+    /// Logical-path and source-identity exhaustion has no authored span to anchor, so the
+    /// diagnostic stays spanless and carries only the exhausted resource. Reporting never
+    /// attempts another allocation from the rejected table.
+    pub(crate) fn source_table_capacity(resource: SourceSpanCapacityResource) -> Self {
+        Self::new(
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::SourceSpanCapacity),
+            None,
+            DiagnosticPayload::SourceSpanCapacity {
+                start: 0,
+                length: u32::MAX,
+                resource,
+            },
+        )
+    }
+
     pub(crate) fn invalid_number_literal(
         literal_text: StringId,
         reason: NumberLiteralErrorReason,

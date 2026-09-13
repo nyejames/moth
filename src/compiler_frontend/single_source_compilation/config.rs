@@ -32,7 +32,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
-    InvalidConfigReason, RuleDiagnosticKind,
+    InvalidConfigReason, RuleDiagnosticKind, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
@@ -155,9 +155,9 @@ pub(crate) fn compile_config_source(
         }
         Err(PathInternError::TableFull) => {
             return ConfigCompilationOutcome {
-                result: Err(CompilerMessages::from_error(
-                    CompilerError::compiler_error(
-                        "Config path table exhausted while interning the authored path",
+                result: Err(CompilerMessages::from_diagnostic(
+                    CompilerDiagnostic::source_table_capacity(
+                        SourceSpanCapacityResource::LogicalPathTable,
                     ),
                     string_table.clone(),
                 )),

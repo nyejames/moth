@@ -613,3 +613,89 @@ fn effective_project_fields_classify_fixed_direct_and_metadata_kinds() {
         .collect::<Vec<_>>();
     assert_eq!(direct_names, vec!["configured"]);
 }
+
+/// Build one minimal semantic result whose path fork carries one module-local path node, so
+/// publication must allocate into the build table to merge it.
+fn semantic_result_with_local_path() -> crate::compiler_frontend::module_compilation::ModuleSemanticResult {
+    let origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("combined-publication-tests"),
+        "main".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let mut artifact = invalid_artifact();
+    artifact.module.metadata.materialisation_context = None;
+    artifact.interface.module_origin = origin.clone();
+
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    path_fork
+        .try_intern_portable_path(&format!("{origin:?}/published-path"), &mut string_table)
+        .expect("the module-local path should intern into the fork");
+    assert_ne!(path_fork.base_len(), 0, "fork must carry local nodes");
+
+    crate::compiler_frontend::module_compilation::ModuleSemanticResult {
+        module: artifact.module,
+        generated_delta: GeneratedFunctionDelta::from_records(Vec::new()),
+        resource_source_associations: Vec::new(),
+        string_table,
+        path_fork,
+        public_interface: artifact.interface,
+    }
+}
+
+#[test]
+fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic() {
+    use crate::compiler_frontend::compiler_messages::{
+        DiagnosticSeverity, PremergeFailure, SourceSpanCapacityResource,
+    };
+    use crate::compiler_frontend::symbols::path_interner::{
+        ForcedExhaustionGuard, PathInternerBuilder,
+    };
+
+    let compiled = semantic_result_with_local_path();
+    let mut string_table = StringTable::new();
+    let mut path_interner = PathInternerBuilder::new();
+    let mut modules = ModuleArtifactStore::new(1);
+    let mut generated = BoundaryGeneratedFunctionStore::default();
+    let mut materialisations = ProviderMaterialisationRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("combined-publication-tests"),
+        "main".to_owned(),
+        ModuleRootRole::Normal,
+    );
+
+    let _gate = ForcedExhaustionGuard::new();
+    let error = super::publish_compiled_module(
+        &mut modules,
+        &mut generated,
+        &mut materialisations,
+        &mut resource_inputs,
+        ModuleId::from_index(0),
+        &origin,
+        compiled,
+        // A production `path_fork` forks from the build table, so its inherited base already
+        // contains the root node; the empty fixture fork reports the same base length.
+        0,
+        1,
+        &mut string_table,
+        &mut path_interner,
+    )
+    .expect_err("authored path exhaustion must fail module publication");
+
+    let PremergeFailure::Diagnosed(batch) = error else {
+        panic!("authored publication exhaustion must produce the diagnosed capacity lane");
+    };
+    let (diagnostic_bag, _moved_string_table, ..) = batch.into_parts();
+    let diagnostics = diagnostic_bag.diagnostics();
+    assert_eq!(diagnostics.len(), 1, "exhaustion must diagnose exactly once");
+    assert_eq!(
+        diagnostics[0].payload,
+        crate::compiler_frontend::compiler_messages::DiagnosticPayload::SourceSpanCapacity {
+            start: 0,
+            length: u32::MAX,
+            resource: SourceSpanCapacityResource::LogicalPathTable,
+        }
+    );
+    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+}

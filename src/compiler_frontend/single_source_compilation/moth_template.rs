@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
 };
@@ -187,7 +188,17 @@ pub(crate) fn compile_moth_template_source(
                     Some(&path_resolver),
                     string_table,
                 )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                .map_err(|error| match error {
+                    SourceDatabaseError::Capacity(capacity) => {
+                        CompilerMessages::from_diagnostic(
+                            CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                            string_table.clone(),
+                        )
+                    }
+                    SourceDatabaseError::Infrastructure(error) => {
+                        CompilerMessages::from_error_ref(error, string_table)
+                    }
+                })?;
                 let source_builder = SourceDatabaseBuilder::new(source_files);
                 (Vec::new(), None, source_builder, None)
             }
