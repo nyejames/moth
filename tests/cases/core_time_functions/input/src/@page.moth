@@ -43,7 +43,9 @@ ts0 = timestamp_from_unix_milliseconds(0.0)
 ts1 = timestamp_from_unix_seconds(1.0)
 ts_millis = unix_milliseconds(ts0)
 ts_sec = unix_seconds(ts1)
-ts_iso = to_iso_string(ts0)
+ts_iso = to_iso_string(ts0) catch:
+    then "unrenderable"
+;
 
 io.line([:duration sec=[sec] millis=[millis] neg=[neg] abs_sec=[abs_sec] clamped_sec=[clamped_sec]])
 io.line([:delta_ok=[delta_ok] elapsed_ok=[elapsed_ok]])

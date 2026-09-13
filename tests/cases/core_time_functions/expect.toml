@@ -18,7 +18,7 @@ must_contain = [
     "(1.5 * 1000.0)",
     "Math.abs(",
     "Math.min(Math.max(",
-    "toISOString()",
+    "function __moth_time_to_iso_string(",
 ]
 must_not_contain = [
     "function __moth_time_now_millis(",

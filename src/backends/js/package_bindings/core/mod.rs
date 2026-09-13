@@ -25,11 +25,14 @@ pub(crate) struct CoreJsHelper {
 /// through [`crate::backends::js::runtime::collection_javascript_helpers`]. Remaining runtime
 /// prelude groups are compiler infrastructure, not this optional-helper inventory.
 pub(crate) fn core_javascript_helpers() -> Vec<CoreJsHelper> {
-    let mut helpers = Vec::new();
+    let mut helpers: Vec<CoreJsHelper> = Vec::new();
     helpers.extend_from_slice(text::CORE_TEXT_JS_HELPERS);
     helpers.extend_from_slice(random::CORE_RANDOM_JS_HELPERS);
     helpers.extend_from_slice(io::CORE_IO_JS_HELPERS);
-    helpers.push(time::CORE_TIME_JS_HELPER);
+    helpers.extend(time::core_time_js_helpers().iter().map(|helper| CoreJsHelper {
+        name: helper.name,
+        source: helper.source.as_str(),
+    }));
     helpers
 }
 

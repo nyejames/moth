@@ -12,6 +12,8 @@ ts = parse_epoch_plus_one() catch:
 ;
 
 millis = time.unix_milliseconds(ts)
-iso = time.to_iso_string(ts)
+iso = time.to_iso_string(ts) catch:
+    then "unrenderable"
+;
 
 io.line([:timestamp_parse millis=[millis] iso=[iso]])

@@ -1,0 +1,25 @@
+@core/time Timestamp, timestamp_from_unix_milliseconds, to_iso_string
+
+render_past_window || -> Int, Error!:
+    -- One millisecond past 9999-12-31T23:59:59.999Z, the last renderable instant
+    far = timestamp_from_unix_milliseconds(253402300800000.0)
+    iso = to_iso_string(far)!
+    return 0
+;
+
+render_fractional_edge || -> Int, Error!:
+    -- Half a millisecond past the window: the range is tested before truncation
+    edge = timestamp_from_unix_milliseconds(253402300799999.5)
+    iso = to_iso_string(edge)!
+    return 0
+;
+
+past_code = render_past_window() catch |past_err|:
+    then past_err.code
+;
+
+edge_code = render_fractional_edge() catch |edge_err|:
+    then edge_err.code
+;
+
+[: to_iso_string_out_of_range code=[past_code] edge_code=[edge_code]]

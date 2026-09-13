@@ -17,6 +17,33 @@ use crate::compiler_frontend::external_packages::{
     ExternalSignatureType, ExternalTypeId, ExternalTypeSpec,
 };
 
+/// One registered `@core/time` function.
+///
+/// WHAT: pairs the published name and signature with its JavaScript lowering.
+/// WHY: registration reads as named fields instead of a positional tuple, and the lowering
+///      kind is carried by an enum instead of an inline/runtime boolean.
+struct TimeFunctionSpec<'a> {
+    name: &'static str,
+    /// Parameters in published order; every parameter takes shared access.
+    parameters: &'a [&'a ExternalSignatureType],
+    return_type: &'a ExternalSignatureType,
+    /// Set only for the two fallible parse and render helpers.
+    error_return_type: Option<&'a ExternalSignatureType>,
+    js_lowering: TimeJsLowering,
+}
+
+/// JavaScript lowering for one `@core/time` function.
+///
+/// WHAT: distinguishes inline millisecond expressions from compiler-owned runtime helpers.
+/// WHY: the two kinds map to different `ExternalJsLowering` variants and different emission
+///      paths.
+enum TimeJsLowering {
+    /// Inline expression over the millisecond representation, with `#N` substitution.
+    Inline(&'static str),
+    /// Named compiler-owned runtime helper reached through the shared reachability path.
+    Runtime(&'static str),
+}
+
 pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
     let package_id = registry
         .register_package("@core/time", crate::builder_surface::PackageOrigin::Core)
@@ -33,269 +60,214 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
     let duration_type = ExternalSignatureType::External(duration_id);
     let time_mark_type = ExternalSignatureType::External(time_mark_id);
     let timestamp_type = ExternalSignatureType::External(timestamp_id);
+    let f64_type = ExternalSignatureType::Abi(ExternalAbiType::F64);
+    let string_type = ExternalSignatureType::Abi(ExternalAbiType::Utf8Str);
+    let bool_type = ExternalSignatureType::Abi(ExternalAbiType::Bool);
+    let error_type = ExternalSignatureType::BuiltinError;
 
     // ------------------------
     //  Register free functions
     // ------------------------
 
-    // Monotonic clock
-
-    register_external_time_function(
-        registry,
-        package_id,
+    // One row per registered function, grouped as the canonical reference groups them. Inline
+    // lowerings keep the published `#0`-substitution form; the two runtime helpers are reached
+    // through the reachability path shared with the other optional Core packages.
+    let time_functions = [
+        // Monotonic clock
         TimeFunctionSpec {
             name: "mark_now",
-            parameters: vec![],
-            returns: vec![ExternalReturnSlot::fresh(time_mark_type.clone())],
+            parameters: &[],
+            return_type: &time_mark_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression(
-                "globalThis.performance.now()".to_owned(),
-            ),
+            js_lowering: TimeJsLowering::Inline("globalThis.performance.now()"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "elapsed_since",
-            parameters: vec![shared_param(time_mark_type.clone())],
-            returns: vec![ExternalReturnSlot::fresh(duration_type.clone())],
+            parameters: &[&time_mark_type],
+            return_type: &duration_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression(
-                "(globalThis.performance.now() - #0)".to_owned(),
-            ),
+            js_lowering: TimeJsLowering::Inline("(globalThis.performance.now() - #0)"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "duration_between",
-            parameters: vec![
-                shared_param(time_mark_type.clone()),
-                shared_param(time_mark_type.clone()),
-            ],
-            returns: vec![ExternalReturnSlot::fresh(duration_type.clone())],
+            parameters: &[&time_mark_type, &time_mark_type],
+            return_type: &duration_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("(#1 - #0)".to_owned()),
+            js_lowering: TimeJsLowering::Inline("(#1 - #0)"),
         },
-    );
-
-    // Wall-clock timestamp
-
-    register_external_time_function(
-        registry,
-        package_id,
+        // Wall-clock timestamp
         TimeFunctionSpec {
             name: "timestamp_now",
-            parameters: vec![],
-            returns: vec![ExternalReturnSlot::fresh(timestamp_type.clone())],
+            parameters: &[],
+            return_type: &timestamp_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("Date.now()".to_owned()),
+            js_lowering: TimeJsLowering::Inline("Date.now()"),
         },
-    );
-
-    // Duration construction
-
-    register_external_time_function(
-        registry,
-        package_id,
+        // Duration construction
         TimeFunctionSpec {
             name: "duration_from_seconds",
-            parameters: vec![shared_param(ExternalSignatureType::Abi(
-                ExternalAbiType::F64,
-            ))],
-            returns: vec![ExternalReturnSlot::fresh(duration_type.clone())],
+            parameters: &[&f64_type],
+            return_type: &duration_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("(#0 * 1000.0)".to_owned()),
+            js_lowering: TimeJsLowering::Inline("(#0 * 1000.0)"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "duration_from_milliseconds",
-            parameters: vec![shared_param(ExternalSignatureType::Abi(
-                ExternalAbiType::F64,
-            ))],
-            returns: vec![ExternalReturnSlot::fresh(duration_type.clone())],
+            parameters: &[&f64_type],
+            return_type: &duration_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("#0".to_owned()),
+            js_lowering: TimeJsLowering::Inline("#0"),
         },
-    );
-
-    // Timestamp construction
-
-    register_external_time_function(
-        registry,
-        package_id,
+        // Timestamp construction
         TimeFunctionSpec {
             name: "timestamp_from_unix_seconds",
-            parameters: vec![shared_param(ExternalSignatureType::Abi(
-                ExternalAbiType::F64,
-            ))],
-            returns: vec![ExternalReturnSlot::fresh(timestamp_type.clone())],
+            parameters: &[&f64_type],
+            return_type: &timestamp_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("(#0 * 1000.0)".to_owned()),
+            js_lowering: TimeJsLowering::Inline("(#0 * 1000.0)"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "timestamp_from_unix_milliseconds",
-            parameters: vec![shared_param(ExternalSignatureType::Abi(
-                ExternalAbiType::F64,
-            ))],
-            returns: vec![ExternalReturnSlot::fresh(timestamp_type.clone())],
+            parameters: &[&f64_type],
+            return_type: &timestamp_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("#0".to_owned()),
+            js_lowering: TimeJsLowering::Inline("#0"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "timestamp_from_iso_string",
-            parameters: vec![shared_param(ExternalSignatureType::Abi(
-                ExternalAbiType::Utf8Str,
-            ))],
-            returns: vec![ExternalReturnSlot::fresh(timestamp_type.clone())],
-            error_return_type: Some(ExternalSignatureType::BuiltinError),
-            js_lowering: ExternalJsLowering::RuntimeFunction(
-                "__moth_time_timestamp_from_iso_string".to_owned(),
-            ),
+            parameters: &[&string_type],
+            return_type: &timestamp_type,
+            error_return_type: Some(&error_type),
+            js_lowering: TimeJsLowering::Runtime("__moth_time_timestamp_from_iso_string"),
         },
-    );
-
-    // ------------------------
-    //  Duration helpers
-    // ------------------------
-
-    register_external_time_function(
-        registry,
-        package_id,
+        // Duration helpers
         TimeFunctionSpec {
             name: "as_seconds",
-            parameters: vec![shared_param(duration_type.clone())],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::F64,
-            ))],
+            parameters: &[&duration_type],
+            return_type: &f64_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("(#0 / 1000.0)".to_owned()),
+            js_lowering: TimeJsLowering::Inline("(#0 / 1000.0)"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "as_milliseconds",
-            parameters: vec![shared_param(duration_type.clone())],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::F64,
-            ))],
+            parameters: &[&duration_type],
+            return_type: &f64_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("#0".to_owned()),
+            js_lowering: TimeJsLowering::Inline("#0"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "is_negative",
-            parameters: vec![shared_param(duration_type.clone())],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::Bool,
-            ))],
+            parameters: &[&duration_type],
+            return_type: &bool_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("(#0 < 0)".to_owned()),
+            js_lowering: TimeJsLowering::Inline("(#0 < 0)"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "abs",
-            parameters: vec![shared_param(duration_type.clone())],
-            returns: vec![ExternalReturnSlot::fresh(duration_type.clone())],
+            parameters: &[&duration_type],
+            return_type: &duration_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("Math.abs(#0)".to_owned()),
+            js_lowering: TimeJsLowering::Inline("Math.abs(#0)"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "clamp",
-            parameters: vec![
-                shared_param(duration_type.clone()),
-                shared_param(duration_type.clone()),
-                shared_param(duration_type.clone()),
-            ],
-            returns: vec![ExternalReturnSlot::fresh(duration_type.clone())],
+            parameters: &[&duration_type, &duration_type, &duration_type],
+            return_type: &duration_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression(
-                "Math.min(Math.max(#0, #1), #2)".to_owned(),
-            ),
+            js_lowering: TimeJsLowering::Inline("Math.min(Math.max(#0, #1), #2)"),
         },
-    );
-
-    // ------------------------
-    //  Timestamp helpers
-    // ------------------------
-
-    register_external_time_function(
-        registry,
-        package_id,
+        TimeFunctionSpec {
+            name: "duration_add",
+            parameters: &[&duration_type, &duration_type],
+            return_type: &duration_type,
+            error_return_type: None,
+            js_lowering: TimeJsLowering::Inline("(#0 + #1)"),
+        },
+        TimeFunctionSpec {
+            name: "duration_subtract",
+            parameters: &[&duration_type, &duration_type],
+            return_type: &duration_type,
+            error_return_type: None,
+            js_lowering: TimeJsLowering::Inline("(#0 - #1)"),
+        },
+        TimeFunctionSpec {
+            name: "duration_scale",
+            parameters: &[&duration_type, &f64_type],
+            return_type: &duration_type,
+            error_return_type: None,
+            js_lowering: TimeJsLowering::Inline("(#0 * #1)"),
+        },
+        // Timestamp helpers
         TimeFunctionSpec {
             name: "unix_seconds",
-            parameters: vec![shared_param(timestamp_type.clone())],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::F64,
-            ))],
+            parameters: &[&timestamp_type],
+            return_type: &f64_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("(#0 / 1000.0)".to_owned()),
+            js_lowering: TimeJsLowering::Inline("(#0 / 1000.0)"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "unix_milliseconds",
-            parameters: vec![shared_param(timestamp_type.clone())],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::F64,
-            ))],
+            parameters: &[&timestamp_type],
+            return_type: &f64_type,
             error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression("#0".to_owned()),
+            js_lowering: TimeJsLowering::Inline("#0"),
         },
-    );
-
-    register_external_time_function(
-        registry,
-        package_id,
         TimeFunctionSpec {
             name: "to_iso_string",
-            parameters: vec![shared_param(timestamp_type.clone())],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::Utf8Str,
-            ))],
-            error_return_type: None,
-            js_lowering: ExternalJsLowering::InlineExpression(
-                "(new Date(#0)).toISOString()".to_owned(),
-            ),
+            parameters: &[&timestamp_type],
+            return_type: &string_type,
+            error_return_type: Some(&error_type),
+            js_lowering: TimeJsLowering::Runtime("__moth_time_to_iso_string"),
         },
-    );
+        TimeFunctionSpec {
+            name: "timestamp_offset",
+            parameters: &[&timestamp_type, &duration_type],
+            return_type: &timestamp_type,
+            error_return_type: None,
+            js_lowering: TimeJsLowering::Inline("(#0 + #1)"),
+        },
+        TimeFunctionSpec {
+            name: "timestamp_difference",
+            parameters: &[&timestamp_type, &timestamp_type],
+            return_type: &duration_type,
+            error_return_type: None,
+            js_lowering: TimeJsLowering::Inline("(#1 - #0)"),
+        },
+    ];
+
+    for function in time_functions {
+        let parameters: Vec<ExternalParameter> = function
+            .parameters
+            .iter()
+            .map(|language_type| ExternalParameter {
+                language_type: (*language_type).clone(),
+                access_kind: ExternalAccessKind::Shared,
+            })
+            .collect();
+        let returns = vec![ExternalReturnSlot::fresh(function.return_type.clone())];
+        let js_lowering = match function.js_lowering {
+            TimeJsLowering::Inline(expression) => {
+                ExternalJsLowering::InlineExpression(expression.to_owned())
+            }
+            TimeJsLowering::Runtime(name) => ExternalJsLowering::RuntimeFunction(name.to_owned()),
+        };
+
+        registry
+            .register_external_function(
+                package_id,
+                ExternalFunctionSpec {
+                    name: function.name.to_owned(),
+                    parameters,
+                    returns,
+                    error_return_type: function.error_return_type.cloned(),
+                    lowerings: ExternalFunctionLowerings {
+                        js: Some(js_lowering),
+                        wasm: None,
+                    },
+                },
+            )
+            .expect("builtin time function registration should not collide");
+    }
 }
 
 // ------------------------
@@ -317,48 +289,4 @@ fn register_external_time_type(
             },
         )
         .expect("builtin time type registration should not collide")
-}
-
-/// Builds a shared-access parameter for the given signature type.
-fn shared_param(language_type: ExternalSignatureType) -> ExternalParameter {
-    ExternalParameter {
-        language_type,
-        access_kind: ExternalAccessKind::Shared,
-    }
-}
-
-/// Local spec for registering one external time function.
-///
-/// WHAT: collapses the per-function metadata so the registration helper does not need
-///       a long argument list.
-/// WHY: keeps call sites readable and avoids clippy warnings for too many arguments.
-struct TimeFunctionSpec {
-    name: &'static str,
-    parameters: Vec<ExternalParameter>,
-    returns: Vec<ExternalReturnSlot>,
-    error_return_type: Option<ExternalSignatureType>,
-    js_lowering: ExternalJsLowering,
-}
-
-/// Registers a single external function in the time package.
-fn register_external_time_function(
-    registry: &mut ExternalPackageRegistry,
-    package_id: ExternalPackageId,
-    spec: TimeFunctionSpec,
-) {
-    registry
-        .register_external_function(
-            package_id,
-            ExternalFunctionSpec {
-                name: spec.name.to_owned(),
-                parameters: spec.parameters,
-                returns: spec.returns,
-                error_return_type: spec.error_return_type,
-                lowerings: ExternalFunctionLowerings {
-                    js: Some(spec.js_lowering),
-                    wasm: None,
-                },
-            },
-        )
-        .expect("builtin time function registration should not collide");
 }

@@ -1,0 +1,13 @@
+@core/time Timestamp, timestamp_from_iso_string
+
+parse || -> Int, Error!:
+    ts = timestamp_from_iso_string("1970-01-01T00:00:00z")!
+    return 0
+;
+
+-- Lowercase designator is rejected
+code = parse() catch |err|:
+    then err.code
+;
+
+[: timestamp_parse_grammar_lowercase_designator code=[code]]

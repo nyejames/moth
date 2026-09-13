@@ -9597,6 +9597,91 @@ contract = "language.dependencies.core_time_timestamp_parse_acceptance"
 role = "boundary"
 
 [[case]]
+id = "core_time_timestamp_parse_grammar_rejected"
+path = "core_time_timestamp_parse_grammar_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_timestamp_parse_grammar_acceptance"
+role = "boundary"
+
+[[case]]
+id = "core_time_timestamp_parse_lowercase_designator_rejected"
+path = "core_time_timestamp_parse_lowercase_designator_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_timestamp_parse_grammar_acceptance"
+role = "boundary"
+
+[[case]]
+id = "core_time_timestamp_parse_whitespace_rejected"
+path = "core_time_timestamp_parse_whitespace_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_timestamp_parse_grammar_acceptance"
+role = "boundary"
+
+[[case]]
+id = "core_time_timestamp_parse_date_only_rejected"
+path = "core_time_timestamp_parse_date_only_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_timestamp_parse_grammar_acceptance"
+role = "boundary"
+
+[[case]]
+id = "core_time_timestamp_parse_invalid_calendar_day_rejected"
+path = "core_time_timestamp_parse_invalid_calendar_day_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_timestamp_parse_calendar_acceptance"
+role = "boundary"
+
+[[case]]
+id = "core_time_timestamp_parse_field_out_of_range_rejected"
+path = "core_time_timestamp_parse_field_out_of_range_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_timestamp_parse_calendar_acceptance"
+role = "boundary"
+
+[[case]]
+id = "core_time_timestamp_parse_offset_fraction_success"
+path = "core_time_timestamp_parse_offset_fraction_success"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_timestamp_parse_offset_and_fraction_acceptance"
+role = "primary"
+
+[[case]]
+id = "core_time_timestamp_parse_window_boundary"
+path = "core_time_timestamp_parse_window_boundary"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_renderable_window_acceptance"
+role = "boundary"
+
+[[case]]
+id = "core_time_to_iso_string_out_of_range_rejected"
+path = "core_time_to_iso_string_out_of_range_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_to_iso_string_renderable_range_acceptance"
+role = "boundary"
+
+[[case]]
+id = "core_time_duration_arithmetic_success"
+path = "core_time_duration_arithmetic_success"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js"]
+contract = "language.dependencies.core_time_duration_arithmetic_acceptance"
+role = "primary"
+
+[[case]]
+id = "core_time_duration_overflow_at_float_boundary"
+path = "core_time_duration_overflow_at_float_boundary"
+tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
+contract = "language.dependencies.core_time_duration_arithmetic_acceptance"
+role = "boundary"
+
+
+[[case]]
+id = "unary_minus_requires_numeric_operand"
+path = "unary_minus_requires_numeric_operand"
+tags = ["integration", "language", "operators", "diagnostics", "type-checking"]
+contract = "language.operators.unary_minus_requires_numeric_operand"
+role = "boundary"
+
+[[case]]
 id = "core_time_namespace_binding_success"
 path = "core_time_namespace_binding_success"
 tags = ["integration", "language", "external-packages", "core-packages", "time", "dependencies", "namespace-bindings"]

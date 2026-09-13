@@ -1,0 +1,23 @@
+@core/time Timestamp, timestamp_from_iso_string
+
+parse_hour || -> Int, Error!:
+    ts = timestamp_from_iso_string("1970-01-01T24:00:00Z")!
+    return 0
+;
+
+parse_offset || -> Int, Error!:
+    ts = timestamp_from_iso_string("1970-01-01T00:00:00+99:99")!
+    return 0
+;
+
+-- An out-of-range hour is rejected instead of rolling over
+hour_code = parse_hour() catch |hour_err|:
+    then hour_err.code
+;
+
+-- The offset fields carry the same range rule as the time of day
+offset_code = parse_offset() catch |offset_err|:
+    then offset_err.code
+;
+
+[: timestamp_parse_field_out_of_range code=[hour_code] offset_code=[offset_code]]

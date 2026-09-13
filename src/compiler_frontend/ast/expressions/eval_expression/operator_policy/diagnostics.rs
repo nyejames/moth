@@ -35,8 +35,8 @@ pub(super) fn diagnostic_operator_from_ast(op: &Operator) -> DiagnosticOperator 
         Operator::Equality => DiagnosticOperator::Equality,
         Operator::NotEqual => DiagnosticOperator::NotEqual,
         Operator::Not => DiagnosticOperator::Not,
-        // Unary minus shares the `-` spelling with subtraction. It never reaches an
-        // unsupported-operator diagnostic because unary policy preserves the operand type.
+        // Unary minus shares the `-` spelling with subtraction, so non-numeric unary
+        // negation is reported with the subtraction operator spelling.
         Operator::Negate => DiagnosticOperator::Subtract,
         Operator::Range => DiagnosticOperator::Range,
     }

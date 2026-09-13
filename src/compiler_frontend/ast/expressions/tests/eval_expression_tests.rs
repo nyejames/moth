@@ -234,6 +234,11 @@ fn unary_not_requires_boolean_operand() {
 }
 
 #[test]
+fn unary_minus_requires_numeric_operand() {
+    assert_unsupported_operator("value = -\"moth\"\n", DiagnosticOperator::Subtract);
+}
+
+#[test]
 fn logical_and_requires_bool_operands() {
     assert_unsupported_operator("value = true and 1\n", DiagnosticOperator::And);
 }

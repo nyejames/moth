@@ -7,37 +7,36 @@
 backing and no prelude alias.
 
 Canonical source semantics belong to `docs/src/docs/packages/core/time/time.mtf` and the canonical
-`Float`, `Error` and external-binding references. This living plan records the audited implementation
-state, the contract gaps, the decisions a v1 needs and a verified touch map. It accepts no public API
-and no semantics: every open item below must be settled with the user and published in the canonical
-reference before implementation.
+`Float`, `Error` and external-binding references. That reference now states the package's semantic
+contract, so this living plan records implementation strategy, the inherited defects the slice
+exposed but does not own, and coverage ownership. It cannot accept public API or semantics.
 
 ### Current-state capsule
 
 ```text
-STATUS: design checkpoint delivered; no implementation slice accepted
-CURRENT_SLICE: none - this plan is the audit result, not an approved change
-BLOCKERS: thirteen tabled semantic decisions below - eleven fully open, two settled only in scope - four of which already have a demonstrable current behaviour that a new test would silently promote to contract; the correction set also needs a decision on who owns binding error-code allocation; the umbrella programme owns the inherited red `just validate` gate
-NEXT_ACTION: settle the decision table with the user, publish the accepted contract in `time.mtf`, then implement the validity and portability corrections before any arithmetic surface
+STATUS: semantic contract published and implemented; corrections and the accepted arithmetic surface delivered
+CURRENT_SLICE: none - the contract, the four corrections and the five arithmetic functions are complete
+BLOCKERS: a Wasm lowering set still waits for a target decision; the repeated same-name `catch` binder defect below is inherited and owned outside this package; the umbrella programme owns the inherited red `just validate` gate
+NEXT_ACTION: none required; a Wasm lowering set is the next candidate and needs its own accepted decision
 ```
 
 ## Current surface
 
-Registered in `src/builder_surface/core_packages/time.rs`: three opaque types, seventeen functions,
-no constants. Every function has a JS lowering and `wasm: None`; sixteen are inline expressions and
-one is a runtime helper.
+Registered in `src/builder_surface/core_packages/time.rs`: three opaque types, twenty-two functions,
+no constants. Every function has a JS lowering and `wasm: None`; twenty are inline expressions and
+two are runtime helpers.
 
 | Group | Functions | Lowering |
 |---|---|---|
 | Monotonic | `mark_now`, `elapsed_since`, `duration_between` | `globalThis.performance.now()`, `(globalThis.performance.now() - #0)`, `(#1 - #0)` |
 | Wall clock | `timestamp_now`, `timestamp_from_unix_seconds`, `timestamp_from_unix_milliseconds`, `timestamp_from_iso_string` | `Date.now()`, `(#0 * 1000.0)`, `#0`, runtime helper |
 | Duration construction | `duration_from_seconds`, `duration_from_milliseconds` | `(#0 * 1000.0)`, `#0` |
-| Duration helpers | `as_seconds`, `as_milliseconds`, `is_negative`, `abs`, `clamp` | `(#0 / 1000.0)`, `#0`, `(#0 < 0)`, `Math.abs(#0)`, `Math.min(Math.max(#0, #1), #2)` |
-| Timestamp helpers | `unix_seconds`, `unix_milliseconds`, `to_iso_string` | `(#0 / 1000.0)`, `#0`, `(new Date(#0)).toISOString()` |
+| Duration helpers | `as_seconds`, `as_milliseconds`, `is_negative`, `abs`, `clamp`, `duration_add`, `duration_subtract`, `duration_scale` | `(#0 / 1000.0)`, `#0`, `(#0 < 0)`, `Math.abs(#0)`, `Math.min(Math.max(#0, #1), #2)`, `(#0 + #1)`, `(#0 - #1)`, `(#0 * #1)` |
+| Timestamp helpers | `unix_seconds`, `unix_milliseconds`, `to_iso_string`, `timestamp_offset`, `timestamp_difference` | `(#0 / 1000.0)`, `#0`, runtime helper, `(#0 + #1)`, `(#1 - #0)` |
 
 Uniform contract facts, all read from registration: every parameter is positional-only with shared
-access, every success slot is fresh, and `timestamp_from_iso_string` is the only function with an
-error channel.
+access, every success slot is fresh, and `timestamp_from_iso_string` and `to_iso_string` are the two
+functions with an error channel.
 
 ## Implementation notes
 
@@ -47,28 +46,50 @@ All three types register `ExternalAbiType::Handle`, which maps to no Moth scalar
 (`src/compiler_frontend/external_packages/abi.rs`) and is interned as a distinct nominal external
 identity per type. In emitted JavaScript a `Duration`, `TimeMark` or `Timestamp` is a bare `number`:
 nothing wraps, brands or tags it, unlike `@core/io`'s `Input`, which is a real object. The abstraction
-exists in the type environment and in diagnostics, and is erased at runtime.
+exists in the type environment and in diagnostics, and is erased at runtime. That erasure is why
+every arithmetic function can be a one-expression inline lowering over the millisecond value.
 
-### The one runtime helper
+### The two runtime helpers
 
-`src/backends/js/package_bindings/core/time.rs` emits `__moth_time_timestamp_from_iso_string`, which
-calls `Date.parse`, detects failure with `Number.isNaN` and hand-builds
-`{ tag: "err", value: __moth_make_error("Invalid ISO timestamp", 400, null, null) }`. It is emitted
-only when the function is referenced, and is inventoried for the first-party JavaScript guard.
+`src/backends/js/package_bindings/core/time.rs` builds `__moth_time_timestamp_from_iso_string` and
+`__moth_time_to_iso_string`. Both apply compiler-owned failure lanes: the parse helper applies the
+canonical String content boundary `__moth_string_value`, matches the published grammar with one
+anchored regular expression, validates the calendar and offset fields, truncates fractional digits
+toward zero, converts a numeric offset and range-checks the instant; the render helper tests the
+renderable window before truncating and never lets `toISOString()` throw. Failure goes through the
+canonical `__moth_error_result(message, code)` with `BuiltinErrorCode::TimeInvalidTimestampText`
+(310) or `TimeTimestampOutOfRange` (311), so no numeric literal appears in the helper source.
+
+Both bodies are built once in a `LazyLock` because they interpolate those codes and the window
+bounds. The same inventory feeds emission and the first-party JavaScript guard, so the two consumers
+cannot drift.
+
+Instant construction goes through `setUTCFullYear` rather than `Date.UTC`, which remaps years 0 to 99
+into the 1900s and would silently accept a four-digit year the grammar allows.
+
+### The renderable window
+
+The window is the four-digit year range, `0000-01-01T00:00:00.000Z` to `9999-12-31T23:59:59.999Z`,
+held as two `i64` consts in the helper module. It is not the host limit: `toISOString()` accepts
+±8 640 000 000 000 000 ms but switches to an expanded-year spelling such as `+275760-09-13` outside
+the four-digit range, which is neither the published format nor re-parseable by this package. Both
+helpers apply the same window, so parse and render are total inverses over it.
 
 ### Finite-result boundary
 
 The shared boundary `__moth_float_validate` (builtin code 304) is applied by the single-Float success
 gate in HIR, so it fires on exactly four Time functions: `as_seconds`, `as_milliseconds`,
 `unix_seconds`, `unix_milliseconds`. Opaque-returning functions and every `Float` *argument* bypass
-it, so a non-finite `Float` reaching `duration_from_seconds` is unchecked by the package.
+it. That is why duration arithmetic overflow is contractually observable at the read rather than at
+the arithmetic: `duration_scale` can produce a host infinity, and the boundary rejects it when the
+duration is read.
 
 ### No operator surface
 
 Time values support no arithmetic and no comparison. The AST arithmetic policy accepts only
 `Int`/`Float` pairs, the comparison policy rejects same-type non-comparable categories, and
 `TypeEnvironment::supports_runtime_equality` returns false for external types. There is no
-registration hook for an operator, so any arithmetic must be a named function.
+registration hook for an operator, so all five arithmetic functions are named functions.
 
 ## Design rationale worth preserving
 
@@ -78,134 +99,75 @@ registration hook for an operator, so any arithmetic must be a named function.
 - Operators cannot be overloaded and no registration hook exists for one, so every arithmetic
   addition is a named function over handles rather than a syntax change.
 - The finite-result boundary is a shared language rule applied at one gate, not a package feature.
-  Extending validity to `Float` *arguments* is a boundary decision, not a Time helper edit.
+  Extending validity to `Float` *arguments* would be a boundary decision, not a Time helper edit.
 - Binding error codes belong to the compiler-owned enum. A package-local code cannot be kept stable
   and cannot carry a `default_message`.
-- Host behaviour is not a contract. `Date.parse` is the only reason the current accept set exists,
-  and a decision must state the accepted grammar before any test may pin it.
+- Host behaviour is not a contract. The grammar, the field rules, the truncation rule and the window
+  were published before the parser was written, and the parser matches them instead of delegating
+  acceptance to `Date.parse`.
+- The window is narrower than the host limit on purpose: a rendered string that cannot be parsed back
+  would make the two fallible functions non-inverse for no user-visible benefit.
 
 ## Current work
 
-This plan is the delivered work: a read-only audit of the shipped surface with no production change.
-It establishes what is true today (the surface table and implementation notes above), the seven
-defects below with their real owners, the thirteen decisions a v1 needs, the four assertions already
-pinned against canonical silence, and the coverage owner table. Implementation starts only after the
-decisions are settled with the user and published in `time.mtf`.
+None. The published contract, the four corrections it exposed and the accepted arithmetic surface are
+all delivered and covered.
 
 ## Known gaps and next extensions
 
-### Audited defects and their owners
-
-Each item was read at its cited owner. Nothing here is fixed by this plan.
+### Inherited defects this slice exposed and does not own
 
 | # | Defect | Owner | Evidence |
 |---|---|---|---|
-| 1 | The parse helper returns error code `400`, which is absent from `BuiltinErrorCode` (assigned values top out at 305) and has no `default_message` entry. The canvas binding uses the same unowned family (400/404/409/500); collections, maps, casts and numeric helpers all allocate from the enum. | Time helper, but the real decision is who owns binding error-code allocation | `src/backends/js/package_bindings/core/time.rs`, `src/compiler_frontend/builtins/error_codes.rs` |
-| 2 | The helper hand-writes the failed carrier instead of calling the canonical `__moth_error_result(message, code)`, which produces byte-identical output. `@core/io`'s input helper repeats the same pattern with code `500`. | Time helper; canonical owner is `src/backends/js/runtime/errors.rs` | both files read |
-| 3 | `timestamp_from_iso_string` declares `Abi(Utf8Str)` but passes the raw argument to `Date.parse` without the canonical String content boundary `__moth_string_value`, which every `@core/text` helper applies. A reactive template reaching this argument coerces to `"[object Object]"` and fails as invalid input. | Time helper; boundary owner is `src/backends/js/runtime/strings.rs` | both files read |
-| 4 | `to_iso_string` is documented and registered infallible, yet lowers to `(new Date(#0)).toISOString()`, which throws a host `RangeError` for a non-finite or out-of-range instant. Nothing contains that exception: the JS backend's only `try`/`catch` wraps a fallible Moth function and rethrows anything that is not the result-propagation sentinel. The path is reachable from ordinary accepted source - `timestamp_from_unix_seconds(100000000000000.0)` followed by `to_iso_string` compiles with no errors or warnings. | Time registration plus the host-exception policy gap | `time.rs`, `src/backends/js/js_function.rs`; `(new Date(1e17)).toISOString()` throws `RangeError: Invalid time value` on the harness interpreter |
-| 5 | A successful parse is unvalidated: any finite `Date.parse` result becomes a `Timestamp` with no range check. | Time helper | helper body |
-| 6 | Unary minus on any non-numeric value, including a `Duration`, reaches HIR as a plain `HirUnaryOp::Neg` and is reported as `MOTH-INFRA-0001` "Plain HirUnaryOp::Neg must be lowered through HirStatementKind::NumericOp" - an internal-invariant lane for ordinary user source. Reproduced on `-duration`, `-"moth"` and `-true`, so this is a general operator-policy defect, not a Time defect. | `src/compiler_frontend/ast/expressions/eval_expression/operator_policy/unary.rs` returns `Ok(operand)` unconditionally for `Negate`; rejection must happen there | `cargo run -- check` on a three-line project for each of the three operand types |
-| 7 | Time carries a `shared_param` helper and a `TimeFunctionSpec` whose fields are one-to-one with `ExternalFunctionSpec`, so the shim adds indirection without absorbing variation. The package-local table itself is the accepted shape - `core-math.md` and `core-text.md` both settle that - so only Time's extra layer is open, and the fix is a package-local simplification, never a cross-Core registration abstraction. | Time registration module | `time.rs` beside `math.rs`'s post-cleanup table |
-
-### Decisions the v1 needs
-
-The canonical reference states signatures, the monotonic sentence, the single-fallible sentence, the
-access and return contract, the backend lowering list, the opaque-type prohibitions, the five
-unsupported source forms and the deferral list. It states no other semantics, so every row below is
-unstated there.
-
-| # | Decision | State | Note |
-|---|---|---|---|
-| 1 | Accepted timestamp grammar | open, behaviour already observable | `Date.parse` accepts far more than ISO 8601: date-only strings, a space instead of `T`, surrounding whitespace and `"01/02/2024"` all parse |
-| 2 | Timezone requirement | open, conflicts with the documented type | `Timestamp` is documented as a UTC instant, yet a designator-less or whitespace-padded string parses as *local* time, so the same source yields different instants on different machines |
-| 3 | Invalid calendar values | open, conflicts with the documented failure promise | `"2024-02-30"` is accepted and rolled over to 1 March rather than returning through `Error!` |
-| 4 | Fractional-second precision | open | `Float` in and out, with millisecond naming as the only hint |
-| 5 | Representable timestamp range | open | no bound stated; no range check anywhere |
-| 6 | Representable duration range | open | `abs` of the most negative representable value is unaddressed |
-| 7 | Rounding policy | open | for construction, extraction and formatting |
-| 8 | Finite-value invariants through opaque values | scope settled, Time application open | the language rule is canonical and the sibling Math reference states its resolution explicitly; `time.mtf` does not, and nothing covers non-finite `Float` arguments |
-| 9 | Formatting failure behaviour | open, demonstrable failure mode | defect 4 above: infallible signature over a throwing host call |
-| 10 | Host exception containment | open | no canonical sentence, and no mechanism: the only `try`/`catch` the JS backend emits wraps a fallible *Moth* function and rethrows anything that is not the result-propagation sentinel, so a host exception from an external call escapes even inside a fallible caller |
-| 11 | Monotonic mark origin and comparison restrictions | open | monotonicity is asserted as a type purpose and never as an observable guarantee; `mark_now` is the only way to obtain a mark, so the origin may simply be documented as unobservable |
-| 12 | Equality and ordering of the three types | open | already effectively false in the compiler, but undocumented and untested; map-key rejection is owned elsewhere |
-| 13 | Arithmetic surface | exclusion settled, surface open | calendar types, time zones, local-time conversion, locale formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings are canonically deferred; which arithmetic functions leave candidate status is a user decision |
-
-### Already pinned by existing coverage
-
-These four assertions can only pass because of current host behaviour on points the canonical
-reference leaves open. A decision must ratify or deliberately change each.
-
-- exact `Float` round-trips: `as_seconds(duration_from_seconds(1.5)) == 1.5`, `millis=1500`,
-  `abs_sec=0.25`, `clamped_sec=0.5` and the `2.5` family in the free-function case
-- the exact ISO rendering `1970-01-01T00:00:00.000Z` / `1970-01-01T00:00:01.000Z`, which is a host
-  formatting consequence rather than a documented format
-- acceptance of the literal `"1970-01-01T00:00:01.000Z"` and its interpretation as 1000 ms, currently
-  the only authority for that spelling being valid
-- `elapsed_since` and `duration_between` being non-negative, asserted as `>= 0.0` although the
-  reference states only a direction
+| 1 | Two `catch` handlers in one function that use the same binder name fail with `MOTH-INFRA-0001` "Local 'err' is already declared in this function scope", an internal-invariant lane for legal source. The canonical catch reference makes the binding visible only inside the handler and the shadowing reference permits reuse across disjoint scopes, so sibling handlers should be free to share a name. The AST interns the binder against the parent statement scope before the handler child frame exists, and HIR allocates it with `allocate_named_local` without `with_temporary_local_bindings`, so the name also leaks for the rest of the function. Every multi-handler case in the tree avoids the shape by using distinct names, so nothing owns it. | `src/compiler_frontend/ast/statements/fallible_handling/catch_handler.rs` for the path identity, `src/compiler_frontend/hir/hir_expression/fallible/catch.rs` for the unscoped local | `catch_handler.rs:186-191`, `catch.rs:178-186`, `hir_builder.rs:795-803`; the scoped pattern already exists in `match_captures.rs:240-244` |
+| 2 | `@core/io`'s input helper still hand-builds its failed carrier with the unowned code 500, and the canvas binding uses the same unowned 400/404/409/500 family. Time no longer does. | those package bindings | `src/backends/js/package_bindings/core/io.rs`, the canvas binding |
+| 3 | The shared `Float` boundary traps outside a fallible context, so a non-finite external result ends the program rather than returning `Error!`. That is the language-wide rule, not a Time behaviour, and the contract now states it explicitly instead of promising that nothing aborts. | the numeric boundary lane in HIR and the JS runtime | `hir_expression/numeric.rs`, `src/backends/js/runtime/numeric.rs` |
 
 ### Canonical facts with no test owner
 
 Shared access and mutable-access rejection; return freshness; the struct-construction prohibition;
-a Time-specific named-argument rejection; inline-lowering shape for `duration_from_milliseconds`,
-`as_seconds`, `unix_seconds` and `timestamp_from_unix_seconds`; any non-epoch instant; any
-sub-second fraction; UTC formatting independent of the machine timezone. Host-call identity is
-asserted only by string presence, so a swap that leaves both `performance.now()` and `Date.now()`
-somewhere in the artifact still passes.
+a Time-specific named-argument rejection; any non-epoch instant through the inline extraction
+helpers. Host-call identity for `mark_now` and `timestamp_now` is asserted only by string presence,
+so a swap that leaves both `performance.now()` and `Date.now()` somewhere in the artifact still
+passes.
 
 ### Next extensions, in order
 
 Candidates only. Nothing here is accepted API.
 
-1. **Validity and portability corrections.** Route the parse failure through the canonical carrier
-   with an allocated code, apply the String content boundary, pin the accepted grammar in the
-   canonical reference and reject what falls outside it, and resolve the infallible-versus-throwing
-   tension for `to_iso_string`. These change no public signature except possibly that one error
-   channel, and they are what makes the package portable rather than "whatever the host parser does".
-2. **A recorded semantic contract.** Publish the settled outcome of decision rows 1-12 in `time.mtf`
-   - row 13 chooses a surface rather than a contract - then convert the four
-   pinned assertions into contract-derived coverage and add owners for the unowned canonical facts.
-
-### Documentation corrections awaiting approval
-
-Identified while auditing, not applied, because Time implementation status did not change:
-
-- the progress matrix Time row records `JS / HTML` although the lane runs html and html_wasm
-  executions, where the sibling Math row uses `JS / HTML-Wasm validation`
-- the same row describes "runtime smoke" coverage and implies the fallible parse contract is covered,
-  while the error value is never observed
-- its closing rule - that Time semantics must stay backend-neutral rather than inheriting JavaScript
-  behaviour - is correct and currently unenforceable, because the parse grammar it would need is
-  undefined
+1. **A Wasm lowering set.** Now that the grammar, the calendar rules, the truncation rule and the
+   window are published rather than inherited from the host parser, a second backend can implement
+   the same contract instead of duplicating unspecified behaviour. It needs a target decision first.
+2. **Duration range rules.** `abs` of the most negative representable value and the saturation
+   behaviour of the arithmetic functions are still unstated; the contract currently describes exact
+   millisecond arithmetic and defers overflow to the read boundary.
 
 ## Longer-term candidates
-
-A small arithmetic surface: Duration addition, subtraction and scaling, timestamp offset and
-timestamp difference. They need accepted names, signatures, saturation or failure behaviour and a
-range decision first, and they follow the recorded contract rather than preceding it.
 
 Out of implementation scope: calendar types, time zones, local-time conversion, locale-aware
 formatting, timers, sleep, intervals, animation scheduling and new opaque-handle infrastructure.
 
 ## Previous blockers and rejected approaches
 
-- Reject treating the current `Date.parse` accept set as the contract. It accepts non-ISO spellings
-  and local-time interpretations that contradict the documented UTC type.
+- Reject treating the `Date.parse` accept set as the contract. It accepted non-ISO spellings and
+  local-time interpretations that contradicted the documented UTC type, so the published grammar is
+  matched explicitly instead.
+- Reject the host renderable limit as the window. Its expanded-year spelling is not the published
+  format and does not parse back.
 - Reject a second error-carrier construction in a package helper. The canonical constructor produces
   the same output, and a package-local code outside `BuiltinErrorCode` cannot be kept stable.
 - Reject operator support for the opaque types. Operators cannot be overloaded, so any arithmetic is
   a named function over handles.
 - Reject exposing the handle representation. The millisecond `number` is an implementation fact; a
   source-visible unit or field would fix it permanently.
-- Reject a Wasm lowering set until the semantic contract exists. Duplicating the host parser in a
-  second backend would double the unspecified behaviour.
-- Reject a cross-Core registration abstraction for defect 7. Package-local tables are the settled
-  shape; only Time's redundant spec layer is in scope.
+- Reject a cross-Core registration abstraction. Package-local tables are the settled shape, and
+  Time's redundant `shared_param` and spec-mirror layer was removed rather than generalised.
+- Reject containing host exceptions with a new backend guard. Making the helpers incapable of
+  throwing removes the need, and a per-call guard would cost every external call.
 
 ## Validation and integration coverage
 
-Primary owners today:
+Primary owners:
 
 | Contract | Owner |
 |---|---|
@@ -216,18 +178,27 @@ Primary owners today:
 | Timestamp round-trips and ISO rendering | `tests/cases/core_time_timestamp_conversions_success` |
 | Valid parse with `!` propagation and `catch` | `tests/cases/core_time_timestamp_parse_success` |
 | Invalid parse reaching `catch` | `tests/cases/core_time_timestamp_parse_invalid_catch_success` |
+| Grammar rejection classes, each observing code 310 | `tests/cases/core_time_timestamp_parse_grammar_rejected`, `core_time_timestamp_parse_lowercase_designator_rejected`, `core_time_timestamp_parse_whitespace_rejected`, `core_time_timestamp_parse_date_only_rejected` |
+| Calendar and field rejection, including the offset fields | `tests/cases/core_time_timestamp_parse_invalid_calendar_day_rejected`, `core_time_timestamp_parse_field_out_of_range_rejected` |
+| Numeric-offset conversion and fractional truncation | `tests/cases/core_time_timestamp_parse_offset_fraction_success` |
+| The renderable window on both paths: accepted endpoints, endpoint round-trips and the post-offset rejection | `tests/cases/core_time_timestamp_parse_window_boundary` |
+| Rendering rejection outside the window, including the fractional edge that proves the check precedes truncation | `tests/cases/core_time_to_iso_string_out_of_range_rejected` |
+| Arithmetic values, argument order and composition | `tests/cases/core_time_duration_arithmetic_success` |
+| Arithmetic overflow becoming observable at the shared `Float` boundary as code 304 | `tests/cases/core_time_duration_overflow_at_float_boundary` |
 | Namespace clause, alias selection | `tests/cases/core_time_namespace_binding_success`, `tests/cases/core_time_direct_selection_alias_success` |
 | Arity, wrong-type, removed-name, opaque-field and receiver-call rejection | `tests/cases/core_time_arity_error`, `core_time_wrong_argument_type_rejected`, `core_time_old_api_rejected`, `core_time_opaque_field_access_rejected`, `core_time_raw_method_call_rejected`, `core_time_namespace_raw_method_call_rejected` |
 | Unreachable JS-only call in an HTML-Wasm build | `tests/cases/core_time_unused_wasm_wrapper_success` |
 | Opaque types as map keys, receiver targets, trait targets, template heads | the general language cases that use Time as their subject |
 
-No case observes the parse error's code or message, so defect 1 is unowned by construction. The
-suite is strong on numeric values and rejection codes and weak wherever the canonical reference is
-silent.
+Rules for this package: every expected value comes from the published contract, and a rejection case
+observes the returned error's `code` rather than a message, so the two Time codes each have an owner.
+Host formatting is asserted only where the contract fixes the format.
 
-This checkpoint changed no production code, so it ran no gate of its own: `cargo run -- tests --tag
-time` (18/18 correct) and `cargo run -- check docs --terse` are the evidence that the audited state
-is the current state. The umbrella programme owns the inherited red `just validate` gate.
+This slice could not close the mandatory `just validate` gate: the inherited data-layout base fails
+the all-targets lint build and two feature lanes. The programme plan owns that record. Focused
+evidence was `cargo run -- tests --tag time` (29/29), `--tag core-packages` (41/41), the full
+`cargo run -- tests` at the inherited failure count, `cargo run -- check docs --terse`,
+`cargo check -p moth --lib` and `rustfmt --check` on every touched Rust file.
 
 ## History
 
@@ -238,3 +209,14 @@ a wall-clock timestamp lane with one fallible ISO parse, duration construction a
 timestamp extraction and formatting. Numeric failure of the four `Float`-returning accessors was
 delegated to the shared external `Float` boundary, and reachable Time calls in HTML-Wasm were
 rejected through target validation.
+
+### V1 - published semantics, corrected boundaries and an arithmetic surface
+
+An audit found that the package's observable behaviour was whatever `Date.parse` and `toISOString()
+` did, including local-time interpretation of designator-less text, calendar rollover, an unowned
+error code, a missing String content boundary and a reachable host `RangeError` from an infallible
+signature. The contract was published first, then the parser was rewritten against it, `to_iso_string`
+became fallible over a validating helper, and the registration module collapsed to one descriptor
+table. The same slice added the five accepted arithmetic functions and fixed an unrelated
+operator-policy defect that reported unary minus on a non-numeric operand through the
+internal-invariant lane.
