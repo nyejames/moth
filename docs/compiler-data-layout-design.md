@@ -69,7 +69,8 @@ approval and a corresponding architecture update:
 - complex token payloads and unusual diagnostic data use typed side stores rather than widening
   common records.
 - `PathId` is a genuine interned path identity, not a wrapper around an owned component vector.
-- one file-owned `PathSyntaxTable` owns every authored path in a source; path tokens carry dense
+- one source-owned `PathSyntaxTable` — evolved from the file-owned implementation table — owns
+  every authored path in a source; path tokens carry canonical `TokenTag` plus dense
   `PathSyntaxId` handles and never expanded per-component payloads.
 - diagnostic families are declared through one schema authority.
 - user mistakes, operational infrastructure failures and compiler bugs are three separate failure
@@ -773,8 +774,8 @@ Reserved token flag bits must be zero.
 Payload policy:
 
 - punctuation, keywords and structural tokens use `data = 0`
-- symbols, directives and ordinary string-like literals may store a compact ID directly
-- authored path tokens carry one dense `PathSyntaxId` handle into the file-owned path syntax table
+- authored path tokens carry the canonical `TokenTag` plus one dense `PathSyntaxId` handle into
+  the source-owned path syntax table
 - numeric details and other complex lexical facts use a typed source-local side-store ID
 - adding a new token family may not widen `TokenShape`
 
@@ -827,9 +828,10 @@ pub struct TokenRef<'a> {
 
 ### Path syntax table
 
-One file-owned `PathSyntaxTable` owns every authored path in a source. A path token carries one
-dense `PathSyntaxId` handle instead of an expanded per-component payload. Dependency selections are
-owned by retained dependency clauses, not by this path table.
+One source-owned `PathSyntaxTable` — evolved in place from the implementation's file-owned
+`PathSyntaxTable` — owns every authored path in a source. A path token carries the canonical
+`TokenTag` plus one dense `PathSyntaxId` handle instead of an expanded per-component payload.
+Dependency selections are owned by retained dependency clauses, not by this path table.
 
 ```rust
 #[repr(transparent)]
@@ -851,8 +853,9 @@ Rules:
 
 - `PathSyntaxId(0)` means no path row. It is an absent marker, never a valid identity.
 - one authored path exists exactly once as one `PathSyntax` row
-- `TokenKind::Path(PathSyntaxId)` is the only path-token vocabulary; there is no second stable
-  path-token shape and no inline path fast path
+- a path token carries the canonical `TokenTag` for the path token family plus one dense
+  `PathSyntaxId` in its shape data; that tag-plus-handle vocabulary is the only path-token
+  vocabulary, there is no second stable path-token shape, and there is no inline path fast path
 - token-driven consumers look up rows with a token-aware ownership check so a same-index handle
   from another file-owned table cannot be treated as valid
 - dependency clause shape, selected-name order, aliases and source-versus-provider target
@@ -1160,9 +1163,8 @@ A rare primary or secondary site that genuinely belongs to another identity
 domain uses typed cold ownership data associated with that site. The cold data
 resolves the site through a compact, report-owned reference to the other
 `FrozenIdentityContext`; it must not widen the common record. An explicit
-`FrozenIdentityHandle` may provide this ownership during migration, but it is
-not the final packed representation. Phase 4 chooses the exact side-store
-encoding.
+`FrozenIdentityHandle` provides this ownership during migration. Phase 4 Slice 4B replaces it
+with the final typed cold-store encoding without widening 32-byte records or 12-byte labels.
 
 The common `DiagnosticRecord` remains exactly 32 bytes and
 `SecondaryDiagnosticLabel` remains exactly 12 bytes. Neither common type carries
@@ -1410,22 +1412,40 @@ Expected environmental and host failures use a separate typed result:
 pub struct InfrastructureFailure {
     kind: InfrastructureFailureKind,
     stage: InfrastructureStage,
-    source: Option<SourceSpan>,
+    identity: Option<(SourceSpan, Arc<FrozenIdentityContext>)>,
+    filesystem: Option<FileSystemContext>,
     message: Box<str>,
     details: Box<[InfrastructureDetail]>,
 }
 ```
 
+`FileSystemContext` is the ordinary pre-source/non-source owner of paths and OS/tool error facts.
+At most one of `identity` and `filesystem` is `Some`: an identity-context failure never also
+carries filesystem context, and a filesystem-context failure never carries a compact compiler ID.
+
+An operational failure carries exactly one context shape, never both:
+
+```text
+identity context    — the failure retains SourceSpan/PathId/StringId facts and shares the
+                      matching frozen identity context, so those compact IDs stay resolvable
+                      exactly like diagnostic spans
+filesystem context  — a pre-source or non-source failure carries ordinary filesystem context
+                      (owned paths, OS/tool error facts) and carries no compact compiler ID
+```
+
 Examples:
 
-- source or config file cannot be opened
-- output cannot be written
-- permission is denied
-- a dev-server port cannot bind
-- file watching fails
-- a backend tool or registered provider fails
-- target runtime resources are unavailable
+- source or config file cannot be opened (filesystem context)
+- output cannot be written (filesystem context)
+- permission is denied (filesystem context)
+- a dev-server port cannot bind (filesystem/host context)
+- file watching fails (filesystem/host context)
+- a backend tool or registered provider fails (filesystem/host/tool context)
+- target runtime resources are unavailable (filesystem/host context)
+- a source-scoped operational failure attached to authored bytes (identity context with the
+  exact `SourceSpan`)
 - an invalid host path cannot be represented by the compiler's source identity policy
+  (filesystem context)
 
 Properties:
 
@@ -1434,7 +1454,10 @@ Properties:
 - no conversion to an `InfrastructureError` diagnostic payload
 - typed deterministic details instead of a string-keyed `HashMap`
 - may have no source span
-- can be rendered in terminal, terse and dev-server forms through a separate infrastructure renderer
+- a retained `SourceSpan`, `PathId` or `StringId` is never detached from its matching frozen
+  identity context, and that context is shared, never deep-cloned for one failure
+- can be rendered in terminal, terse and dev-server forms through a separate infrastructure
+  renderer
 - never widened to include arbitrary subsystem objects
 
 An operational failure is not a compiler bug merely because the user cannot repair it in source.
@@ -1460,6 +1483,11 @@ The panic payload is a structured `CompilerBugReport` containing:
 - compiler version and commit identity where available
 - a precise invariant message
 - a clear request to report the compiler bug
+
+The report must be self-contained before the worker's compiler state is discarded: when a bug
+carries a source span, the raising site resolves bounded source/display facts (logical display
+path, byte/line/column range, bounded excerpt) into the payload before the discard, so the report
+stays useful after unwind and never reads suspect worker tables.
 
 Valid panic examples:
 
@@ -1503,10 +1531,11 @@ Compiler bugs are not another `Result` variant. They panic.
 
 ### Current `CompilerError` migration
 
-Phase 1 keeps expected operational failures in the typed outer `CompilerError` lane while
-user-caused failures use plain `CompilerDiagnostic` values. This is the transitional boundary:
-the infrastructure result described above is the Phase 5 target, after infrastructure and compiler
-bug context ownership are settled.
+The implementation keeps expected operational failures in the typed outer `CompilerError` lane
+while user-caused failures use plain `CompilerDiagnostic` values. This is the transitional
+boundary: the infrastructure result described above is the Phase 5 target, once infrastructure and
+compiler-bug context ownership are settled per `Lane 2`'s context contract and `Lane 3`'s
+self-contained bug facts.
 
 Every current `CompilerError` construction site must be audited and assigned to one lane before the
 type is deleted:
@@ -1613,7 +1642,8 @@ Before changing representation, record with the exact CI toolchain:
 - `size_of` and alignment for every hard-layout type and current predecessor
 - total sources and source bytes
 - total tokens and current token bytes
-- current `TokenKind` size and path-token payload shape
+- pre-migration `TokenKind` size and path-token payload shape (the baseline predecessor, not the
+  final `TokenTag`/`TokenShape` model)
 - total source-location instances where measurable
 - current diagnostic, payload, label and reason sizes
 - diagnostic counts, secondary-label counts and variable-list counts

@@ -7,9 +7,12 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Phase 1 is delivered on main. Phase 2 complete-path interning is delivered on
-> `diagnostic-data-layout-changes`. Next is Phase 3 token-store work. Package work proceeds in
-> parallel. The roadmap retains the separate checkpoint before Phase 4.
+> Phase 1 is delivered on main. Phase 2 complete-path interning is accepted at the continuation
+> checkpoint `c17672bb5` on `diagnostic-data-layout-changes` (diagnostic correction `e7d9a7ab5`
+> plus validation-lane stabilization). Phase 3 token-store work is the next action, starting at
+> Slice 3A. Package work stays paused until accepted Phase 3. After Phase 3 this plan pauses:
+> Wiring V1, then native result slots and Core const evaluation run first, and Phase 4 resumes only
+> after a rebase and explicit reactivation. The roadmap retains those separate checkpoints.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -52,8 +55,9 @@ The implementation must converge on:
 - separate user-diagnostic, operational-infrastructure and compiler-bug lanes
 - isolated tooling workers that discard failed compiler state
 
-The diagnostics-improvement plan remains paused until this plan is complete. It resumes at its recorded
-Phase 4.1c slice after the layout migration, not during it.
+The diagnostics-improvement plan remains paused until this plan is complete. It resumes at its
+recorded Phase 4.1c slice after the layout migration, not during it; Phase 4 is the only phase
+that continues user-facing diagnostics work, and that continuation is preserved there.
 
 ---
 
@@ -66,9 +70,12 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 2 is complete on `diagnostic-data-layout-changes`; final review corrections are
-  committed in `aed38042f`, covering generated path/string pairing and report-owner path retention.
-  Next: Phase 3 Slice 3A token array layout selection.
+- Phase: the accepted Phase 2 continuation checkpoint is `c17672bb5` on
+  `diagnostic-data-layout-changes`; it carries the diagnostic correction `e7d9a7ab5` (path/string
+  attachment and remap ownership) and the merged-revision validation-lane stabilization.
+  Phase 2 complete-path interning is accepted, including final review corrections in `aed38042f`
+  (generated path/string pairing and report-owner path retention). Next: Phase 3 Slice 3A token
+  array layout selection.
 - Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
   diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
 - Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
@@ -76,37 +83,43 @@ CURRENT_SLICE:
   diagnosed lanes retain issuing path tables, imported nominals intern defining names, provider
   materialisation keeps the live string/path pair through nested requests, and final report metrics
   count only path tables reachable from diagnostic owners.
-- Validation evidence: targeted capacity, ownership, materialisation and invariant suites pass;
-  `cargo test --workspace --quiet -- --format terse` passes 5,983 tests; the exact all-feature
-  workspace check compiles with warnings; the clean and warning-heavy retention probes complete
-  successfully with 0 and 1 retained path tables respectively; feature-lane-check reports 0
-  findings; source audit reports 1,389 files audited with 0 findings; docs check reports no errors
-  or warnings; bench-ci covers 82 preflight cases and frontend timing averages -3 ms;
-  timers-erasure-check passes.
-  The recorded `just validate` attempt reaches native clippy but fails on the repository's
-  warning-denied set. validate-common integration reports 31/1,959 baseline-equivalent failures,
-  and bench-scaling's generic-instantiation budget remains over target in both current (n^1.82)
-  and pre-cleanup baseline (n^1.77). These full-gate limitations are recorded in this capsule;
-  the benchmark evidence records the separate workload probes.
+- Validation evidence (dated, at the `c17672bb5` checkpoint, 2026-09-13): targeted capacity,
+  ownership, materialisation and invariant suites pass; the exact all-feature workspace check
+  compiles; the clean and warning-heavy retention probes complete successfully with 0 and 1
+  retained path tables respectively; feature-lane-check reports 0 findings; source audit reports
+  0 findings; docs check reports no errors or warnings; bench-ci covers 82 preflight cases and
+  frontend timing averages -3 ms; timers-erasure-check passes.
+  Approved red exceptions, explicitly not green: the warning-denied native Clippy lane still
+  reports the repository's inherited warning-denied findings; validate-common integration reports
+  baseline-equivalent failures inherited from main (31/1,959 at the recorded attempt); and
+  bench-scaling's generic-instantiation budget remains over target in both current (n^1.82) and
+  pre-cleanup baseline (n^1.77). Each exception is pre-existing and not caused by this branch; the
+  benchmark evidence records the separate workload probes.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
-  `aed38042f`, `72f30dcfb`.
-- Non-goals: Phase 3 token-store work; diagnostic compact-record work.
+  `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`.
+- Non-goals: diagnostic compact-record work; package implementation (paused until accepted
+  Phase 3); Wiring V1 and native result-slot/Core const-eval work (separate plans that run after
+  this plan's Phase 3 and before Phase 4).
 
-Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
-`eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and
-`3c9c776a8`; Slice 2A is `15fe3049f`; Slice 2B is `2bac27b34`; Slice 2C is `d040f08de`; Slice 2D is
-`379c77fb0`.
+Phase 1 code closeout is `3c9c776a8`; Phase 2 continuation acceptance is `c17672bb5`, with
+diagnostic correction `e7d9a7ab5`. Detailed implementation and review checkpoints remain in Git
+history; the summaries below retain only contracts and evidence needed by later phases.
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 remains complete. Phase 2 PathId cutover, generated identity pairing and report-owner
-  retention metrics are implemented and committed; refreshed probe evidence is recorded. The final
-  integration audit approved the complete change with no required findings.
-- Next work is Phase 3 fixed tokens and source-owned retained syntax.
+  retention metrics are accepted at `c17672bb5` with the diagnostic correction and
+  validation-lane stabilization; refreshed probe evidence is recorded. The final integration audit
+  approved the complete change with no required findings.
+- Next work is Phase 3 fixed tokens and source-owned retained syntax, starting with Slice 3A.
+- After Phase 3, this plan pauses. Wiring V1 runs, then native result slots and Core const
+  evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
+  reactivated (see the Phase 4 reactivation gate in the Phase 4 section).
 
 HISTORICAL_ACCEPTED_SLICES:
-Phase 0 and Phase 1 are complete on main. Per-slice delivery, review and validation logs live in
-Git. The compact Phase 0/1 summary below keeps standing contracts, later-phase prerequisites and
-ownership notes that later slices still need. Do not resume Phase 1 work from this capsule.
+Phase 0 and Phase 1 are complete on main; Phase 2 is accepted on the continuation branch at
+`c17672bb5`. Per-slice delivery, review and validation logs live in Git. The compact Phase 0/1/2
+summaries below keep standing contracts, later-phase prerequisites and ownership notes that later
+slices still need. Do not resume accepted-phase work from this capsule.
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -136,11 +149,15 @@ RELEVANT_CODE:
 - `src/compiler_frontend/module_compilation/service.rs::compile_module`: the one production owner of the local semantic sequence, and the consumer of whatever source identity representation this plan lands on
 - `src/compiler_frontend/pipeline.rs::CompilerFrontend`: stage facade with remaining immutable-service copies
 - `src/compiler_frontend/source/`: build registration, loaded snapshots, exact spans and line indexes
-- `src/compiler_frontend/symbols/interned_path.rs`: current `Vec<StringId>` complete-path owner
+- `src/compiler_frontend/symbols/path_interner/`: current dense parent-linked path table owner
+  (builder, fork, delta, remap, frozen lookup; complete-path identity since Phase 2)
 - `src/compiler_frontend/symbols/string_interning.rs`: existing immutable-base fork and deterministic delta merge to reuse
-- `src/compiler_frontend/tokenizer/tokens.rs`: current `Token`, wide 94-variant `TokenKind` and `FileTokens`
-- `src/compiler_frontend/headers/types.rs::Header`: current owned `FileTokens` body and repeated source/path fields
-- `src/compiler_frontend/headers/header_dispatch.rs::capture_function_body_tokens`: current token-cloning body capture
+- `src/compiler_frontend/tokenizer/tokens.rs`: current (pre-Phase-3) `Token`, wide 94-variant
+  `TokenKind` and `FileTokens`; Phase 3 replaces them
+- `src/compiler_frontend/headers/types.rs::Header`: current owned `FileTokens` body and repeated
+  source/path fields; Phase 3 replaces them
+- `src/compiler_frontend/headers/header_dispatch.rs::capture_function_body_tokens`: current
+  token-cloning body capture; Phase 3 replaces it
 - `src/compiler_frontend/compiler_messages/`: current diagnostic kinds, descriptors, payloads, labels, bags, messages and renderers
 - `src/compiler_frontend/compiler_messages/compiler_errors.rs`: current mixed error lane, table cloning and full type-context retention
 - `src/lib.rs` and `xtask/src/benchmark_execution.rs`: activation-era lint-bridge locations retained only as historical removal records; current workspace status makes no validation claim
@@ -194,12 +211,10 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
-Phase 1 final closeout is `3c9c776a8` (2026-09-10). `just validate` passed native featured
-all-target Clippy, 5,105 workspace tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951,
-source audit 1,336 files, docs check, 82 benchmark preflights, three scaling series and timer
-erasure. Retained-layout and allocator evidence is in
-`benchmarks/frontend-optimization-results.md`. Earlier per-slice validation is Git history, not a
-current workspace claim.
+Phase 1 final closeout is `3c9c776a8` (2026-09-10); the Phase 2 continuation checkpoint is
+`c17672bb5` (2026-09-13) with diagnostic correction `e7d9a7ab5`. The accepted Phase 2 validation
+evidence and its approved red exceptions are recorded in CURRENT_SLICE above. Earlier per-slice
+validation is Git history, not a current workspace claim.
 Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before it
 starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
 all-target Clippy gate before accepting a slice.
@@ -207,9 +222,12 @@ all-target Clippy gate before accepting a slice.
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - current authorities and style rules describe exact `SourceSpan` ownership and the compact plain diagnosed boundary; the Phase 1 closeout evidence and status are now synchronized
-- authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below is complete
-- next action: pause for external user review before starting Phase 2
-- `R10a`–`R10d` remain prerequisites for their owning later phases.
+- authorized docs updates for this maintenance pass: the plan itself, the main roadmap's two
+  data-layout bullets, the package programme capsule/lifecycle paragraphs and the architecture
+  document's path-token and infrastructure-context wording are current
+- next action: Phase 3 Slice 3A token array layout selection
+- `R10a`–`R10d` remain prerequisites for their owning later phases (see the integrated list in the
+  Phase 1 standing-contracts section).
 
 ---
 
@@ -338,7 +356,7 @@ Stage 0 inventories pre-register final SourceIds before preparation; traversal-o
 -> module work owns SourcePreparationDelta values plus local string/path deltas
 -> each source's preparation result is cached once for Stage 0 structural reachability and later module compilation while its source-local extended-span builder stays owned until the last span-producing stage
 -> DiagnosticBag captures only referenced type-display facts while the local TypeEnvironment is live
--> existing file/module merge boundaries merge strings, then paths, then remap prepared diagnostic batches into one command-owned draft stream
+-> existing file/module merge boundaries merge strings, then paths, then remap prepared diagnostic batches into the module domain's DiagnosticBag; the command/report owner collects them without a second durable store
 -> target/project/backend diagnostic producers receive narrow mutable diagnostic/identity borrows and never a second message system
 -> at the last diagnostic-producing boundary for the actual outcome, DiagnosticBag::freeze performs the one draft-to-dense-store transition
 -> build ownership collects finalized source records and freezes source/string/path lookup tables once into FrozenIdentityContext
@@ -361,7 +379,8 @@ before the first implementation phase that freezes reports.
 ### Current roadmap state
 
 Test Suite Hardening was delivered in `03168082d`. This plan is the sole active representation
-migration. The diagnostics plan remains paused until the full migration completes.
+migration, accepted through Phase 2 at checkpoint `c17672bb5`; Phase 3 is the current work. The
+diagnostics plan remains paused until the full migration completes.
 
 ### Approved private discovery-finalization contract
 
@@ -507,9 +526,9 @@ Every phase ends with an explicit **Audit / style-guide review / validation** su
 A temporary adapter normally dies inside its owning phase. A bridge may cross a phase boundary only
 when this plan names its exact deletion slice, the active capsule lists every caller and new callers are
 forbidden. Such a bridge is migration-only, private and never a compatibility API. The source
-`PathId`/legacy-path boundary ending in Slice 2D, the transitional `CompilerMessages` identity-context
-bridge ending in Slice 4I and any measured early token projection ending in Slice 3H are the only
-anticipated cross-phase cases.
+`PathId`/legacy-path bridge is historical: it ended at Slice 2D when Phase 2 was accepted. The
+transitional `CompilerMessages` identity-context bridge ending in Slice 4I and any measured early
+token projection ending in Slice 3H remain the only anticipated cross-phase cases.
 
 ---
 
@@ -540,149 +559,111 @@ Stage 0, introduced exact packed byte spans and migrated every compiler stage an
 removed duplicated location data and obsolete diagnostic indirection so later layout work proceeds
 from one source-span boundary.
 
-Phase 1 is complete on main. Implementation tasks and per-slice checklists are closed. Git holds the
-delivery log. The notes below are standing contracts, remaining later-phase work and ownership
-facts that Phase 2 onward still needs.
+Phase 1 is complete on main. Implementation tasks and per-slice checklists are closed; Git holds
+the delivery log. The contracts below are standing rules and ownership facts that later phases
+still need.
 
-### Standing contracts
-
-#### Path foundation (1A)
-
-`PathId(NonZeroU32)` and a dense parent/component path table intern source logical paths into the
-database-owned build base before string/path forks. Compiler source registration slots use `PathId`
-immediately. Filesystem `PathBuf`/`Box<Path>` stay separate from compiler logical identity.
-
-`SourceLogicalIdentity` keeps its owned portable spelling as the `SourceId` sort key. Canonical
-source order is established before path interning. Numeric `PathId` allocation order must never
-sort source candidates.
-
-Source paths preserve exact `Path::components()` semantics and strict UTF-8 validation. Portable
-semantic spellings preserve their component separators. The frozen table owns nodes and depths
-only; the child map lives and dies with the builder.
-
-The full compiler `InternedPath` migration remains Phase 2.
-
-#### Registration and loading (1B)
+**Source identity and registration.** `PathId(NonZeroU32)` and a dense parent/component path table
+intern source logical paths into the database-owned build base before string/path forks; compiler
+source registration slots use `PathId` immediately; filesystem `PathBuf`/`Box<Path>` stay separate
+from compiler logical identity. `SourceLogicalIdentity` keeps its owned portable spelling as the
+`SourceId` sort key; canonical source order is established before path interning, and numeric
+`PathId` allocation order must never sort source candidates. Source paths preserve exact
+`Path::components()` semantics and strict UTF-8 validation; portable semantic spellings preserve
+their component separators. The frozen path table owns nodes and depths only; the child map lives
+and dies with the builder.
 
 The source database owns one registration slot per candidate, dense loaded snapshots and a cold
 load-failure array. `SourceId(1)` is the compilation root. Config is registered before tokenization
-and remains in the project identity domain; independently compiled packages keep separate domains.
-Stage 0's `SourceRegistrationIndex` preserves its module-origin order; traversal-only single-file
-and direct-template lanes use canonical logical-path order because they have no module inventory,
-and their provisional identities stay in a private, disposable discovery-local domain, rebound
-exactly once before success or diagnosed publication. A flat display-path sort must not replace
-either lane's canonical ordering policy.
+and stays in the project identity domain; independently compiled packages keep separate domains.
+Stage 0's `SourceRegistrationIndex` preserves module-origin order; traversal-only single-file and
+direct-template lanes use canonical logical-path order, and their provisional identities stay in a
+private, disposable discovery-local domain rebound exactly once before success or diagnosed
+publication. A flat display-path sort must not replace either lane's canonical ordering policy.
+Loaded text moves into its slot once (a second retain is an invariant failure); re-registration of
+one canonical source rejects conflicting logical identity or kind; display-path equality is not
+source identity. `SourceKind` records the producer's authored classification, not the canonical
+target's extension or builder support; provider-owned slots carry identity but acquire no compiler
+snapshots. Module inputs carry ordered candidate `SourceId` sets whose external-import scope is the
+module's owned candidates. File/chunk merges place prepared results in preassigned slots and reject
+duplicate, missing and out-of-range outputs. `SourceDatabaseBuilder` separates live span ownership
+from immutable lookup services; `finish` consumes the builder and returns an owned
+`SourceDatabase`. Package lookup publication waits for check-only producers.
 
-Loaded text moves into its slot once; a second retain is an invariant failure. Re-registration of
-one canonical source rejects conflicting logical identity or supplied kind. Different physical
-sources may share a display path (bootstrap `config.moth` vs `src/config.moth`); display-path
-equality is not source identity. `SourceKind` records the producer's authored classification, not
-the canonical target's extension or the builder's support policy; provider-owned slots carry
-identity but acquire no compiler snapshots merely by registration. Module inputs carry ordered
-candidate `SourceId` sets whose external-import scope is the module's owned candidates, not every
-source in the boundary database. File/chunk merges place prepared results in preassigned slots and
-reject duplicate, missing and out-of-range outputs.
-
-`SourceDatabaseBuilder` separates live span ownership from immutable lookup services. Private AST
-handles share the same allocation only during producer calls; `finish` consumes the builder,
-unwraps exclusive ownership, and returns an owned `SourceDatabase` after installing the tables.
-Package lookup publication waits for check-only producers.
-
-`SourceDatabase` owns the existing path interner as its one source identity base. The source
-`PathId`/legacy-path bridge ends at 2D and reconstructs transient components from table nodes,
-never rendered text. Current bridge callers: source discovery/rebinding, frontend identity and AST
-entry setup, content dependency targets, AST file-value scope, direct-template entry setup, HTML
-template bundle rebinding/owner diagnostics, the source-size error path; test callers: source
-invariants, frontend pipeline, module dependencies, template heads, source snapshot rendering,
-Stage 0 preparation fixtures. No new consumer may adopt this migration bridge.
-
-`ModuleSymbols` no longer copies canonical OS paths. `FileTokens.canonical_os_path` and
-`FileFrontendPrepareOutput.canonical_os_path` remain for 3D and 3E1; their agreement checks stay
-until the duplicated fields are removed. Renderers use retained snapshots rather than reopening
-files. Per-diagnostic-range source contexts preserve package ownership, and ambiguous display-path
-matches omit a frame rather than select the wrong file. The direct-template API retains its
-finalized per-document source context with warnings and diagnosed outcomes. The facade and module
+`SourceDatabase` owns the path interner as its one source identity base. The source
+`PathId`/legacy-path bridge ended at Slice 2D; it reconstructed transient components from table
+nodes, never rendered text, and no new consumer may adopt it. `ModuleSymbols` no longer copies
+canonical OS paths. `FileTokens.canonical_os_path` and `FileFrontendPrepareOutput.canonical_os_path`
+remain for 3D/3E1 with their agreement checks until the duplicated fields are removed. Renderers
+use retained snapshots rather than reopening files; per-diagnostic-range source contexts preserve
+package ownership; ambiguous display-path matches omit a frame rather than select the wrong file;
+the direct-template API retains its finalized per-document source context; the facade and module
 semantic context borrow immutable services.
 
-#### Spans and line indexes (1C)
+**Spans.** `LocalSpan`/`Option<LocalSpan>` are 4 bytes; `SourceSpan`/`Option<SourceSpan>` are 8.
+Selected codec: the measured 22/10 split (`LENGTH_BITS = 10`) with exact append-only overflow rows;
+the census proved every candidate start-overflow-free, so length overflow alone decided the split.
+The terminator experiment was deferred undone (not evaluated); its measured maximum prize is under
+2 KB and re-entry criteria live in the architecture document and evidence report. One line-index
+builder and byte-offset cursor is threaded through each source kind's traversal; the line index
+builds once per snapshot; empty snapshots have no lines; EOF after a final terminator resolves to
+the preceding visible line end; Unicode scalar columns serve rendering and UTF-16 columns serve
+tooling, both derived lazily; empty spans overlap nothing and containment is the operation for
+insertion points. The tokenizer's line-break set is LF, CRLF and bare CR; `TokenStream::next`
+advances the UTF-8 byte-offset cursor; line indexes derive from retained snapshots. Unreadable-source
+failure stays at the slot layer; loaded records own text, line starts and extended spans
+unconditionally. Cross-source joins are rejected; named source-order, overlap and containment
+operations replace ambiguous location `PartialOrd`. Any remaining allowance must name a real
+unreached consumer rather than suppress an entire module.
 
-`LocalSpan` and `Option<LocalSpan>` are four bytes; `SourceSpan` and `Option<SourceSpan>` are eight.
-Selected codec: the measured 22/10 split (`LENGTH_BITS = 10`) with exact append-only overflow rows.
-The Phase 0 source-size census proved every candidate start-overflow-free, so length overflow alone
-decided the split. The bounded terminator experiment was deferred undone, not evaluated or
-rejected; its measured maximum prize is under 2 KB and re-entry criteria are in the architecture
-document and evidence report.
+**Preparation and builder ownership.** Tokenization emits `LocalSpan`; source-scoped diagnostics
+emit `SourceSpan`. Authored token streams and header/source identity are keyed by registered
+`SourceId`; frozen generic syntax preserves or canonically remaps its owning context; the
+compilation root never substitutes for missing identity. The original source builder remains owned
+through the last producer; preparation, aggregation and diagnosis publish only final source
+identities before downstream consumers run; no repeated preparation or independent builder may
+create a parallel source table; later migrations must thread this owner into any new
+joined/insertion-span producer. File workers return move-only `SourcePreparationDelta` values keyed
+by owning source identity; private discovery domains normalize exactly once at final publication;
+diagnostics produced before merge retain the producer identity/local span, then normalize before
+downstream publication. The mandatory provider owns a dependency clause's path-token anchor; source
+contracts retain the qualifier `#` anchor copied into `DeclarationSyntax.span`, not the header name
+anchor. Const-template joins preserve first-interior-token through post-close-token bounds through
+the original live builder; runtime fragments continue to use retained tokens without a new record;
+synthetic constructors preserve authored anchors and explicit synthetic metadata without
+manufacturing source identities. The historical interval bridge (exact spans plus line/column
+location) is gone: authored tokens and diagnostics use source-qualified `SourceSpan` values.
+Focused Rust tests use one owning-module test-only `TestSourceContext`; no production convenience
+API for that helper.
 
-One line-index builder and byte-offset cursor is threaded through each source kind's existing
-traversal. The line index builds once per snapshot; empty snapshots have no lines; EOF after a
-final terminator resolves to the preceding visible line end. Unicode scalar columns serve rendering
-and UTF-16 columns serve tooling; both are derived lazily from exact byte offsets. Empty spans
-overlap nothing; containment is the operation for insertion points.
-
-The tokenizer's line-break set is LF, CRLF and bare CR. `TokenStream::next` advances the UTF-8
-byte-offset cursor; line indexes are derived from retained snapshots rather than an authored line
-counter in the tokenizer. Unreadable-source failure stays at the slot layer; loaded records own
-text, line starts and extended spans unconditionally.
-
-Cross-source joins are rejected. Named source-order, overlap and containment operations replace
-ambiguous location `PartialOrd`. Any remaining allowance must name a real unreached consumer rather
-than suppress an entire module.
-
-#### Preparation and builder ownership (1D)
-
-Tokenization emits `LocalSpan`; source-scoped diagnostics emit `SourceSpan`. Authored token streams
-and header/source identity are keyed by registered `SourceId`. Frozen generic syntax preserves or
-canonically remaps its owning context; the compilation root never substitutes for missing identity.
-
-The original source builder remains owned through the last producer. Preparation, aggregation and
-diagnosis publish only final source identities before downstream consumers run. Joined and insertion
-spans use that owner. No repeated preparation or independent builder may create a parallel source
-table. Later migrations must thread this owner into any new joined/insertion-span producer.
-
-File workers return move-only `SourcePreparationDelta` values keyed by owning source identity.
-Private discovery domains normalize exactly once at final publication; no published delta retains
-provisional IDs. Diagnostics produced before merge retain the producer source identity and local
-span, then normalize those identities before downstream publication.
-
-The mandatory provider owns a dependency clause's path-token anchor. Source contracts retain the
-qualifier `#` anchor copied into `DeclarationSyntax.span`, not the header name anchor.
-Const-template joins preserve first-interior-token through post-close-token bounds by joining those
-original token spans through the original live builder. Runtime fragments continue to use retained
-tokens without a new record. Synthetic constructors preserve authored anchors and explicit
-synthetic metadata without manufacturing source identities.
-
-The historical interval bridge that carried both exact spans and a line/column location is gone:
-authored tokens and diagnostics use source-qualified `SourceSpan` values.
-
-Focused Rust tests use one owning-module test-only `TestSourceContext`. Do not expose a production
-convenience API for that helper.
-
-#### Downstream spans, freeze, diagnostics and deletion (1E–1H)
-
-All compiler source positions are exact compact byte spans, or explicit absence for generated data.
-HIR, borrow facts, target-contract validation, Stage 0, config and build diagnostics use the same
-boundary. Header parse-time duplicate sites carry their first authored `SourceSpan` or an explicit
-spanless contract; no path/line reconstruction is permitted.
-
-Consuming freeze moves current string/source/minimal-path allocations into lookup-only
-`FrozenIdentityContext`. File stages return move-only diagnostic/source deltas. The final
-build/package render boundary owns diagnostics, type context and frozen identity; there is no
-module-level premature freeze or clone. Materialised tokens, generated artefacts and diagnostics
-preserve or canonically remap their owning `SourceId`, including extended spans after donor
-builders drop. Synthetic/compilation-root display and provenance are explicit. Non-UTF-8
-filesystem display stays in infrastructure/path handling, not fabricated source paths.
-
+**Downstream cutover.** All compiler source positions are exact compact byte spans, or explicit
+absence for generated data; HIR, borrow facts, target-contract validation, Stage 0, config and
+build diagnostics share the boundary; header parse-time duplicate sites carry their first authored
+`SourceSpan` or an explicit spanless contract, with no path/line reconstruction. Consuming freeze
+moves current string/source/minimal-path allocations into lookup-only `FrozenIdentityContext`; file
+stages return move-only diagnostic/source deltas; the final build/package render boundary owns
+diagnostics, type context and frozen identity; no module-level premature freeze or clone.
+Materialised tokens, generated artefacts and diagnostics preserve or canonically remap their owning
+`SourceId`, including extended spans after donor builders drop; synthetic/compilation-root display
+and provenance are explicit; non-UTF-8 filesystem display stays in infrastructure/path handling.
 `CompilerDiagnostic` owns one canonical primary span; secondary labels retain related sites without
-copying primary facts. Infrastructure failures remain in the typed `CompilerError` lane. A
-throwaway layout probe measured `CompilerDiagnostic` at 96 bytes and `CompilerMessages` at 112 bytes
-on `aarch64-apple-darwin`; the hard diagnostic bound is 128 bytes. `DiagnosticToken` remains the
-fixed-width 8-byte projection with explicit `TokenTag(u16)`. Plain `CompilerDiagnostic` values cross
-the diagnosed lane with no common diagnostic boxing, no `result_large_err` allowance and no
-lint-specific local workaround.
+copying primary facts; infrastructure failures remain in the typed `CompilerError` lane pending
+Phase 5. A throwaway layout probe measured `CompilerDiagnostic` at 96 bytes and `CompilerMessages`
+at 112 bytes on `aarch64-apple-darwin` (hard diagnostic bound 128 bytes). Plain `CompilerDiagnostic`
+values cross the diagnosed lane with no common diagnostic boxing, no `result_large_err` allowance
+and no lint-specific workaround. `SourceLocation`, `CharPosition`, `SourceFileTable`, `FileId`,
+fallback path-based identity comparison, line/column mutation and location filesystem fallback
+helpers are absent from production sources.
 
-`SourceLocation`, `CharPosition`, `SourceFileTable`, `FileId`, fallback path-based identity
-comparison, line/column mutation and location filesystem fallback helpers are absent from
-production sources.
+### Phase 1 closeout evidence
+
+Final Phase 1 review-correction closeout is `3c9c776a8` (2026-09-10), after implementation
+`a9f9744de`, representation corrections `e1f16cb49` and later correction checkpoints through
+`fc9f449e9`. `just validate` passed on Apple M1 Pro / Rust 1.97.1 as recorded in the capsule.
+Span-census corpus: 4,626 files walked, 4,585 tokenized, 286,779 spans; selected `LocalSpan`
+extended table 1,992 bytes at the 22/10 split. Timing and retained-memory partitions, including
+the five-run probe, live in `benchmarks/frontend-optimization-results.md`. Per-command closeout
+tables are Git history.
 
 ### Phase 1 exit criteria
 
@@ -693,28 +674,20 @@ production sources.
 - [x] the compact plain diagnostic boundary has no common diagnostic boxing or lint-specific workaround
 - [x] full local CI is green before Phase 2 begins
 
-### Closeout evidence
-
-Final Phase 1 review-correction closeout is `3c9c776a8` (2026-09-10), after implementation
-`a9f9744de`, representation corrections `e1f16cb49` and later correction checkpoints through
-`fc9f449e9`. `just validate` passed on Apple M1 Pro / Rust 1.97.1 as recorded in the capsule.
-Span-census corpus: 4,626 files walked, 4,585 tokenized, 286,779 spans; selected `LocalSpan`
-extended table 1,992 bytes at the 22/10 split. Timing and retained-memory partitions, including
-the five-run probe, live in `benchmarks/frontend-optimization-results.md`. Per-command closeout
-tables are Git history.
-
 ### Standing correction contracts
 
-These remain in force for later phases. They do not reopen Phase 1 or start Phase 2.
+These remain in force for later phases. They do not reopen Phase 1; Phase 2 is accepted and
+Phase 3 is the next action.
 
 #### Cold ownership
 
 The common `DiagnosticRecord` remains 32 bytes and the common `SecondaryDiagnosticLabel` remains
 12 bytes. Their compact spans are meaningful only in the identity domain of the enclosing report
-context. Rare mixed-domain sites carry an optional typed `FrozenIdentityHandle` in cold diagnostic
-or label ownership storage; the handle names the immutable string/source context that resolves the
-span. No common record grows an `Arc`, path table, or rendered coordinate, and no renderer guesses
-an owner from a colliding requester database. Exact Phase 4 side-store encoding remains deferred.
+context. Rare mixed-domain sites currently carry an optional typed `FrozenIdentityHandle` in cold
+diagnostic or label ownership storage; the handle names the immutable string/source context that
+resolves the span. No common record grows an `Arc`, path table, or rendered coordinate, and no
+renderer guesses an owner from a colliding requester database. Slice 4B replaces this transitional
+handle with the final typed cold-store encoding.
 
 `ProjectEntry` and linked-module views retain the owning boundary domain. Project backend
 diagnostics use the domain-less project default only for project modules; package diagnostics use
@@ -768,91 +741,65 @@ migration slices. Parent-linked path tables and compact span encoding are Phase 
 future work. This Phase 1 work adds no second interner, scheduler, observer API or ubiquitous
 per-node owner.
 
-The private discovery-finalization barrier, parent-linked path trie, ambiguity-failing legacy path
-lookup and local `_unspanned` wrappers remain accepted migration choices until their owning cleanup
-steps; they are not reopened as parallel frameworks.
+The private discovery-finalization barrier, parent-linked path trie and local `_unspanned` wrappers
+remain accepted choices for later phases; the ambiguity-failing legacy path lookup was a Phase 1
+bridge and ended with Phase 2. None of these choices permits a parallel framework.
 
 #### Later-phase prerequisites (R10)
-
-- [ ] **R10a — diagnostic identity ownership (Phase 4):** make stable reason keys part of the final
-  diagnostic schema rather than an interim compiler-owned payload convention.
-- [ ] **R10b — draft/durable type separation (Phase 4):** define distinct draft and durable
-  diagnostic fact types before compact-record and type-display work begins.
+- [ ] **R10a — diagnostic identity ownership (Phase 4, Slice 4A):** make stable `reason_key`s
+  part of the final diagnostic schema rather than an interim compiler-owned payload convention.
+  Integrated into Slice 4A.
+- [ ] **R10b — draft/durable type separation (Phase 4, Slice 4B):** define distinct draft and
+  durable diagnostic fact/core types so a pre-compaction `TypeId` cannot masquerade as a durable
+  fact. Integrated into Slice 4B.
 - [ ] **R10c — infrastructure/bug context (Phase 5):** settle self-contained context ownership for
   infrastructure failures and compiler-bug reports before deleting the mixed error model.
-- [ ] **R10d — structural type-display dedup (Phase 4):** keep `TypeId` to `TypeDisplayId`
-  memoization mandatory, but require benchmark evidence before adding cross-identity structural
-  hash-consing.
+  Integrated into Slice 5C0 and 5D; remains a Phase 5 prerequisite and is not pulled into Phase 4.
+- [ ] **R10d — structural type-display dedup (Phase 4, Slice 4C):** keep `TypeId` to
+  `TypeDisplayId` memoization mandatory, but require benchmark evidence before adding
+  cross-identity structural hash-consing. Integrated into Slice 4C5.
 
 ---
 
 ## Phase 2 — Genuine complete-path interning
 
-### Summary, reasoning and context
+Phase 2 is accepted on `diagnostic-data-layout-changes`. Its continuation checkpoint is
+`c17672bb5`, carrying the diagnostic correction `e7d9a7ab5` (path/string attachment and remap
+ownership: one attachment contract, `NotExportedByPublicSurface` remaps `public_surface_name`,
+required paths keep tables that contain unused nodes, and renderer type contexts retain the tables
+they read) plus validation-lane stabilization. Per-slice checklists and review logs are Git
+history.
 
-Phase 2 begins only after 1A has migrated compiler source slots to `PathId` and Phase 1 has
-passed its exit gates. It replaces the remaining vector-backed complete compiler paths without
-adding a contended global interner or another scheduling system.
+Delivered, in order:
 
-### Slice 2A — Extend the final path-table foundation beyond source registration
+- **2A** extended the Phase 1 dense parent/component path table with module-local delta, remap and
+  consuming frozen-table support; allocation-free parent/append/join after interning; portable and
+  native rendering through `PathTable` plus string lookup; path-domain classification (compiler
+  logical/semantic paths share the table, filesystem paths stay cold `Path` values, rendered free
+  text is never interned).
+- **2B** mirrored the string-table immutable-base fork at module scope; merges strings before
+  path nodes (path records contain `StringId`); reuses the existing file/chunk and module merge
+  order; remaps `PathId`s exactly once per boundary; source logical paths stay in the immutable
+  build base and never remap. No scheduler, global lock, atomic allocator or generic interner
+  framework was added; existing counters record path nodes, unique paths, depth, merges, remaps.
+- **2C** migrated every compiler path owner (tokenizer/dependencies, headers/graph facts,
+  semantic types/interfaces, AST/TIR/HIR metadata, diagnostics/support) to `PathId`. Stable
+  semantic origin IDs remain the cross-package authority; display `PathId`s remap or context-own
+  at interface binding. Retained per-header dependency sets became sorted/deduplicated
+  `PathId` slices or typed arena ranges.
+- **2D** deleted `InternedPath`, its vector constructors and remap implementation, repeated path
+  clones and allocation-based parent/append/join helpers, and `HashMap`/`HashSet` keyed by
+  `InternedPath`; `PathBuf` remains only at filesystem boundaries and source cold data.
 
-- [x] keep the exact dense parent/component representation introduced in Phase 1; do not replace it with a second interner
-- [x] add module-local delta, remap and consuming frozen-table support needed by later compiler stages
-- [x] make parent/append/join identity operations allocation-free after interning
-- [x] add a consuming freeze operation that drops reverse lookup state when no further interning occurs
-- [x] define portable and native rendering through `PathTable` plus string lookup
-- [x] classify path domains before migration: compiler logical/semantic component paths may share the table, filesystem paths remain cold `Path` values and rendered free text is never interned as a path
-- [x] add layout, depth, prefix/suffix, equality, domain-wrapper and invalid-context tests
+### Phase 2 standing rules
 
-### Slice 2B — Reuse existing deterministic identity merges
-
-- [x] mirror the existing string-table immutable-base fork at module scope only where PathIds must exist during module compilation
-- [x] merge string IDs before path nodes because path records contain `StringId`
-- [x] merge path deltas in the same file/chunk and module order already used by frontend orchestration
-- [x] remap PathIds exactly once at each existing merge boundary
-- [x] keep source logical paths in the immutable build base so they never remap
-- [x] do not add a new scheduler, global lock, atomic ID allocator or generic interner framework
-- [x] extend existing counters for path nodes, unique complete paths, depth, merges and remaps
-
-### Slice group 2C — Migrate compiler path owners
-
-Each checked batch is an independent accepted slice. Delete old fields and conversion helpers in the
-same batch.
-
-- [x] **2C1 — tokenizer and dependencies:** tokenized path rows, clause-owned dependency aliases,
-  dependency-shell provider paths and path diagnostics
-- [x] **2C2 — headers and graph facts:** header identities, dependency collections, exports, module symbols, path resolution and source/package identities
-- [x] **2C3 — semantic types and interfaces:** parsed type paths, nominal/type lookup maps, traits, generic identities and public-surface facts; keep stable semantic origin IDs as the cross-package authority and remap or context-own every display `PathId` at interface binding
-- [x] **2C4 — AST/TIR/HIR metadata:** declarations, scopes, constants, template metadata, HIR/link facts and build metadata
-- [x] **2C5 — diagnostics and support:** diagnostic places/path facts, renderers, test support, snapshots and debug output
-- [x] replace retained per-header `HashSet<InternedPath>` dependency storage with deterministic sorted/deduplicated `PathId` slices or typed arena ranges; temporary sets may exist only while collecting
-
-### Slice 2D — Delete vector-backed canonical paths
-
-- [x] delete `InternedPath`, its vector constructors and string-ID remap implementation
-- [x] delete repeated path clones and allocation-based parent/append/join helpers
-- [x] remove `HashMap<InternedPath, ...>`/`HashSet<InternedPath>` owners in favour of PathId keys
-- [x] keep `PathBuf` only at filesystem boundaries and source cold data
-- [x] update codebase index and module docs
-
-### Phase 2 — Audit / style-guide review / validation
-
-Complete the common phase close, plus:
-
-- [x] audit one path identity domain per compilation context and no detached raw path ID crosses a project/package boundary
-- [x] audit source paths stay stable while worker-created paths remap deterministically
-- [x] audit no path identity is reconstructed from rendered text
-- [x] audit no lock or `Arc` exists per path
-- [x] review path APIs for explicit context and no hidden allocation
-- [x] run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests
-- [x] record path bytes, allocation/remap counts and timing (see `benchmarks/frontend-optimization-results.md` > `Data Layout Migration - Phase 2 Path Identity Retention Probe`)
-
-### Phase 2 exit criteria
-
-- [x] `PathId` is the only complete logical path identity
-- [x] `InternedPath` is deleted
-- [x] common compiler records carry IDs rather than owned component vectors
-- [x] path construction and merge order are deterministic
+- `PathId` is the only complete logical path identity; one path identity domain per compilation
+  context; no detached raw path ID crosses a project/package boundary.
+- Source paths stay stable while worker-created paths remap deterministically; no path identity
+  is reconstructed from rendered text; no per-path lock or `Arc`.
+- Path construction and merge order are deterministic; path bytes, allocation/remap counts and
+  timing evidence live in `benchmarks/frontend-optimization-results.md` > `Data Layout Migration -
+  Phase 2 Path Identity Retention Probe`.
 
 ---
 
@@ -886,14 +833,19 @@ Evaluate only these production candidates:
 - [ ] preserve exact source spelling and current lexical semantics
 - [ ] add all-tag coverage and reserved-bit/layout tests
 
-### Slice 3C — Add typed source-local cold stores
+### Slice 3C — Evolve the file-owned path-syntax table into the final source-owned token cold store
+
+Evolve the existing file-owned `PathSyntaxTable` into the final source-owned token cold store; do not
+invent a generic path store. Path tokens use the canonical `TokenTag` plus a dense `PathSyntaxId` —
+one representation only.
 
 - [ ] move numeric literal retained data into a numeric store while reusing `numeric_text` parsing
-- [ ] move canonical path rows into typed path stores using `PathId` and `LocalSpan`; keep
-  dependency aliases under their retained clause owner and migrate only their locations
+- [ ] evolve the existing file-owned `PathSyntaxTable` in place into the source-owned cold store;
+  path tokens carry canonical `TokenTag` plus `PathSyntaxId` with the row's `PathId` and
+  `LocalSpan`; keep dependency aliases under their retained clause owner and migrate only their
+  locations
 - [ ] encode symbol, string, bool and char payloads directly when they fit the token word
 - [ ] use checked `u32` indexes and typed capacity failures
-- [ ] add a direct single-path fast form only if measured aggregate evidence justifies it
 - [ ] add remap/freeze tests for every cold store
 
 ### Slice 3D — Separate immutable storage from parser cursor
@@ -907,15 +859,43 @@ Evaluate only these production candidates:
 
 ### Slice group 3E — Make prepared syntax source-owned
 
-- [ ] **3E1 — prepared-source store:** evolve `FileFrontendPrepareOutput` into one move-owned `PreparedSource` slot per selected `SourceId`; it owns the source token store and syntax preparation exactly once; Stage 0 may borrow structural facts, then the unique owning module/direct service takes the record without per-source `Arc` or cloning
-- [ ] **3E2 — structural reachability reuse:** make prepared dependency shells expose final local-source `SourceId` edges plus typed provider request records; Stage 0 traverses those facts without reading token stores or rendered path text; keep provider mutation/resolution on its serial owner after workers return structural references
-- [ ] **3E3 — consolidate retained preparation:** preserve the current exactly-once lexical and
-  preparation paths while moving both directory-token and synthetic-prepared variants into the
-  same build-lifetime `PreparedSource` store; module aggregation must consume those records without
-  adding another tokenizer, parser or cache
-- [ ] **3E4 — contiguous retained syntax:** add half-open `TokenRange { source, start, end }`, replace contiguous `Header::tokens` bodies with ranges, remove repeated `Header::source_file` and change function/template body capture to record boundaries instead of cloning tokens
-- [ ] **3E5 — segmented start-body syntax:** add `TokenSequenceId` into a source-local range-list store whose entries are 8-byte `{ start, end }` token-index pairs and whose owner stores `SourceId` once; expose one `TokenSequenceView` so contiguous and segmented bodies use the same `TokenCursor`; never add a copied start stream or parallel parser path
-- [ ] **3E6 — source-kind adapters:** represent non-tokenized adapter payloads directly, preserve plain Markdown's no-token path and keep declaration-shell parsing single-owner through token/sequence views
+Each tokenized source is loaded, tokenized and prepared exactly once. Stage 0 borrows structural
+facts from the prepared result; semantic compilation consumes the prepared result; afterwards the
+storage is dropped or moved into an existing later owner such as persistent generic materialisation.
+Never a second tokenization and never a second store.
+
+- [ ] **3E1 — prepared-source store:** evolve `FileFrontendPrepareOutput` into one move-owned
+  `PreparedSource` slot per selected `SourceId`; it owns the source token store and syntax
+  preparation exactly once. Stage 0 borrows structural facts from the prepared result; semantic
+  compilation then consumes the prepared record, and the record's storage is dropped or moved into
+  an existing later owner (such as persistent generic materialisation) — without per-source `Arc`
+  or cloning and without a second tokenization or store
+- [ ] **3E2 — structural reachability reuse:** make prepared dependency shells expose final
+  local-source `SourceId` edges plus typed provider request records; Stage 0 traverses those facts
+  without reading token stores or rendered path text; keep provider mutation/resolution on its
+  serial owner after workers return structural references
+- [ ] **3E3 — consolidate retained preparation:** preserve the current exactly-once
+  load/tokenize/prepare path while moving both directory-token and synthetic-prepared variants into
+  the same build-lifetime `PreparedSource` store; module aggregation consumes the prepared result
+  once and never re-tokenizes, re-parses or adds a second store or cache
+- [ ] **3E4 — contiguous retained syntax:** add half-open `TokenRange { source, start, end }`,
+  replace contiguous `Header::tokens` bodies with ranges, remove repeated `Header::source_file` and
+  change function/template body capture to record boundaries instead of cloning tokens
+- [ ] **3E5 — segmented start-body syntax:** add `TokenSequenceId` into a source-local range-list
+  store whose entries are 8-byte `{ start, end }` token-index pairs and whose owner stores
+  `SourceId` once; expose one `TokenSequenceView` so contiguous and segmented bodies use the same
+  `TokenCursor`; never add a copied start stream or parallel parser path
+- [ ] **3E6 — source-kind adapters:** represent non-tokenized adapter payloads directly, preserve
+  plain Markdown's no-token path and keep declaration-shell parsing single-owner through
+  token/sequence views
+- [ ] **3E7 — persistent generic syntax:** generic templates and generated/materialised generic
+  bodies retain their ranges/sequences over the canonical immutable source token store, plus donor
+  identity/context, so nested and cross-package materialisation, donor diagnostics and retained
+  file-reference facts keep exact ownership. No generic-specific token representation: materialised
+  bodies reuse the same source-owned token/range/sequence model. This slice must not require a
+  second store before 3E7; if the final ownership needs the store to outlive one compilation
+  boundary, that owner is an existing later owner (persistent generic materialisation), not a new
+  framework
 
 ### Slice group 3F — Migrate parser and semantic consumers
 
@@ -933,10 +913,16 @@ Each checked batch is independently accepted and must remove the old token API f
 ### Slice 3G — Add the durable diagnostic token projection
 
 - [ ] implement exact 8-byte `DiagnosticToken`
-- [ ] reuse `TokenTag` and descriptor spelling
-- [ ] preserve only the one ID/immediate needed for useful diagnostics
-- [ ] collapse detailed path and numeric payloads when full retained data is unnecessary
-- [ ] prove diagnostics render after source token cold stores are dropped
+- [ ] reuse `TokenTag` and descriptor spelling; preserve only the one compact ID/immediate the
+  diagnostic needs (path category plus an optional `PathId`, numeric kind/text, string identity)
+  and never the complete tokenizer record
+- [ ] inventory every surviving diagnostic query against `Token`/`TokenKind` and map each one to
+  the facts the projection and its typed side stores must preserve (tag, spelling, path identity,
+  numeric text/kind, string identity); extend the typed side stores or the projection where a
+  needed fact would otherwise be lost
+- [ ] prove diagnostics render after source token/cold stores are gone, with equivalence tests
+  over the full surviving diagnostic set comparing old-model and projected rendering while the
+  source token/cold stores still exist and again after they are dropped
 
 ### Slice 3H — Delete the old token architecture
 
@@ -965,74 +951,140 @@ Complete the common phase close, plus:
 - [ ] record common/cold token bytes, clones, capacity and timing
 
 ### Phase 3 exit criteria
-
 - [ ] `TokenShape` and the selected source-token array layout are canonical
 - [ ] complex token data lives only in typed source-local stores
 - [ ] declaration shells use `TokenRange`
 - [ ] no wide token enum or cloned retained token vector remains
 - [ ] each tokenized source is prepared once and reused by reachability and module compilation
-
 ---
 
 ## Phase 4 — Compact diagnostics, type snapshots and frozen reports
+
+### Phase 4 reactivation gate
+
+Phase 4 starts only when all of the following are true. Until then the plan is paused after
+Phase 3, and Wiring V1 followed by native result slots/Core const evaluation run first.
+
+- [ ] rebase `diagnostic-data-layout-changes` onto a main that contains the accepted Wiring V1
+  checkpoint and then the accepted native result-slot/Core const-eval checkpoint
+- [ ] re-run the owning validation gate after the rebase
+- [ ] fresh inventory of diagnostic producers, result boundaries, warnings, type environments and
+  generated functions as they exist after those semantic checkpoints merged
+- [ ] stale name refresh: update schema inventories and slice wording for any diagnostic family,
+  result shape or owner renamed or moved by the rebase
+- [ ] every locked architecture decision in `docs/compiler-data-layout-design.md` is preserved;
+  no reactivation change may weaken a locked size, ownership or failure-lane contract
 
 ### Summary, reasoning and context
 
 This phase replaces the complete diagnostic model in one migration phase. Temporary conversion code
 may exist only inside this phase. The exit commit must have one schema, one draft accumulator, one
-32-byte durable record, one type-display renderer and one immutable report boundary.
+32-byte durable record, one type-display renderer and one immutable report boundary. One report and
+one accumulator per identity domain; `DiagnosticReportSet` is the canonical-order collection. The
+command/report owner is the sole warning-storage owner in this phase; `CompilationOutcome::Success`
+as the final warning owner is installed by Phase 5 alone, and this phase must not introduce that
+result model early.
 
-### Slice 4A — Declare the complete diagnostic schema
+### Slice 4A — Declare the complete diagnostic schema with stable reason keys
 
-- [ ] inventory every current stable diagnostic family after the parked diagnostics checkpoint
+- [ ] inventory every current stable diagnostic family from the fresh reactivation inventory
 - [ ] assign explicit non-zero internal `DiagnosticCode` values; never derive them from enum order
 - [ ] preserve each external `MOTH-*` code, category, title and default severity
-- [ ] declare fact-word meaning, optional codecs, allowed extra kind, secondary-label roles, type-rewrite markers and renderer entry once per diagnostic
-- [ ] replace compiler-generated prose stored in payload/label string fields with typed reason/message codes and facts; an authored string may remain a `StringId`, but `RenderedText` is not a generic escape hatch
+- [ ] give every diagnostic a stable `reason_key` in the final schema, independent of wording and
+  of Rust identifier spellings; reason keys survive wording changes and are the R10a contract
+- [ ] declare fact-word meaning, optional codecs, allowed extra kind, secondary-label roles,
+  type-rewrite markers and renderer entry once per diagnostic
+- [ ] replace compiler-generated prose stored in payload/label string fields with typed
+  reason/message codes and facts; an authored string may remain a `StringId`, but `RenderedText`
+  is not a generic escape hatch
 - [ ] use one small `macro_rules!` vocabulary and const tables
-- [ ] keep one registry module and split domain declaration files once the registry would exceed the repository's practical file-size guidance; each family still has exactly one declaration
-- [ ] generate/validate descriptor lookup, all-code iteration, typed draft constructors, durable accessors and schema tests
+- [ ] keep one registry module and split domain declaration files once the registry would exceed
+  the repository's practical file-size guidance; each family still has exactly one declaration
+- [ ] generate/validate descriptor lookup, all-code iteration, typed draft constructors, durable
+  accessors and schema tests
 - [ ] prohibit raw fact indexing outside diagnostic storage modules
 
-### Slice 4B — Implement compact records and cold stores
+### Slice 4B — Define distinct draft/durable fact types and implement compact records
 
-- [ ] implement `DiagnosticRecord`, `DiagnosticDraft`, `DiagnosticId`, `DiagnosticExtraId` and hard layout assertions
+- [ ] define distinct draft and durable fact/core types so a pre-compaction stage-local `TypeId`
+  can never be assigned where a durable `DiagnosticRecord` fact is required; the draft type set is
+  not implicitly interchangeable with the durable fact set (R10b)
+- [ ] implement `DiagnosticRecord`, `DiagnosticDraft`, `DiagnosticId`, `DiagnosticExtraId` and
+  hard layout assertions
 - [ ] implement packed code/severity flags with reserved-bit validation
 - [ ] implement fixed `DiagnosticExtraRecord`, typed list ranges and typed arenas
-- [ ] implement 12-byte secondary labels; primary span exists only in the record and every compiler-owned label phrase uses a compact `LabelMessageCode` plus typed immediate/side data
+- [ ] implement 12-byte secondary labels; primary span exists only in the record and every
+  compiler-owned label phrase uses a compact `LabelMessageCode` plus typed immediate/side data
 - [ ] implement 4-byte `DiagnosticPlace` and checked optional/packed ID codecs
+- [ ] implement the final typed cold-store encoding for rare foreign-domain primary/secondary
+  sites, replacing the transitional `FrozenIdentityHandle` without widening 32-byte records or
+  12-byte labels; carry project/package/generated-generic regression coverage for every mixed-domain
+  site class
 - [ ] implement deterministic capacity-exhaustion diagnostics without recursive extra allocation
-- [ ] make common drafts allocate nothing and rare drafts allocate at most one root auxiliary object
+- [ ] make common drafts allocate nothing and rare drafts allocate at most one root auxiliary
+  object
 - [ ] remove broad `Clone` from drafts, bags and owning stores
 
-### Slice 4C — Define the one draft, preparation and compaction path
+### Slice 4C — Build the type-display snapshot representation first
 
-- [ ] make `DiagnosticBag` a move-only `Vec<DiagnosticDraft>` accumulator
-- [ ] let each `SourcePreparationDelta` carry its local `DiagnosticBag`; at the existing file/chunk merge, merge strings then paths and schema-remap those drafts into the module identity domain
-- [ ] define one internal `PreparedDiagnosticBatch` only for a module-local identity/type domain crossing the module/build merge boundary
-- [ ] keep prepared batches as drafts plus compact type-display draft data; they are not another durable report/store API
-- [ ] implement `DiagnosticBag::freeze`/equivalent as the one final draft-to-dense-store transition after canonical remapping and after the actual outcome's last diagnostic producer
+No later preparation or compaction slice may depend on an undefined type-display representation;
+this slice defines it before 4D.
+
+- [ ] **4C1 — shared display/query view:** inventory every renderer query against
+  `TypeEnvironment`, define the smallest frozen query surface beyond spelling and extract one
+  read-only view from `datatypes/display.rs` so live and frozen types share one formatter
+- [ ] **4C2 — compact store:** implement `TypeDisplayId`, fixed records and typed child ranges for
+  every currently rendered builtin, nominal, choice, generic, function, option, collection, map,
+  tuple/multi-value, fallible and external shape
+- [ ] **4C3 — snapshot algorithm:** while the producing `TypeEnvironment` is live, collect
+  schema-marked `TypeId`s, reserve before recursion, copy only transitive display/query facts and
+  rewrite draft words to batch-local `TypeDisplayId`s before the environment can be released
+- [ ] **4C4 — type-lifetime proof:** prove the snapshot algorithm captures every schema-marked `TypeId`
+  while its `TypeEnvironment` is live; leave prepared-batch stage integration to 4D/4E, after its
+  contract exists
+- [ ] **4C5 — equivalence and dedup policy:** add exhaustive live/snapshot formatting and
+  query-equivalence tests; a valid frozen report never falls back to a raw internal ID.
+  `TypeId` -> `TypeDisplayId` memoization is mandatory; cross-identity structural deduplication is
+  benchmark-gated and stays off until measured evidence justifies it (R10d)
+
+### Slice 4D — Define the one draft, preparation and compaction path
+
+Prepares batches over the representation 4C already defined.
+
+- [ ] make `DiagnosticBag` a move-only `Vec<DiagnosticDraft>` accumulator, one per identity domain
+- [ ] let each `SourcePreparationDelta` carry its local `DiagnosticBag`; at the existing
+  file/chunk merge, merge strings then paths and schema-remap those drafts into the module identity
+  domain
+- [ ] define one internal `PreparedDiagnosticBatch` only for a module-local identity/type domain
+  crossing the module/build merge boundary
+- [ ] integrate AST/HIR/target stage boundaries only after `PreparedDiagnosticBatch` exists; no live
+  `TypeEnvironment` is dropped before its batch is captured, while successful semantic owners retain
+  the environment only for real backend work
+- [ ] keep prepared batches as drafts plus compact type-display draft data from the 4C
+  representation; they are not another durable report/store API
+- [ ] implement `DiagnosticBag::freeze`/equivalent as the one final draft-to-dense-store
+  transition after canonical remapping and after the actual outcome's last diagnostic producer
 - [ ] avoid a separate public `DiagnosticStoreBuilder` layer
 - [ ] compact labels, lists, token projections and extras into dense arenas
 - [ ] preserve deterministic production order
 - [ ] expose typed immutable `DiagnosticView` and iterators; renderers never mutate records
-- [ ] compute error/warning/note counts during freeze and expose allocation-free severity-bucket iteration without building a reordered index vector
-- [ ] keep `DiagnosticReport` and `DiagnosticReportSet` move-only; a long-lived host wraps the whole set/report in `Arc` only when multiple host consumers genuinely share it, never per record or per side store
-
-### Slice group 4D — Build the minimal diagnostic type-display store
-
-- [ ] **4D1 — shared display/query view:** inventory every renderer query against `TypeEnvironment`, define the smallest frozen query surface beyond spelling and extract one read-only view from `datatypes/display.rs` so live and frozen types share one formatter
-- [ ] **4D2 — compact store:** implement `TypeDisplayId`, fixed records and typed child ranges for every currently rendered builtin, nominal, choice, generic, function, option, collection, map, tuple/multi-value, fallible and external shape
-- [ ] **4D3 — snapshot algorithm:** while the producing `TypeEnvironment` is live, collect schema-marked `TypeId`s, reserve before recursion, copy only transitive display/query facts and rewrite draft words to batch-local `TypeDisplayId`s before the environment can be released
-- [ ] **4D4 — stage boundaries:** refactor diagnosed AST/HIR/target paths so no live environment is dropped before its prepared diagnostic batch is captured; successful semantic owners keep their environment only for real backend work
-- [ ] **4D5 — equivalence:** add exhaustive live/snapshot formatting and query-equivalence tests; a valid frozen report never falls back to a raw internal ID
+- [ ] compute error/warning/note counts during freeze and expose allocation-free severity-bucket
+  iteration without building a reordered index vector
+- [ ] keep `DiagnosticReport` and `DiagnosticReportSet` move-only; a long-lived host wraps the
+  whole set/report in `Arc` only when multiple host consumers genuinely share it, never per record
+  or per side store
 
 ### Slice group 4E — Consolidate file, module and command diagnostic aggregation
 
 - [ ] **4E1 — file/module domains:** let `SourcePreparationDelta` carry file-domain drafts; at file/chunk merge, merge strings then paths and schema-remap drafts into the module domain
 - [ ] **4E2 — prepared module batch:** add `PreparedDiagnosticBatch` beside `CompiledModuleResult`, never inside `Module`; capture drafts plus the small module-local type-display store before a diagnosed module drops its environment
 - [ ] **4E3 — canonical module merge:** use existing module result sorting as the only cross-module diagnostic order; merge module strings then paths, remap drafts/labels/type records, merge batch-local `TypeDisplayId`s and append into command-owned builders without freezing early
-- [ ] **4E4 — warnings and success artifacts:** move successful warnings out of `Module` and backend `Project` payloads, remove warning-specific clones/remaps and preserve success-only linkable/artifact payloads; all warnings remain command-owned drafts and become only `CompilationOutcome::Success::warnings`
+- [ ] **4E4 — warnings and success artifacts:** move successful warnings out of `Module` and
+  backend `Project` payloads, remove warning-specific clones/remaps and preserve success-only
+  linkable/artifact payloads. The command/report owner is the sole warning-storage owner in this
+  phase: all warnings remain command-owned drafts in that owner's stores. Installing them into
+  `CompilationOutcome::Success::warnings` is Phase 5 work; Phase 4 must not introduce that result
+  model early
 - [ ] **4E5 — independent contexts:** define thin move-only `DiagnosticReportSet` as the command-level canonical-order collection of one-domain reports; keep project/package identity domains separate rather than concatenating raw IDs, and preserve one canonical diagnostic set per shared module
 
 ### Slice 4F — Freeze lookup context without a parallel compiler framework
@@ -1105,11 +1157,20 @@ Complete the common phase close, plus:
 
 ### Phase 4 exit criteria
 
-- [ ] every user diagnostic uses the schema and `DiagnosticDraft`
-- [ ] every durable record is exactly 32 bytes
-- [ ] prepared module batches contain no full type environment and no second durable diagnostic model
-- [ ] `DiagnosticReport`/`DiagnosticReportSet` are the only diagnosed/warning render boundaries and are frozen only at the actual outcome's last diagnostic producer
-- [ ] full type environments and mutable reverse-lookup tables are not retained solely for rendering
+- [ ] every user diagnostic uses the schema and `DiagnosticDraft`, with one report/accumulator per
+  identity domain and `DiagnosticReportSet` for canonical ordering
+- [ ] every durable record is exactly 32 bytes; no raw ID concatenation replaces the
+  `DiagnosticReportSet` canonical ordering
+- [ ] prepared module batches contain no full type environment and no second durable diagnostic
+  model
+- [ ] `DiagnosticReport`/`DiagnosticReportSet` are the only diagnosed/warning render boundaries
+  and are frozen only at the actual outcome's last diagnostic producer
+- [ ] type-display snapshot representation was defined (4C) before any preparation/compaction slice
+  (4D) consumed it
+- [ ] the command/report owner is the sole warning-storage owner; `CompilationOutcome::Success` was
+  not introduced early
+- [ ] full type environments and mutable reverse-lookup tables are not retained solely for
+  rendering
 - [ ] all old diagnostic/message models are deleted
 
 ---
@@ -1147,14 +1208,25 @@ Review the complete ledger before broad signature changes.
 
 Define the final type first, then migrate these independent batches:
 
-- [ ] **5C1 — data and rendering:** compact typed kind/stage, optional exact source or owned filesystem-path context, deterministic typed detail slice and terminal/terse/dev-server renderers
-- [ ] **5C2 — filesystem/build:** source open/read, canonicalization, output writing, manifests, permissions and other expected operating-system failures
-- [ ] **5C3 — providers/backends:** tool invocation, provider loading, backend emission/validation IO and other recoverable external-system failures
+- [ ] **5C0 — canonical example and context contract:** before implementing any batch, update the
+  `InfrastructureFailure` example in `docs/compiler-data-layout-design.md` so it explicitly carries
+  identity-vs-filesystem context: a retained `SourceSpan`/`PathId`/`StringId` always has its
+  matching frozen identity context, while a pre-source filesystem failure carries ordinary
+  filesystem context and no compact ID. Record this as the accepted R10c context ownership
+- [ ] **5C1 — data and rendering:** compact typed kind/stage, optional exact source or owned
+  filesystem-path context, deterministic typed detail slice and terminal/terse/dev-server
+  renderers
+- [ ] **5C2 — filesystem/build:** source open/read, canonicalization, output writing, manifests,
+  permissions and other expected operating-system failures
+- [ ] **5C3 — providers/backends:** tool invocation, provider loading, backend emission/validation
+  IO and other recoverable external-system failures
 - [ ] **5C4 — tooling hosts:** watcher, socket/server, routing and dev-server operational failures
 - [ ] replace string-keyed metadata `HashMap`s with typed details in the owning batch
 - [ ] preserve useful underlying IO/tool information without pre-rendering all presentation text
-- [ ] when a failure carries `SourceSpan`/`PathId`/`StringId`, make the host-facing failure share the matching frozen identity context; pre-source failures use owned filesystem context instead
-- [ ] never let a compact ID escape detached from its context and never deep-clone that context for one failure
+- [ ] when a failure carries `SourceSpan`/`PathId`/`StringId`, make the host-facing failure share
+  the matching frozen identity context; pre-source failures use owned filesystem context instead
+- [ ] never let a compact ID escape detached from its context and never deep-clone that context for
+  one failure
 - [ ] never convert infrastructure data into a `DiagnosticRecord`
 
 ### Slice group 5D — Implement structured compiler bugs
@@ -1164,7 +1236,9 @@ Define the final type first, then migrate these independent batches:
 - [ ] **5D3 — AST/TIR/HIR invariants:** impossible validated semantic/IR states and missing stage authority
 - [ ] **5D4 — borrow/link/backend invariants:** impossible analysis, call-target, capability and backend metadata states
 - [ ] route every intentional production compiler-invariant panic through `compiler_bug!`; debug assertions may supplement but never replace release validation
-- [ ] resolve any optional bug source span into enough owned display/provenance/range data before panicking so the report remains useful after the complete worker state is discarded
+- [ ] require every compiler-bug report that carries a source span to resolve its bounded
+  source/display facts (logical display path, byte/line/column range, bounded excerpt) before the
+  worker's compiler state is discarded; resolution happens before the discard, never after unwind
 - [ ] never rely on reading logically suspect worker tables after unwind merely to render the bug
 - [ ] let unknown dependency/runtime panics become generic compiler-bug reports only at the host boundary
 - [ ] ensure user-driven capacity/limit failures diagnose instead of panic
@@ -1185,9 +1259,13 @@ pub enum CompilationOutcome<T> {
 Exact names may follow existing module/graph outcome types, but the lane placement is fixed. This slice must adapt the graph/result owner present at activation; it must not implement the separately queued canonical-module graph architecture merely to introduce these lanes.
 
 - [ ] keep stage-local short-circuit helpers free to return `Result<T, DiagnosticDraft>`; convert to `Diagnosed` only at the owning compilation boundary
-- [ ] keep warnings only on `Success`; a diagnosed or infrastructure-failed outcome does not carry unrelated prior warnings, and any source context essential to an error belongs in that diagnostic's labels/facts; use a one-element report set for the common single-context case
-- [ ] update current warning-prepend helpers and tests to this accepted boundary rather than carrying mixed-lane production-order streams forward
-- [ ] keep graph `blocked` and independent-branch continuation inside the successful orchestration outcome, not as infrastructure errors
+- [ ] install `CompilationOutcome::Success::warnings` here — Phase 5 alone introduces that result
+  model — moving the command/report owner's warning store into the success outcome; a diagnosed or
+  infrastructure-failed outcome does not carry unrelated prior warnings, and any source context
+  essential to an error belongs in that diagnostic's labels/facts; use a one-element report set for
+  the common single-context case
+- [ ] update current warning-prepend helpers and tests to this accepted boundary rather than
+  carrying mixed-lane production-order streams forward
 - [ ] remove internal-bug variants from `Result` signatures after they become invariant panics
 - [ ] preserve operational failures explicitly as the outer `Err`
 - [ ] remove immediate printing from compiler internals
@@ -1286,11 +1364,17 @@ than normalizing it.
 - [ ] record the accepted cost and exact profile policy in the architecture/build documents
 - [ ] leave process-isolated workers to the deferred item below
 
-### Slice 6F — Expose the future tooling boundary
+### Slice 6F — Prove the frozen data and owned worker boundary are host-ready
 
-- [ ] expose immutable source/report views and owned worker inputs suitable for a future LSP host
-- [ ] do not implement LSP protocol, cancellation or incremental document state
-- [ ] ensure frozen source/diagnostic context can outlive the worker safely
+Narrow scope: this slice proves two things and builds nothing speculative. It does not expose
+future LSP APIs, frameworks or cancellation models.
+
+- [ ] prove frozen source/report data can outlive a worker: frozen identity contexts, report
+  stores and retained facts remain valid and renderable after the worker that produced them is
+  dropped
+- [ ] prove the existing owned worker boundary is ready for another long-lived host: a fresh owned
+  worker per build, coherent freeze before outcomes return, complete failed-worker discard, and a
+  documented request/shape a second host could adopt without changing the compiler
 - [ ] document restart/cancellation as future host policy, not a fourth failure lane
 
 ### Phase 6 — Audit / style-guide review / validation
@@ -1344,7 +1428,6 @@ Identify the top remaining owners before changing anything.
 - [ ] source snapshot compression/mapping remains deferred unless source bytes dominate and a separate design is approved
 - [ ] path-node AoS/SoA only if path traversal is a measured hotspot
 - [ ] token cold-store packing only with formal bounds and aggregate evidence
-- [ ] direct path-token fast form only if it improves aggregate memory or parse time
 - [ ] extra/list record packing only if diagnostic cold data is material
 - [ ] verify the selected `LocalSpan` split against the final corpus
 - [ ] do not reduce `TokenShape` below 8 bytes or change the 32-byte diagnostic budget in this plan
@@ -1378,11 +1461,16 @@ For each experiment:
 
 ### Slice 7E — Close roadmap ownership and resume diagnostics work
 
-- [ ] mark this plan complete using current roadmap convention
-- [ ] move rejected/postponed items to the roadmap with the deferral table below and links here
+- [ ] delete this plan and its active roadmap entry in the same completion commit, with no
+  intermediate "plan complete" commit; durable deferred work moves to the roadmap and the
+  architecture authority without links back to this deletable plan
+- [ ] move rejected/postponed items to the roadmap with the deferral table below, named as
+  capabilities in the roadmap's deferred-design area, not linked to this plan
 - [ ] remove duplicate deferred bullets owned by another plan
-- [ ] update the existing Structured diagnostics matrix row to the implemented report/failure contract
-- [ ] unpause the user-facing diagnostics improvement work immediately after this plan
+- [ ] update the existing Structured diagnostics matrix row to the implemented report/failure
+  contract
+- [ ] unpause the user-facing diagnostics improvement work immediately after this plan, preserving
+  its final continuation at its recorded Phase 4.1c checkpoint
 - [ ] refresh its paths, capsule and next semantic slice against the schema/store APIs
 - [ ] remove old payload, label, token and type-context assumptions from that plan
 - [ ] require future diagnostics to fit the 32-byte schema and side-store policy
@@ -1429,9 +1517,10 @@ Complete the common phase close and Slice 7F, plus:
 ## Deliberately deferred work
 
 Maintain one `Compiler data-layout follow-ups` subsection under the roadmap's deferred-design area.
-Add an item when this plan activates or when an experiment is rejected, link back to this plan/design,
-and remove overlapping bullets from other plans. Do not add these implementation optimisations to the
-progress matrix unless they change current tooling or user-visible support.
+Add an item when this plan activates or when an experiment is rejected, name the capability and its
+re-entry criteria in the roadmap (do not link back to this deletable plan), and remove overlapping
+bullets from other plans. Do not add these implementation optimisations to the progress matrix
+unless they change current tooling or user-visible support.
 
 | Deferred item | Owner / re-entry criteria |
 |---|---|
