@@ -86,9 +86,10 @@ CURRENT_SLICE:
   The recorded `just validate` attempt reaches native clippy but fails on the repository's
   warning-denied set. validate-common integration reports 31/1,959 baseline-equivalent failures,
   and bench-scaling's generic-instantiation budget remains over target in both current (n^1.82)
-  and pre-cleanup baseline (n^1.77). These limitations are recorded in the benchmark evidence.
+  and pre-cleanup baseline (n^1.77). These full-gate limitations are recorded in this capsule;
+  the benchmark evidence records the separate workload probes.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
-  `aed38042f`.
+  `aed38042f`, `72f30dcfb`.
 - Non-goals: Phase 3 token-store work; diagnostic compact-record work.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
@@ -98,8 +99,8 @@ Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 remains complete. Phase 2 PathId cutover, generated identity pairing and report-owner
-  retention metrics are implemented and committed; refreshed probe evidence is recorded. Final
-  integration audit is the remaining Phase 2 closeout step.
+  retention metrics are implemented and committed; refreshed probe evidence is recorded. The final
+  integration audit approved the complete change with no required findings.
 - Next work is Phase 3 fixed tokens and source-owned retained syntax.
 
 HISTORICAL_ACCEPTED_SLICES:
