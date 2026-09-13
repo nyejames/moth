@@ -458,6 +458,11 @@ fn parse_ordinary_quoted_literal(
                         "command-input tokenizer path should be valid UTF-8",
                     )
                 }
+                crate::compiler_frontend::symbols::path_interner::PathInternError::BaseMismatch {
+                    ..
+                } => CompilerError::compiler_error(
+                    "logical path merge base is not a structural prefix of the destination table",
+                ),
             }))
         })?;
     let mut span_builder = ExtendedSpanBuilder::new();

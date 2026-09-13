@@ -879,7 +879,7 @@ pub(super) fn compile_check_only_batches(
         match outcome.outcome {
             DirectoryModuleTaskOutcome::Success(compiled) => {
                 debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
-                if let Some(batch) = check_only_success_batch(*compiled) {
+                if let Some(batch) = check_only_success_batch(*compiled)? {
                     transient_batches.push(batch);
                 }
             }
@@ -907,13 +907,15 @@ pub(super) fn compile_check_only_batches(
 ///       canonical check-only success arm does, keeps the module-local string table on the
 ///       batch, and attaches the issuing path fork's snapshot so warning `PathId`s issued
 ///       against the check-only fork keep a table that renders them after the final render
-///       tail's component remap.
+///       tail's component remap. A table whose components the batch's string table cannot
+///       resolve is a pairing invariant failure and returns an infrastructure error instead of
+///       silently dropping the path context.
 /// WHY: the only crossing state for a check-only unit is its diagnostics; keeping the
 ///      construction in one production helper lets the regression test route through the real
 ///      branch instead of re-implementing the path-table attachment.
 pub(super) fn check_only_success_batch(
     compiled: ModuleSemanticResult,
-) -> Option<PremergeDiagnosticBatch> {
+) -> Result<Option<PremergeDiagnosticBatch>, PremergeFailure> {
     let ModuleSemanticResult {
         module,
         generated_delta,
@@ -929,13 +931,15 @@ pub(super) fn check_only_success_batch(
             .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
     );
     if warnings.is_empty() {
-        return None;
+        return Ok(None);
     }
     // Retain the module-local table; the final render tail merges it exactly once via
     // `append_messages_preserving_context`.
     let mut batch = PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
-    batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
-    Some(batch)
+    if let Err(error) = batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table())) {
+        return Err(PremergeFailure::Infrastructure(error));
+    }
+    Ok(Some(batch))
 }
 
 #[allow(clippy::too_many_arguments)]

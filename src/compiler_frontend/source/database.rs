@@ -1207,6 +1207,11 @@ fn map_path_intern_error(error: PathInternError) -> SourceDatabaseError {
         PathInternError::TableFull => {
             SourceDatabaseError::Capacity(SourceCapacityError::LogicalPathTableFull)
         }
+        PathInternError::BaseMismatch { .. } => SourceDatabaseError::Infrastructure(
+            CompilerError::compiler_error(
+                "logical path merge base is not a structural prefix of the destination table",
+            ),
+        ),
     }
 }
 

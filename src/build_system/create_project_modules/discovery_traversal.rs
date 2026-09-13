@@ -652,6 +652,11 @@ fn resolve_module_root_bare_dependency(
                     ),
                 )
             }
+            crate::compiler_frontend::symbols::path_interner::PathInternError::BaseMismatch {
+                ..
+            } => SourceDiscoveryError::Infrastructure(CompilerError::compiler_error(
+                "logical path merge base is not a structural prefix of the destination table",
+            )),
         })?;
     let mut scratch = Vec::new();
     let module_local_provider = path_fork

@@ -77,7 +77,11 @@ impl PathTable {
         self.nodes.len()
     }
 
-    /// Return whether `path` was issued by this table.
+    /// Return whether the numeric index of `path` is addressable by this table.
+    ///
+    /// This proves range only, not provenance: a table from an independent identity domain can
+    /// address the same numeric index with different components. Path identity is meaningful
+    /// only together with the string table that issued the component IDs.
     pub fn contains(&self, path: PathId) -> bool {
         path.index() < self.nodes.len()
     }

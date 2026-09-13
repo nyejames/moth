@@ -287,6 +287,12 @@ fn intern_filesystem_path_identity(
                 ),
                 table,
             ),
+            PathInternError::BaseMismatch { .. } => CompilerMessages::from_error(
+                CompilerError::compiler_error(
+                    "logical path merge base is not a structural prefix of the destination table",
+                ),
+                table,
+            ),
         })
 }
 

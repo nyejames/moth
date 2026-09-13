@@ -821,7 +821,8 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     // If production ever stops attaching the snapshot, the appended messages lose their
     // path context and the spelling assertions below fail.
     let batch = check_only_success_batch(compiled)
-        .expect("a warning-bearing check-only result must produce a transient batch");
+        .expect("a warning-bearing check-only result must produce a transient batch")
+        .expect("check-only path attachment must pair with its own string table");
 
     // One empty project boundary mirrors the canonical check-only lane's project domain.
     let project = CompiledGraphBoundary {

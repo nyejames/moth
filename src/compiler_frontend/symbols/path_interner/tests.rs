@@ -1,6 +1,9 @@
 use super::builder::PathNode;
-use super::{PathId, PathIdRemap, PathInternerBuilder, PathInternerForkSource};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use super::{
+    PathId, PathIdRemap, PathInternError, PathInternerBuilder, PathInternerFork,
+    PathInternerForkSource,
+};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use std::mem::{align_of, size_of};
 use std::path::PathBuf;
 
@@ -716,4 +719,238 @@ mod non_utf8_filesystem_conversion {
             PathInternError::NonUtf8(NonUtf8PathComponent { path: actual }) if actual == path
         ));
     }
+}
+
+#[test]
+fn merge_rejects_delta_base_longer_than_destination() {
+    // The fork's claimed base is 3 nodes; the destination knows only the root.
+    let mut base_strings = StringTable::new();
+    let mut base_builder = PathInternerBuilder::new();
+    let base = base_builder
+        .try_intern_portable_path("a/b", &mut base_strings)
+        .unwrap();
+    let path_source = base_builder.fork_source();
+    let mut fork = path_source.fork_for_module();
+
+    let mut destination = PathInternerBuilder::new();
+
+    let error = destination
+        .merge_delta_from(&fork, &identity_string_remap())
+        .expect_err("a base longer than the destination must be rejected");
+
+    let PathInternError::BaseMismatch {
+        base_len,
+        destination_len,
+        delta_len,
+    } = error
+    else {
+        panic!("expected BaseMismatch, got {error:?}");
+    };
+    assert_eq!(base_len, 3);
+    assert_eq!(destination_len, 1);
+    assert_eq!(delta_len, 3);
+    // The destination must still be untouched by the rejected merge.
+    assert_eq!(destination.len(), 1);
+    assert!(destination.paths().contains(base) == false);
+}
+
+#[test]
+fn merge_rejects_structurally_divergent_base_rows() {
+    // Two independent builders whose first real rows disagree; a fork of one cannot merge
+    // into the other even though every base index is numerically in range. The donor interns
+    // a padding string first so its component IDs differ numerically from the destination's,
+    // exposing the row divergence to the structural prefix check.
+    let mut donor_strings = StringTable::new();
+    donor_strings.intern("donor-pad");
+    let mut donor_builder = PathInternerBuilder::new();
+    donor_builder
+        .try_intern_portable_path("a/b", &mut donor_strings)
+        .unwrap();
+    let donor_source = donor_builder.fork_source();
+    let mut donor_fork = donor_source.fork_for_module();
+
+    let mut destination_strings = StringTable::new();
+    let mut destination_builder = PathInternerBuilder::new();
+    destination_builder
+        .try_intern_portable_path("x/y", &mut destination_strings)
+        .unwrap();
+
+    let string_remap = identity_string_remap();
+    let error = destination_builder
+        .merge_delta_from(&donor_fork, &string_remap)
+        .expect_err("a divergent base row must be rejected");
+
+    assert!(matches!(
+        error,
+        PathInternError::BaseMismatch {
+            base_len: 3,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn merge_rejects_local_parent_forward_reference_with_typed_error() {
+    // A malformed local delta whose first local node's parent points at a later local node
+    // would index unmapped suffix rows under a debug_assert. The merge must return the typed
+    // base-mismatch error in every build profile instead of panicking or mis-mapping.
+    let mut destination = PathInternerBuilder::new();
+    let forward_parent = PathId::try_from_index(2).expect("index 2 fits the compact domain");
+    let delta = PathInternerFork::with_local_nodes_for_test(
+        1,
+        vec![PathNode {
+            parent: Some(forward_parent),
+            component: StringId::from_index(1),
+        }],
+    );
+
+    let error = destination
+        .merge_delta_from(&delta, &identity_string_remap())
+        .expect_err("a forward parent reference must be rejected before suffix remapping");
+
+    assert!(matches!(
+        error,
+        PathInternError::BaseMismatch { base_len: 1, .. }
+    ));
+}
+
+#[test]
+fn merge_rejects_parentless_local_node_with_typed_error() {
+    // A local node without a parent link is malformed: only the root is parentless, and the
+    // root is never a local node. The merge must fail closed instead of unwrapping.
+    let mut destination = PathInternerBuilder::new();
+    let delta = PathInternerFork::with_local_nodes_for_test(
+        1,
+        vec![PathNode {
+            parent: None,
+            component: StringId::from_index(0),
+        }],
+    );
+
+    let error = destination
+        .merge_delta_from(&delta, &identity_string_remap())
+        .expect_err("a parentless local node must be rejected");
+
+    assert!(matches!(
+        error,
+        PathInternError::BaseMismatch { base_len: 1, .. }
+    ));
+}
+
+#[test]
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+fn merge_rejection_leaves_no_delta_counter_trace() {
+    // Counters measure merge work. A delta rejected for a malformed local parent link must
+    // leave the delta counters untouched, so the increments sit behind complete local
+    // validation rather than ahead of it.
+    use crate::compiler_frontend::instrumentation::{
+        FrontendCounter, capture_frontend_counters_for_test, frontend_counter_test_values,
+        lock_counter_test, reset_frontend_counters,
+    };
+    let _guard = lock_counter_test();
+    let _capture = capture_frontend_counters_for_test();
+    reset_frontend_counters();
+    let delta = PathInternerFork::with_local_nodes_for_test(
+        1,
+        vec![PathNode {
+            parent: None,
+            component: StringId::from_index(0),
+        }],
+    );
+    let mut destination = PathInternerBuilder::new();
+    destination
+        .merge_delta_from(&delta, &identity_string_remap())
+        .expect_err("the malformed delta must be rejected");
+    let values = frontend_counter_test_values(&[
+        FrontendCounter::PathDeltaMergeCalls,
+        FrontendCounter::PathDeltaEntriesScanned,
+        FrontendCounter::PathDeltaIdentityRemaps,
+        FrontendCounter::PathDeltaNonIdentityRemaps,
+        FrontendCounter::PathDeltaNonIdentityEntries,
+    ]);
+    assert!(
+        values.iter().all(|value| *value == 0),
+        "a rejected merge must not count: {values:?}"
+    );
+    reset_frontend_counters();
+    let mut fork_destination = PathInternerFork::empty();
+    fork_destination
+        .merge_delta_from(&delta, &identity_string_remap())
+        .expect_err("the malformed delta must be rejected by fork merges too");
+    let values = frontend_counter_test_values(&[
+        FrontendCounter::PathDeltaMergeCalls,
+        FrontendCounter::PathDeltaEntriesScanned,
+        FrontendCounter::PathDeltaIdentityRemaps,
+        FrontendCounter::PathDeltaNonIdentityRemaps,
+        FrontendCounter::PathDeltaNonIdentityEntries,
+    ]);
+    assert!(
+        values.iter().all(|value| *value == 0),
+        "a rejected fork merge must not count: {values:?}"
+    );
+
+    reset_frontend_counters();
+
+    // A valid delta over the same shape still counts exactly its scanned entries.
+    let mut strings = StringTable::new();
+    let mut builder = PathInternerBuilder::new();
+    builder
+        .try_intern_portable_path("a/b", &mut strings)
+        .expect("test path fits");
+    let path_source = builder.fork_source();
+    let string_source = strings.fork_source();
+    let (mut fork_strings, string_base_len) = string_source.fork_for_module().into_parts();
+    let mut fork = path_source.fork_for_module();
+    fork.try_intern_portable_path("a/b/c", &mut fork_strings)
+        .expect("test path fits");
+    let string_remap = strings.merge_delta_from(&fork_strings, string_base_len);
+    builder
+        .merge_delta_from(&fork, &string_remap)
+        .expect("a matching local suffix must merge");
+
+    let values = frontend_counter_test_values(&[
+        FrontendCounter::PathDeltaMergeCalls,
+        FrontendCounter::PathDeltaEntriesScanned,
+    ]);
+    assert_eq!(values[0], 1, "exactly one accepted merge call");
+    assert_eq!(values[1], 1, "the accepted delta scanned one entry");
+}
+
+#[test]
+fn merge_accepts_empty_and_identity_deltas() {
+    // A fork over a matching base with zero local nodes merges as a pure identity remap.
+    let mut string_table = StringTable::new();
+    let mut builder = PathInternerBuilder::new();
+    builder
+        .try_intern_portable_path("a/b", &mut string_table)
+        .unwrap();
+    let path_source = builder.fork_source();
+    let string_source = string_table.fork_source();
+    let (mut fork_strings, string_base_len) = string_source.fork_for_module().into_parts();
+    let mut fork = path_source.fork_for_module();
+
+    let string_remap = string_table.merge_delta_from(&fork_strings, string_base_len);
+    let remap = builder
+        .merge_delta_from(&fork, &string_remap)
+        .expect("an empty delta over a matching base must merge");
+
+    assert!(remap.is_identity());
+    assert_eq!(builder.len(), 3);
+
+    // Re-interning the same identity on the merged builder stays identity.
+    let (mut second_strings, second_base_len) = string_source.fork_for_module().into_parts();
+    let mut second_fork = path_source.fork_for_module();
+    let leaf = second_fork
+        .try_intern_portable_path("a/b/c", &mut second_strings)
+        .unwrap();
+    let second_string_remap = string_table.merge_delta_from(&second_strings, second_base_len);
+    let second_remap = builder
+        .merge_delta_from(&second_fork, &second_string_remap)
+        .expect("a matching local suffix must merge");
+    assert_eq!(second_remap.get(leaf), leaf);
+}
+
+/// An all-identity string remap for merges whose delta carries no new components.
+fn identity_string_remap() -> StringIdRemap {
+    StringTable::new().merge_delta_from(&StringTable::new(), 0)
 }

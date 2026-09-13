@@ -109,7 +109,14 @@ pub(super) fn finalize_failed_discovery(
             let mut diagnostics = warnings;
             diagnostics.push(diagnostic);
             let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
-            batch.attach_path_table_if_missing(Arc::new(source_builder.sources().paths().clone()));
+            if let Err(error) =
+                batch.attach_path_table_if_missing(Arc::new(source_builder.sources().paths().clone()))
+            {
+                return finish_discovery_source_owner(
+                    PremergeFailure::Infrastructure(error),
+                    source_builder,
+                );
+            }
             PremergeFailure::Diagnosed(batch)
         }
         SourceDiscoveryError::Premerge(mut failure) => {
@@ -127,7 +134,12 @@ pub(super) fn finalize_failed_discovery(
         }
     };
     let path_table = Arc::new(source_builder.sources().paths().clone());
-    terminal_failure.attach_path_table_if_missing(path_table);
+    if let Err(error) = terminal_failure.attach_path_table_if_missing(path_table) {
+        return finish_discovery_source_owner(
+            PremergeFailure::Infrastructure(error),
+            source_builder,
+        );
+    }
     finish_discovery_source_owner(terminal_failure, source_builder)
 }
 

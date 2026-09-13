@@ -185,26 +185,62 @@ impl PathInternerBuilder {
     ) -> Result<PathIdRemap, PathInternError> {
         let base_len = delta.base_len();
 
-        debug_assert!(base_len <= self.table.len());
-        debug_assert!(base_len <= delta.len());
-        increment_frontend_counter(FrontendCounter::PathDeltaMergeCalls);
-        add_frontend_counter(FrontendCounter::PathDeltaEntriesScanned, delta.local_len());
-
-        #[cfg(debug_assertions)]
-        for index in 0..base_len {
-            let expected = PathId::try_from_index(index)
-                .expect("a fork base must address its own prefix");
-
-            debug_assert_eq!(self.table.try_parent(expected), delta.try_parent(expected));
-            debug_assert_eq!(
-                self.table.try_component(expected),
-                delta.try_component(expected)
-            );
-            debug_assert_eq!(self.table.try_depth(expected), delta.try_depth(expected));
-            debug_assert_eq!(Some(delta.base_depth(index)), self.table.try_depth(expected));
+        if base_len > self.table.len() || base_len > delta.len() {
+            return Err(PathInternError::BaseMismatch {
+                base_len,
+                destination_len: self.table.len(),
+                delta_len: delta.len(),
+            });
         }
 
+        // The claimed base rows must be structurally equivalent to the destination rows they
+        // replace; a mismatch would remap valid IDs onto silently different paths.
+        for index in 0..base_len {
+            let Some(expected) = PathId::try_from_index(index) else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len,
+                    destination_len: self.table.len(),
+                    delta_len: delta.len(),
+                });
+            };
+
+            if self.table.try_parent(expected) != delta.try_parent(expected)
+                || self.table.try_component(expected) != delta.try_component(expected)
+                || self.table.try_depth(expected) != delta.try_depth(expected)
+            {
+                return Err(PathInternError::BaseMismatch {
+                    base_len,
+                    destination_len: self.table.len(),
+                    delta_len: delta.len(),
+                });
+            }
+        }
+
+        // A rejected malformed delta must leave no counter trace, so every local parent
+        // link is validated before any counter increments or the table is extended.
         let local_len = delta.local_len();
+        for offset in 0..local_len {
+            let node = delta.local_node(offset);
+            let Some(parent) = node.parent else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len,
+                    destination_len: self.table.len(),
+                    delta_len: delta.len(),
+                });
+            };
+            let parent_index = parent.index();
+            if parent_index >= base_len && parent_index - base_len >= offset {
+                // A delta parent must precede its child in node-index order; a forward
+                // or self reference would index unmapped suffix rows.
+                return Err(PathInternError::BaseMismatch {
+                    base_len,
+                    destination_len: self.table.len(),
+                    delta_len: delta.len(),
+                });
+            }
+        }
+        increment_frontend_counter(FrontendCounter::PathDeltaMergeCalls);
+
         let mut mapped_suffix = Vec::with_capacity(local_len);
         let mut is_identity = true;
         let mut non_identity_entries = 0usize;
@@ -212,22 +248,37 @@ impl PathInternerBuilder {
         for offset in 0..local_len {
             let old_index = base_len + offset;
             let node = delta.local_node(offset);
-            let parent = node
-                .parent
-                .expect("a worker-local node must carry a parent");
+            let Some(parent) = node.parent else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len,
+                    destination_len: self.table.len(),
+                    delta_len: delta.len(),
+                });
+            };
 
             let parent_index = parent.index();
             let remapped_parent = if parent_index < base_len {
                 parent
             } else {
                 let parent_offset = parent_index - base_len;
+                if parent_offset >= offset {
+                    // A delta parent must precede its child in node-index order; a forward or
+                    // self reference would index unmapped suffix rows.
+                    return Err(PathInternError::BaseMismatch {
+                        base_len,
+                        destination_len: self.table.len(),
+                        delta_len: delta.len(),
+                    });
+                }
 
-                debug_assert!(
-                    parent_offset < offset,
-                    "a delta parent must precede its child in node-index order"
-                );
-
-                mapped_suffix[parent_offset]
+                mapped_suffix
+                    .get(parent_offset)
+                    .copied()
+                    .ok_or(PathInternError::BaseMismatch {
+                        base_len,
+                        destination_len: self.table.len(),
+                        delta_len: delta.len(),
+                    })?
             };
 
             let remapped_component = string_remap.get(node.component);
@@ -242,6 +293,7 @@ impl PathInternerBuilder {
 
             mapped_suffix.push(merged);
         }
+        add_frontend_counter(FrontendCounter::PathDeltaEntriesScanned, local_len);
         if is_identity {
             increment_frontend_counter(FrontendCounter::PathDeltaIdentityRemaps);
         } else {
@@ -265,9 +317,24 @@ impl PathInternerBuilder {
 ///
 /// Authored interning must never panic: a project that exhausts the compact path-node domain
 /// reaches the deterministic source-capacity lane through [`PathInternError::TableFull`].
+/// Merge-base or local-delta invariant violations use [`PathInternError::BaseMismatch`] and
+/// stay in the infrastructure failure lane.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PathInternError {
-    /// A filesystem component is not strict UTF-8.
+    /// The merge base is not a numeric and structural prefix of the destination table.
+    ///
+    /// The release merge-base contract requires the claimed base rows of a delta to be
+    /// structurally equivalent (same parent, component, and depth) to the destination rows
+    /// they replace, and to fit inside both tables. Violations would otherwise remap valid
+    /// IDs onto silently different paths, so merging rejects them in all build profiles.
+    BaseMismatch {
+        /// The claimed shared base length of the merge.
+        base_len: usize,
+        /// The node count of the destination table.
+        destination_len: usize,
+        /// The node count of the delta table.
+        delta_len: usize,
+    },
     NonUtf8(NonUtf8PathComponent),
     /// The build-lifetime table cannot address another node.
     TableFull,

@@ -407,6 +407,16 @@ mod detailed {
 
         atomic_counter(counter).fetch_add(amount, Ordering::Relaxed);
     }
+
+    /// Read a batch of counters directly, for focused merge-rejection counter tests.
+    #[cfg(test)]
+    pub(crate) fn frontend_counter_test_values(counters: &[FrontendCounter]) -> Vec<usize> {
+        counters
+            .iter()
+            .map(|&counter| atomic_counter(counter).load(Ordering::Relaxed))
+            .collect()
+    }
+
     pub(crate) fn record_path_max_depth(depth: u32) {
         #[cfg(test)]
         if !test_counter_capture_active() {
@@ -1322,7 +1332,9 @@ pub(crate) use detailed::{
 };
 
 #[cfg(all(test, feature = "benchmark_counters", feature = "timers"))]
-pub(crate) use detailed::capture_frontend_counters_for_test;
+pub(crate) use detailed::{
+    capture_frontend_counters_for_test, frontend_counter_test_values,
+};
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn reset_frontend_counters() {}

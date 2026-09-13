@@ -115,7 +115,11 @@ fn materialise_generated_request<'build>(
     match result {
         Ok(()) => Ok(()),
         Err(mut failure) => {
-            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()));
+            if let Err(error) = failure
+                .attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
+            {
+                return Err(PremergeFailure::Infrastructure(error));
+            }
             Err(failure)
         }
     }

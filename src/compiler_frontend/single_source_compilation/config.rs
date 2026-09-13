@@ -165,6 +165,18 @@ pub(crate) fn compile_config_source(
                 span_builder: ExtendedSpanBuilder::new(),
             };
         }
+        Err(PathInternError::BaseMismatch { .. }) => {
+            return ConfigCompilationOutcome {
+                result: Err(CompilerMessages::from_error(
+                    CompilerError::compiler_error(
+                        "logical path merge base is not a structural prefix of the destination table",
+                    ),
+                    string_table.clone(),
+                )),
+                file_id,
+                span_builder: ExtendedSpanBuilder::new(),
+            };
+        }
     };
 
     let mut span_builder = ExtendedSpanBuilder::new();

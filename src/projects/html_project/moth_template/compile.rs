@@ -80,7 +80,11 @@ pub(crate) fn compile_moth_template_with_registry(
     let sources = match request.collect_sources(string_table, &mut path_fork) {
         Ok(sources) => sources,
         Err(mut messages) => {
-            messages.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
+            if let Err(error) =
+                messages.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
+            {
+                return Err(CompilerMessages::from_error_ref(error, string_table));
+            }
             return Err(messages);
         }
     };

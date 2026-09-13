@@ -224,6 +224,11 @@ fn compile_single_file_frontend_with_target(
                     ),
                 ));
             }
+            Err(PathInternError::BaseMismatch { .. }) => {
+                return Err(PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                    "logical path merge base is not a structural prefix of the destination table",
+                )));
+            }
         };
         let extension = string_table.intern(extension_text);
         let diagnostic =
@@ -233,7 +238,11 @@ fn compile_single_file_frontend_with_target(
         // before a source database exists, so the path snapshot must travel with the diagnostic.
         let table = std::mem::take(string_table);
         let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-        batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()));
+        if let Err(error) =
+            batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()))
+        {
+            return Err(PremergeFailure::Infrastructure(error));
+        }
         return Err(PremergeFailure::Diagnosed(batch));
     }
 

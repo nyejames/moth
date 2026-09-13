@@ -59,7 +59,9 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::{
     FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathInternerBuilder, PathInternerFork,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
@@ -1933,4 +1935,99 @@ fn generated_evidence_authorization_requires_the_selected_trait_pair() {
         &type_environment,
         &selected,
     ));
+}
+
+#[test]
+fn provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_requester() {
+    // A published provider context retains the path table and source string table that issued
+    // its retained `PathId`s. A requester from an independent boundary can hold a different
+    // spelling at the same numeric index, so numeric reuse would render the wrong module.
+    // The rebase must re-intern every retained path by spelling into the requester's fork and
+    // rewrite the retained artefact paths through that remap.
+    let mut provider_strings = StringTable::new();
+    let mut provider_builder = PathInternerBuilder::new();
+    let provider_source_file = provider_builder
+        .try_intern_portable_path("provider/@mod.moth", &mut provider_strings)
+        .expect("provider paths fit the compact table");
+    let provider_function_path = provider_builder
+        .try_intern_portable_path("provider/@mod.moth/generate", &mut provider_strings)
+        .expect("provider paths fit the compact table");
+    let provider_path_table = Arc::new(provider_builder.freeze());
+    let source_string_table = Arc::new(provider_strings.freeze());
+
+    let mut context =
+        ModuleMaterialisationContext::from_identities_for_test(vec![generated_identity(
+            "published",
+        )
+        .declaration()
+        .clone()]);
+    context.artefacts[0].source_file = provider_source_file;
+    context.artefacts[0].function_path = provider_function_path;
+    context.install_identity_tables(Arc::clone(&provider_path_table), source_string_table);
+
+    // The requester's fork already interns "shared/@mod.moth" at indexes the provider table
+    // also occupies, while naming different components behind them: same numeric index,
+    // different spelling domains.
+    let mut requester_strings = StringTable::new();
+    requester_strings.intern("shared");
+    requester_strings.intern("@mod.moth");
+    let mut requester_fork = PathInternerFork::empty();
+    let requester_shared = requester_fork
+        .try_intern_portable_path("shared/@mod.moth", &mut requester_strings)
+        .expect("requester paths fit the compact table");
+
+    let rebased = context
+        .rebased_for_requester(&mut requester_fork, &mut requester_strings)
+        .expect("a well-formed provider context rebases into the requester domain");
+
+    let artefact = &rebased.artefacts[0];
+    assert_ne!(
+        artefact.source_file, provider_source_file,
+        "the requester domain must re-issue the retained source path"
+    );
+    assert_ne!(
+        artefact.function_path, provider_function_path,
+        "the requester domain must re-issue the retained function path"
+    );
+
+    // Both spellings must render correctly in their own domains, and the requester's
+    // retained paths must resolve through the requester's fork table, not the provider's.
+    let requester_table = rebased.path_table.as_ref().expect("rebased context table");
+    let requester_frozen_strings = Arc::new(requester_strings.clone().freeze());
+    let mut scratch = Vec::new();
+    assert_eq!(
+        provider_path_table.render_portable_frozen(
+            provider_source_file,
+            &context.source_string_table.as_ref().expect("source strings"),
+            &mut scratch
+        ),
+        "provider/@mod.moth"
+    );
+    assert_eq!(
+        requester_table.render_portable_frozen(
+            artefact.source_file,
+            &requester_frozen_strings,
+            &mut scratch
+        ),
+        "provider/@mod.moth",
+        "the requester spelling must follow the provider's, not its own colliding node"
+    );
+    let requester_rendered_function = requester_table.render_portable_frozen(
+        artefact.function_path,
+        &requester_frozen_strings,
+        &mut scratch,
+    );
+    assert_eq!(
+        requester_rendered_function, "provider/@mod.moth/generate",
+        "the remapped function path must spell the provider's components"
+    );
+    assert_ne!(
+        requester_table.render_portable_frozen(
+            artefact.source_file,
+            &requester_frozen_strings,
+            &mut scratch
+        ),
+        requester_table.render_portable_frozen(requester_shared, &requester_frozen_strings, &mut scratch),
+        "the same numeric prefix must not collapse distinct domains"
+    );
 }

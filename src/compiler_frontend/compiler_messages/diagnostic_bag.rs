@@ -15,7 +15,7 @@ use super::compiler_errors::{
 use super::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathTable};
+use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
 
@@ -179,10 +179,15 @@ impl PremergeFailure {
         }
     }
     /// Retain the path table that issued diagnostics before the local compiler owner is dropped.
-    pub(crate) fn attach_path_table_if_missing(&mut self, path_table: Arc<PathTable>) {
+    ///
+    /// Infrastructure failures carry no path payloads, so attaching is a harmless no-op.
+    pub(crate) fn attach_path_table_if_missing(
+        &mut self,
+        path_table: Arc<PathTable>,
+    ) -> Result<(), CompilerError> {
         match self {
             Self::Diagnosed(batch) => batch.attach_path_table_if_missing(path_table),
-            Self::Infrastructure(_) => {}
+            Self::Infrastructure(_) => Ok(()),
             Self::Mixed { batch, .. } => batch.attach_path_table_if_missing(path_table),
         }
     }
@@ -289,8 +294,11 @@ impl PremergeDiagnosticBatch {
     ) -> Self {
         Self::new(DiagnosticBag::from_diagnostics(diagnostics), string_table)
     }
+    pub(crate) fn has_errors(&self) -> bool {
+        self.bag.has_errors()
+    }
+
     /// Attach the generated-source owner only to spans that do not already have one.
-    ///
     /// Existing primary and label owners are authoritative: this bridge supplies ownership for
     /// legacy AST/HIR diagnostics without replacing mixed-domain provenance.
     pub(crate) fn set_frozen_identity_handle_if_missing(
@@ -302,31 +310,50 @@ impl PremergeDiagnosticBatch {
             diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
         }
     }
+
     /// Attach one complete path identity snapshot to every diagnostic in this batch.
-    pub(crate) fn attach_path_table_if_missing(&mut self, path_table: Arc<PathTable>) {
-        if self.bag.diagnostics.is_empty()
-            || !self.render_path_contexts.is_empty()
-            || (0..path_table.len()).any(|index| {
-                PathId::try_from_index(index)
-                    .and_then(|path| path_table.try_component(path))
-                    .is_some_and(|component| self.string_table.try_resolve(component).is_none())
-            })
-        {
-            return;
+    ///
+    /// A path table is pairable only with the string table that issued its component IDs:
+    /// `PathTable::contains` proves numeric addressability only, so pairing is validated
+    /// against exactly the path identities this batch's diagnostics still render — each
+    /// payload path plus every table ancestor its resolver walks. A diagnostic with no
+    /// `PathId` payload never dereferences the table and rejects nothing. A rendered path the
+    /// candidate table cannot address at all, or whose referenced nodes carry components this
+    /// string table cannot resolve, would render the wrong spelling and returns a typed error
+    /// instead of silently dropping the context. Same-index ownership across foreign domains is
+    /// not detectable from bare tables; the provider/materialisation boundary solves it by
+    /// retaining each table with its source `FrozenStringTable` and rebasing by spelling.
+    pub(crate) fn attach_path_table_if_missing(
+        &mut self,
+        path_table: Arc<PathTable>,
+    ) -> Result<(), CompilerError> {
+        if self.bag.diagnostics.is_empty() || !self.render_path_contexts.is_empty() {
+            return Ok(());
         }
+
+        if let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
+            &path_table,
+            &self.string_table,
+            self.bag
+                .diagnostics
+                .iter()
+                .map(|diagnostic| &diagnostic.payload),
+        ) {
+            return Err(CompilerError::compiler_error(format!(
+                "diagnostic path table is not pairable with this batch's string table: \
+                 rendered path node {index} is unaddressable or carries a component StringId \
+                 the batch cannot resolve"
+            )));
+        }
+
         self.render_path_contexts.push(RenderPathContext {
             diagnostic_range: 0..self.bag.diagnostics.len(),
             path_table,
         });
+        Ok(())
     }
-
-    pub(crate) fn has_errors(&self) -> bool {
-        self.bag.has_errors()
-    }
-    /// Prepend diagnostics emitted before this batch while preserving retained render ranges.
-    ///
     /// WHAT: moves the incoming diagnostics in front of this batch and shifts each retained type
-    /// context by their count.
+    ///       context by their count.
     /// WHY: preparation warnings are collected before a later diagnosed batch; moving them here
     /// keeps authored order and avoids cloning diagnostics or their interned IDs.
     pub(crate) fn prepend_diagnostics(

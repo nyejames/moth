@@ -126,7 +126,10 @@ impl PathInternerFork {
         self.base_len + self.nodes.len()
     }
 
-    /// Return whether `path` was issued by this fork or its inherited base.
+    /// Return whether the numeric index is addressable by this fork's inherited and local rows.
+    ///
+    /// This proves range only, not provenance: an independent domain can reuse the same index
+    /// with different path components. Cross-domain ownership requires the issuing string table.
     #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn contains(&self, path: PathId) -> bool {
         path.index() < self.len()
@@ -142,9 +145,32 @@ impl PathInternerFork {
         self.nodes[offset]
     }
 
-    /// Borrow one inherited base depth for merge-time prefix checks.
-    pub(super) fn base_depth(&self, index: usize) -> u32 {
-        self.base.depths[index]
+
+    /// Build a fork carrying an explicit local node list, for merge-ordering tests only.
+    ///
+    /// Production forks append only parent-linked nodes in index order, so a malformed delta
+    /// cannot arise from interning. This constructor fabricates one to prove the merge reports
+    /// a typed error instead of indexing unmapped suffix rows.
+    #[cfg(test)]
+    pub(super) fn with_local_nodes_for_test(base_len: usize, nodes: Vec<PathNode>) -> Self {
+        Self {
+            base: Arc::new(PathTableBase {
+                nodes: vec![
+                    PathNode {
+                        parent: None,
+                        component: StringId::from_index(0),
+                    };
+                    base_len
+                ]
+                .into_boxed_slice(),
+                depths: vec![0; base_len].into_boxed_slice(),
+                lookup: FxHashMap::default(),
+            }),
+            base_len,
+            depths: vec![0; nodes.len()],
+            nodes,
+            lookup: FxHashMap::default(),
+        }
     }
 
     /// Return the parent path, or `None` for the root.
@@ -568,36 +594,95 @@ impl PathInternerFork {
         string_remap: &StringIdRemap,
     ) -> Result<PathIdRemap, PathInternError> {
         let delta_base_len = delta.base_len();
-        debug_assert!(delta_base_len <= self.len());
-        debug_assert!(delta_base_len <= delta.len());
-        #[cfg(debug_assertions)]
-        for index in 0..delta_base_len {
-            let expected = PathId::try_from_index(index)
-                .expect("a fork base must address its own prefix");
-            debug_assert_eq!(self.try_parent(expected), delta.try_parent(expected));
-            debug_assert_eq!(self.try_component(expected), delta.try_component(expected));
-            debug_assert_eq!(self.try_depth(expected), delta.try_depth(expected));
+        if delta_base_len > self.len() || delta_base_len > delta.len() {
+            return Err(PathInternError::BaseMismatch {
+                base_len: delta_base_len,
+                destination_len: self.len(),
+                delta_len: delta.len(),
+            });
         }
-        increment_frontend_counter(FrontendCounter::PathDeltaMergeCalls);
-        add_frontend_counter(FrontendCounter::PathDeltaEntriesScanned, delta.local_len());
+
+        // The claimed base rows must be structurally equivalent to the destination rows they
+        // replace; a mismatch would remap valid IDs onto silently different paths.
+        for index in 0..delta_base_len {
+            let Some(expected) = PathId::try_from_index(index) else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            };
+            if self.try_parent(expected) != delta.try_parent(expected)
+                || self.try_component(expected) != delta.try_component(expected)
+                || self.try_depth(expected) != delta.try_depth(expected)
+            {
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            }
+        }
+        // A rejected malformed delta must leave no counter trace, so every local parent
+        // link is validated before any counter increments or the fork is extended.
         let local_len = delta.local_len();
+        for offset in 0..local_len {
+            let node = delta.local_node(offset);
+            let Some(parent) = node.parent else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            };
+            let parent_index = parent.index();
+            if parent_index >= delta_base_len && parent_index - delta_base_len >= offset {
+                // A delta parent must precede its child in node-index order; a forward
+                // or self reference would index unmapped suffix rows.
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            }
+        }
+
+        increment_frontend_counter(FrontendCounter::PathDeltaMergeCalls);
         let mut mapped_suffix = Vec::with_capacity(local_len);
         let mut is_identity = true;
         let mut non_identity_entries = 0usize;
         for offset in 0..local_len {
             let old_index = delta_base_len + offset;
             let node = delta.local_node(offset);
-            let parent = node.parent.expect("a worker-local node must carry a parent");
+            let Some(parent) = node.parent else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            };
             let parent_index = parent.index();
             let remapped_parent = if parent_index < delta_base_len {
                 parent
             } else {
                 let parent_offset = parent_index - delta_base_len;
-                debug_assert!(
-                    parent_offset < offset,
-                    "a delta parent must precede its child in node-index order"
-                );
-                mapped_suffix[parent_offset]
+                if parent_offset >= offset {
+                    // A delta parent must precede its child in node-index order; a forward or
+                    // self reference would index unmapped suffix rows.
+                    return Err(PathInternError::BaseMismatch {
+                        base_len: delta_base_len,
+                        destination_len: self.len(),
+                        delta_len: delta.len(),
+                    });
+                }
+                mapped_suffix
+                    .get(parent_offset)
+                    .copied()
+                    .ok_or(PathInternError::BaseMismatch {
+                        base_len: delta_base_len,
+                        destination_len: self.len(),
+                        delta_len: delta.len(),
+                    })?
             };
             let remapped_component = string_remap.get(node.component);
             let merged = self
@@ -609,6 +694,7 @@ impl PathInternerFork {
             }
             mapped_suffix.push(merged);
         }
+        add_frontend_counter(FrontendCounter::PathDeltaEntriesScanned, local_len);
         if is_identity {
             increment_frontend_counter(FrontendCounter::PathDeltaIdentityRemaps);
         } else {

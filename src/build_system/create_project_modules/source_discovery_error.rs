@@ -91,11 +91,15 @@ impl SourceDiscoveryError {
                 let table = std::mem::take(string_table);
                 let mut batch =
                     PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-                batch.attach_path_table_if_missing(path_table);
+                if let Err(error) = batch.attach_path_table_if_missing(path_table) {
+                    return PremergeFailure::Infrastructure(error);
+                }
                 PremergeFailure::Diagnosed(batch)
             }
             SourceDiscoveryError::Premerge(mut failure) => {
-                failure.attach_path_table_if_missing(path_table);
+                if let Err(error) = failure.attach_path_table_if_missing(path_table) {
+                    return PremergeFailure::Infrastructure(error);
+                }
                 failure
             }
             SourceDiscoveryError::Finalized(_) => {

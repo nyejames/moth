@@ -104,6 +104,12 @@ impl DiagnosticPlace {
             *path = remap.get(*path);
         }
     }
+    /// Push this place's path identity when the place addresses one.
+    pub(crate) fn push_path(&self, paths: &mut Vec<PathId>) {
+        if let DiagnosticPlace::Path(path) = self {
+            paths.push(*path);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
