@@ -18,7 +18,7 @@ an explicit dependency clause.
 ```text
 STATUS: activated early for existing-ABI work; current surface hardened, no v1 expansion accepted
 CURRENT_SLICE: existing-behaviour coverage for all 18 registered functions plus registration cleanup
-BLOCKERS: the proposed function expansion waits for a user decision on scope and on the unspecified numerical semantics below; compile-time folding waits for the Core const-eval prerequisite
+BLOCKERS: the proposed function expansion waits for a user decision on scope and on the unspecified numerical semantics below; compile-time folding waits for the Core const-eval prerequisite; the inherited data-layout base fails `just validate`, so this slice reports focused evidence instead of a closed gate
 NEXT_ACTION: settle the expansion list and the open semantic questions with the user, then publish accepted contracts in the canonical reference before implementing
 ```
 
@@ -174,6 +174,10 @@ variadic external signature.
 - Compile-time folding once the Core const-eval prerequisite and a precision contract exist.
 - Interaction with the queued fixed-scale `Number`/`NumberN` family. A Float-only Math slice neither
   implements that plan nor inherits its rounding rule.
+- `ExternalConstantDef::data_type` is registered but never read by production code, so a constant's
+  declared ABI type is unenforced: mutating `PI`'s type survives the whole suite. Either the field
+  gains a consumer in the constant path or it should go; the owner is the external-package registry,
+  not this package.
 
 ## Longer-term candidates
 
@@ -200,7 +204,7 @@ Primary owners:
 | Contract | Owner |
 |---|---|
 | Runtime behaviour of the 18 registered functions | `tests/cases/core_math_basic_functions` |
-| Emitted values of `PI`, `TAU` and `E` | `tests/cases/core_math_constants`, which asserts the emitted decimals only and runs no output |
+| Emitted values of `PI`, `TAU` and `E` | `tests/cases/core_math_constants`, which asserts the three emitted decimals in the artifact only. Its `io.line` calls are emitted but never observed, because the case declares no rendered-output expectation, so nothing about runtime output is checked either way |
 | Inline lowering shape | `tests/cases/core_inline_expression_lowering`, plus the `sqrt` and `exp` forms in `tests/cases/core_math_float_boundary_validation` |
 | Constant folding in a const context | `tests/cases/core_math_external_constants_const_context` |
 | Non-finite results and builtin-error recovery, plus HTML-Wasm rejection | `tests/cases/core_math_float_boundary_validation` |
@@ -212,6 +216,13 @@ transcendental results use a justified error bound with a deterministic pass or 
 representable results use exact rendered output. Where an assertion necessarily depends on
 semantics the canonical reference leaves open, record it in the pinned list above rather than
 treating it as settled contract.
+
+This slice could not close the mandatory `just validate` gate: the inherited data-layout base fails
+the all-targets lint build, `cargo test -p moth --lib` and seven of eight feature lanes, identically
+in a clean worktree at that base. Its focused evidence is `cargo run -- tests --tag math` (13/13),
+`--tag core-packages` (31/31), `cargo run -- check docs --terse`, `cargo check -p moth --lib` and
+`rustfmt --check` on `math.rs`, with the registration rewrite mutation-proved: every registered
+function, constant, arity, ABI type and access kind has at least one killed mutant.
 
 ## History
 

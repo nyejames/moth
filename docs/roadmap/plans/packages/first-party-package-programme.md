@@ -19,7 +19,7 @@ plans under this directory.
 ```text
 STATUS: active programme; isolated existing-ABI package work runs alongside data-layout Phases 2 and 3
 CURRENT_SLICE: none - `@core/math` is activated and its existing-surface coverage and registration cleanup are delivered
-BLOCKERS: the Math expansion waits for a user scope decision and for the open numerical semantics in `core-math.md`; package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout Phase 2 base `34bd000d5` fails `just validate`, `cargo test -p moth --lib` and seven of eight feature lanes, so no package slice can produce a green gate until its owner repairs that build
+BLOCKERS: the Math expansion waits for a user scope decision and for the open numerical semantics in `core-math.md`; package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout Phase 2 base fails `just validate`, `cargo test -p moth --lib` and seven of eight feature lanes, so no package slice can produce a green gate until its owner repairs that build
 NEXT_ACTION: settle the Math expansion scope and its open semantics with the user, or activate the next isolated existing-ABI package slice
 ```
 
@@ -429,7 +429,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage and registration cleanup delivered, expansion waiting on a user scope decision | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
-| 4 | `@core/time` | [core-time.md](./core-time.md) | Design checkpoint delivered: the existing surface is audited and eleven semantic decisions plus a correction set are recorded; no implementation accepted | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
+| 4 | `@core/time` | [core-time.md](./core-time.md) | Design checkpoint delivered: the existing surface is audited and thirteen tabled semantic decisions plus a correction set are recorded; no implementation accepted | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
 | 5 | `@web/canvas` | `web-canvas.md` | TODO: create when activated | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
 | 6 | `@core/io` | `core-io.md` | TODO: create when activated | Run a dedicated scope and prelude review, then close only the agreed common gaps |
@@ -651,7 +651,16 @@ implementation, audits and every other gate lane are complete and merged, and th
 `just validate` runs green. The roadmap owner has accepted that isolated package work on the
 existing external ABI proceeds during data-layout Phases 2 and 3 rather than waiting, so such a
 slice reports the inherited failure with its own focused evidence instead of claiming a closed gate.
-The inherited breakage above is broader than a lint allowance and is escalated to that plan's owner.
+The inherited breakage above is broader than a lint allowance and is escalated to that plan's owner,
+whose Phase 2 audit checklist still records "run path/dependency/module/type/diagnostic tests and
+serial/parallel determinism tests" as ticked for this same checkpoint. That entry is the record the
+measurement contradicts; only that plan may correct it.
+
+One repair on this branch belongs to that owner and is not yet upstream: the `compile_prepared` call
+inside `compile_check_only_job`
+(`src/build_system/create_project_modules/compilation/canonical.rs`) passed `prepared` and
+`path_base_len` in the callee's reverse order, which broke the `timers` feature build.
+Report it rather than reapplying it - the next published data-layout checkpoint may already carry it.
 
 ### Phase 1 - activate the living package workflow
 

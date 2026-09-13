@@ -17,7 +17,7 @@ reference before implementation.
 ```text
 STATUS: design checkpoint delivered; no implementation slice accepted
 CURRENT_SLICE: none - this plan is the audit result, not an approved change
-BLOCKERS: eleven unsettled semantic decisions below, four of which already have a demonstrable current behaviour that a new test would silently promote to contract; the correction set also needs a decision on who owns binding error-code allocation
+BLOCKERS: thirteen tabled semantic decisions below - eleven fully open, two settled only in scope - four of which already have a demonstrable current behaviour that a new test would silently promote to contract; the correction set also needs a decision on who owns binding error-code allocation; the umbrella programme owns the inherited red `just validate` gate
 NEXT_ACTION: settle the decision table with the user, publish the accepted contract in `time.mtf`, then implement the validity and portability corrections before any arithmetic surface
 ```
 
@@ -49,9 +49,6 @@ identity per type. In emitted JavaScript a `Duration`, `TimeMark` or `Timestamp`
 nothing wraps, brands or tags it, unlike `@core/io`'s `Input`, which is a real object. The abstraction
 exists in the type environment and in diagnostics, and is erased at runtime.
 
-That erasure is why every inline lowering can do arithmetic on a handle directly, and why the unit
-carried by each handle - milliseconds today - is an implementation fact rather than a stated contract.
-
 ### The one runtime helper
 
 `src/backends/js/package_bindings/core/time.rs` emits `__moth_time_timestamp_from_iso_string`, which
@@ -73,7 +70,31 @@ Time values support no arithmetic and no comparison. The AST arithmetic policy a
 `TypeEnvironment::supports_runtime_equality` returns false for external types. There is no
 registration hook for an operator, so any arithmetic must be a named function.
 
-## Audited defects and their owners
+## Design rationale worth preserving
+
+- Handle erasure is why every inline lowering can do arithmetic on a handle directly, and why the
+  unit each handle carries - milliseconds today - is an implementation fact rather than a stated
+  contract. Exposing that unit or a field would fix it permanently.
+- Operators cannot be overloaded and no registration hook exists for one, so every arithmetic
+  addition is a named function over handles rather than a syntax change.
+- The finite-result boundary is a shared language rule applied at one gate, not a package feature.
+  Extending validity to `Float` *arguments* is a boundary decision, not a Time helper edit.
+- Binding error codes belong to the compiler-owned enum. A package-local code cannot be kept stable
+  and cannot carry a `default_message`.
+- Host behaviour is not a contract. `Date.parse` is the only reason the current accept set exists,
+  and a decision must state the accepted grammar before any test may pin it.
+
+## Current work
+
+This plan is the delivered work: a read-only audit of the shipped surface with no production change.
+It establishes what is true today (the surface table and implementation notes above), the seven
+defects below with their real owners, the thirteen decisions a v1 needs, the four assertions already
+pinned against canonical silence, and the coverage owner table. Implementation starts only after the
+decisions are settled with the user and published in `time.mtf`.
+
+## Known gaps and next extensions
+
+### Audited defects and their owners
 
 Each item was read at its cited owner. Nothing here is fixed by this plan.
 
@@ -85,9 +106,9 @@ Each item was read at its cited owner. Nothing here is fixed by this plan.
 | 4 | `to_iso_string` is documented and registered infallible, yet lowers to `(new Date(#0)).toISOString()`, which throws a host `RangeError` for a non-finite or out-of-range instant. Nothing contains that exception: the JS backend's only `try`/`catch` wraps a fallible Moth function and rethrows anything that is not the result-propagation sentinel. The path is reachable from ordinary accepted source - `timestamp_from_unix_seconds(100000000000000.0)` followed by `to_iso_string` compiles with no errors or warnings. | Time registration plus the host-exception policy gap | `time.rs`, `src/backends/js/js_function.rs`; `(new Date(1e17)).toISOString()` throws `RangeError: Invalid time value` on the harness interpreter |
 | 5 | A successful parse is unvalidated: any finite `Date.parse` result becomes a `Timestamp` with no range check. | Time helper | helper body |
 | 6 | Unary minus on any non-numeric value, including a `Duration`, reaches HIR as a plain `HirUnaryOp::Neg` and is reported as `MOTH-INFRA-0001` "Plain HirUnaryOp::Neg must be lowered through HirStatementKind::NumericOp" - an internal-invariant lane for ordinary user source. Reproduced on `-duration`, `-"moth"` and `-true`, so this is a general operator-policy defect, not a Time defect. | `src/compiler_frontend/ast/expressions/eval_expression/operator_policy/unary.rs` returns `Ok(operand)` unconditionally for `Negate`; rejection must happen there | `cargo run -- check` on a three-line project for each of the three operand types |
-| 7 | `TimeFunctionSpec` plus a local `shared_param` helper duplicate the per-package registration shim that Math and IO also carry, while `ExternalFunctionSpec` and `external_success_returns` already exist as the shared shapes. | package registration modules | `time.rs`, `math.rs`, `io.rs`, `definitions.rs` |
+| 7 | Time carries a `shared_param` helper and a `TimeFunctionSpec` whose fields are one-to-one with `ExternalFunctionSpec`, so the shim adds indirection without absorbing variation. The package-local table itself is the accepted shape - `core-math.md` and `core-text.md` both settle that - so only Time's extra layer is open, and the fix is a package-local simplification, never a cross-Core registration abstraction. | Time registration module | `time.rs` beside `math.rs`'s post-cleanup table |
 
-## Decisions the v1 needs
+### Decisions the v1 needs
 
 The canonical reference states signatures, the monotonic sentence, the single-fallible sentence, the
 access and return contract, the backend lowering list, the opaque-type prohibitions, the five
@@ -133,20 +154,36 @@ sub-second fraction; UTC formatting independent of the machine timezone. Host-ca
 asserted only by string presence, so a swap that leaves both `performance.now()` and `Date.now()`
 somewhere in the artifact still passes.
 
-## Proposed v1 target
+### Next extensions, in order
 
-Candidates only, in this order. Nothing here is accepted API.
+Candidates only. Nothing here is accepted API.
 
 1. **Validity and portability corrections.** Route the parse failure through the canonical carrier
    with an allocated code, apply the String content boundary, pin the accepted grammar in the
    canonical reference and reject what falls outside it, and resolve the infallible-versus-throwing
    tension for `to_iso_string`. These change no public signature except possibly that one error
    channel, and they are what makes the package portable rather than "whatever the host parser does".
-2. **A recorded semantic contract.** Publish decisions 1-12 in `time.mtf`, then convert the four
+2. **A recorded semantic contract.** Publish the settled outcome of decision rows 1-12 in `time.mtf`
+   - row 13 chooses a surface rather than a contract - then convert the four
    pinned assertions into contract-derived coverage and add owners for the unowned canonical facts.
-3. **A small arithmetic surface.** Duration addition, subtraction and scaling, timestamp offset and
-   timestamp difference are candidates; they need accepted names, signatures, saturation or failure
-   behaviour and a range decision first.
+
+### Documentation corrections awaiting approval
+
+Identified while auditing, not applied, because Time implementation status did not change:
+
+- the progress matrix Time row records `JS / HTML` although the lane runs html and html_wasm
+  executions, where the sibling Math row uses `JS / HTML-Wasm validation`
+- the same row describes "runtime smoke" coverage and implies the fallible parse contract is covered,
+  while the error value is never observed
+- its closing rule - that Time semantics must stay backend-neutral rather than inheriting JavaScript
+  behaviour - is correct and currently unenforceable, because the parse grammar it would need is
+  undefined
+
+## Longer-term candidates
+
+A small arithmetic surface: Duration addition, subtraction and scaling, timestamp offset and
+timestamp difference. They need accepted names, signatures, saturation or failure behaviour and a
+range decision first, and they follow the recorded contract rather than preceding it.
 
 Out of implementation scope: calendar types, time zones, local-time conversion, locale-aware
 formatting, timers, sleep, intervals, animation scheduling and new opaque-handle infrastructure.
@@ -163,6 +200,8 @@ formatting, timers, sleep, intervals, animation scheduling and new opaque-handle
   source-visible unit or field would fix it permanently.
 - Reject a Wasm lowering set until the semantic contract exists. Duplicating the host parser in a
   second backend would double the unspecified behaviour.
+- Reject a cross-Core registration abstraction for defect 7. Package-local tables are the settled
+  shape; only Time's redundant spec layer is in scope.
 
 ## Validation and integration coverage
 
@@ -186,17 +225,9 @@ No case observes the parse error's code or message, so defect 1 is unowned by co
 suite is strong on numeric values and rejection codes and weak wherever the canonical reference is
 silent.
 
-## Documentation corrections awaiting approval
-
-Identified while auditing, not applied, because Time implementation status did not change:
-
-- the progress matrix Time row records `JS / HTML` although the lane runs html and html_wasm
-  executions, where the sibling Math row uses `JS / HTML-Wasm validation`
-- the same row describes "runtime smoke" coverage and implies the fallible parse contract is covered,
-  while the error value is never observed
-- its closing rule - that Time semantics must stay backend-neutral rather than inheriting JavaScript
-  behaviour - is correct and currently unenforceable, because the parse grammar it would need is
-  undefined
+This checkpoint changed no production code, so it ran no gate of its own: `cargo run -- tests --tag
+time` (18/18 correct) and `cargo run -- check docs --terse` are the evidence that the audited state
+is the current state. The umbrella programme owns the inherited red `just validate` gate.
 
 ## History
 
