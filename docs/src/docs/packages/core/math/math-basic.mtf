@@ -24,7 +24,8 @@ You can also bind the whole namespace and access members through field access.
 
 ### Constants
 
-`PI`, `TAU` and `E` form compile-time `Float` values. Use them directly in expressions.
+`PI`, `TAU`, `E`, `SQRT_2`, `LN_2` and `LN_10` form compile-time `Float`
+values. Use them directly in expressions.
 
 ### Common functions
 
@@ -32,6 +33,10 @@ You can also bind the whole namespace and access members through field access.
 - `atan2(y, x)` for arc tangent of two values
 - `sqrt`, `pow`, `log` for powers and logarithms
 - `abs`, `floor`, `ceil`, `round`, `trunc` for rounding
+- `asin`, `acos`, `atan` for inverse trigonometry
+- `cbrt`, `hypot(x, y)` for roots and norms
+- `expm1`, `log1p` for precise small-value helpers
+- `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` for the hyperbolics
 - `min(a, b)`, `max(a, b)`, `clamp(x, min, max)` for comparisons
 
 All functions take `Float` values and return `Float`.

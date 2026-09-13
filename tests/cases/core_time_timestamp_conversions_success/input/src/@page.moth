@@ -5,8 +5,13 @@ ts0 = time.timestamp_from_unix_milliseconds(0.0)
 ts1 = time.timestamp_from_unix_milliseconds(1000.0)
 ts2 = time.timestamp_from_unix_seconds(1.0)
 
-iso0 = time.to_iso_string(ts0)
-iso1 = time.to_iso_string(ts1)
+-- to_iso_string is fallible, so recover each render at the catch boundary
+iso0 = time.to_iso_string(ts0) catch:
+    then "unrenderable"
+;
+iso1 = time.to_iso_string(ts1) catch:
+    then "unrenderable"
+;
 millis0 = time.unix_milliseconds(ts0)
 sec1 = time.unix_seconds(ts1)
 millis2 = time.unix_milliseconds(ts2)

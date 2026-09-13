@@ -1,0 +1,64 @@
+@core/time Duration, duration_from_milliseconds, duration_scale, clamp, abs, as_milliseconds, is_negative
+
+-- Scaling past the finite Float range produces an ordinary opaque Duration:
+-- this infallible path observes the overflowed value without reading it as a
+-- Float, so the rejection below cannot be coming from duration_scale itself.
+survive_scale || -> Bool:
+    big = duration_from_milliseconds(1.0e100)
+    huge = duration_scale(big, 1.0e300)
+    return is_negative(huge)
+;
+
+-- Rejection happens where the same overflowed duration is read as a Float.
+read_overflow || -> Float, Error!:
+    big = duration_from_milliseconds(1.0e100)
+    huge = duration_scale(big, 1.0e300)
+    return as_milliseconds(huge)
+;
+
+-- An infinite quantity is not stuck outside the range: clamp brings it back
+-- between its bounds and the clamped duration reads as an ordinary Float.
+recover_by_clamp || -> Float, Error!:
+    huge = duration_scale(duration_from_milliseconds(1.0e100), 1.0e300)
+    bounded = clamp(huge, duration_from_milliseconds(0.0), duration_from_milliseconds(1.0))
+    return as_milliseconds(bounded)
+;
+
+-- Scaling an overflowed duration by zero leaves a quantity that is not a
+-- number. No bound recovers it: it propagates through clamp and abs,
+-- is_negative answers false, and the Float accessor rejects it.
+clamp_not_a_number || -> Bool:
+    nan = duration_scale(duration_scale(duration_from_milliseconds(1.0e100), 1.0e300), 0.0)
+    bounded = clamp(nan, duration_from_milliseconds(0.0), duration_from_milliseconds(1.0))
+    return is_negative(bounded)
+;
+
+read_clamped_not_a_number || -> Float, Error!:
+    nan = duration_scale(duration_scale(duration_from_milliseconds(1.0e100), 1.0e300), 0.0)
+    bounded = clamp(nan, duration_from_milliseconds(0.0), duration_from_milliseconds(1.0))
+    return as_milliseconds(bounded)
+;
+
+read_absolute_not_a_number || -> Float, Error!:
+    nan = duration_scale(duration_scale(duration_from_milliseconds(1.0e100), 1.0e300), 0.0)
+    return as_milliseconds(abs(nan))
+;
+
+opaque = survive_scale()
+overflow = read_overflow() catch |err|:
+    then err.code
+;
+
+recovered = recover_by_clamp() catch |recover_err|:
+    then 0.0 - 1.0
+;
+
+not_a_number_negative = clamp_not_a_number()
+clamped_not_a_number = read_clamped_not_a_number() catch |clamped_err|:
+    then clamped_err.code
+;
+absolute_not_a_number = read_absolute_not_a_number() catch |absolute_err|:
+    then absolute_err.code
+;
+
+[:duration_overflow opaque=[opaque] code=[overflow] recovered=[recovered] nan_negative=[not_a_number_negative] nan_clamp_code=[clamped_not_a_number] nan_abs_code=[absolute_not_a_number]]

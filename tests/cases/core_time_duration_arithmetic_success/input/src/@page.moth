@@ -1,0 +1,32 @@
+@core/time Duration,
+    Timestamp,
+    timestamp_from_unix_milliseconds,
+    duration_from_milliseconds,
+    duration_add,
+    duration_subtract,
+    duration_scale,
+    timestamp_offset,
+    timestamp_difference,
+    as_milliseconds
+
+-- Discriminating samples: swapping any sibling lowering changes the rendered value
+added = duration_add(duration_from_milliseconds(700.0), duration_from_milliseconds(250.0))
+added_millis = as_milliseconds(added)
+
+subtracted = duration_subtract(duration_from_milliseconds(1000.0), duration_from_milliseconds(300.0))
+subtracted_millis = as_milliseconds(subtracted)
+
+scaled = duration_scale(duration_from_milliseconds(1200.0), 2.5)
+scaled_millis = as_milliseconds(scaled)
+
+-- Composition: build a Timestamp, offset it, take the difference back
+base = timestamp_from_unix_milliseconds(5000.0)
+offset = timestamp_offset(base, duration_from_milliseconds(2500.0))
+back = timestamp_difference(base, offset)
+back_millis = as_milliseconds(back)
+
+-- Reversed argument order of timestamp_difference is observable
+reversed = timestamp_difference(offset, base)
+reversed_millis = as_milliseconds(reversed)
+
+[:duration_arithmetic added=[added_millis] subtracted=[subtracted_millis] scaled=[scaled_millis] offset_back=[back_millis] reversed=[reversed_millis]]

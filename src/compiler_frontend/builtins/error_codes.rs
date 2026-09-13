@@ -35,6 +35,10 @@ pub(crate) enum BuiltinErrorCode {
     FloatBoundaryNonFinite = 304,
     /// Defensive Float formatting checks use this when an internal finite-Float invariant fails.
     FloatFormatInvariant = 305,
+    /// Time ISO parsing uses this when text does not match the accepted timestamp format.
+    TimeInvalidTimestampText = 310,
+    /// Time rendering uses this when an instant lies outside the renderable range.
+    TimeTimestampOutOfRange = 311,
 }
 
 impl BuiltinErrorCode {
@@ -74,6 +78,10 @@ impl BuiltinErrorCode {
                 "External Float boundary produced a non-finite value"
             }
             BuiltinErrorCode::FloatFormatInvariant => "Float formatting invariant failed",
+            BuiltinErrorCode::TimeInvalidTimestampText => "Cannot parse Timestamp from text",
+            BuiltinErrorCode::TimeTimestampOutOfRange => {
+                "Timestamp instant is outside the renderable range"
+            }
         }
     }
 }

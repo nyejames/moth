@@ -1,0 +1,8 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "timestamp_parse_grammar_lowercase_designator code=310",
+]

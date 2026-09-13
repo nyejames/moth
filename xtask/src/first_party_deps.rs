@@ -18,11 +18,14 @@
 //! - User-owned or future dependency packages and their manifests.
 //! - Package declarations, aliases, resolution or package-graph design.
 //! - Generated HTML runtime glue, documentation, tests, benchmarks or repository-root manifests.
+//! - Host-driven script loading: `importScripts`, `new Worker(url)`, injected `script` elements and
+//!   specifiers reaching `eval`, `new Function` or a `fetch` response. Those are runtime behaviour
+//!   rather than a declared dependency, so the scoped roots and review defend them, not this scan.
 
 use crate::report_file::{ReportRunIdentity, write_report_atomically};
 use crate::source_tree::{WalkDecision, relative_display_path, walk_source_tree, workspace_root};
 use moth::first_party_js::{
-    FirstPartyJavascriptImportFindingKind, inventoried_javascript_sources,
+    FirstPartyJavascriptImportFindingKind, InventoriedJsSource, inventoried_javascript_sources,
     javascript_import_findings,
 };
 use serde::Serialize;
@@ -78,7 +81,7 @@ pub enum FirstPartyDepsRule {
     UnapprovedModuleImport,
     /// A registered runtime module was imported with an unknown name or unsupported form.
     InvalidRuntimeImport,
-    /// A path could not be read or represented, so the audit could not inspect it.
+    /// A path could not be read, decoded, or inspected as a regular file or directory.
     UnreadablePath,
 }
 
@@ -180,7 +183,7 @@ pub(crate) fn audit_first_party_deps(
         scan_first_party_root(workspace_root, root, &mut state)?;
     }
 
-    scan_inventoried_javascript(&mut state);
+    scan_inventoried_javascript(&inventoried_javascript_sources(), &mut state);
     Ok((
         state.visited_file_count,
         state.javascript_source_count,
@@ -318,8 +321,8 @@ fn scan_first_party_root(
     })
 }
 
-fn scan_inventoried_javascript(state: &mut ScanState) {
-    for source in inventoried_javascript_sources() {
+fn scan_inventoried_javascript(sources: &[InventoriedJsSource], state: &mut ScanState) {
+    for source in sources {
         state.javascript_source_count += 1;
         state
             .findings

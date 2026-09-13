@@ -1,0 +1,8 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "timestamp_parse_offset_and_fraction millis=961063245123 iso=2000-06-15T10:00:45.123Z truncated=961072245999 negative_offset=2024-01-01T17:30:00.000Z",
+]

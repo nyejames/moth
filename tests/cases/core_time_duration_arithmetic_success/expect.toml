@@ -1,0 +1,8 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "duration_arithmetic added=950 subtracted=700 scaled=3000 offset_back=2500 reversed=-2500",
+]

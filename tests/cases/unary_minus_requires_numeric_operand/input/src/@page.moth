@@ -1,0 +1,2 @@
+value = -"moth"
+io.line([: [value]])

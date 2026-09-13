@@ -1,0 +1,8 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "timestamp_parse_field_out_of_range code=310 offset_hour_code=310 offset_minute_code=310",
+]

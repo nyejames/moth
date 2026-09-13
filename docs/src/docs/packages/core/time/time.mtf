@@ -115,7 +115,7 @@ All three use the handle ABI. They carry no source-visible fields.
     ]
 ]
 
-`timestamp_from_iso_string` is the only fallible function. Invalid ISO strings return through `Error!`.
+`timestamp_from_iso_string` fails on text outside the accepted ISO format, and on accepted text naming an instant outside the renderable window. `to_iso_string` fails on instants outside that window. Both return through `Error!`.
 
 [codeblock, $code("moth"):
     @core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds
@@ -183,7 +183,30 @@ All three use the handle ABI. They carry no source-visible fields.
         [: `Duration`]
         [: no]
     ]
+
+    [td:
+        [: `duration_add(left, right)`]
+        [: `Duration, Duration`]
+        [: `Duration`]
+        [: no]
+    ]
+
+    [td:
+        [: `duration_subtract(left, right)`]
+        [: `Duration, Duration`]
+        [: `Duration`]
+        [: no]
+    ]
+
+    [td:
+        [: `duration_scale(duration, factor)`]
+        [: `Duration, Float`]
+        [: `Duration`]
+        [: no]
+    ]
 ]
+
+`duration_add(left, right)` returns the sum of `left` and `right`. `duration_subtract(left, right)` returns `left` minus `right`. `duration_scale(duration, factor)` returns the result of scaling `duration` by `factor`.
 
 ### Timestamp helpers
 
@@ -212,18 +235,66 @@ All three use the handle ABI. They carry no source-visible fields.
     [td:
         [: `to_iso_string(timestamp)`]
         [: `Timestamp`]
-        [: `String`]
+        [: `String, Error!`]
+        [: yes]
+    ]
+
+    [td:
+        [: `timestamp_offset(timestamp, duration)`]
+        [: `Timestamp, Duration`]
+        [: `Timestamp`]
+        [: no]
+    ]
+
+    [td:
+        [: `timestamp_difference(start, end)`]
+        [: `Timestamp, Timestamp`]
+        [: `Duration`]
         [: no]
     ]
 ]
 
+`timestamp_offset(timestamp, duration)` returns the instant `duration` away from `timestamp`. `timestamp_difference(start, end)` returns the duration from `start` to `end`, mirroring `duration_between`.
+
+### Semantic contract
+
+`Timestamp` counts milliseconds from the Unix epoch, 1970-01-01T00:00:00Z, and always denotes a UTC instant. `Duration` is a signed millisecond quantity. `TimeMark` is a point on a monotonic clock whose origin is unspecified and unobservable. Marks are meaningful only as arguments to `elapsed_since` and `duration_between`. A mark never decreases within one program run, and both functions return a non-negative duration when the earlier mark is passed first.
+
+`timestamp_from_iso_string` accepts exactly one text format:
+
+- a calendar date `YYYY-MM-DD`
+- the separator `T`
+- a time of day `HH:MM:SS`
+- an optional fractional second written as `.` followed by one to nine digits
+- a mandatory UTC designator, either `Z` or a numeric offset `+HH:MM` or `-HH:MM`
+
+Text that does not match returns builtin error code 310 through `Error!`. This rejects a missing designator, a lowercase `t` or `z`, surrounding whitespace, a date-only string and any other calendar or locale convention.
+
+Field values are validated: month 1 to 12, a day that exists in that month of that year, hour 0 to 23, minute and second 0 to 59, and the same hour and minute ranges in a numeric offset. An out-of-range field returns code 310 instead of rolling over into the next day or month. Leap seconds are not accepted.
+
+Fractional seconds resolve to milliseconds. Digits beyond the third are truncated toward zero, never rounded.
+
+`to_iso_string` renders the same format with a `Z` designator and exactly three fractional digits. Rendering requires an instant between `0000-01-01T00:00:00.000Z` and `9999-12-31T23:59:59.999Z`, the window the four-digit year spelling can express, so every rendered string parses back through `timestamp_from_iso_string`. An instant outside that window returns builtin error code 311 through `Error!`, and the window is tested before truncation, so a fractional instant just outside it is rejected rather than pulled in. A fractional millisecond inside the window is truncated toward zero before rendering. Parsing applies the same window after the offset is converted, so accepted text naming an instant outside it also returns code 311.
+
+Duration arithmetic is addition, subtraction and multiplication of millisecond quantities. It is exact while the operands and the result stay within the whole numbers a `Float` represents exactly, a range far wider than the renderable window; beyond that it rounds like any other `Float` arithmetic, so adding one millisecond to a duration of `1e16` milliseconds returns the same duration. Because the arithmetic functions return opaque values, a result that leaves the finite `Float` range is not rejected where the arithmetic happens: it is rejected with builtin error code 304 when the duration is read as a `Float` by `as_seconds` or `as_milliseconds`, at the shared external `Float` boundary.
+
+`clamp(duration, min, max)` is the composition `min(max(duration, min), max)`, so when `min` exceeds `max` the upper bound wins and the result is `max`.
+
+A duration whose quantity has already left the finite range is still a valid opaque `Duration`, and whether it is outside the range when it is read depends on what is applied to it. `clamp` can bring an infinite quantity back between its bounds, and that clamped result is an ordinary finite duration. A quantity that is not a number, which repeated arithmetic can reach by scaling an overflowed duration by zero, propagates through `abs` and `clamp` instead, and no bound recovers it. `is_negative` answers from the same comparison with zero as it does for any duration, so it is `false` for a quantity that is not a number and `true` only for a quantity below zero. The composition rule and the reversed-bound result above hold whenever the operands hold a number. Any quantity still outside the finite range when a `Float` accessor reads it is rejected with builtin error code 304.
+
+Every `Float` reaching this package is already finite, because `NaN` and the infinities are never valid Moth `Float` values, so the package validates no argument of its own. The four `Float`-returning accessors `as_seconds`, `as_milliseconds`, `unix_seconds` and `unix_milliseconds` are checked by that shared boundary.
+
+`Duration`, `TimeMark` and `Timestamp` support no equality, no ordering and no use as map keys. Compare durations through `as_milliseconds` and timestamps through `unix_milliseconds`.
+
+Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `Float` result at the shared external boundary, which returns `Error!` in a fallible context and otherwise ends the program the way any unhandled builtin failure does. No function in this package throws a host error of its own.
+
 ### Access and return contracts
 
-All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on invalid input. Every other function stays infallible.
+All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on text outside the accepted ISO format and on accepted text whose offset-adjusted instant leaves the renderable window. `to_iso_string` returns through `Error!` when the instant lies outside that window. Every other function stays infallible.
 
 ### Backend behaviour
 
-HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `to_iso_string` lowers to `(new Date(#0)).toISOString()`. Duration and timestamp construction helpers lower to inline JavaScript expressions.
+HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `timestamp_from_iso_string` and `to_iso_string` lower to validating runtime helpers. Every other function, including the Duration and Timestamp construction helpers and the arithmetic functions, lowers to an inline JavaScript expression.
 
 HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 

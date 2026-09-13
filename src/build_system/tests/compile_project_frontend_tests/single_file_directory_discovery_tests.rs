@@ -209,6 +209,7 @@ fn directory_project_discovers_multiple_entry_modules() {
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,

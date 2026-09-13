@@ -1,0 +1,8 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "to_iso_string_out_of_range code=311 edge_code=311",
+]

@@ -6,135 +6,203 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantValue, ExternalFunctionLowerings, ExternalFunctionSpec,
-    ExternalJsLowering, external_success_returns,
+    ExternalJsLowering, ExternalParameter, external_success_returns,
 };
+
+struct MathFunctionSpec {
+    name: &'static str,
+    js_lowering: &'static str,
+    parameter_count: usize,
+}
 
 pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
     let package_id = registry
         .register_package("@core/math", crate::builder_surface::PackageOrigin::Core)
         .expect("builtin package registration should not collide");
 
-    let math_f64_param =
-        |_name: &'static str| crate::compiler_frontend::external_packages::ExternalParameter {
-            language_type: ExternalSignatureType::Abi(ExternalAbiType::F64),
-            access_kind: ExternalAccessKind::Shared,
-        };
+    let math_f64_param = || ExternalParameter {
+        language_type: ExternalSignatureType::Abi(ExternalAbiType::F64),
+        access_kind: ExternalAccessKind::Shared,
+    };
 
-    let math_functions: &[(
-        &'static str,
-        ExternalJsLowering,
-        Vec<crate::compiler_frontend::external_packages::ExternalParameter>,
-    )] = &[
-        (
-            "sin",
-            ExternalJsLowering::InlineExpression("Math.sin(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "cos",
-            ExternalJsLowering::InlineExpression("Math.cos(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "tan",
-            ExternalJsLowering::InlineExpression("Math.tan(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "atan2",
-            ExternalJsLowering::InlineExpression("Math.atan2(#0, #1)".to_owned()),
-            vec![math_f64_param("y"), math_f64_param("x")],
-        ),
-        (
-            "log",
-            ExternalJsLowering::InlineExpression("Math.log(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "log2",
-            ExternalJsLowering::InlineExpression("Math.log2(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "log10",
-            ExternalJsLowering::InlineExpression("Math.log10(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "exp",
-            ExternalJsLowering::InlineExpression("Math.exp(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "pow",
-            ExternalJsLowering::InlineExpression("Math.pow(#0, #1)".to_owned()),
-            vec![math_f64_param("base"), math_f64_param("exponent")],
-        ),
-        (
-            "sqrt",
-            ExternalJsLowering::InlineExpression("Math.sqrt(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "abs",
-            ExternalJsLowering::InlineExpression("Math.abs(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "floor",
-            ExternalJsLowering::InlineExpression("Math.floor(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "ceil",
-            ExternalJsLowering::InlineExpression("Math.ceil(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "round",
-            ExternalJsLowering::InlineExpression("Math.round(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "trunc",
-            ExternalJsLowering::InlineExpression("Math.trunc(#0)".to_owned()),
-            vec![math_f64_param("x")],
-        ),
-        (
-            "min",
-            ExternalJsLowering::InlineExpression("Math.min(#0, #1)".to_owned()),
-            vec![math_f64_param("a"), math_f64_param("b")],
-        ),
-        (
-            "max",
-            ExternalJsLowering::InlineExpression("Math.max(#0, #1)".to_owned()),
-            vec![math_f64_param("a"), math_f64_param("b")],
-        ),
-        (
-            "clamp",
-            ExternalJsLowering::InlineExpression("Math.min(Math.max(#0, #1), #2)".to_owned()),
-            vec![
-                math_f64_param("x"),
-                math_f64_param("min"),
-                math_f64_param("max"),
-            ],
-        ),
+    let math_functions = [
+        MathFunctionSpec {
+            name: "sin",
+            js_lowering: "Math.sin(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "cos",
+            js_lowering: "Math.cos(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "tan",
+            js_lowering: "Math.tan(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "atan2",
+            js_lowering: "Math.atan2(#0, #1)",
+            parameter_count: 2, // y, x
+        },
+        MathFunctionSpec {
+            name: "log",
+            js_lowering: "Math.log(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "log2",
+            js_lowering: "Math.log2(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "log10",
+            js_lowering: "Math.log10(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "exp",
+            js_lowering: "Math.exp(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "pow",
+            js_lowering: "Math.pow(#0, #1)",
+            parameter_count: 2, // base, exponent
+        },
+        MathFunctionSpec {
+            name: "sqrt",
+            js_lowering: "Math.sqrt(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "abs",
+            js_lowering: "Math.abs(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "floor",
+            js_lowering: "Math.floor(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "ceil",
+            js_lowering: "Math.ceil(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "round",
+            js_lowering: "Math.round(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "trunc",
+            js_lowering: "Math.trunc(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "min",
+            js_lowering: "Math.min(#0, #1)",
+            parameter_count: 2, // a, b
+        },
+        MathFunctionSpec {
+            name: "max",
+            js_lowering: "Math.max(#0, #1)",
+            parameter_count: 2, // a, b
+        },
+        MathFunctionSpec {
+            name: "clamp",
+            js_lowering: "Math.min(Math.max(#0, #1), #2)",
+            parameter_count: 3, // x, min, max
+        },
+        MathFunctionSpec {
+            name: "asin",
+            js_lowering: "Math.asin(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "acos",
+            js_lowering: "Math.acos(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "atan",
+            js_lowering: "Math.atan(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "cbrt",
+            js_lowering: "Math.cbrt(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "hypot",
+            js_lowering: "Math.hypot(#0, #1)",
+            parameter_count: 2, // x, y
+        },
+        MathFunctionSpec {
+            name: "expm1",
+            js_lowering: "Math.expm1(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "log1p",
+            js_lowering: "Math.log1p(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "sinh",
+            js_lowering: "Math.sinh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "cosh",
+            js_lowering: "Math.cosh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "tanh",
+            js_lowering: "Math.tanh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "asinh",
+            js_lowering: "Math.asinh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "acosh",
+            js_lowering: "Math.acosh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "atanh",
+            js_lowering: "Math.atanh(#0)",
+            parameter_count: 1, // x
+        },
     ];
 
-    for (name, js_lowering, parameters) in math_functions {
+    for function in math_functions {
+        let parameters: Vec<ExternalParameter> = (0..function.parameter_count)
+            .map(|_| math_f64_param())
+            .collect();
+
         registry
             .register_external_function(
                 package_id,
                 ExternalFunctionSpec {
-                    name: (*name).to_owned(),
-                    parameters: parameters.clone(),
+                    name: function.name.to_owned(),
+                    parameters,
                     returns: external_success_returns(
                         ExternalAbiType::F64,
                         ExternalReturnAlias::Fresh,
                     ),
                     error_return_type: None,
                     lowerings: ExternalFunctionLowerings {
-                        js: Some(js_lowering.clone()),
+                        js: Some(ExternalJsLowering::InlineExpression(
+                            function.js_lowering.to_owned(),
+                        )),
                         wasm: None,
                     },
                 },
@@ -142,10 +210,19 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
             .expect("builtin math function registration should not collide");
     }
 
-    let math_constants: &[(&'static str, ExternalConstantValue)] = &[
+    let math_constants = [
         ("PI", ExternalConstantValue::Float(std::f64::consts::PI)),
         ("TAU", ExternalConstantValue::Float(std::f64::consts::TAU)),
         ("E", ExternalConstantValue::Float(std::f64::consts::E)),
+        (
+            "SQRT_2",
+            ExternalConstantValue::Float(std::f64::consts::SQRT_2),
+        ),
+        ("LN_2", ExternalConstantValue::Float(std::f64::consts::LN_2)),
+        (
+            "LN_10",
+            ExternalConstantValue::Float(std::f64::consts::LN_10),
+        ),
     ];
 
     for (name, value) in math_constants {
@@ -153,9 +230,9 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
             .register_external_constant(
                 package_id,
                 ExternalConstantDef {
-                    name: (*name).to_owned(),
+                    name: name.to_owned(),
                     data_type: ExternalAbiType::F64,
-                    value: *value,
+                    value,
                 },
             )
             .expect("builtin math constant registration should not collide");

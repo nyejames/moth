@@ -16,11 +16,25 @@ functions until a separate language decision changes binding-backed receiver met
 ### Current-state capsule
 
 ```text
-STATUS: designed, queued
-CURRENT_SLICE: wait for native result slots and Core constant-evaluation infrastructure
-BLOCKERS: merge the package-foundation baseline, then land the compiler-owned native result-slot and Core const-eval prerequisite
-NEXT_ACTION: after that prerequisite lands, audit its final Text evaluator owner and run Phase 0 from current main
+STATUS: v1 designed and queued; pre-checkpoint hardening of the existing five functions delivered
+CURRENT_SLICE: none - the v1 expansion waits for its compiler prerequisite
+BLOCKERS: the v1 expansion still waits for the compiler-owned native result-slot and Core const-eval prerequisite
+NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner and run this plan's Phase 0 from current main
 ```
+
+The package-foundation baseline this plan waited on is merged, so the compiler prerequisite is the
+only remaining blocker owned here. The umbrella programme owns cross-cutting blockers for every
+code-bearing phase, including the inherited data-layout base that currently fails `just validate`.
+
+The pre-checkpoint hardening slice is delivered. `__moth_text_length` now counts scalars with a
+single-pass `charCodeAt` scan, and both successful `tests/cases/core_text_*` cases assert their whole
+rendered line, covering non-matching and case-differing predicates, a combining sequence, non-BMP
+scalars in every position, the lowest surrogate pair with independent upper lead and trail bounds,
+decomposed-against-precomposed search, literal `.` matching, whitespace against emptiness and a
+non-empty pattern in empty text. Those two cases now own behaviour only; helper reachability moved
+to `tests/cases/core_text_helper_reachability`, which exercises `length` alone. Registration shape,
+inline-lowering conversion, error codes, new APIs, result slots and constant evaluation remain with
+the phases below.
 
 The prerequisite compiler work establishes truthful zero/one/many result slots, adds
 `ExternalConstEvalOp`, adds one AST-owned Core constant-evaluation path and proves it with the existing
@@ -50,13 +64,14 @@ rather than preluded.
 
 Current implementation debt relevant to this slice:
 
-- `length` uses `Array.from(...).length`, allocating a temporary array only to count scalars
 - the other four functions are one-line JS runtime wrappers that can use the existing inline external
   lowering path instead
 - `src/builder_surface/core_packages/text.rs` uses a homogeneous tuple table and repeated parameter
   cloning that will become noisy once signatures, error channels and const-eval metadata diverge
-- the existing Text integration fixtures assert those wrapper helper names, coupling tests to an
-  implementation shape that should disappear
+- `tests/cases/core_text_helper_reachability` is the intended permanent owner of Text helper
+  reachability; it exercises only `length` and asserts the other four helper bodies stay absent,
+  so a later phase that replaces a wrapper with an inline lowering updates that case rather than
+  deleting the contract
 
 ## Implementation notes
 
@@ -319,9 +334,9 @@ Use the same explicit Moth whitespace set for Rust trim operations. Fallible Rus
 return their successful value or the canonical Text `BuiltinErrorCode` so future fallible const eval
 can reuse them directly.
 
-All Rust operations use the existing const-evaluation budget, concrete-text requirement and current
-Int range. Structural resource/site-root strings remain unavailable for character inspection until
-the existing fold owner can produce concrete text.
+All Rust operations use whatever evaluation bound the prerequisite delivers, plus the existing
+concrete-text requirement and current Int range. Structural resource/site-root strings remain
+unavailable for character inspection until the existing fold owner can produce concrete text.
 
 ### Constant-evaluation registration
 
@@ -374,8 +389,9 @@ engine-specific branches from one microbenchmark.
 
 ## Current work
 
-Implementation starts only after the native result-slot and Core const-evaluation prerequisite has
-landed and this worktree has adopted it.
+The v1 expansion phases below start only after the native result-slot and Core const-evaluation
+prerequisite has landed and this worktree has adopted it. The delivered pre-checkpoint hardening
+recorded in the capsule is the one accepted exception, and it added no API.
 
 ### Phase 0 - refresh owners and freeze contracts
 
@@ -396,7 +412,7 @@ Exit: API, errors, evaluator ownership and target lowering owners are explicit a
       shape justified by the expanded signatures.
 - [ ] Convert `is_empty`, `contains`, `starts_with` and `ends_with` to inline JS lowerings and delete
       their runtime helper bodies.
-- [ ] Replace `Array.from(...).length` with allocation-free scalar counting.
+- [x] Replace `Array.from(...).length` with allocation-free scalar counting (delivered by the pre-checkpoint hardening slice).
 - [ ] Add the canonical Text builtin error codes and reuse `__moth_error_result`.
 - [ ] Add `char_at` and `slice` with strict fallible bounds and one-pass scalar-aware JS lowering.
 - [ ] Add or reuse the Rust scalar implementations and shared contract vectors.
