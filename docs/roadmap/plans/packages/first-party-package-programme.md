@@ -18,9 +18,9 @@ plans under this directory.
 
 ```text
 STATUS: active programme; isolated existing-ABI package work runs alongside data-layout Phases 2 and 3
-CURRENT_SLICE: none - `@core/math` is activated and its existing-surface coverage and registration cleanup are delivered
-BLOCKERS: the Math expansion waits for a user scope decision and for the open numerical semantics in `core-math.md`; package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout Phase 2 base fails `just validate`, `cargo test -p moth --lib` and seven of eight feature lanes, so no package slice can produce a green gate until its owner repairs that build
-NEXT_ACTION: settle the Math expansion scope and its open semantics with the user, or activate the next isolated existing-ABI package slice
+CURRENT_SLICE: none - `@core/math` and `@core/time` are both delivered, each with its accepted contract published in the canonical reference before implementation
+BLOCKERS: package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout base still fails the all-targets lint build and two feature lanes, so no package slice can produce a green gate until its owner repairs that build
+NEXT_ACTION: activate the next package slice, `@core/random` at tracker order 2, or take the `@core/math` Wasm lowering decision
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -428,8 +428,8 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 0 | Package foundations | this plan | Implementation merged; open on the red `just validate` clippy lane | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
 | 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
-| 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage and registration cleanup delivered, expansion waiting on a user scope decision | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
-| 4 | `@core/time` | [core-time.md](./core-time.md) | Design checkpoint delivered: the existing surface is audited and thirteen tabled semantic decisions plus a correction set are recorded; no implementation accepted | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
+| 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
+| 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
 | 5 | `@web/canvas` | `web-canvas.md` | TODO: create when activated | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
 | 6 | `@core/io` | `core-io.md` | TODO: create when activated | Run a dedicated scope and prelude review, then close only the agreed common gaps |
@@ -717,20 +717,24 @@ Do not use flaky distribution thresholds as the only correctness evidence.
 ### Phase 4 - `@core/math` current v1 slice
 
 `core-math.md` exists and Math was activated out of order, because hardening its already-registered
-surface needs no new compiler capability. Its existing-behaviour coverage and registration cleanup
-are delivered on the package branch. The remaining work is the proposed scalar expansion, which is
-not accepted yet: it needs a user scope decision and the open numerical semantics settled in that
-plan.
+surface needed no new compiler capability. Delivered: existing-behaviour coverage for the original
+eighteen functions, the registration cleanup, and the accepted scalar expansion of thirteen
+functions and three constants over the same external ABI. The numerical contract the expansion
+depends on was published in the canonical reference before any of it was implemented, so no
+assertion rests on host behaviour. A Wasm lowering set and const-eval folding remain open, each
+needing its own accepted decision.
 
 Mandatory closeout: full phase gate plus finite-result, domain edge and integration coverage.
 
 ### Phase 5 - `@core/time` current v1 slice
 
-`core-time.md` exists and records the audit of the shipped surface: the implementation defects with
-their owners, the assertions already pinned against canonical silence, and the semantic decisions a
-v1 needs. Implementation starts only after those decisions are settled with the user and published
-in the canonical reference, and the validity and portability corrections precede any arithmetic
-surface.
+`core-time.md` exists and the v1 slice is delivered. The audit found that the package's observable
+behaviour was whatever the host parser and formatter did, so the semantic contract was settled with
+the user and published in the canonical reference first. The implementation then matched it: an
+explicit grammar and calendar validation with compiler-owned error codes, a fallible `to_iso_string`
+over a validating helper, a shared renderable window that makes parsing and rendering inverse, one
+descriptor table for registration, and the accepted Duration and Timestamp arithmetic. Remaining
+candidates are a Wasm lowering set and explicit duration range rules.
 
 Mandatory closeout: full phase gate plus deterministic parsing, conversion and monotonic-time
 contract coverage. Keep wall-clock tests independent of the machine's current date and time.
