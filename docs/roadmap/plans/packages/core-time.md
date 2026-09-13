@@ -143,9 +143,10 @@ Candidates only. Nothing here is accepted API.
    window are published rather than inherited from the host parser, a second backend can implement
    the same contract instead of duplicating unspecified behaviour. It needs a target decision first.
 2. **Duration range rules.** `abs` of the most negative representable value is still unstated, and so
-   is the behaviour of `abs`, `clamp` and `is_negative` on a duration whose millisecond quantity has
-   already left the finite `Float` range. The contract states where exact arithmetic ends and defers
-   overflow rejection to the read boundary, so what remains is a decision about saturation.
+   is whether the arithmetic functions should saturate instead of leaving a quantity outside the
+   finite `Float` range for the read boundary to reject. The reference already states where exact
+   arithmetic ends and what `abs`, `clamp` and `is_negative` do with a quantity outside that range,
+   so what remains is the saturation decision.
 
 ## Longer-term candidates
 
@@ -190,7 +191,7 @@ Primary owners:
 | Emission of the parse helper | `tests/cases/core_time_timestamp_parse_success`, the only case that pins it |
 | Rendering rejection outside the window, including the fractional edge that proves the check precedes truncation | `tests/cases/core_time_to_iso_string_out_of_range_rejected` |
 | Arithmetic values, argument order and composition | `tests/cases/core_time_duration_arithmetic_success` |
-| Arithmetic overflow: the scaled duration stays an ordinary opaque value on an infallible path, then becomes code 304 where it is read as a `Float` | `tests/cases/core_time_duration_overflow_at_float_boundary` |
+| Arithmetic overflow: the scaled duration stays an ordinary opaque value on an infallible path, `clamp` recovers an infinite quantity into finite bounds, a quantity that is not a number survives `clamp` and `abs`, and code 304 arrives only where a still non-finite quantity is read as a `Float` | `tests/cases/core_time_duration_overflow_at_float_boundary` |
 | Namespace clause, alias selection | `tests/cases/core_time_namespace_binding_success`, `tests/cases/core_time_direct_selection_alias_success` |
 | Arity, wrong-type, removed-name, opaque-field and receiver-call rejection | `tests/cases/core_time_arity_error`, `core_time_wrong_argument_type_rejected`, `core_time_old_api_rejected`, `core_time_opaque_field_access_rejected`, `core_time_raw_method_call_rejected`, `core_time_namespace_raw_method_call_rejected` |
 | Unreachable JS-only call in an HTML-Wasm build | `tests/cases/core_time_unused_wasm_wrapper_success` |
@@ -221,10 +222,15 @@ corrected, because adding one millisecond to `1e16` milliseconds returns the sam
 
 The integration audit then falsified the first `clamp` correction: scaling an overflowed duration by
 zero leaves a quantity that is not a number, and `Math.min(Math.max(...))` returns that quantity
-rather than the upper bound. The reference now states the reversed-bound result for durations that
-hold a number and states separately that `abs` and `clamp` pass a non-finite quantity through until
-a `Float` accessor rejects it with code 304, which `core_time_duration_overflow_at_float_boundary`
-observes end to end. Helper-emission ownership was split rather than merged, because
+rather than the upper bound. The second attempt overstated the fix in the other direction, because
+`clamp` does bring an infinite quantity back between finite bounds. The reference now separates the
+two: the reversed-bound result and the composition rule hold whenever the operands hold a number,
+`clamp` recovers an infinite quantity, a quantity that is not a number propagates through `abs` and
+`clamp` with no bound recovering it, and rejection with code 304 happens only where a quantity still
+outside the finite range reaches a `Float` accessor. `core_time_duration_overflow_at_float_boundary`
+observes all four outcomes end to end: the overflowed duration's own rejection, the clamp recovery
+reading back as `1`, `is_negative` answering `false`, and code 304 through both `clamp` and `abs`.
+Helper-emission ownership was split rather than merged, because
 `core_time_functions` never calls the parser: it owns the render helper, and
 `core_time_timestamp_parse_success` owns the parse helper. The duplicate `must_contain` blocks in
 the conversion, catch, semantic and rejection cases are gone.

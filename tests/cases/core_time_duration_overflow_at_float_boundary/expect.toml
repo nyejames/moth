@@ -4,5 +4,5 @@ entry = "."
 mode = "success"
 warnings = "forbid"
 rendered_output_contains = [
-    "duration_overflow opaque=false code=304 nan_negative=false nan_code=304",
+    "duration_overflow opaque=false code=304 recovered=1 nan_negative=false nan_clamp_code=304 nan_abs_code=304",
 ]
