@@ -184,9 +184,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Core math package]
             [: Partial]
-            [: Broad exact-output and error-bounded runtime coverage of every registered function, plus direct, aliased, namespace, const, arity, type, missing-symbol, unbound access, finite-result boundary and HTML-Wasm unsupported-path coverage.]
+            [: Broad exact-output and error-bounded runtime coverage of all thirty-one registered functions and six constants, plus direct, aliased, namespace, const, arity, type, missing-symbol, unbound access, domain and finite-result boundary and HTML-Wasm unsupported-path coverage.]
             [: JS / HTML-Wasm validation]
-            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It requires an explicit dependency clause. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. The existing surface is hardened and behaviourally covered. Common mathematical gaps should be filled before expanding into specialised APIs.]
+            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It requires an explicit dependency clause. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. The canonical reference states the numerical contract the surface depends on: radian angles, per-function domains, the rounding tie rule, the clamp composition, the atan2 range, overflow-avoiding hypot, and signed zero and underflow as deliberately unspecified. A Wasm lowering set and compile-time folding are the remaining target and const-evaluation gaps.]
         ]
 
         [data:

@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "core_math_basic_functions exact_abs=3.5 floor=3 floor_negative=-4 ceil=4 ceil_negative=-3 round=3 round_up=4 trunc=-3 trunc_positive=3 min=4 max=9 clamp=5 clamp_low=0 clamp_high=10 sqrt=4 pow=8 log2=3 log10=2 exp0=1 log1=0 approximate_sin=true approximate_cos=true approximate_tan=true approximate_atan2=true approximate_log=true control adjusted=4 bounded=4"
+rendered_output_exact = "core_math_basic_functions exact_abs=3.5 floor=3 floor_negative=-4 ceil=4 ceil_negative=-3 round=3 round_up=4 trunc=-3 trunc_positive=3 min=4 max=9 clamp=5 clamp_low=0 clamp_high=10 sqrt=4 pow=8 log2=3 log10=2 exp0=1 log1=0 approximate_sin=true approximate_cos=true approximate_tan=true approximate_atan2=true approximate_log=true round_tie_positive=4 round_tie_negative_half=-3 round_tie_negative_two_and_half=-2 clamp_reversed=0 quadrant_one=true quadrant_two=true quadrant_three=true quadrant_four=true control adjusted=4 bounded=4"

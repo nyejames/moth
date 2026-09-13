@@ -30,6 +30,20 @@ clamp_value = clamp(5.0, 0.0, 10.0)
 clamp_low_value = clamp(-1.0, 0.0, 10.0)
 clamp_high_value = clamp(11.0, 0.0, 10.0)
 
+-- Round breaks ties toward positive infinity.
+round_tie_positive = round(3.5)
+round_tie_negative_half = round(-3.5)
+round_tie_negative_two_and_half = round(-2.5)
+
+-- Reversed bounds make the upper bound win, so the result is the max.
+clamp_reversed_value = clamp(5.0, 10.0, 0.0)
+
+-- One sample from each atan2 quadrant around the origin.
+quadrant_one_ok = abs(atan2(1.0, 1.0) - 0.785398) < 0.000001
+quadrant_two_ok = abs(atan2(1.0, -1.0) - 2.356194) < 0.000001
+quadrant_three_ok = abs(atan2(-1.0, -1.0) - -2.356194) < 0.000001
+quadrant_four_ok = abs(atan2(-1.0, 1.0) - -0.785398) < 0.000001
+
 -- These six-decimal mathematical references use a one-micro-unit absolute error bound.
 -- The bound checks the numeric result without making host decimal rendering contractual.
 sin_ok = abs(sin_value - 0.841471) < 0.000001
@@ -47,4 +61,4 @@ else
 bounded = clamp(adjusted, 0.0, 10.0)
 control_report = [:control adjusted=[adjusted] bounded=[bounded]]
 
-[:core_math_basic_functions exact_abs=[abs_value] floor=[floor_value] floor_negative=[floor_negative_value] ceil=[ceil_value] ceil_negative=[ceil_negative_value] round=[round_value] round_up=[round_up_value] trunc=[trunc_value] trunc_positive=[trunc_positive_value] min=[min_value] max=[max_value] clamp=[clamp_value] clamp_low=[clamp_low_value] clamp_high=[clamp_high_value] sqrt=[sqrt_value] pow=[pow_value] log2=[log2_value] log10=[log10_value] exp0=[exp_zero] log1=[log_one] approximate_sin=[sin_ok] approximate_cos=[cos_ok] approximate_tan=[tan_ok] approximate_atan2=[atan2_ok] approximate_log=[log_ok] [control_report]]
+[:core_math_basic_functions exact_abs=[abs_value] floor=[floor_value] floor_negative=[floor_negative_value] ceil=[ceil_value] ceil_negative=[ceil_negative_value] round=[round_value] round_up=[round_up_value] trunc=[trunc_value] trunc_positive=[trunc_positive_value] min=[min_value] max=[max_value] clamp=[clamp_value] clamp_low=[clamp_low_value] clamp_high=[clamp_high_value] sqrt=[sqrt_value] pow=[pow_value] log2=[log2_value] log10=[log10_value] exp0=[exp_zero] log1=[log_one] approximate_sin=[sin_ok] approximate_cos=[cos_ok] approximate_tan=[tan_ok] approximate_atan2=[atan2_ok] approximate_log=[log_ok] round_tie_positive=[round_tie_positive] round_tie_negative_half=[round_tie_negative_half] round_tie_negative_two_and_half=[round_tie_negative_two_and_half] clamp_reversed=[clamp_reversed_value] quadrant_one=[quadrant_one_ok] quadrant_two=[quadrant_two_ok] quadrant_three=[quadrant_three_ok] quadrant_four=[quadrant_four_ok] [control_report]]

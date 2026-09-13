@@ -9156,6 +9156,13 @@ contract = "language.dependencies.old_std_namespace_rejected"
 role = "primary"
 
 [[case]]
+id = "core_math_transcendental_functions"
+path = "core_math_transcendental_functions"
+tags = ["integration", "math", "js-backend"]
+contract = "language.dependencies.core_math_transcendental_functions_acceptance"
+role = "primary"
+
+[[case]]
 id = "source_package_project_local"
 path = "source_package_project_local"
 tags = ["integration", "source-packages", "dependencies"]

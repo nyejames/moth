@@ -47,6 +47,24 @@ A namespace alias creates a file-local name:
         [: `Float`]
         [: Euler's number]
     ]
+
+    [td:
+        [: `SQRT_2`]
+        [: `Float`]
+        [: square root of 2]
+    ]
+
+    [td:
+        [: `LN_2`]
+        [: `Float`]
+        [: natural log of 2]
+    ]
+
+    [td:
+        [: `LN_10`]
+        [: `Float`]
+        [: natural log of 10]
+    ]
 ]
 
 Constants form compile-time `Float` values. They fold into expressions at compile time and do not produce runtime lookups.
@@ -169,6 +187,84 @@ All functions take `Float` parameters and return `Float`. Parameters stay positi
         [: `Float, Float, Float`]
         [: `Float`]
     ]
+
+    [td:
+        [: `asin(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `acos(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `atan(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `cbrt(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `hypot(x, y)`]
+        [: `Float, Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `expm1(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `log1p(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `sinh(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `cosh(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `tanh(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `asinh(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `acosh(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
+
+    [td:
+        [: `atanh(x)`]
+        [: `Float`]
+        [: `Float`]
+    ]
 ]
 
 All functions keep infallible Moth signatures. A non-finite result still fails
@@ -178,6 +274,50 @@ builtin `Error!` recovers through that error channel, while a non-fallible
 function, a custom fallible channel or entry-selected root runtime code traps.
 `NaN`, positive infinity and negative infinity never become valid Moth
 `Float` values.
+
+### Numerical contract
+
+Angles are radians for `sin`, `cos`, `tan`, `asin`, `acos`, `atan` and
+`atan2`. `PI` is the radian measure of a half turn and `TAU` of a full turn.
+
+A mathematical result that is undefined or infinite produces no Moth `Float`.
+The shared external `Float` boundary rejects the non-finite host result with
+builtin error code 304 before source observes it. The functions with
+restricted domains are:
+
+- `sqrt(x)` requires `x >= 0`
+- `log(x)`, `log2(x)` and `log10(x)` require `x > 0`
+- `log1p(x)` requires `x > -1`
+- `asin(x)` and `acos(x)` require `x` between `-1` and `1` inclusive
+- `acosh(x)` requires `x >= 1`
+- `atanh(x)` requires `x` strictly between `-1` and `1`
+
+Overflow to an infinite result, such as `exp`, `cosh` or `sinh` of a large
+argument, fails at the same boundary.
+
+`round(x)` breaks ties toward positive infinity. `round(3.5)` is `4`,
+`round(-3.5)` is `-3` and `round(-2.5)` is `-2`.
+
+`clamp(x, min, max)` is the composition `min(max(x, min), max)`. When `min`
+exceeds `max` the upper bound wins, so the result is `max`.
+
+`atan2(y, x)` returns the angle of the point `(x, y)` from the positive x
+axis, between negative `PI` and `PI`.
+
+`hypot(x, y)` returns the square root of `x * x + y * y` and avoids
+intermediate overflow.
+
+The sign of a zero result is not part of this contract.
+
+A result too small to be a normal `Float` stays finite. It becomes a
+subnormal value or zero and never fails the finite boundary. Which of the
+two occurs is unspecified.
+
+Transcendental results are approximations with target-defined accuracy, so
+comparisons use a tolerance. Exactly representable results stay exact:
+`exp(0)` is `1`, `log(1)` is `0`, `log2(8)` is `3`, `log10(100)` is `2` and
+`pow(2, 3)` is `8`. Every constant is the nearest `Float` to its
+mathematical value.
 
 ### Access and return contracts
 

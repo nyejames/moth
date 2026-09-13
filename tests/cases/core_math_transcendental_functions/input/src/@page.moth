@@ -1,0 +1,51 @@
+@core/math asin, acos, atan, cbrt, hypot, expm1, log1p, sinh, cosh, tanh, asinh, acosh, atanh, abs
+asin_value = asin(0.5)
+acos_value = acos(0.5)
+atan_value = atan(1.0)
+cbrt_value = cbrt(27.0)
+hypot_value = hypot(3.0, 4.0)
+
+-- A naive sum of squares overflows at this magnitude and would reach the finite
+-- boundary as a non-finite value, so this sample defends overflow avoidance.
+hypot_large = hypot(1e200, 1e200)
+hypot_scaled = hypot_large / 1e200
+
+expm1_zero = expm1(0.0)
+log1p_zero = log1p(0.0)
+
+small = 0.000001
+expm1_small = expm1(small)
+log1p_small = log1p(small)
+
+-- expm1 and log1p are the small-argument forms: a tiny argument returns a value
+-- near the argument itself, which distinguishes them from a mis-registration to
+-- exp or log, whose results near 1 and 0 could never pass these bounds.
+expm1_precise = abs(expm1_small - small) < 0.000001
+log1p_precise = abs(log1p_small - small) < 0.000001
+
+sinh_value = sinh(1.0)
+cosh_zero = cosh(0.0)
+cosh_value = cosh(1.0)
+tanh_zero = tanh(0.0)
+tanh_value = tanh(1.0)
+asinh_zero = asinh(0.0)
+asinh_value = asinh(1.0)
+acosh_one = acosh(1.0)
+acosh_value = acosh(2.0)
+atanh_zero = atanh(0.0)
+atanh_half = atanh(0.5)
+
+-- These six-decimal mathematical references use a one-micro-unit absolute error bound.
+-- The bound checks the numeric result without making host decimal rendering contractual.
+asin_ok = abs(asin_value - 0.523599) < 0.000001
+acos_ok = abs(acos_value - 1.047198) < 0.000001
+atan_ok = abs(atan_value - 0.785398) < 0.000001
+sinh_ok = abs(sinh_value - 1.175201) < 0.000001
+cosh_ok = abs(cosh_value - 1.543081) < 0.000001
+tanh_ok = abs(tanh_value - 0.761594) < 0.000001
+asinh_ok = abs(asinh_value - 0.881374) < 0.000001
+acosh_ok = abs(acosh_value - 1.316958) < 0.000001
+atanh_ok = abs(atanh_half - 0.549306) < 0.000001
+hypot_large_ok = abs(hypot_scaled - 1.414214) < 0.000001
+
+[:core_math_transcendental_functions exact_cbrt=[cbrt_value] exact_hypot=[hypot_value] exact_expm1_0=[expm1_zero] exact_log1p_0=[log1p_zero] exact_cosh_0=[cosh_zero] exact_tanh_0=[tanh_zero] exact_asinh_0=[asinh_zero] exact_acosh_1=[acosh_one] exact_atanh_0=[atanh_zero] approximate_asin=[asin_ok] approximate_acos=[acos_ok] approximate_atan=[atan_ok] precise_expm1=[expm1_precise] precise_log1p=[log1p_precise] approximate_sinh=[sinh_ok] approximate_cosh=[cosh_ok] approximate_tanh=[tanh_ok] approximate_asinh=[asinh_ok] approximate_acosh=[acosh_ok] approximate_atanh=[atanh_ok] overflow_safe_hypot=[hypot_large_ok]]

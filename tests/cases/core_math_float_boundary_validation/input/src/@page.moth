@@ -1,4 +1,4 @@
-@core/math sqrt, exp as exponential, log
+@core/math sqrt, exp as exponential, log, log1p, asin, acos, acosh, atanh
 @core/math
 
 finite_direct = sqrt(16.0)
@@ -25,6 +25,38 @@ invalid_log_negative || -> Float, Error!:
     return math.log(-1.0)
 ;
 
+invalid_asin_above_one || -> Float, Error!:
+    return asin(1.5)
+;
+
+invalid_asin_below_minus_one || -> Float, Error!:
+    return asin(-1.5)
+;
+
+invalid_acos_above_one || -> Float, Error!:
+    return acos(1.5)
+;
+
+invalid_acosh_below_one || -> Float, Error!:
+    return acosh(0.5)
+;
+
+invalid_atanh_at_one || -> Float, Error!:
+    return atanh(1.0)
+;
+
+invalid_atanh_beyond_one || -> Float, Error!:
+    return atanh(1.5)
+;
+
+invalid_log1p_at_minus_one || -> Float, Error!:
+    return log1p(-1.0)
+;
+
+invalid_log1p_below_minus_one || -> Float, Error!:
+    return log1p(-1.5)
+;
+
 sqrt_code = invalid_sqrt() catch |sqrt_err|:
     then sqrt_err.code
 ;
@@ -40,5 +72,29 @@ log_zero_code = invalid_log_zero() catch |log_zero_err|:
 log_negative_code = invalid_log_negative() catch |log_negative_err|:
     then log_negative_err.code
 ;
+asin_above_code = invalid_asin_above_one() catch |asin_above_err|:
+    then asin_above_err.code
+;
+asin_below_code = invalid_asin_below_minus_one() catch |asin_below_err|:
+    then asin_below_err.code
+;
+acos_above_code = invalid_acos_above_one() catch |acos_above_err|:
+    then acos_above_err.code
+;
+acosh_below_code = invalid_acosh_below_one() catch |acosh_below_err|:
+    then acosh_below_err.code
+;
+atanh_at_one_code = invalid_atanh_at_one() catch |atanh_at_one_err|:
+    then atanh_at_one_err.code
+;
+atanh_beyond_code = invalid_atanh_beyond_one() catch |atanh_beyond_err|:
+    then atanh_beyond_err.code
+;
+log1p_at_minus_one_code = invalid_log1p_at_minus_one() catch |log1p_at_err|:
+    then log1p_at_err.code
+;
+log1p_below_code = invalid_log1p_below_minus_one() catch |log1p_below_err|:
+    then log1p_below_err.code
+;
 
-[:core_math_float_boundary_validation finite=[finite_direct] namespace=[finite_namespace] alias=[finite_alias] errors=[sqrt_code]/[exp_code]/[alias_exp_code]/[log_zero_code]/[log_negative_code]]
+[:core_math_float_boundary_validation finite=[finite_direct] namespace=[finite_namespace] alias=[finite_alias] errors=[sqrt_code]/[exp_code]/[alias_exp_code]/[log_zero_code]/[log_negative_code]/[asin_above_code]/[asin_below_code]/[acos_above_code]/[acosh_below_code]/[atanh_at_one_code]/[atanh_beyond_code]/[log1p_at_minus_one_code]/[log1p_below_code]]

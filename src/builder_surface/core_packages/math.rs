@@ -116,6 +116,71 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
             js_lowering: "Math.min(Math.max(#0, #1), #2)",
             parameter_count: 3, // x, min, max
         },
+        MathFunctionSpec {
+            name: "asin",
+            js_lowering: "Math.asin(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "acos",
+            js_lowering: "Math.acos(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "atan",
+            js_lowering: "Math.atan(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "cbrt",
+            js_lowering: "Math.cbrt(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "hypot",
+            js_lowering: "Math.hypot(#0, #1)",
+            parameter_count: 2, // x, y
+        },
+        MathFunctionSpec {
+            name: "expm1",
+            js_lowering: "Math.expm1(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "log1p",
+            js_lowering: "Math.log1p(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "sinh",
+            js_lowering: "Math.sinh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "cosh",
+            js_lowering: "Math.cosh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "tanh",
+            js_lowering: "Math.tanh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "asinh",
+            js_lowering: "Math.asinh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "acosh",
+            js_lowering: "Math.acosh(#0)",
+            parameter_count: 1, // x
+        },
+        MathFunctionSpec {
+            name: "atanh",
+            js_lowering: "Math.atanh(#0)",
+            parameter_count: 1, // x
+        },
     ];
 
     for function in math_functions {
@@ -149,6 +214,15 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
         ("PI", ExternalConstantValue::Float(std::f64::consts::PI)),
         ("TAU", ExternalConstantValue::Float(std::f64::consts::TAU)),
         ("E", ExternalConstantValue::Float(std::f64::consts::E)),
+        (
+            "SQRT_2",
+            ExternalConstantValue::Float(std::f64::consts::SQRT_2),
+        ),
+        ("LN_2", ExternalConstantValue::Float(std::f64::consts::LN_2)),
+        (
+            "LN_10",
+            ExternalConstantValue::Float(std::f64::consts::LN_10),
+        ),
     ];
 
     for (name, value) in math_constants {

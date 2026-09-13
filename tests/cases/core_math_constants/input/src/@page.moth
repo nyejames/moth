@@ -1,4 +1,4 @@
-@core/math PI, TAU, E
+@core/math PI, TAU, E, SQRT_2, LN_2, LN_10
 
 pi = PI
 tau = TAU
@@ -6,3 +6,10 @@ e_val = E
 io.line([: [pi]])
 io.line([: [tau]])
 io.line([: [e_val]])
+
+sqrt_2 = SQRT_2
+ln_2 = LN_2
+ln_10 = LN_10
+io.line([: [sqrt_2]])
+io.line([: [ln_2]])
+io.line([: [ln_10]])

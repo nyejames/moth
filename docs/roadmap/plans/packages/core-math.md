@@ -16,10 +16,10 @@ an explicit dependency clause.
 ### Current-state capsule
 
 ```text
-STATUS: activated early for existing-ABI work; current surface hardened, no v1 expansion accepted
-CURRENT_SLICE: existing-behaviour coverage for all 18 registered functions plus registration cleanup
-BLOCKERS: the proposed function expansion waits for a user decision on scope and on the unspecified numerical semantics below; compile-time folding waits for the Core const-eval prerequisite; the inherited data-layout base fails `just validate`, so this slice reports focused evidence instead of a closed gate
-NEXT_ACTION: settle the expansion list and the open semantic questions with the user, then publish accepted contracts in the canonical reference before implementing
+STATUS: activated early for existing-ABI work; the accepted scalar expansion is delivered
+CURRENT_SLICE: none - the expansion, its published numerical contract and its coverage are complete
+BLOCKERS: compile-time folding waits for the Core const-eval prerequisite; the inherited data-layout base fails `just validate`, so code-bearing slices report focused evidence instead of a closed gate
+NEXT_ACTION: none required; a Wasm lowering set and const-eval folding are the next candidates, each needing its own accepted contract
 ```
 
 Math was activated ahead of `@core/random`, `@core/time` and the queued `@core/text` v1 slice because
@@ -29,16 +29,18 @@ tracker records that reason.
 
 ## Current surface
 
-Eighteen functions and three constants are registered, all on the existing external ABI. The
-canonical reference owns the signature table; the implementation-relevant facts are:
+Thirty-one functions and six constants are registered, all on the existing external ABI. The
+canonical reference owns the signature table and the numerical contract; the
+implementation-relevant facts are:
 
-- `sin`, `cos`, `tan`, `log`, `log2`, `log10`, `exp`, `sqrt`, `abs`, `floor`, `ceil`, `round`,
-  `trunc` are unary; `atan2(y, x)`, `pow(base, exponent)`, `min(a, b)`, `max(a, b)` are binary;
-  `clamp(x, min, max)` is ternary.
+- `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `log`, `log2`, `log10`, `log1p`, `exp`, `expm1`,
+  `sqrt`, `cbrt`, `abs`, `floor`, `ceil`, `round`, `trunc`, `sinh`, `cosh`, `tanh`, `asinh`,
+  `acosh`, `atanh` are unary; `atan2(y, x)`, `pow(base, exponent)`, `hypot(x, y)`, `min(a, b)`,
+  `max(a, b)` are binary; `clamp(x, min, max)` is ternary.
 - Every parameter and result is ABI `F64`, Moth `Float`, positional-only, shared access, fresh
   result. No function declares an error channel.
-- `PI`, `TAU` and `E` are compile-time `Float` constants that fold into expressions and produce no
-  runtime lookup.
+- `PI`, `TAU`, `E`, `SQRT_2`, `LN_2` and `LN_10` are compile-time `Float` constants that fold into
+  expressions and produce no runtime lookup.
 - Each function lowers to one `ExternalJsLowering::InlineExpression` over the host `Math` object;
   `clamp` lowers to `Math.min(Math.max(x, min), max)`. No Math runtime helper module exists.
 - No function has a Wasm lowering, so HTML-Wasm rejects any reachable Math call before lowering.
@@ -118,55 +120,46 @@ Registry-owned values are constructed once, the discarded parameter-name plumbin
 registration order, names, arity, ABI types, access kinds, return metadata and lowering strings are
 unchanged.
 
-### Phase D - accepted scalar expansion (blocked on a user decision)
+### Phase D - accepted scalar expansion (delivered)
 
-Implement only after the user accepts a bounded function list and the open semantic questions below,
-and only after the accepted contract is published in the canonical reference. Reuse the current
-scalar external ABI, return metadata and shared finite boundary; use inline lowerings where they
-preserve the full contract; keep `wasm: None` while no lowering exists; exercise every new function
-end to end by group closeout.
+The user accepted the whole candidate list at once: `asin`, `acos`, `atan`, `cbrt`, two-argument
+`hypot`, `expm1`, `log1p`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, plus the constants
+`SQRT_2`, `LN_2` and `LN_10`. Each one reuses the existing scalar ABI through the same table row
+shape, so registration grew by thirteen rows and three constant entries and nothing else changed:
+the parameter constructor, return metadata, error channel and `wasm: None` all come from the
+unchanged loop. `hypot` stayed fixed-arity.
+
+The numerical contract the expansion needed was settled with the user first and published in the
+canonical reference as `### Numerical contract` before any code landed. It states the radian angle
+unit, the domain list and the shared-boundary failure lane, `round` ties toward positive infinity,
+`clamp` as the `min(max(x, min), max)` composition with the reversed-bound result, the `atan2` angle
+range, `hypot`'s overflow avoidance, signed zero as outside the contract, underflow staying finite
+with the subnormal-or-zero choice unspecified, and the precision statement with its exact-result
+examples and the nearest-`Float` constant rule.
 
 ## Known gaps and next extensions
 
-### Unspecified semantics that need a decision
+### How coverage now rests on the contract
 
-The canonical reference is silent on all of these, so none of them is an accepted contract.
+Every assertion that previously depended on canonical silence now rests on a published sentence, so
+the earlier pinned list is retired. Two properties worth remembering when the contract next changes:
 
-Unasserted, because a test written today would make current host behaviour authoritative:
+- The radian bounds in `core_math_basic_functions` and `core_math_transcendental_functions` are
+  satisfiable only under radians, so a non-radian decision would invalidate them rather than merely
+  loosen them.
+- `core_math_float_boundary_validation` still fixes `exp(1.0)` to the exact decimal
+  `2.718281828459045`. That predates the precision statement, which promises exactness only for
+  results that are exactly representable, and `exp(1)` is not one of them. It is an inherited
+  assertion on a target-defined approximation and should become a bounded check when that case is
+  next touched.
 
-- tie-breaking for `round`
-- whether negative zero is preserved, normalised or unobservable
-- `atan2` quadrant and signed-zero mapping
-- underflow and subnormal behaviour for `exp`, `pow` and the logarithms
-- whether `clamp` requires `min <= max`, and what reversed bounds mean
+### Coverage gaps that are not defects
 
-Already pinned by delivered coverage, so a decision here must either ratify the assertion or change
-it deliberately:
-
-- angle units for `sin`, `cos`, `tan` and `atan2`, and whether `PI`/`TAU` establish that unit. The
-  error bounds in `core_math_basic_functions` are satisfiable only under radians. They rest on the
-  canonical Backend-behaviour statement that HTML-JS lowers to a host `Math` expression, not on an
-  accepted target-independent angle contract. A Wasm lowering or a non-radian decision changes them.
-- exact endpoint behaviour for the logarithms: `core_math_float_boundary_validation` fixes
-  logarithm-of-zero and logarithm-of-negative as non-finite results recovered as builtin code 304.
-- precision: the transcendental checks fix a one-micro-unit absolute error bound; `log2(8)`,
-  `log10(100)` and `pow(2, 3)` are asserted exactly; and `core_math_float_boundary_validation` fixes
-  `exp(1.0)` to the exact decimal `2.718281828459045`. The host specification allows
-  implementation-approximated results for all of those.
-
-### Proposed expansion candidates
-
-Candidates only. They are not accepted API and must not be implemented or documented as public
-behaviour before the user accepts them.
-
-| Group | Candidates | Decisions the group needs |
-|---|---|---|
-| First | `asin`, `acos`, `atan`, `cbrt`, two-argument `hypot`, `expm1`, `log1p` | domains, angle units, finite-result failure, signed zero, numerical test bounds |
-| Later | `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` | common-use justification, endpoint behaviour, overflow coverage |
-| Constants | `SQRT_2`, `LN_2`, `LN_10` | deliberate acceptance and precision expectation |
-
-`hypot` stays fixed-arity in any accepted proposal. A host variadic form is not permission to add a
-variadic external signature.
+- No case exercises arity or wrong-type rejection for an individual new function; `core_math_type_errors`
+  and `core_math_arity_error` own those shapes generically through `sin` and `pow`.
+- No case exercises `sinh` or `cosh` overflow. The overflow lane itself is owned through `exp`.
+- Constant coverage stays emission-only and unordered: `core_math_constants` asserts the six emitted
+  decimals in the artifact and observes no rendered output.
 
 ### Other extensions
 
@@ -203,8 +196,9 @@ Primary owners:
 
 | Contract | Owner |
 |---|---|
-| Runtime behaviour of the 18 registered functions | `tests/cases/core_math_basic_functions` |
-| Emitted values of `PI`, `TAU` and `E` | `tests/cases/core_math_constants`, which asserts the three emitted decimals in the artifact only. Its `io.line` calls are emitted but never observed, because the case declares no rendered-output expectation, so nothing about runtime output is checked either way |
+| Runtime behaviour of the 18 originally registered functions, plus the `round` tie rule, the reversed-bound `clamp` result and the four `atan2` quadrants | `tests/cases/core_math_basic_functions` |
+| Runtime behaviour of the 13 functions added by the expansion, including the overflow-avoiding `hypot` sample | `tests/cases/core_math_transcendental_functions` |
+| Emitted values of the six constants | `tests/cases/core_math_constants`, which asserts the six emitted decimals in the artifact only. Its `io.line` calls are emitted but never observed, because the case declares no rendered-output expectation, so nothing about runtime output is checked either way |
 | Inline lowering shape | `tests/cases/core_inline_expression_lowering`, plus the `sqrt` and `exp` forms in `tests/cases/core_math_float_boundary_validation` |
 | Constant folding in a const context | `tests/cases/core_math_external_constants_const_context` |
 | Non-finite results and builtin-error recovery, plus HTML-Wasm rejection | `tests/cases/core_math_float_boundary_validation` |
@@ -213,18 +207,20 @@ Primary owners:
 
 Rules for this package: expected values come from the canonical contract wherever it speaks;
 transcendental results use a justified error bound with a deterministic pass or fail; exactly
-representable results use exact rendered output. Where an assertion necessarily depends on
-semantics the canonical reference leaves open, record it in the pinned list above rather than
-treating it as settled contract.
+representable results use exact rendered output. Every function needs at least one sample that no
+plausible mis-registration survives, which means a fixed point such as `asinh(0)` or `cosh(0)` is
+never the only sample for its function.
 
-The hardening slice could not close the mandatory `just validate` gate, and after this branch merged
+The expansion could not close the mandatory `just validate` gate either. After this branch merged
 the published data-layout work the inherited failure is narrower: library tests pass, six of eight
 feature lanes pass, and `ci-clippy-native` plus the `timers-counters` and `dev-output` lanes stay red
-on data-layout files. The programme plan owns that record. Focused evidence for the hardening slice
-was `cargo run -- tests --tag math` (13/13), `--tag core-packages` (31/31),
-`cargo run -- check docs --terse`, `cargo check -p moth --lib` and
-`rustfmt --check` on `math.rs`, with the registration rewrite mutation-proved: every registered
-function, constant, arity, ABI type and access kind has at least one killed mutant.
+on data-layout files. The programme plan owns that record. Focused evidence for the expansion is
+`cargo run -- tests --tag math` (14/14), `--tag core-packages` (31/31),
+`cargo run -- check docs --terse`, `cargo check -p moth --lib` and `rustfmt --check` on `math.rs`.
+Both slices are mutation-proved: the hardening slice proved every registered function, constant,
+arity, ABI type and access kind has a killed mutant, and the expansion proved the new coverage by
+rewriting the `asinh` lowering to `Math.sinh(#0)`, which failed the transcendental case on
+`approximate_asinh=false` alone before the row was restored.
 
 ## History
 
@@ -233,3 +229,10 @@ function, constant, arity, ABI type and access kind has at least one killed muta
 The package shipped 18 inline-lowered `Float` functions and three compile-time constants for
 HTML-JS, with numeric failure delegated to the shared external `Float` boundary and HTML-Wasm use
 rejected through target validation.
+
+### V1 - accepted scalar expansion with a published numerical contract
+
+The package grew to 31 functions and six constants on the same scalar ABI, and the canonical
+reference gained the numerical contract that expansion required: angle unit, per-function domains,
+the rounding tie rule, the `clamp` composition, the `atan2` range, `hypot`'s overflow avoidance,
+signed zero and underflow as deliberately unspecified, and the precision rule.
