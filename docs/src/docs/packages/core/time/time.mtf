@@ -115,7 +115,7 @@ All three use the handle ABI. They carry no source-visible fields.
     ]
 ]
 
-`timestamp_from_iso_string` is the only fallible function. Invalid ISO strings return through `Error!`.
+`timestamp_from_iso_string` fails on text outside the accepted ISO format. `to_iso_string` fails on instants outside the renderable range. Both return through `Error!`.
 
 [codeblock, $code("moth"):
     @core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds
@@ -183,7 +183,30 @@ All three use the handle ABI. They carry no source-visible fields.
         [: `Duration`]
         [: no]
     ]
+
+    [td:
+        [: `duration_add(left, right)`]
+        [: `Duration, Duration`]
+        [: `Duration`]
+        [: no]
+    ]
+
+    [td:
+        [: `duration_subtract(left, right)`]
+        [: `Duration, Duration`]
+        [: `Duration`]
+        [: no]
+    ]
+
+    [td:
+        [: `duration_scale(duration, factor)`]
+        [: `Duration, Float`]
+        [: `Duration`]
+        [: no]
+    ]
 ]
+
+`duration_add(left, right)` returns the sum of `left` and `right`. `duration_subtract(left, right)` returns `left` minus `right`. `duration_scale(duration, factor)` returns the result of scaling `duration` by `factor`.
 
 ### Timestamp helpers
 
@@ -212,18 +235,62 @@ All three use the handle ABI. They carry no source-visible fields.
     [td:
         [: `to_iso_string(timestamp)`]
         [: `Timestamp`]
-        [: `String`]
+        [: `String, Error!`]
+        [: yes]
+    ]
+
+    [td:
+        [: `timestamp_offset(timestamp, duration)`]
+        [: `Timestamp, Duration`]
+        [: `Timestamp`]
+        [: no]
+    ]
+
+    [td:
+        [: `timestamp_difference(start, end)`]
+        [: `Timestamp, Timestamp`]
+        [: `Duration`]
         [: no]
     ]
 ]
 
+`timestamp_offset(timestamp, duration)` returns the instant `duration` away from `timestamp`. `timestamp_difference(start, end)` returns the duration from `start` to `end`, mirroring `duration_between`.
+
+### Semantic contract
+
+`Timestamp` counts milliseconds from the Unix epoch, 1970-01-01T00:00:00Z, and always denotes a UTC instant. `Duration` is a signed millisecond quantity. `TimeMark` is a point on a monotonic clock whose origin is unspecified and unobservable. Marks are meaningful only as arguments to `elapsed_since` and `duration_between`. A mark never decreases within one program run, and both functions return a non-negative duration when the earlier mark is passed first.
+
+`timestamp_from_iso_string` accepts exactly one text format:
+
+- a calendar date `YYYY-MM-DD`
+- the separator `T`
+- a time of day `HH:MM:SS`
+- an optional fractional second written as `.` followed by one to nine digits
+- a mandatory UTC designator, either `Z` or a numeric offset `+HH:MM` or `-HH:MM`
+
+Text that does not match returns through `Error!`. This rejects a missing designator, a lowercase `t` or `z`, surrounding whitespace, a date-only string and any other calendar or locale convention.
+
+Field values are validated: month 1 to 12, a day that exists in that month of that year, hour 0 to 23 and minute and second 0 to 59. An out-of-range field returns through `Error!` instead of rolling over into the next day or month. Leap seconds are not accepted.
+
+Fractional seconds resolve to milliseconds. Digits beyond the third are truncated toward zero, never rounded.
+
+`to_iso_string` renders the same format with a `Z` designator and exactly three fractional digits. Rendering requires an instant within 8 640 000 000 000 000 milliseconds of the epoch, roughly 273 790 years either side. An instant outside that range returns through `Error!`. A fractional millisecond is truncated toward zero before rendering.
+
+Duration arithmetic is exact addition, subtraction and multiplication of millisecond quantities. Because the arithmetic functions return opaque values, a result that leaves the finite `Float` range is not rejected where the arithmetic happens: it is rejected when the duration is read as a `Float` by `as_seconds` or `as_milliseconds`, at the shared external `Float` boundary.
+
+Every `Float` reaching this package is already finite, because `NaN` and the infinities are never valid Moth `Float` values, so the package validates no argument of its own. The four `Float`-returning accessors `as_seconds`, `as_milliseconds`, `unix_seconds` and `unix_milliseconds` are checked by that shared boundary.
+
+`Duration`, `TimeMark` and `Timestamp` support no equality, no ordering and no use as map keys. Compare durations through `as_milliseconds` and timestamps through `unix_milliseconds`.
+
+Every failure in this package is observable in Moth: either a returned `Error!` or the shared `Float` boundary. No function in this package aborts the program.
+
 ### Access and return contracts
 
-All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on invalid input. Every other function stays infallible.
+All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on text outside the accepted ISO format. `to_iso_string` returns through `Error!` when the instant lies outside the renderable range. Every other function stays infallible.
 
 ### Backend behaviour
 
-HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `to_iso_string` lowers to `(new Date(#0)).toISOString()`. Duration and timestamp construction helpers lower to inline JavaScript expressions.
+HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `to_iso_string` lowers to a validating runtime helper. Duration and timestamp construction helpers lower to inline JavaScript expressions.
 
 HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 
