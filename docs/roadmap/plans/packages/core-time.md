@@ -130,10 +130,16 @@ all delivered and covered.
 ### Canonical facts with no test owner
 
 Shared access and mutable-access rejection; return freshness; the struct-construction prohibition;
-a Time-specific named-argument rejection; any non-epoch instant through the inline extraction
-helpers. Host-call identity for `mark_now` and `timestamp_now` is asserted only by string presence,
-so a swap that leaves both `performance.now()` and `Date.now()` somewhere in the artifact still
-passes.
+a Time-specific named-argument rejection. Host-call identity for `mark_now` and `timestamp_now` is
+asserted only by string presence, so a swap that leaves both `performance.now()` and `Date.now()`
+somewhere in the artifact still passes.
+
+Non-epoch extraction is owned: `core_time_timestamp_conversions_success` reads one second in both
+units, `core_time_timestamp_parse_offset_fraction_success` extracts from an offset-adjusted instant
+in 2000, and `core_time_timestamp_parse_window_boundary` extracts both window endpoints, including
+the negative pre-epoch value at year 0000. What no case observes is a `unix_seconds` result with a
+fraction: every sample lands on a whole second, so a lowering that truncated `(#0 / 1000.0)` to
+whole seconds would still pass.
 
 ### Next extensions, in order
 

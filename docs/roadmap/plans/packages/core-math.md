@@ -108,12 +108,13 @@ shared `Float` boundary and its actual test owners. Findings that shaped this pl
 
 ### Phase B - existing-behaviour coverage (delivered)
 
-Coverage now exercises all 18 functions: exactly representable results use exact rendered output,
-transcendental results use a justified error bound computed in Moth, and the non-finite lane owns
-logarithm-of-zero and logarithm-of-negative alongside the existing negative `sqrt` and overflowing
-`exp`. Where the canonical reference is silent, the assertion is recorded in the pinned list below
-rather than claimed as contract. Constant coverage was emission-only at this point; the final review
-replaced it with a labelled exact comparison per symbol.
+Coverage now exercises all 18 functions: a result the contract promises exactly, or that is exact by
+definition, uses exact rendered output, every approximating result uses a justified error bound
+computed in Moth, and the non-finite lane owns logarithm-of-zero and logarithm-of-negative alongside
+the existing negative `sqrt` and overflowing `exp`. Where the canonical reference is silent, the
+assertion is recorded in the list below rather than claimed as contract. Constant coverage was
+emission-only at this point; the final review replaced it with a labelled exact comparison per
+symbol.
 
 ### Phase C - registration cleanup (delivered)
 
@@ -142,16 +143,22 @@ examples and the nearest-`Float` constant rule.
 
 ### How coverage now rests on the contract
 
-Every assertion that previously depended on canonical silence now rests on a published sentence, so
-the earlier pinned list is retired. Two properties worth remembering when the contract next changes:
+Two properties are worth remembering when the contract next changes. The radian bounds in
+`core_math_basic_functions` and `core_math_transcendental_functions` are satisfiable only under
+radians, so a non-radian decision would invalidate them rather than merely loosen them. And exact
+rendered output survives in three groups, only the first of which the reference promises:
 
-- The radian bounds in `core_math_basic_functions` and `core_math_transcendental_functions` are
-  satisfiable only under radians, so a non-radian decision would invalidate them rather than merely
-  loosen them.
-- `core_math_float_boundary_validation` still fixes `exp(1.0)` to the exact decimal
-  `2.718281828459045`. That predates the precision statement, which now promises exactness only for
-  the five listed identities, and `exp(1)` is not one of them. It is an inherited assertion on a
-  target-defined approximation and should become a bounded check when that case is next touched.
+- the six constants and the five named identities, which the precision statement promises exactly;
+- the selection and rounding functions, whose results are exact by definition, and `sqrt(16)`,
+  because square root is an exactly rounded IEEE operation;
+- the fixed points of the approximating functions in `core_math_transcendental_functions`, where
+  `expm1(0)`, `log1p(0)`, `cosh(0)`, `tanh(0)`, `asinh(0)`, `acosh(1)` and `atanh(0)` render
+  exactly. This is a target-dependent assertion, not a contract one: the host specification fixes
+  those seven results, and an exact zero or one is the discriminator a tolerance would throw away,
+  because every near-identity sibling passes a bound at zero. A target whose accuracy contract does
+  not fix them needs those seven assertions bounded, or the reference extended.
+
+Every other approximating sample is a bounded comparison.
 
 ### Coverage gaps that are not defects
 
@@ -205,11 +212,11 @@ Primary owners:
 | Type and arity rejection | `tests/cases/core_math_type_errors`, `tests/cases/core_math_arity_error` |
 | Dependency, alias, namespace and facade selection | the existing dependency and namespace-binding cases |
 
-Rules for this package: expected values come from the canonical contract wherever it speaks;
-transcendental results use a justified error bound with a deterministic pass or fail; exactly
-representable results use exact rendered output. Every function needs at least one sample that no
-plausible mis-registration survives, which means a fixed point such as `asinh(0)` or `cosh(0)` is
-never the only sample for its function.
+Rules for this package: expected values come from the canonical contract wherever it speaks; a
+result the contract leaves to target-defined accuracy uses a justified error bound with a
+deterministic pass or fail; exact rendered output is reserved for the three groups listed above.
+Every function needs at least one sample that no plausible mis-registration survives, which means a
+fixed point such as `asinh(0)` or `cosh(0)` is never the only sample for its function.
 
 The expansion could not close the mandatory `just validate` gate either. After this branch merged
 the published data-layout work the inherited failure is narrower: library tests pass, six of eight
@@ -232,6 +239,17 @@ boolean per constant, leaving compile-time folding with its existing owner. The 
 rule claimed that exactly representable results stay exact, which `Math.hypot(20, 99)` returning
 `100.99999999999999` disproves, so the rule now names the five exact identities and states that an
 approximating function may round even when its mathematical result is representable.
+
+An external pause review then found three assertions still contradicting that precision rule:
+`cbrt(27)` and `hypot(3, 4)` were required to render exactly `3` and `5`, and the alias path in
+`core_math_float_boundary_validation` fixed `exp(1)` to `2.718281828459045`. All three are
+approximating results the reference does not promise exactly, so a conforming target could fail a
+test while honouring the contract. Each became a bounded comparison against the same six-decimal
+reference and one-micro-unit bound the neighbouring samples use, keeping the direct, namespace and
+alias paths and every error-code and target-boundary assertion. The bounds still discriminate:
+rewriting `cbrt` to `Math.sqrt(#0)` and `hypot` to `Math.max(#0, #1)` failed on
+`approximate_cbrt=false approximate_hypot=false`, and rewriting `exp` to `Math.exp(#0 * 2.0)` failed
+on `alias=false`.
 
 ## History
 

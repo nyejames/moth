@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "core_math_transcendental_functions exact_cbrt=3 exact_hypot=5 exact_expm1_0=0 exact_log1p_0=0 exact_cosh_0=1 exact_tanh_0=0 exact_asinh_0=0 exact_acosh_1=0 exact_atanh_0=0 approximate_asin=true approximate_acos=true approximate_atan=true precise_expm1=true precise_log1p=true approximate_sinh=true approximate_cosh=true approximate_tanh=true approximate_asinh=true approximate_acosh=true approximate_atanh=true overflow_safe_hypot=true unit_expm1=true unit_log1p=true"
+rendered_output_exact = "core_math_transcendental_functions approximate_cbrt=true approximate_hypot=true exact_expm1_0=0 exact_log1p_0=0 exact_cosh_0=1 exact_tanh_0=0 exact_asinh_0=0 exact_acosh_1=0 exact_atanh_0=0 approximate_asin=true approximate_acos=true approximate_atan=true precise_expm1=true precise_log1p=true approximate_sinh=true approximate_cosh=true approximate_tanh=true approximate_asinh=true approximate_acosh=true approximate_atanh=true overflow_safe_hypot=true unit_expm1=true unit_log1p=true"

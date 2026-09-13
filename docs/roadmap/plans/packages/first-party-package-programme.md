@@ -17,10 +17,10 @@ plans under this directory.
 ## Current-state capsule
 
 ```text
-STATUS: active programme; isolated existing-ABI package work runs alongside data-layout Phases 2 and 3
+STATUS: paused by the user after the `@core/math` and `@core/time` batch
 CURRENT_SLICE: none - `@core/math` and `@core/time` are both delivered, each with its accepted contract published in the canonical reference before implementation
-BLOCKERS: package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout base still fails the all-targets lint build and two feature lanes, so no package slice can produce a green gate until its owner repairs that build
-NEXT_ACTION: activate the next package slice, `@core/random` at tracker order 2, or take the `@core/math` Wasm lowering decision
+BLOCKERS: package development waits for accepted data-layout Phase 3 completion; package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout base still fails the all-targets lint build and two feature lanes, so no package slice can produce a green gate until its owner repairs that build
+NEXT_ACTION: integrate at the accepted data-layout Phase 2 checkpoint, which is ahead of the merge already in this branch, validate the combined tree and remain paused
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -33,7 +33,7 @@ started and the checkpoint order below is unchanged.
 
 ## Roadmap position and lifecycle
 
-The foundation and documentation baseline is merged into main. Phase 1 is delivered there and Phase 0's implementation is merged with only its `just validate` gate outstanding. The roadmap records that isolated package work fitting the existing external ABI may run alongside data-layout Phases 2 and 3, while any slice needing result slots or Core const evaluation waits for the compiler checkpoint below. The roadmap owns shared checkpoints and serial order. Each package slice keeps its own compiler prerequisites and the merge-isolation rules below.
+The foundation and documentation baseline is merged into main. Phase 1 is delivered there and Phase 0's implementation is merged with only its `just validate` gate outstanding. The roadmap previously allowed isolated package work fitting the existing external ABI to run alongside data-layout Phases 2 and 3; the user has since paused package development until accepted data-layout Phase 3 is complete, so that permission is spent and this is the one current schedule. Integrating at the accepted Phase 2 checkpoint is a synchronisation event, not permission to start a new slice. Slices needing result slots or Core const evaluation still wait for the compiler checkpoint below. The roadmap owns shared checkpoints and serial order. Each package slice keeps its own compiler prerequisites and the merge-isolation rules below.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
 `docs/roadmap/plans/packages/` and are linked from the tracker in this file.
@@ -657,13 +657,15 @@ in-flight sources or narrow the gate to make it green.
 That red gate is a recorded external blocker, not a waiver. A code-bearing package phase cannot
 finish its mandatory gate while it is red, so Phase 0 stays open on validation alone: its
 implementation, audits and every other gate lane are complete and merged, and the phase closes when
-`just validate` runs green. The roadmap owner has accepted that isolated package work on the
-existing external ABI proceeds during data-layout Phases 2 and 3 rather than waiting, so such a
-slice reports the inherited failure with its own focused evidence instead of claiming a closed gate.
-The remaining breakage above is escalated to that plan's owner, whose Phase 2 audit checklist still
-records "run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests" as
-ticked for a checkpoint whose own feature lanes do not build. That entry is the record the
-measurement contradicts; only that plan may correct it.
+`just validate` runs green. The roadmap owner accepted that isolated package work on the existing
+external ABI could proceed during data-layout Phases 2 and 3 rather than waiting, which is how the
+delivered slices reported the inherited failure with their own focused evidence instead of claiming
+a closed gate. That permission is now spent: the user has paused package development until accepted
+data-layout Phase 3 completes, so the next package slice needs a fresh baseline measured after the
+shared representation work lands. The remaining breakage above is escalated to that plan's owner,
+whose Phase 2 audit checklist still records "run path/dependency/module/type/diagnostic tests and
+serial/parallel determinism tests" as ticked for a checkpoint whose own feature lanes do not build.
+That entry is the record the measurement contradicts; only that plan may correct it.
 
 The `compile_prepared` argument-order repair this branch carried is no longer outstanding: the
 merged data-layout work contains the identical swap in `compile_check_only_job`, so the two sides

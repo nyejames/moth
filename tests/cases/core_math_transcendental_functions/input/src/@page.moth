@@ -56,4 +56,9 @@ hypot_large_ok = abs(hypot_scaled - 1.414214) < 0.000001
 expm1_ok = abs(expm1_unit - 1.718282) < 0.000001
 log1p_ok = abs(log1p_unit - 0.693147) < 0.000001
 
-[:core_math_transcendental_functions exact_cbrt=[cbrt_value] exact_hypot=[hypot_value] exact_expm1_0=[expm1_zero] exact_log1p_0=[log1p_zero] exact_cosh_0=[cosh_zero] exact_tanh_0=[tanh_zero] exact_asinh_0=[asinh_zero] exact_acosh_1=[acosh_one] exact_atanh_0=[atanh_zero] approximate_asin=[asin_ok] approximate_acos=[acos_ok] approximate_atan=[atan_ok] precise_expm1=[expm1_precise] precise_log1p=[log1p_precise] approximate_sinh=[sinh_ok] approximate_cosh=[cosh_ok] approximate_tanh=[tanh_ok] approximate_asinh=[asinh_ok] approximate_acosh=[acosh_ok] approximate_atanh=[atanh_ok] overflow_safe_hypot=[hypot_large_ok] unit_expm1=[expm1_ok] unit_log1p=[log1p_ok]]
+-- `cbrt` and `hypot` approximate, so a representable whole result is not promised
+-- exactly. These bounds still reject every sibling registration.
+cbrt_ok = abs(cbrt_value - 3.0) < 0.000001
+hypot_ok = abs(hypot_value - 5.0) < 0.000001
+
+[:core_math_transcendental_functions approximate_cbrt=[cbrt_ok] approximate_hypot=[hypot_ok] exact_expm1_0=[expm1_zero] exact_log1p_0=[log1p_zero] exact_cosh_0=[cosh_zero] exact_tanh_0=[tanh_zero] exact_asinh_0=[asinh_zero] exact_acosh_1=[acosh_one] exact_atanh_0=[atanh_zero] approximate_asin=[asin_ok] approximate_acos=[acos_ok] approximate_atan=[atan_ok] precise_expm1=[expm1_precise] precise_log1p=[log1p_precise] approximate_sinh=[sinh_ok] approximate_cosh=[cosh_ok] approximate_tanh=[tanh_ok] approximate_asinh=[asinh_ok] approximate_acosh=[acosh_ok] approximate_atanh=[atanh_ok] overflow_safe_hypot=[hypot_large_ok] unit_expm1=[expm1_ok] unit_log1p=[log1p_ok]]
