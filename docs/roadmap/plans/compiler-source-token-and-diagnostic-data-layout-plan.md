@@ -831,7 +831,7 @@ Complete the common phase close, plus:
 - [x] audit no lock or `Arc` exists per path
 - [x] review path APIs for explicit context and no hidden allocation
 - [x] run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests
-- [ ] record path bytes, allocation/remap counts and timing
+- [x] record path bytes, allocation/remap counts and timing (see `benchmarks/frontend-optimization-results.md` > `Data Layout Migration - Phase 2 Path Identity Retention Probe`)
 
 ### Phase 2 exit criteria
 

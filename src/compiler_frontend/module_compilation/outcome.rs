@@ -11,13 +11,13 @@ use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::generated::GeneratedFunctionDelta;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// Typed result of one retained module's semantic compilation.
 ///
-/// `Success` carries the complete unmerged semantic result plus its local string-table delta.
-/// `Diagnosed` carries the user-facing diagnostics the renderer surfaces. An infrastructure
-/// failure is `Err(CompilerError)` at the call boundary instead.
+/// `Success` carries the complete unmerged semantic result plus its local string-table and
+/// path-interner deltas. `Diagnosed` carries the user-facing diagnostics the renderer surfaces.
+/// An infrastructure failure is `Err(CompilerError)` at the call boundary instead.
 pub(crate) enum ModuleCompilationOutcome {
     // `ModuleSemanticResult` carries the full unmerged module (HIR, type environment and borrow
     // facts) and is far larger than `ModuleDiagnostics`, so the success payload is boxed to keep
@@ -29,10 +29,10 @@ pub(crate) enum ModuleCompilationOutcome {
 /// Everything one successful module compilation produced, before boundary publication.
 ///
 /// WHAT: the validated base module lanes, the generated delta completed in the same transaction,
-///       the closed public interface and the module-local string table carrying every diagnostic
-///       render identity.
-/// WHY: publication is atomic. Keeping the artefact, its generated delta and its string-table
-///      state in one value means the build boundary merges string identities once and commits the
+///       the closed public interface, and the module-local string/path deltas carrying every
+///       diagnostic render identity.
+/// WHY: publication is atomic. Keeping the artefact, its generated delta and both identity deltas
+///      in one value means the build boundary merges strings first, then paths, and commits the
 ///      whole transaction or none of it. The stable module origin travels through
 ///      `public_interface`; no dense `ModuleId` crosses this boundary, because standalone
 ///      compilation has no graph-assigned identity.
@@ -44,15 +44,15 @@ pub(crate) struct ModuleSemanticResult {
     /// Compiler-owned origin/source pairings emitted while AST interned resource values.
     pub(crate) resource_source_associations: Vec<ResourceSourceAssociation>,
     /// The module-local string table carrying every diagnostic render identity produced during
-    /// semantic compilation. Merged into the build table once per module so downstream consumers
-    /// see a single remapped table.
+    /// semantic compilation. Merged into the build table once per module before path identities
+    /// are merged, so downstream consumers see one remapped identity context.
     pub(crate) string_table: StringTable,
-    /// The module-local path fork carrying every `PathId` interned through semantic
-    /// compilation. Merged into the build table once per module after the string delta,
-    /// so source-prefix identities stay stable.
+    /// The module-local path fork carrying every `PathId` interned through semantic compilation.
+    /// Merged into the boundary path table after the string delta, so source-prefix identities
+    /// stay stable and every retained path is remapped before publication.
     pub(crate) path_fork: PathInternerFork,
     /// The closed and publication-validated semantic interface. Provider-owned re-export facts
     /// have already joined through immutable completed interfaces, so the graph can publish this
-    /// value directly after the deterministic string-table merge.
+    /// value directly after the deterministic string-then-path merge.
     pub(crate) public_interface: PublicSemanticInterface,
 }

@@ -730,11 +730,15 @@ and one canonical node per unique path prefix.
 Normal compilation does not put a lock around one mutable global path interner.
 
 - The build context freezes an immutable base before a parallel wave.
-- Each worker owns a `PathInternerDelta` and may reference base paths plus worker-local paths.
-- Deltas merge in canonical module and source order.
+- Each worker owns a `PathInternerFork` and may reference base paths plus worker-local paths.
+- Deltas merge in canonical module and source order after the corresponding string-ID remap.
 - Merge returns a compact `PathIdRemap`.
 - Worker outputs are remapped before consumers observe them.
 - Numeric `PathId` assignment never depends on worker completion order.
+- After canonical publication, the project/package boundary freezes one final `PathTable` and shares it
+  across completed module and generated-sidecar artefacts.
+- A provider context retained across identity boundaries keeps its paired path/string tables as a
+  justified cold subset and rebases requesters by spelling rather than numeric identity.
 
 Source logical paths known at Stage 0 are interned before source IDs are assigned.
 

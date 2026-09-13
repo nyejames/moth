@@ -94,10 +94,12 @@ pub(crate) struct ModuleExecutable {
     pub(crate) resource_table: ModuleResourceTable,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) borrow_analysis: BorrowCheckReport,
-    /// Immutable path identity table covering every `PathId` retained by this module.
+    /// Immutable path identity table shared by the enclosing project/package compilation boundary.
+    /// It covers every `PathId` retained by this executable after publication.
     ///
-    /// The semantic compiler owns a fork while producing the module. The build publication tail
-    /// installs the merged boundary table here before any backend consumes the executable lane.
+    /// The semantic compiler owns a module-local fork while producing the executable. The build
+    /// publication tail installs one merged boundary table here and shares that `Arc` across
+    /// completed module and generated-sidecar artefacts before backend consumption.
     pub(crate) path_table: Arc<PathTable>,
 }
 

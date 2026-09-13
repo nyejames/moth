@@ -934,11 +934,10 @@ Stage 0 finalises structural edges and produces deterministic dependency-ordered
 
 A source provider compiles before a consumer that needs its public interface.
 
-Within a ready wave, parallel work is allowed only when:
-
 - graph dependencies permit it
 - identity assignment is deterministic
-- string-table deltas merge in canonical order
+- string-table and path-interner deltas merge in canonical order
+- each path delta is merged only after its string-ID remap is known
 - diagnostics and warnings are ordered independently of completion time
 - completed payloads are remapped before consumers use them
 
@@ -949,7 +948,10 @@ ready module + completed provider interfaces
 -> build one compiler input value
 -> call the compiler module compilation service
 -> Success / Diagnosed (plain CompilerDiagnostic values) / CompilerError
--> deterministic string-identity remap and atomic publication
+-> merge the module StringTable delta
+-> merge the module PathInternerFork delta after string remapping
+-> remap retained payloads and atomically publish the module
+-> install one final boundary PathTable shared by completed artefacts
 ```
 
 Diagnosed outcomes carry the compact plain user-diagnostic boundary. Typed `CompilerError` values

@@ -56,8 +56,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
@@ -221,7 +221,7 @@ fn build_mutation_from_target(
     ast_log!(
         "Handling mutation for ",
         #variable_declaration.value.value_mode, " ",
-        Blue variable_declaration.id.to_string(string_table)
+        Blue path_fork.render_portable(variable_declaration.id, string_table, &mut Vec::new())
     );
 
     // -----------------------

@@ -1032,7 +1032,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             &mut span_view,
             &entry_file_path,
             local_string_table,
-            PathInternerFork::empty(),
+            source_files.fork_path_interner(),
             source_byte_count,
             None,
         )
@@ -1045,7 +1045,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             &mut span_view,
             &entry_file_path,
             local_string_table,
-            PathInternerFork::empty(),
+            source_files.fork_path_interner(),
             source_byte_count,
         )
         .expect("synthetic outputs should prepare against the retained source table");
