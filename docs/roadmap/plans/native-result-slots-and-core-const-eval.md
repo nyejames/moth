@@ -4,7 +4,8 @@
 
 Preserve zero, one or many produced values through AST, HIR and analysis without representing
 multiple returns as a semantic tuple. Build Core external constant evaluation on that representation and
-prove it with the existing five `@core/text` inspection functions before package expansion resumes.
+prove it with the existing five `@core/text` inspection functions before result-slot-dependent
+package expansion resumes.
 
 This is an ordinary compiler implementation plan, not a living package plan or a new semantic
 authority. The user approved the decisions below through a ten-question design interview. Publish
@@ -16,8 +17,8 @@ Implementation observations and file paths below are navigation aids, not frozen
 ```text
 STATUS: queued, design approved
 CURRENT_SLICE: activation and merged-baseline audit
-BLOCKERS: diagnostics Phase 3 completion and merge, then validated package-foundations baseline merge + + wiring v1 plan completion.
-NEXT_ACTION: finish both prerequisite merges into main, create a fresh worktree, then run Phase 0
+BLOCKERS: diagnostics Phase 3 completion and merge, then wiring v1 plan completion. The package-foundations baseline is merged on main; its Phase 0 remains open only on the red `ci-clippy-native` lane, which the data-layout plan owns.
+NEXT_ACTION: finish the remaining prerequisite merges into main, create a fresh worktree, then run Phase 0
 ```
 
 ## Required reading
@@ -68,7 +69,7 @@ rather than linking short-lived plan files.
 | Folding contexts | Required constants and opportunistic ordinary expressions share one evaluator. A runtime declaration remains a runtime declaration. |
 | First real operations | Enable `length`, `is_empty`, `contains`, `starts_with` and `ends_with` in `@core/text`. Other package APIs are not expanded here. |
 | Borrow precision | Preserve result-slot identity and existing conservative legality. Put finer result alias/lifetime investigations in Boracle follow-up work. |
-| Scheduling | Run on merged `main` after the two prerequisite baselines, with diagnostics and package expansion paused until this work lands. |
+| Scheduling | Run on merged `main` after the two prerequisite baselines. Diagnostics and result-slot-dependent package expansion pause until this work lands; package work on the existing external ABI continues beside it. |
 
 ## Scope limits
 
@@ -402,8 +403,8 @@ legacy/current API or compatibility wrapper to manufacture a green checkpoint.
 
 ### Phase 0 - merge checkpoint, audit and final contract map
 
-- [ ] Confirm both prerequisite baselines are merged, both competing workstreams paused and the
-      implementation worktree starts from current `main`.
+- [ ] Confirm both prerequisite baselines are merged, that no competing workstream is changing the
+      shared result representation, and that the implementation worktree starts from current `main`.
 - [ ] Run and record baseline validation, supported backend lanes, Boracle gates and known unrelated
       failures. Read the new data-layout contracts before naming any diagnostic or source type.
 - [ ] Trace every producer/consumer in the owner table, including frozen generics, module interfaces,
@@ -510,7 +511,8 @@ artifact absence checks for fully folded calls.
 - [ ] Run the complete final gate and record exact commands/results. Merge only the completed work.
 - [ ] Remove this ordinary plan and its roadmap entry in the completion commit. Transfer durable
       implementation rationale into canonical/developer/package notes first.
-- [ ] Resume diagnostics and package work only from the merged main containing this refactor.
+- [ ] Resume diagnostics and result-slot-dependent package work only from the merged main
+      containing this refactor.
 
 Exit: final result shapes, Core const evaluation and all current consumers agree. Deferred Boracle
 research and package evaluator gaps remain discoverable without reopening this implementation.

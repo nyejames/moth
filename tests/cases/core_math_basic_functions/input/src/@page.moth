@@ -1,13 +1,64 @@
-@core/math sin, cos, pow, sqrt, clamp
+@core/math sin, cos, tan, atan2, log, log2, log10, exp, pow, sqrt, abs, floor, ceil, round, trunc, min, max, clamp
 
-angle = 0.0
-s = sin(angle)
-c = cos(angle)
-p = pow(2.0, 3.0)
-r = sqrt(16.0)
-cl = clamp(5.0, 0.0, 10.0)
-io.line([: [s]])
-io.line([: [c]])
-io.line([: [p]])
-io.line([: [r]])
-io.line([: [cl]])
+angle = 1.0
+sin_value = sin(angle)
+cos_value = cos(angle)
+tan_value = tan(angle)
+atan2_value = atan2(1.0, 2.0)
+log_one = log(1.0)
+log_value = log(3.0)
+log2_value = log2(8.0)
+log10_value = log10(100.0)
+exp_zero = exp(0.0)
+pow_value = pow(2.0, 3.0)
+sqrt_value = sqrt(16.0)
+abs_value = abs(-3.5)
+floor_value = floor(3.8)
+ceil_value = ceil(3.2)
+round_value = round(3.4)
+trunc_value = trunc(-3.8)
+
+-- Signed fractional samples distinguish the rounding functions.
+floor_negative_value = floor(-3.2)
+ceil_negative_value = ceil(-3.2)
+round_up_value = round(3.6)
+trunc_positive_value = trunc(3.8)
+
+min_value = min(4.0, 9.0)
+max_value = max(4.0, 9.0)
+clamp_value = clamp(5.0, 0.0, 10.0)
+clamp_low_value = clamp(-1.0, 0.0, 10.0)
+clamp_high_value = clamp(11.0, 0.0, 10.0)
+
+-- Round breaks ties toward positive infinity.
+round_tie_positive = round(3.5)
+round_tie_negative_half = round(-3.5)
+round_tie_negative_two_and_half = round(-2.5)
+
+-- Reversed bounds make the upper bound win, so the result is the max.
+clamp_reversed_value = clamp(5.0, 10.0, 0.0)
+
+-- One sample from each atan2 quadrant around the origin.
+quadrant_one_ok = abs(atan2(1.0, 1.0) - 0.785398) < 0.000001
+quadrant_two_ok = abs(atan2(1.0, -1.0) - 2.356194) < 0.000001
+quadrant_three_ok = abs(atan2(-1.0, -1.0) - -2.356194) < 0.000001
+quadrant_four_ok = abs(atan2(-1.0, 1.0) - -0.785398) < 0.000001
+
+-- These six-decimal mathematical references use a one-micro-unit absolute error bound.
+-- The bound checks the numeric result without making host decimal rendering contractual.
+sin_ok = abs(sin_value - 0.841471) < 0.000001
+cos_ok = abs(cos_value - 0.540302) < 0.000001
+tan_ok = abs(tan_value - 1.557408) < 0.000001
+atan2_ok = abs(atan2_value - 0.463648) < 0.000001
+log_ok = abs(log_value - 1.098612) < 0.000001
+
+adjusted ~= abs(-6.0)
+if adjusted > 5.0:
+    adjusted = adjusted - 2.0
+else
+    adjusted = adjusted + 2.0
+;
+bounded = clamp(adjusted, 0.0, 10.0)
+control_report = [:control adjusted=[adjusted] bounded=[bounded]]
+
+[:core_math_basic_functions exact_abs=[abs_value] floor=[floor_value] floor_negative=[floor_negative_value] ceil=[ceil_value] ceil_negative=[ceil_negative_value] round=[round_value] round_up=[round_up_value] trunc=[trunc_value] trunc_positive=[trunc_positive_value] min=[min_value] max=[max_value] clamp=[clamp_value] clamp_low=[clamp_low_value] clamp_high=[clamp_high_value] sqrt=[sqrt_value] pow=[pow_value] log2=[log2_value] log10=[log10_value] exp0=[exp_zero] log1=[log_one] approximate_sin=[sin_ok] approximate_cos=[cos_ok] approximate_tan=[tan_ok] approximate_atan2=[atan2_ok] approximate_log=[log_ok] round_tie_positive=[round_tie_positive] round_tie_negative_half=[round_tie_negative_half] round_tie_negative_two_and_half=[round_tie_negative_two_and_half] clamp_reversed=[clamp_reversed_value] quadrant_one=[quadrant_one_ok] quadrant_two=[quadrant_two_ok] quadrant_three=[quadrant_three_ok] quadrant_four=[quadrant_four_ok] [control_report]]

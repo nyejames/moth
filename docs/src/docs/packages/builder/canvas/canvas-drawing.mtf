@@ -1,6 +1,6 @@
 `@web/canvas` provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-`@web/canvas` ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the standard library expands.
+`@web/canvas` ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.
 
 ### Dependency roots
 

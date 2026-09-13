@@ -218,9 +218,9 @@ Before declaring a non-trivial code-bearing slice complete, run:
         [: First-party dependency audit]
         [: `just first-party-deps`]
         [: Scoped first-party package and runtime roots must contain no package-manager manifests,
-        vendored dependency directories or unapproved JavaScript module-loading forms. Invalid
-        runtime imports from a registered module are a distinct rule. The audit writes
-        `first_party_deps.json`]
+        vendored dependency directories or unapproved lexical JavaScript module-loading forms.
+        Invalid runtime imports from a registered module are a distinct rule. Host-driven script
+        loading is out of scope. The audit writes `first_party_deps.json`]
     ]
 
     [td:
@@ -346,7 +346,9 @@ It walks only these first-party implementation roots: `packages/`,
 inventory from `moth::first_party_js`: Core helper bodies, `@core/collections` runtime helpers,
 inline lowering templates and every module registered in `RuntimeModuleRegistry`.
 JavaScript module-loading classification is owned by the HTML JS parser scanner. This audit maps
-those diagnostics onto two rules and does not keep a second lexer.
+those diagnostics onto two rules and does not keep a second lexer. Classification is lexical and
+covers the forms the scanner parses: static `import` declarations including a clause-less
+side-effect import, dynamic `import()`, CommonJS `require()` and re-export `from` clauses.
 
 The only allowed JavaScript module specifier is an exact compiler-owned runtime module registered
 by `RuntimeModuleRegistry`. Dynamic `import()`, `require()`, relative, absolute, URL and data
@@ -354,6 +356,15 @@ imports are rejected. Exact package-manager manifest and lockfile basenames, and
 `vendor` and `third_party` directory names, are rejected under the scoped roots.
 Invalid named imports or unsupported import forms from a registered runtime module are reported
 as a distinct runtime-import rule, not as an unapproved third-party module specifier.
+
+Host-driven script loading is outside this audit: classic-worker `importScripts`, `new Worker(url)`,
+an injected `script` element and specifiers reaching `eval`, `new Function` or a `fetch` response.
+Those are arbitrary runtime behaviour rather than a declared dependency, so no lexical scan can
+bound them, and teaching the scanner call-expression semantics would buy a false-positive surface
+without closing the hole. The promise holds there because first-party JavaScript is compiler-owned
+either as a physical asset under the audited roots or as an inventoried fragment in compiler
+sources, generated `runtime_glue` is emitted from those owned sources, and both routes reach the
+repository through review.
 
 This audit does not walk generated `runtime_glue`, user-owned or future dependency packages,
 documentation, test fixtures, benchmarks or repository-root manifests. Missing roots,

@@ -1,0 +1,38 @@
+@core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds, unix_milliseconds, to_iso_string
+
+parse_first || -> Timestamp, Error!:
+    return timestamp_from_iso_string("0000-01-01T00:00:00.000Z")!
+;
+
+parse_last || -> Timestamp, Error!:
+    return timestamp_from_iso_string("9999-12-31T23:59:59.999Z")!
+;
+
+-- An accepted text whose offset pushes the instant past the last renderable one
+parse_past_last || -> Int, Error!:
+    ts = timestamp_from_iso_string("9999-12-31T23:59:59.999-00:01")!
+    return 0
+;
+
+first = parse_first() catch |first_err|:
+    then timestamp_from_unix_milliseconds(0.0)
+;
+
+last = parse_last() catch |last_err|:
+    then timestamp_from_unix_milliseconds(0.0)
+;
+
+-- Both endpoints render back to the text they were parsed from
+first_iso = to_iso_string(first) catch |first_render_err|:
+    then "unrenderable"
+;
+
+last_iso = to_iso_string(last) catch |last_render_err|:
+    then "unrenderable"
+;
+
+past_code = parse_past_last() catch |past_err|:
+    then past_err.code
+;
+
+[: window first=[unix_milliseconds(first)] last=[unix_milliseconds(last)] first_iso=[first_iso] last_iso=[last_iso] past_code=[past_code]]

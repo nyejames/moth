@@ -1,0 +1,13 @@
+@core/time Timestamp, timestamp_from_iso_string
+
+parse || -> Int, Error!:
+    ts = timestamp_from_iso_string("1970-01-01T00:00:00Z ")!
+    return 0
+;
+
+-- Surrounding whitespace is rejected
+code = parse() catch |err|:
+    then err.code
+;
+
+[: timestamp_parse_grammar_whitespace code=[code]]

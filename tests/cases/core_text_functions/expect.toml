@@ -3,20 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["core_text len=3 empty=true has=true prefix=true suffix=true"]
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "function __moth_text_length(",
-    "function __moth_text_is_empty(",
-    "function __moth_text_contains(",
-    "function __moth_text_starts_with(",
-    "function __moth_text_ends_with(",
-    "__moth_text_length(\"abc\")",
-    "__moth_text_contains(__moth_read(",
-]
+rendered_output_exact = "core_text len=3 empty=true has=true prefix=true suffix=true missing=false non_prefix=false non_suffix=false case_miss=false prefix_case_miss=false suffix_case_miss=false"
 
 [backends.html_wasm]
 mode = "failure"

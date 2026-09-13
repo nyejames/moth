@@ -24,7 +24,7 @@ Use `TimeMark` for a monotonic measurement point. Use `Duration` for the elapsed
     seconds = as_seconds(delta)
 ]
 
-This shape works for frame-delta style code without requiring a scheduler or animation package.
+This shape works for frame-delta style code without requiring a scheduler or animation package. Durations also compose directly: `duration_add`, `duration_subtract` and `duration_scale` combine elapsed amounts without converting through seconds.
 
 ### UTC timestamps
 
@@ -41,8 +41,16 @@ Use `Timestamp` for real-world UTC instants that may be logged, stored or exchan
         then timestamp_from_unix_milliseconds(0.0)
     ;
 
-    io.line(to_iso_string(created))
+    rendered = to_iso_string(created) catch:
+        then "1970-01-01T00:00:00.000Z"
+    ;
+
+    io.line(rendered)
 ]
 
-`timestamp_from_iso_string` takes the fallible path because invalid strings can fail. Handle it with `!` or `catch`.
+`timestamp_from_iso_string` rejects text outside the accepted ISO format. `to_iso_string` rejects instants outside its renderable range. Handle both fallible functions with `!` or `catch`.
+
+Timestamps compose too: `timestamp_offset` moves an instant by a duration and `timestamp_difference` measures the duration between two instants.
+
 For the full function list, backend behaviour and deferred surfaces, see @./ (Core time advanced).
+

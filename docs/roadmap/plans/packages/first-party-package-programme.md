@@ -3,7 +3,7 @@
 ## Purpose
 
 Build a useful batteries-included set of first-party Moth packages, starting with JavaScript
-implementations while the compiler diagnostics and data-layout work continues in parallel.
+implementations while the compiler diagnostics and data-layout work continues.
 
 The programme completes the common gaps in existing Core and Builder packages before adding broad new
 surface area. It also establishes package terminology, implementation boundaries, progress tracking
@@ -17,18 +17,23 @@ plans under this directory.
 ## Current-state capsule
 
 ```text
-STATUS: active parallel programme
-CURRENT_SLICE: Phase 0 - harden package foundations and first-party dependency policy
-BLOCKERS: package implementation waits for the native result-slot and Core const-eval compiler checkpoint after the foundation baseline is merged
-NEXT_ACTION: finish the first-party dependency guard corrections, retain the accepted core-text.md design, then land the compiler checkpoint before Text implementation starts
+STATUS: paused by the user after the `@core/math` and `@core/time` batch
+CURRENT_SLICE: none - `@core/math` and `@core/time` are delivered, each with its accepted contract published in the canonical reference before implementation
+BLOCKERS: package development remains paused until accepted data-layout Phase 3 completes. The merged tree passes workspace tests and all eight feature lanes, but the inherited warning-denied Clippy lane, 22 baseline-equivalent integration failures and the generic-instantiation scaling budget remain open.
+NEXT_ACTION: remain paused; begin the next package slice only from a main branch containing the accepted data-layout Phase 3 checkpoint, then rerun the complete package gate
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
 phase starts. Do not pin a moving programme to a baseline commit in this file.
 
+The pre-checkpoint hardening slice for the five shipped `@core/text` functions is delivered:
+exact-output coverage for the existing behaviour and an allocation-free `length` scan. It added no
+package API, no result-slot or const-eval capability and no new compiler surface, so Phase 2 has not
+started and the checkpoint order below is unchanged.
+
 ## Roadmap position and lifecycle
 
-After the foundation and documentation baseline is squash-merged into main, continue this programme on a rebased packages-and-builder-progress-plan branch in parallel with compiler data-layout Phase 2 onward. The roadmap owns shared checkpoints. Each package slice keeps its own compiler prerequisites and the merge-isolation rules below.
+The foundation and documentation baseline is merged into main. Phase 1 is delivered there and Phase 0's implementation is merged with only its `just validate` gate outstanding. The roadmap previously allowed isolated package work fitting the existing external ABI to run alongside data-layout Phases 2 and 3; the user has since paused package development until accepted data-layout Phase 3 is complete, so that permission is spent and this is the one current schedule. Integrating at the accepted Phase 2 checkpoint is a synchronisation event, not permission to start a new slice. Slices needing result slots or Core const evaluation still wait for the compiler checkpoint below. The roadmap owns shared checkpoints and serial order. Each package slice keeps its own compiler prerequisites and the merge-isolation rules below.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
 `docs/roadmap/plans/packages/` and are linked from the tracker in this file.
@@ -249,7 +254,8 @@ Phase 0 adds one focused validation owner to `just validate`. It must:
 - reject package-manager manifests and lockfiles within those roots
 - reuse the HTML JS parser scanner rather than a second lexer or repository-wide substring scan
 - reject unapproved JavaScript module-loading forms other than a named static import of a
-  registered runtime module
+  registered runtime module, within the lexical ECMAScript and `require` forms the scanner
+  classifies; host-driven script loading is out of scope by decision, recorded in Phase 0 below
 - report invalid named imports or unsupported import forms from a registered runtime module as a
   distinct rule
 - use one explicit allowlist for Moth-owned runtime modules where imports are required
@@ -419,11 +425,11 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Active next | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
-| 1 | `@core/text` | [core-text.md](./core-text.md) | Designed, queued behind native result slots and Core const evaluation | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
+| 0 | Package foundations | this plan | Implementation merged; open on the red `just validate` clippy lane | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
-| 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
-| 4 | `@core/time` | `core-time.md` | TODO: create when activated | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
+| 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
+| 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
 | 5 | `@web/canvas` | `web-canvas.md` | TODO: create when activated | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
 | 6 | `@core/io` | `core-io.md` | TODO: create when activated | Run a dedicated scope and prelude review, then close only the agreed common gaps |
@@ -551,7 +557,7 @@ Only then add a package row to the packages and builders progress matrix.
 The main roadmap:
 
 - links this umbrella programme once
-- records that it is active in parallel with diagnostics
+- records the programme's current state, including what blocks the next package phase
 - does not list each child package plan
 - retains the later package dependency and manager foundations work as a separate item
 
@@ -600,7 +606,7 @@ Delivered before Phase 0:
 
 ### Phase 0 - package foundations hardening
 
-In progress:
+Implementation merged, phase not formally closed:
 
 - removed `PackageOrigin::Standard` and Standard-tier documentation
 - kept `PackageOrigin::Dependency` for later package-system work
@@ -609,35 +615,77 @@ In progress:
   and allows only exact `RuntimeModuleRegistry` specifiers
 - no cryptography Core package examples were present in canonical docs
 
-Do not activate `@core/text` implementation until this phase stays green.
+The guard classifies ECMAScript module loading lexically through the HTML JS scanner: static and
+dynamic `import`, `require` and re-export forms. Host-driven script loading of any shape is outside
+that classification, including classic-worker `importScripts`, `new Worker(url)`, an injected
+`script` element and specifiers reaching `eval` or `new Function` through a string or `fetch`
+response.
+
+That boundary is now a decision, not an open question: the ownership statement in
+`validation.mtf > First-party dependency audit` names the lexical scope and the excluded host forms,
+and the scanner dispatch stays as it is. The guard enforces a promise about declared dependencies,
+so arbitrary runtime evaluation is not in its reach at any dispatch size, and teaching the scanner
+call-expression semantics would add a false-positive surface without closing the hole. The excluded
+forms are defended instead by compiler ownership: first-party JavaScript is either a physical asset
+under one of the four audited roots or an inventoried fragment in compiler sources, generated
+runtime glue is emitted from those owned sources, and both routes reach the repository through
+review. A green guard result therefore proves lexical module-loading cleanliness, and host-driven
+loading is a named manual review boundary.
+
+Phase 0's mandatory `just validate` gate remains open on the warning-denied native Clippy lane. On
+the current merged tree, `cargo test --workspace --quiet -- --format terse` passes 5,986 tests;
+`just test-feature-matrix` passes all 8/8 standard lanes; `just feature-lane-check` reports zero
+findings; `just source-audit` audits 1,389 files with zero findings; `just first-party-deps`
+visits 21 files and 80 JavaScript sources with zero findings; the documentation and timer-erasure
+checks pass; and `bench-ci` passes all 82 benchmark preflight cases.
+
+The integration suite reports 1,937/1,959 correct with 22 failures. Running the same suite on
+`main` reports the same 22 failing cases, so the diagnostics refactor introduces no additional
+integration failures. The package-owned focused cases remain green: `--tag math` is 14/14,
+`--tag time` is 29/29 and `--tag core-packages` is 42/42. `bench-scaling` passes its constant and
+nominal series but the inherited generic-instantiation series fits n^1.82 against its n^1.70
+budget.
+
+The remaining Clippy findings are warning-denied unused imports, variables and mutability in the
+merged compiler/test tree, and the broad formatter check reports inherited unformatted files.
+These are upstream shared-tree validation blockers rather than package API or runtime failures.
+The package implementation does not alter diagnostic payloads, source/path ownership, HIR call
+representation or build-graph construction. The package work is therefore synchronized and
+validated, but the programme stays paused and Phase 0 remains open on the gate alone.
 
 ### Phase 1 - activate the living package workflow
 
-- create and accept `core-text.md` from the required living-plan structure
-- complete the `@core/text` API and implementation audit
-- settle its useful v1 scope with the user
-- update the tracker and package progress row
-- verify that package-plan links and lifecycle wording remain accurate
-- commit the accepted text plan before implementation starts
+Delivered and merged:
 
-The design file and progress tracking may be prepared on this planning branch while Phase 0 closes.
-That does not authorize package code before the compiler prerequisite below.
+- created and accepted `core-text.md` from the required living-plan structure
+- completed the `@core/text` API and implementation audit, recorded as its current surface and
+  implementation debt
+- settled the useful v1 scope with the user
+- updated the tracker row and the packages-and-builders Core text rows
+- verified package-plan links and lifecycle wording
 
-Mandatory closeout: documentation, design-boundary, merge-isolation and validation audit. No text
-implementation belongs in this phase.
+No `@core/text` implementation belongs in this phase, and none landed.
 
-### Compiler foundation checkpoint before package implementation
+### Compiler foundation checkpoint for result-slot-dependent package work
 
-After the package-foundation baseline is validated and merged, pause package expansion while the
-compiler-owned native result-slot and Core constant-evaluation work lands. It must provide:
+The compiler-owned native result-slot and Core constant-evaluation work is a capability gate, not a
+programme-wide pause. It gates the `@core/text` v1 slice and any other package slice that needs
+truthful result slots or compile-time Core evaluation. Package work on the existing external ABI,
+including hardening and current-surface expansion of an already registered package, is not gated by
+this checkpoint and proceeded while that work landed. It is nonetheless stopped right now by the
+user's pause recorded in the capsule, which is a scheduling decision rather than a capability one.
+The checkpoint must provide:
 
 - truthful zero/one/many result slots through AST/HIR/backend-neutral analysis
 - the typed `ExternalConstEvalOp` metadata and one AST-owned dispatch path
 - Rust evaluation of the existing five `@core/text` operations
 - JS/Rust semantic parity tests and runtime-helper elimination for folded calls
 
-Resume this programme only from `main` containing that checkpoint. Adopt its final owners directly
-and remove any planning assumptions made obsolete by the implementation.
+Start a result-slot-dependent phase only from `main` containing that checkpoint. Adopt its final
+owners directly and remove any planning assumptions made obsolete by the implementation. This
+checkpoint alone would pause package work only while the shared result representation is actually
+changing under it; the current pause is the user's and lasts until accepted data-layout Phase 3
+completes.
 
 ### Phase 2 - `@core/text` current v1 slice
 
@@ -656,13 +704,27 @@ Do not use flaky distribution thresholds as the only correctness evidence.
 
 ### Phase 4 - `@core/math` current v1 slice
 
-Create and accept `core-math.md`, then fill only the high-value gaps found by its audit.
+`core-math.md` exists and Math was activated out of order, because hardening its already-registered
+surface needed no new compiler capability. Delivered: existing-behaviour coverage for the original
+eighteen functions, the registration cleanup, and the accepted scalar expansion of thirteen
+functions and three constants over the same external ABI. The numerical contract the expansion
+depends on was published in the canonical reference before any of it was implemented, so every new
+assertion rests on a published sentence. The three assertions that still fixed an approximating
+result to an exact decimal - `cbrt(27)`, `hypot(3, 4)` and the aliased `exp(1.0)` - became bounded
+comparisons after an external pause review, so no exception survives.
+A Wasm lowering set and const-eval folding remain open, each needing its own accepted decision.
 
 Mandatory closeout: full phase gate plus finite-result, domain edge and integration coverage.
 
 ### Phase 5 - `@core/time` current v1 slice
 
-Create and accept `core-time.md`, then complete the bounded duration and timestamp surface.
+`core-time.md` exists and the v1 slice is delivered. The audit found that the package's observable
+behaviour was whatever the host parser and formatter did, so the semantic contract was settled with
+the user and published in the canonical reference first. The implementation then matched it: an
+explicit grammar and calendar validation with compiler-owned error codes, a fallible `to_iso_string`
+over a validating helper, a shared renderable window that makes every rendered string parse back, one
+descriptor table for registration, and the accepted Duration and Timestamp arithmetic. Remaining
+candidates are a Wasm lowering set and explicit duration range rules.
 
 Mandatory closeout: full phase gate plus deterministic parsing, conversion and monotonic-time
 contract coverage. Keep wall-clock tests independent of the machine's current date and time.

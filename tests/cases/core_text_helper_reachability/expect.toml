@@ -1,0 +1,19 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "core_text_helper_reachability length=3"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "function __moth_text_length(",
+]
+must_not_contain = [
+    "function __moth_text_is_empty(",
+    "function __moth_text_contains(",
+    "function __moth_text_starts_with(",
+    "function __moth_text_ends_with(",
+]

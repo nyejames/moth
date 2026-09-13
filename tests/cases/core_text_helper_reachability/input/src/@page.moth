@@ -1,0 +1,5 @@
+@core/text length
+
+value = length("abc")
+
+[:core_text_helper_reachability length=[value]]

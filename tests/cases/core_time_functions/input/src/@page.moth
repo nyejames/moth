@@ -29,6 +29,10 @@ abs_sec = as_seconds(abs_d)
 clamped = clamp(d1, duration_from_milliseconds(0.0), duration_from_milliseconds(1000.0))
 clamped_sec = as_seconds(clamped)
 
+-- Reversed bounds make the upper bound win, so the result is the maximum
+reversed_clamped = clamp(d1, duration_from_milliseconds(1000.0), duration_from_milliseconds(0.0))
+reversed_clamped_sec = as_seconds(reversed_clamped)
+
 -- TimeMark delta (use deterministic derived values, not live elapsed)
 mark1 = mark_now()
 mark2 = mark_now()
@@ -43,8 +47,10 @@ ts0 = timestamp_from_unix_milliseconds(0.0)
 ts1 = timestamp_from_unix_seconds(1.0)
 ts_millis = unix_milliseconds(ts0)
 ts_sec = unix_seconds(ts1)
-ts_iso = to_iso_string(ts0)
+ts_iso = to_iso_string(ts0) catch:
+    then "unrenderable"
+;
 
-io.line([:duration sec=[sec] millis=[millis] neg=[neg] abs_sec=[abs_sec] clamped_sec=[clamped_sec]])
+io.line([:duration sec=[sec] millis=[millis] neg=[neg] abs_sec=[abs_sec] clamped_sec=[clamped_sec] reversed_sec=[reversed_clamped_sec]])
 io.line([:delta_ok=[delta_ok] elapsed_ok=[elapsed_ok]])
 io.line([:timestamp ts_millis=[ts_millis] ts_sec=[ts_sec] iso=[ts_iso]])
