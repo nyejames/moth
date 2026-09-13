@@ -15,9 +15,8 @@
 //! or project code cannot assemble a semantic sequence of its own.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
+    check_borrows as run_borrow_checker, BorrowCheckError, BorrowCheckReport,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::{
@@ -31,19 +30,19 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
-    SourcePreparationDelta, parse_file_headers_with_table,
+    parse_file_headers_with_table, BoundModuleHeaders, FileFrontendPrepareError,
+    FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
-    PlainMarkdownPrepareInput, prepare_plain_markdown_file,
+    prepare_plain_markdown_file, PlainMarkdownPrepareInput,
 };
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::instrumentation::{add_frontend_counter, FrontendCounter};
 use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::module_dependencies::{
-    ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
+    resolve_module_dependencies, ContentSourceTargets, SortedHeaders,
 };
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
@@ -54,10 +53,11 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseError, SourceId,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use crate::compiler_frontend::FrontendBuildProfile;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -97,18 +97,23 @@ impl<'a> CompilerFrontend<'a> {
     pub(crate) fn new(
         options: FrontendOptions,
         string_table: StringTable,
-        mut path_fork: PathInternerFork,
+        path_fork: PathInternerFork,
         style_directives: &'a StyleDirectiveRegistry,
         external_package_registry: &'a Arc<ExternalPackageRegistry>,
         project_path_resolver: Option<&'a ProjectPathResolver>,
         source_files: &'a Arc<SourceDatabase>,
     ) -> Self {
-        // Source identities and retained prepared outputs use the source database's path domain.
-        // Rebind standalone test/fixture forks before any tokenizer or header reader can resolve
-        // a registered logical path through the wrong base table.
-        if path_fork.len() < source_files.paths().len() {
-            path_fork = source_files.fork_path_interner();
-        }
+        // Callers must supply a fork minted from this source database: standalone fixtures fork
+        // from an empty table only when `source_files` is empty. A mismatched base would let
+        // tokenizers resolve registered logical paths through the wrong identity table, so this
+        // constructor fails loudly instead of repairing the fork.
+        assert!(
+            path_fork.len() >= source_files.paths().len(),
+            "CompilerFrontend requires a path fork carrying the authoritative source-table \
+             prefix: expected at least {} paths, got {}",
+            source_files.paths().len(),
+            path_fork.len(),
+        );
         Self {
             external_package_registry,
             style_directives,
@@ -494,8 +499,9 @@ impl<'a> CompilerFrontend<'a> {
         )?;
         for (function_path, provenance) in static_if_function_provenance {
             let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {
-                (result.hir_module.side_table.function_name_path(function.id) == Some(function_path))
-                    .then_some(function.id)
+                (result.hir_module.side_table.function_name_path(function.id)
+                    == Some(function_path))
+                .then_some(function.id)
             }) else {
                 return Err(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(format!(

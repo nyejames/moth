@@ -300,7 +300,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
             &mut span_view,
             &entry_file_path,
             local_string_table,
-            PathInternerFork::empty(),
+            source_files.fork_path_interner(),
             source_byte_count,
             None,
         )
@@ -313,7 +313,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
             &mut span_view,
             &entry_file_path,
             local_string_table,
-            PathInternerFork::empty(),
+            source_files.fork_path_interner(),
             source_byte_count,
         )
         .expect("retained synthetic outputs should prepare once");

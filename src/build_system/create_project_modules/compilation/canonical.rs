@@ -34,8 +34,8 @@ use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
+use crate::compiler_frontend::symbols::path_interner::{PathInternerBuilder, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 
 use crate::projects::settings::Config;
 
@@ -530,6 +530,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         &self,
         job: module_inventory::ModuleCompilationJob,
         known_generated: KnownGeneratedFunctions<'_>,
+        global_path_table: &PathTable,
     ) -> DirectoryModuleTaskResult {
         let module_inventory::ModuleCompilationJob {
             module_id,
@@ -552,6 +553,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 module_id,
                 base_len,
                 path_base_len,
+                global_path_table,
                 prepared,
                 known_generated,
                 None,
@@ -568,6 +570,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 module_id,
                 base_len,
                 path_base_len,
+                global_path_table,
                 prepared,
                 known_generated,
                 None,
@@ -578,12 +581,12 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             )
         }
     }
-    #[allow(clippy::too_many_arguments)]
     fn compile_prepared(
         &self,
         module_id: ModuleId,
         base_len: usize,
         path_base_len: usize,
+        global_path_table: &PathTable,
         prepared: PreparedModule,
         known_generated: KnownGeneratedFunctions<'_>,
         build_config_values_override: Option<&ResolvedBuildConfigMap>,
@@ -673,6 +676,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             source_provider_dependencies: &source_provider_dependencies,
             provider_materialisations: self.provider_materialisations,
             global_string_table: Some(self.global_string_table),
+            global_path_table: Some(global_path_table),
             builder_runtime_packages: &self.boundary.builder_surface.builder_runtime_packages,
         };
 
@@ -716,6 +720,7 @@ fn compile_check_only_job(
     job: module_inventory::CheckOnlyModuleCompilationJob,
     known_generated: KnownGeneratedFunctions<'_>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
+    global_path_table: &PathTable,
 ) -> DirectoryModuleTaskResult {
     let module_inventory::CheckOnlyModuleCompilationJob {
         owner_module_id: module_id,
@@ -805,6 +810,7 @@ fn compile_check_only_job(
             module_id,
             base_len,
             path_base_len,
+            global_path_table,
             prepared,
             known_generated,
             Some(&check_only_build_config_values),
@@ -821,6 +827,7 @@ fn compile_check_only_job(
             module_id,
             base_len,
             path_base_len,
+            global_path_table,
             prepared,
             known_generated,
             Some(&check_only_build_config_values),
@@ -845,7 +852,7 @@ pub(super) fn compile_check_only_batches(
     source_package_dependency_index: &rustc_hash::FxHashMap<(ModuleId, DependencyShellId), usize>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
     string_table: &mut StringTable,
-    _path_interner: &mut PathInternerBuilder,
+    path_interner: &mut PathInternerBuilder,
 ) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
     // successful artefacts, interfaces, generated deltas and resource associations are discarded.
@@ -873,13 +880,14 @@ pub(super) fn compile_check_only_batches(
                 check_only_job,
                 generated_store.known_generated(),
                 build_config_index,
+                path_interner.paths(),
             )
         };
         let path_base_len = outcome.path_base_len;
         match outcome.outcome {
             DirectoryModuleTaskOutcome::Success(compiled) => {
                 debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
-                if let Some(batch) = check_only_success_batch(*compiled) {
+                if let Some(batch) = check_only_success_batch(*compiled)? {
                     transient_batches.push(batch);
                 }
             }
@@ -907,13 +915,15 @@ pub(super) fn compile_check_only_batches(
 ///       canonical check-only success arm does, keeps the module-local string table on the
 ///       batch, and attaches the issuing path fork's snapshot so warning `PathId`s issued
 ///       against the check-only fork keep a table that renders them after the final render
-///       tail's component remap.
+///       tail's component remap. A table whose components the batch's string table cannot
+///       resolve is a pairing invariant failure and returns an infrastructure error instead of
+///       silently dropping the path context.
 /// WHY: the only crossing state for a check-only unit is its diagnostics; keeping the
 ///      construction in one production helper lets the regression test route through the real
 ///      branch instead of re-implementing the path-table attachment.
 pub(super) fn check_only_success_batch(
     compiled: ModuleSemanticResult,
-) -> Option<PremergeDiagnosticBatch> {
+) -> Result<Option<PremergeDiagnosticBatch>, PremergeFailure> {
     let ModuleSemanticResult {
         module,
         generated_delta,
@@ -929,13 +939,15 @@ pub(super) fn check_only_success_batch(
             .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
     );
     if warnings.is_empty() {
-        return None;
+        return Ok(None);
     }
     // Retain the module-local table; the final render tail merges it exactly once via
     // `append_messages_preserving_context`.
     let mut batch = PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
-    batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
-    Some(batch)
+    if let Err(error) = batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table())) {
+        return Err(PremergeFailure::Infrastructure(error));
+    }
+    Ok(Some(batch))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1055,7 +1067,11 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                     &source_package_dependency_index,
                     &*string_table,
                 );
-                compile_context.compile(job, generated_store.known_generated())
+                compile_context.compile(
+                    job,
+                    generated_store.known_generated(),
+                    path_interner.paths(),
+                )
             };
             match outcome.outcome {
                 DirectoryModuleTaskOutcome::Success(compiled) => {
@@ -1127,13 +1143,25 @@ pub(super) fn compile_module_waves_in_premerge_lane(
         .into());
     }
 
-    let boundary = CompiledGraphBoundary {
+    // The local provider registry owns every retained context only until this point. Dropping
+    // it before the boundary install proves the store's contexts are the sole owners, so the
+    // install's `Arc::make_mut` never clones. The single final table replaces every
+    // construction placeholder without another per-module snapshot.
+    drop(provider_materialisations);
+    let mut boundary = CompiledGraphBoundary {
         structure: graph,
         modules: provider_store,
         generated: generated_store,
         diagnosed,
         blocked,
     };
+    // Cloning keeps the caller's builder intact: the directory tail later adopts this same
+    // builder into the source database (`adopt_path_builder`), so the install must not move it.
+    let frozen_path_table = path_interner.clone().freeze();
+    boundary.install_boundary_identity(
+        Arc::new(frozen_path_table),
+        Arc::new(string_table.clone().freeze()),
+    );
     let boundary = boundary.finish()?;
     Ok((boundary, transient_batches))
 }

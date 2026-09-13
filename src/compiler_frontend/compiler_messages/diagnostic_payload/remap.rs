@@ -358,6 +358,98 @@ impl DiagnosticPayload {
     }
 
 }
+
+impl DiagnosticPayload {
+    /// Push every path identity this payload's renderers resolve through a path table.
+    ///
+    /// WHAT: collects the exact `PathId`s a render boundary must spell out for this payload,
+    ///       including every table ancestor each one requires.
+    /// WHY: path-table pairing only matters where a rendered spelling would be wrong. Scanning
+    ///      whole table ranges rejects valid foreign-domain tables that no retained diagnostic
+    ///      ever dereferences; scanning only leaf IDs misses ancestors the resolver walks
+    ///      before reaching the final component. Collecting each required chain here keeps the
+    ///      pairing check exact: a payload with no paths rejects nothing, and one with paths
+    ///      rejects a table whose referenced nodes carry unresolvable components.
+    pub(crate) fn required_path_payload_paths(&self, paths: &mut Vec<PathId>) {
+        match self {
+            DiagnosticPayload::MissingImportTarget { path }
+            | DiagnosticPayload::AmbiguousImportTarget { path }
+            | DiagnosticPayload::BareFileImport { path }
+            | DiagnosticPayload::DirectSpecialFileImport { path }
+            | DiagnosticPayload::NotExportedBySourceFile { symbol_path: path }
+            | DiagnosticPayload::NotExportedByPublicSurface {
+                requested_path: path,
+                ..
+            }
+            | DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path: path }
+            | DiagnosticPayload::CrossModuleImportNotExported { symbol_path: path }
+            | DiagnosticPayload::DirectSymbolPathImport { path }
+            | DiagnosticPayload::InvalidNamespaceDefaultName { path }
+            | DiagnosticPayload::ExplicitMothExtension { path }
+            | DiagnosticPayload::InvalidImportPath { path, .. }
+            | DiagnosticPayload::InvalidExternalModule { path, .. }
+            | DiagnosticPayload::InvalidCompileTimePath { path, .. }
+            | DiagnosticPayload::UnsupportedExternalExtension { path, .. }
+            | DiagnosticPayload::ExplicitSourceExtension { path, .. }
+            | DiagnosticPayload::UnsupportedSourceFileKind { path, .. }
+            | DiagnosticPayload::InvalidSourceFileEntry { path, .. }
+            | DiagnosticPayload::DuplicateMothTemplateInputPath { path } => {
+                paths.push(*path);
+            }
+            DiagnosticPayload::DuplicateImportSurfaceMember { surface_path, .. } => {
+                paths.push(*surface_path);
+            }
+            DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
+                first_path,
+                second_path,
+            } => {
+                paths.push(*first_path);
+                paths.push(*second_path);
+            }
+            DiagnosticPayload::CircularDependency { path } => {
+                paths.push(*path);
+            }
+            DiagnosticPayload::BorrowConflict { place, .. }
+            | DiagnosticPayload::UseOfUninitializedLocal { place }
+            | DiagnosticPayload::UseAfterPossibleMove { place }
+            | DiagnosticPayload::MoveWhileBorrowed { place, .. } => {
+                place.push_path(paths);
+            }
+            DiagnosticPayload::MultipleMutableBorrows {
+                place,
+                conflicting_place,
+            }
+            | DiagnosticPayload::SharedMutableConflict {
+                place,
+                conflicting_place,
+                ..
+            } => {
+                place.push_path(paths);
+                if let Some(conflicting_place) = conflicting_place {
+                    conflicting_place.push_path(paths);
+                }
+            }
+            DiagnosticPayload::WholeObjectBorrowConflict {
+                whole_place,
+                part_place,
+            } => {
+                whole_place.push_path(paths);
+                part_place.push_path(paths);
+            }
+            DiagnosticPayload::InvalidMutableAccess {
+                place,
+                conflicting_place,
+                ..
+            } => {
+                place.push_path(paths);
+                if let Some(conflicting_place) = conflicting_place {
+                    conflicting_place.push_path(paths);
+                }
+            }
+            _ => {}
+        }
+    }
+}
 fn remap_path_import_payload(path: &mut PathId, remap: &PathIdRemap) {
     *path = remap.get(*path);
 }

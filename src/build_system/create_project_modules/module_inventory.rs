@@ -177,9 +177,11 @@ fn resolve_directory_dependency_path(
             let table = std::mem::take(string_table);
             let mut failure =
                 PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(diagnostic, table));
-            failure.attach_path_table_if_missing(Arc::new(
+            if let Err(error) = failure.attach_path_table_if_missing(Arc::new(
                 directory_dependency_resolution.path_fork().snapshot_table(),
-            ));
+            )) {
+                return PremergeFailure::Infrastructure(error);
+            }
             failure
         })
 }

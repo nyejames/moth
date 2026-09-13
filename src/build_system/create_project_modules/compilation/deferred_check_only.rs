@@ -6,6 +6,7 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
+use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 
@@ -30,7 +31,7 @@ fn seed_boundary_materialisations(
 ) -> Result<(), CompilerError> {
     for artifact in modules.successful_artefacts_in_module_id_order() {
         if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
-            registry.publish_context(context)?;
+            registry.publish_context_with_rebase_required(context, true)?;
         }
     }
     Ok(())

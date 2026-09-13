@@ -185,7 +185,7 @@ pub enum ModuleCompilationOutcome {
 }
 ```
 
-`ModuleSemanticResult` is the complete unmerged result of one module compilation: the validated module lanes, the generated delta completed in the same transaction, the closed public interface, and the module-local string table carrying every diagnostic render identity. The build system merges that table into its own, remaps the result and stores the merged pair as a `CompiledModuleArtifact`.
+`ModuleSemanticResult` is the complete unmerged result of one module compilation: the validated module lanes, the generated delta completed in the same transaction, the closed public interface, and the module-local string table plus path-interner fork carrying every diagnostic render identity. The build system merges the string delta first, merges the path delta into one final boundary path table, remaps the result and stores the published identity context in a `CompiledModuleArtifact`.
 
 The two types are deliberately different. The success payload is what the compiler produced; the artefact is what the boundary published. Publication is atomic, so a result that fails validation at the boundary is discarded whole rather than leaving a merged half.
 
@@ -205,7 +205,7 @@ The build system may collect successful independent branches for `check` or futu
 
 ### Compiled module artefact
 
-A successful module result separates the consumer-visible interface from the three module-local lanes.
+A successful module result separates the consumer-visible interface from the module-local semantic lanes and their transient identity deltas.
 
 ```rust
 pub struct Module {
@@ -220,18 +220,19 @@ pub struct CompiledModuleArtifact {
 }
 ```
 
-The three module-local lanes are grouped because they share one lifetime and one remap: string-ID remapping after a table merge covers HIR, type identity, link facts and metadata in a single pass over `Module`. The interface is separate because it is the only lane another module reads.
+The module-local lanes are grouped because they share one publication lifetime. String-ID remapping runs first; the path delta then merges and PathId remapping runs before consumers observe the `Module`. The interface is separate because it is the only lane another module reads.
 
 The reuse fingerprints described under `Fingerprints and reuse facts` are planned design, not a current artefact lane.
 
 `PublicSemanticInterface` contains consumer-visible semantic facts.
 
-`ModuleExecutable` contains module-local semantic state:
+`ModuleExecutable` contains module-local semantic state plus its final boundary identity table:
 
 - the local `TypeEnvironment`
 - validated module-local HIR
 - borrow-analysis facts
 - lifetime-region and escape-validation facts
+- the immutable `PathTable` shared by completed artefacts in the project or package boundary
 
 `PublicSemanticInterface` carries the stable consumer-visible facts listed in `Public semantic interfaces`, including complete lifetime and effect summaries. Donor-local region identities do not cross that boundary.
 
@@ -325,6 +326,7 @@ One project or package compilation boundary owns a diagnostic identity context f
 
 - `SourceSpan` stores a final `SourceId` and exact local byte range; source display paths are resolved through the attached context.
 - Parallel workers may return deterministic string-table deltas.
+- Parallel workers may return deterministic path-interner deltas alongside string-table deltas.
 - File deltas merge in original source order.
 - Module deltas merge in canonical module order.
 - Diagnostics and warnings never merge in worker-completion order.
@@ -333,11 +335,11 @@ One project or package compilation boundary owns a diagnostic identity context f
   (`docs/compiler-data-layout-design.md` > `Source identity and database > Private discovery
   finalization`).
 - Tokens, headers, visibility records, type-rendering contexts and artefacts are remapped before a later consumer uses them.
-- A success or failure result that outlives the active compilation call carries the merged `StringTable` or an equivalent self-contained render context.
+- A success or diagnosed result that outlives the active compilation call carries the merged `StringTable` and final `PathTable`, or an equivalent paired self-contained render context.
 
-Full table cloning remains valid for genuinely independent identity boundaries. It is not the ordinary module-compilation strategy.
+Full string/path table cloning remains valid for genuinely independent identity boundaries. It is not the ordinary module-compilation strategy.
 
-Process-local `StringId` values and absolute filesystem paths are not persistent semantic identities. A serialised artefact stores canonical logical identities plus self-contained strings or a remappable string table.
+Process-local `StringId` and `PathId` values and absolute filesystem paths are not persistent semantic identities. A serialised artefact stores canonical logical identities plus self-contained strings/path tables or a remappable identity context.
 
 ## Stable semantic identities
 

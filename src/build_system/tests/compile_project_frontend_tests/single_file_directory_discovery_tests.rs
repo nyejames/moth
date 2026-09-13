@@ -220,20 +220,22 @@ fn directory_project_discovers_multiple_entry_modules() {
         &mut string_table,
     );
 
-    assert!(
-        result.is_ok(),
-        "expected Ok for multi-module directory project"
-    );
+    let modules = result.expect("expected Ok for multi-module directory project");
+    let views = modules.successful_module_views().collect::<Vec<_>>();
     assert_eq!(
-        result
-            .expect("checked above")
-            .successful_module_views()
-            .count(),
+        views.len(),
         2,
-        "expected exactly two modules"
+        "expected exactly two successful modules in the retained boundary"
     );
-}
+    let shared_path_table = &views[0].executable.path_table;
+    assert!(
+        views.iter().all(|module| {
+            std::sync::Arc::ptr_eq(&module.executable.path_table, shared_path_table)
+        }),
+        "all base modules in one boundary must share its final path table"
+    );
 
+}
 #[test]
 fn directory_project_remaps_delta_collisions_across_modules() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();

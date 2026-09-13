@@ -10,18 +10,17 @@
 //!      semantic stages behind that call are tested with their own owners.
 
 use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
-use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::CompilerFrontend;
+use crate::builder_surface::SourceFileKindRegistry;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
-    SourcePreparationDelta, parse_file_headers_with_table, prepare_header_syntax,
+    parse_file_headers_with_table, prepare_header_syntax, FileFrontendPrepareOutput, HeaderKind,
+    HeaderParseOptions, PreparedHeaderSyntax, SourcePreparationDelta,
 };
 use crate::compiler_frontend::module_compilation::{
-    ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
-    compile_module,
+    compile_module, ModuleCompilationContext, ModuleCompilationOutcome,
+    ProviderMaterialisationRegistry,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -35,11 +34,12 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -68,6 +68,9 @@ fn moth_prepared_input(
 }
 
 /// Tokenize the registered source while borrowing its caller-owned span builder.
+///
+/// The tokenizer writes logical path identities through a fork minted from the source
+/// database so prepared inputs stay in the database's numeric path domain.
 fn tokenized_moth_prepared_input(
     source_files: &SourceDatabase,
     style_directives: &StyleDirectiveRegistry,
@@ -76,7 +79,7 @@ fn tokenized_moth_prepared_input(
     source_code: &str,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> PreparedSourceInput {
-    let mut path_fork = PathInternerFork::empty();
+    let mut path_fork = source_files.fork_path_interner();
     let tokens = CompilerFrontend::tokenize_source(
         source_files,
         style_directives,
@@ -137,7 +140,6 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         .clone();
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
@@ -145,6 +147,9 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         &mut string_table,
     )
     .expect("source file table should build");
+    // Tokenization must mint logical path identities in the source database's domain so the
+    // prepared inputs and the fixture fork share one authoritative base.
+    let mut path_fork = source_files.fork_path_interner();
     for (canonical, (_, source)) in canonical_paths.iter().zip(file_sources) {
         let source_id = source_files
             .get_by_canonical_path(canonical)
@@ -414,16 +419,13 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     )
     .expect("header syntax preparation should succeed");
 
-    let beta_header = headers
-        .headers
-        .iter()
-        .find(|h| {
-            frontend
-                .path_fork
-                .component(h.tokens.src_path)
-                .map(|id| frontend.string_table.resolve(id))
-                == Some("beta")
-        });
+    let beta_header = headers.headers.iter().find(|h| {
+        frontend
+            .path_fork
+            .component(h.tokens.src_path)
+            .map(|id| frontend.string_table.resolve(id))
+            == Some("beta")
+    });
     assert!(
         beta_header.is_some(),
         "beta header should exist with name resolvable through module table"
@@ -438,10 +440,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         const_template_header.is_some(),
         "const template header should exist"
     );
-    let const_template_name = const_template_header
-        .unwrap()
-        .tokens
-        .src_path;
+    let const_template_name = const_template_header.unwrap().tokens.src_path;
     let const_template_name = frontend
         .path_fork
         .component(const_template_name)
@@ -656,6 +655,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         project_path_resolver: Some(&project_path_resolver),
         style_directives: &style_directives,
         global_string_table: None,
+        global_path_table: None,
         external_packages: Arc::clone(&external_packages),
         build_config_values: Arc::new(Default::default()),
         external_dependency_resolution_table: &resolution_table,
@@ -848,6 +848,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
         global_string_table: None,
+        global_path_table: None,
         style_directives: &style_directives,
         external_packages,
         build_config_values: Arc::new(Default::default()),
@@ -887,18 +888,16 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     assert_eq!(draft.public_interface.export_bindings.len(), 1);
     assert_eq!(draft.module.executable.hir.start_function, None);
     assert!(draft.module.executable.hir.functions.is_empty());
-    assert!(
-        draft
-            .module
-            .executable
-            .hir
-            .function_origins
-            .values()
-            .all(|origin| !matches!(
-                origin,
-                crate::compiler_frontend::hir::functions::HirFunctionOrigin::EntryStart
-            ))
-    );
+    assert!(draft
+        .module
+        .executable
+        .hir
+        .function_origins
+        .values()
+        .all(|origin| !matches!(
+            origin,
+            crate::compiler_frontend::hir::functions::HirFunctionOrigin::EntryStart
+        )));
 }
 
 #[test]
@@ -980,11 +979,9 @@ fn chunk_planning_is_bounded_by_thread_policy_and_minimum_chunk_size() {
     assert_eq!(four_thread_plans.last().unwrap().file_range, 35..40);
 
     assert_eq!(uneven_plans.len(), 2);
-    assert!(
-        uneven_plans
-            .iter()
-            .all(|plan| plan.file_range.len() >= super::FILE_PREPARATION_MIN_CHUNK_SIZE)
-    );
+    assert!(uneven_plans
+        .iter()
+        .all(|plan| plan.file_range.len() >= super::FILE_PREPARATION_MIN_CHUNK_SIZE));
 }
 
 #[test]
@@ -1006,7 +1003,6 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let canonical_c = fs::canonicalize(&file_c).unwrap();
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         &[&canonical_a, &canonical_b, &canonical_c],
         &canonical_a,
@@ -1059,7 +1055,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        PathInternerFork::empty(),
+        source_files.fork_path_interner(),
         &style_directives,
         &external_package_registry,
         None,
@@ -1133,7 +1129,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         style_directives: frontend.style_directives,
         project_path_resolver: frontend.project_path_resolver.cloned(),
     };
-    let mut preparation_path_fork = PathInternerFork::empty();
+    let mut preparation_path_fork = source_files.fork_path_interner();
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
@@ -1185,26 +1181,20 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     );
 
     // Verify headers from all files exist and strings resolve.
-    let beta_header = headers
-        .headers
-        .iter()
-        .find(|h| {
-            preparation_path_fork
-                .component(h.tokens.src_path)
-                .map(|id| frontend.string_table.resolve(id))
-                == Some("Beta")
-        });
+    let beta_header = headers.headers.iter().find(|h| {
+        preparation_path_fork
+            .component(h.tokens.src_path)
+            .map(|id| frontend.string_table.resolve(id))
+            == Some("Beta")
+    });
     assert!(beta_header.is_some(), "Beta header should exist");
 
-    let gamma_header = headers
-        .headers
-        .iter()
-        .find(|h| {
-            preparation_path_fork
-                .component(h.tokens.src_path)
-                .map(|id| frontend.string_table.resolve(id))
-                == Some("Gamma")
-        });
+    let gamma_header = headers.headers.iter().find(|h| {
+        preparation_path_fork
+            .component(h.tokens.src_path)
+            .map(|id| frontend.string_table.resolve(id))
+            == Some("Gamma")
+    });
     assert!(gamma_header.is_some(), "Gamma header should exist");
 
     let const_template_header = headers
@@ -1303,7 +1293,6 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         .expect("test should create an entry file")
         .clone();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
@@ -1374,7 +1363,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        PathInternerFork::empty(),
+        source_files.fork_path_interner(),
         &style_directives,
         &external_package_registry,
         None,
@@ -1392,7 +1381,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         style_directives: frontend.style_directives,
         project_path_resolver: frontend.project_path_resolver.cloned(),
     };
-    let mut preparation_path_fork = PathInternerFork::empty();
+    let mut preparation_path_fork = source_files.fork_path_interner();
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
@@ -1486,6 +1475,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             super::FilePreparationStrategy::ParallelChunked,
             &mut span_owners,
         )
+        .expect("fixture chunks should prepare against the fixture path fork")
     };
     for chunk in &mut chunks {
         for (source, builder) in chunk.span_builders.drain(..) {
@@ -1543,8 +1533,7 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
-    let mut preparation_path_fork =
-        fixture.frontend.path_fork.fork_source().fork_for_module();
+    let mut preparation_path_fork = fixture.frontend.path_fork.fork_source().fork_for_module();
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
@@ -1654,6 +1643,7 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
                 strategy,
                 &mut span_owners,
             )
+            .expect("fixture chunks should prepare against the fixture path fork")
         };
 
         if strategy == super::FilePreparationStrategy::ParallelChunked {
@@ -1712,7 +1702,7 @@ fn chunked_file_preparation_preserves_warning_source_order() {
     let (_headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &mut PathInternerFork::empty(),
+            &mut fixture.frontend.source_files.fork_path_interner(),
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
@@ -1757,7 +1747,16 @@ fn parsed_prepared_output(
         .try_intern_filesystem_path(&source_path, string_table)
         .expect("test source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut tokens = tokenize(source_code, source_identity, TokenizerEntryMode::SourceFile, &style_directives, string_table, path_fork, source_id, span_builder)
+    let mut tokens = tokenize(
+        source_code,
+        source_identity,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        string_table,
+        path_fork,
+        source_id,
+        span_builder,
+    )
     .expect("test source should tokenize");
 
     parse_file_headers_with_table(
@@ -1820,8 +1819,6 @@ fn assert_malformed_chunks_rejected(
     use crate::compiler_frontend::compiler_messages::PremergeFailure;
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-
     let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
         &mut PathInternerFork::empty(),
@@ -1878,6 +1875,86 @@ fn merge_rejects_duplicate_chunk_indexes() {
 }
 
 #[test]
+fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
+    // A production chunk forks its local path identities from the module fork's base. This
+    // fixture mints the chunk fork from the source database while the merge destination is an
+    // empty standalone fork, so the merge would silently alias worker-local IDs onto the wrong
+    // base; the boundary must reject the infrastructure mismatch instead of repairing it.
+    let mut fixture = frontend_preparation_fixture(&[("a.moth", "alpha #= 1\n")]);
+    let input_file_count = fixture.input_files.len();
+    let options = HeaderParseOptions {
+        entry_file_id: fixture
+            .frontend
+            .source_files
+            .get_by_canonical_path(&fixture.entry_file_path)
+            .map(|identity| identity.id),
+        project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
+        entry_file_role: None,
+        active_root_role: ModuleRootRole::Normal,
+    };
+    let fork_source = fixture.frontend.string_table.fork_source();
+    let chunks = {
+        let (source_files_view, mut span_owners) = fixture.span_builders.split();
+        let prepare_context = FrontendFilePrepareContext {
+            source_files: source_files_view,
+            style_directives: &fixture.frontend.style_directives,
+            entry_file_path: &fixture.entry_file_path,
+            options: &options,
+        };
+        super::ModulePreparationContext::prepare_module_file_chunks(
+            std::mem::take(&mut fixture.input_files),
+            &fork_source,
+            &fixture.frontend.path_fork.fork_source(),
+            &prepare_context,
+            0,
+            0,
+            super::FilePreparationStrategy::Serial,
+            &mut span_owners,
+        )
+        .expect("fixture chunks should prepare against the fixture path fork")
+    };
+
+    use crate::compiler_frontend::compiler_messages::PremergeFailure;
+
+    let mut string_table = fixture
+        .frontend
+        .string_table
+        .fork_source()
+        .fork_for_module()
+        .into_parts()
+        .0;
+    let mut foreign_fork = PathInternerFork::empty();
+    let destination_len_before = foreign_fork.len();
+    let destination_base_len_before = foreign_fork.base_len();
+    match super::ModulePreparationContext::merge_file_preparation_chunks(
+        &mut string_table,
+        &mut foreign_fork,
+        chunks,
+        input_file_count,
+        fork_source.base_len(),
+    ) {
+        Err(PremergeFailure::Infrastructure(_)) => {}
+        Err(PremergeFailure::Mixed { .. }) => {
+            panic!("a foreign merge base must be an infrastructure failure, not diagnostics")
+        }
+        Err(PremergeFailure::Diagnosed(_)) => {
+            panic!("a foreign merge base must be an infrastructure failure, not diagnostics")
+        }
+        Ok(_) => panic!("a foreign merge base must be rejected, but merge succeeded"),
+    }
+    assert_eq!(
+        foreign_fork.len(),
+        destination_len_before,
+        "a rejected foreign base must not mutate the destination fork",
+    );
+    assert_eq!(
+        foreign_fork.base_len(),
+        destination_base_len_before,
+        "a rejected foreign base must preserve the destination identity base",
+    );
+}
+
+#[test]
 fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identity() {
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     use crate::compiler_frontend::instrumentation::{
@@ -1896,7 +1973,6 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::build(
         [
             PathBuf::from("synthetic.moth"),
@@ -2052,7 +2128,6 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     let canonical_entry = fs::canonicalize(&entry_path).expect("file should canonicalize");
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.clone()),
         &canonical_entry,
@@ -2132,7 +2207,7 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
     preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &mut PathInternerFork::empty(),
+            &mut fixture.frontend.source_files.fork_path_interner(),
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
@@ -2184,7 +2259,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &mut PathInternerFork::empty(),
+            &mut fixture.frontend.source_files.fork_path_interner(),
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
@@ -2263,7 +2338,11 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
     };
     let (diagnostic_bag, taken_string_table, ..) = batch.into_parts();
     let diagnostics = diagnostic_bag.diagnostics();
-    assert_eq!(diagnostics.len(), 1, "exhaustion must diagnose exactly once");
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "exhaustion must diagnose exactly once"
+    );
     let diagnostic = &diagnostics[0];
     assert_eq!(
         diagnostic.payload,

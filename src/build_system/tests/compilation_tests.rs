@@ -821,7 +821,8 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     // If production ever stops attaching the snapshot, the appended messages lose their
     // path context and the spelling assertions below fail.
     let batch = check_only_success_batch(compiled)
-        .expect("a warning-bearing check-only result must produce a transient batch");
+        .expect("a warning-bearing check-only result must produce a transient batch")
+        .expect("check-only path attachment must pair with its own string table");
 
     // One empty project boundary mirrors the canonical check-only lane's project domain.
     let project = CompiledGraphBoundary {
@@ -859,6 +860,8 @@ fn check_only_success_batches_render_local_paths_through_production_construction
 
 #[test]
 fn published_warning_paths_remap_to_preserve_original_spelling() {
+    use crate::build_system::create_project_modules::compiled_boundary::CompiledGraphBoundary;
+    use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
     use crate::compiler_frontend::compiler_messages::{
         CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
         ImportDiagnosticKind,
@@ -939,7 +942,29 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
     )
     .expect("non-identity publication should succeed");
 
-    let published = &modules
+    // Mirroring the canonical tail: after every publication the boundary installs one final
+    // table built from the merged builder, so the executable reads paths from the shared Arc
+    // instead of a per-module snapshot.
+    let mut boundary = CompiledGraphBoundary {
+        structure: ProjectModuleGraph::from_normal_roots(vec![(
+            origin.clone(),
+            PathBuf::new(),
+            PathBuf::from("@page.moth"),
+        )]),
+        modules,
+        generated,
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    };
+    drop(materialisations);
+    boundary.install_boundary_identity(
+        Arc::new(path_interner.clone().freeze()),
+        Arc::new(string_table.clone().freeze()),
+    );
+    let boundary = boundary.finish().expect("the test boundary should finish");
+
+    let published = &boundary
+        .modules
         .artifact(ModuleId::from_index(0))
         .expect("the published slot should resolve")
         .expect("the published module should be successful")

@@ -199,7 +199,11 @@ pub(crate) fn compile_module(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
         )),
         Err(mut failure) => {
-            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()));
+            if let Err(error) =
+                failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
+            {
+                return Err(error);
+            }
             match failure {
                 PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
                     Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
@@ -291,7 +295,11 @@ pub(crate) fn compile_module_for_boracle(
             ),
         )),
         Err(mut failure) => {
-            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()));
+            if let Err(error) =
+                failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
+            {
+                return Err(PremergeFailure::Infrastructure(error));
+            }
             Err(failure)
         }
     }

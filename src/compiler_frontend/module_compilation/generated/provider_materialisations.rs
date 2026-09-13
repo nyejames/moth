@@ -22,6 +22,14 @@ use std::sync::Arc;
 pub(crate) struct PublishedMaterialisation {
     pub(crate) context: Arc<ModuleMaterialisationContext>,
     pub(crate) template_index: usize,
+    /// Whether this context was published from a different identity domain.
+    ///
+    /// Same-boundary publications normally share the requester's path/string domain and can use
+    /// the retained context directly. If the provider was published after the requester forked,
+    /// the current boundary pair is supplied and materialisation rebases from that pair instead.
+    /// Completed source-package seeds and any other cross-boundary publication re-intern by
+    /// spelling through [`ModuleMaterialisationContext::rebased_for_requester`] for every request.
+    pub(crate) rebase_required: bool,
 }
 
 /// Every declaring-module materialisation template published in one compilation boundary.
@@ -72,6 +80,7 @@ impl ProviderMaterialisationRegistry {
         identity: GeneratedDeclarationIdentity,
         context: Arc<ModuleMaterialisationContext>,
         template_index: usize,
+        rebase_required: bool,
     ) -> Result<(), CompilerError> {
         self.preflight_publish(&identity, &context, template_index)?;
         self.published
@@ -79,6 +88,7 @@ impl ProviderMaterialisationRegistry {
             .or_insert(PublishedMaterialisation {
                 context,
                 template_index,
+                rebase_required,
             });
         Ok(())
     }
@@ -87,6 +97,19 @@ impl ProviderMaterialisationRegistry {
     pub(crate) fn publish_context(
         &mut self,
         context: &Arc<ModuleMaterialisationContext>,
+    ) -> Result<(), CompilerError> {
+        self.publish_context_with_rebase_required(context, false)
+    }
+
+    /// Record every declaring row from one context with an explicit identity-domain marker.
+    ///
+    /// Deferred check-only compilation seeds canonical rows after their boundary has installed
+    /// retained tables, but its requester forks were prepared before canonical publication. Those
+    /// rows therefore need the same spelling-based rebase as a completed package seed.
+    pub(crate) fn publish_context_with_rebase_required(
+        &mut self,
+        context: &Arc<ModuleMaterialisationContext>,
+        rebase_required: bool,
     ) -> Result<(), CompilerError> {
         let rows: Vec<_> = context.declaration_rows().collect();
         let mut pending = FxHashMap::default();
@@ -104,7 +127,12 @@ impl ProviderMaterialisationRegistry {
             }
         }
         for (identity, template_index) in rows {
-            self.publish(identity.clone(), Arc::clone(context), template_index)?;
+            self.publish(
+                identity.clone(),
+                Arc::clone(context),
+                template_index,
+                rebase_required,
+            )?;
         }
         Ok(())
     }
@@ -121,15 +149,13 @@ impl ProviderMaterialisationRegistry {
 #[path = "tests/provider_materialisations_tests.rs"]
 mod tests;
 
-/// Where one generated request finds the template it must materialise.
-///
-/// A request usually resolves to a completed provider, but a module may also instantiate its own
-/// generic before that module has been published. That requester-local case stays a compiler-local
-/// case rather than making the build system fake a completed provider.
 pub(crate) enum DeclaringMaterialisation<'a> {
     Published {
         context: &'a ModuleMaterialisationContext,
         template_index: usize,
+        /// Whether the declaring context was published from a different identity domain and
+        /// must re-intern its retained paths by spelling into the requester fork.
+        rebase_required: bool,
     },
     Preparing(&'a ModuleMaterialisationPreparation),
 }
@@ -144,6 +170,7 @@ pub(crate) fn declaring_materialisation<'a>(
         return Some(DeclaringMaterialisation::Published {
             context: published.context.as_ref(),
             template_index: published.template_index,
+            rebase_required: published.rebase_required,
         });
     }
 

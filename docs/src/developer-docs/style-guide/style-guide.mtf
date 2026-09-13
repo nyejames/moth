@@ -14,8 +14,10 @@ Priorities:
 
 ### No user-input panics
 
-- Active frontend stages must reject unsupported syntax and malformed input with structured diagnostics, not `panic!`, `todo!` or user-data-driven `.unwrap()`.
-- Panic paths are only for proven internal invariants that indicate a compiler bug.
+- Avoid `.unwrap()` unless it is blatantly safe and tied to an internal invariant.
+- Handle invalid external input and expected operational failures with structured errors or diagnostics. Reserve panics for internal invariant violations indicating a bug. Any invariant-backed `unwrap`, `expect` or unchecked assumption needs a locally evident reason it cannot fail and a comment as to why.
+- Preserve failure information. Use fallback values only when the contract explicitly calls for them.
+- Panic paths are only for proven internal invariants that indicate a bug.
 
 ### Diagnostics
 
@@ -36,11 +38,11 @@ For test assertion policy, see `testing.mtf`.
 
 ### `format!` and printing
 
-Use the saying library macro `say!()` for user-facing stdout that may need colour styling. Use variables directly in `format!` strings whenever possible.
+Use the saying library macro `say!()` for user-facing stdout that may need colour styling. Capture variables directly in `format!` strings whenever possible.
 
 ### Imports
 
-Use inline imports only when they are one level deep and improve local reasoning. Import long paths at the top, including types used once in signatures.
+Import long paths at module scope, including types used only in signatures. Use short qualified paths where they improve local reasoning.
 
 [codeblock, $code("rust"):
     // ACCEPTABLE: terse and locally clear.
@@ -57,19 +59,21 @@ Avoid aliasing unless it clearly improves readability.
 - Maintain clear separation between compilation stages.
 - Each module should have one clear responsibility. Do not mix concerns.
 - Split files by task category. Aim for files under ~2000 lines where practical.
-- `mod.rs` should be the module entry point and structural map. It exposes the public surface, shows the module flow and points to the files that contain the implementation.
-- Keep `mod.rs` focused on orchestration, re-exports and documentation rather than core implementation.
+- For multi-file modules, keep `mod.rs` as the entry point and structural map focused on orchestration, re-exports and documentation rather than core implementation. Simple leaf modules can remain in one file. Split by responsibility, not to satisfy a preferred file shape.
 - A reader should understand the module's responsibilities and important files by opening `mod.rs` first. Its documentation should explain structure and data flow and state what the module owns, important exclusions and why the pieces are arranged that way.
-- Prefer context structs for shared state instead of noisy or repetitive parameter lists.
+- Prefer context structs for state with a shared purpose and lifetime when they simplify genuinely repetitive parameter lists.
+- Prefer direct data and control flow when another layer adds no invariant or ownership boundary. An abstraction should encode a meaningful state or identity, establish a real lifetime or stage boundary, remove non-trivial repeated behaviour, or simplify a current operation.
 - Keep new abstractions small, stage-local and easy to justify.
-- Avoid `.unwrap()` unless it is blatantly safe and tied to an internal invariant.
-- Avoid `.to_owned()` and `.clone()` whenever possible, prefer borrowing when possible and find patterns that avoid copies.
 
 For test-file placement, see `testing.mtf`.
 
+### Copies and cloning
+
+- Avoid `.to_owned()` and `.clone()` whenever possible. Prefer moving or borrowing before cloning. Clone when independent ownership is needed or borrowing would materially complicate the design, with the cost understood.
+
 ### Readable Rust style
 
-Compiler code should optimise for fast review. Dense code is harder to scan and easier to extend badly.
+This codebase should optimise for fast and easy review. Dense and verbose code is harder to scan and easier to extend badly.
 
 Prefer code that reads as a sequence of named steps and makes data flow obvious before every detail is understood. The main function for a module or pass should also read as a sequence of named steps.
 
@@ -101,19 +105,15 @@ Prefer this:
 
 ### Comments as reading landmarks
 
-**Comments must explain non-local intent, not restate the code.** Write for programmers reading the codebase for the first time so they can understand local code without first reading distant owners. Stay comment-positive: keep the comments that carry ownership, invariants and failure context, and drop the ones that only narrate syntax.
+**Comments must explain non-local intent, not restate the code.** Write for programmers reading the codebase for the first time so they can understand local code without first reading distant owners.
 
-File-level docs are the primary place for subsystem role, ownership, exclusions and detailed WHAT/WHY context. A reader should learn the architecture from the file header and `mod.rs` map, then use item comments only where local code is not enough.
+- Start each hand-written Rust source file with concise module documentation stating its responsibility. Explain ownership, exclusions and data flow where they are non-obvious.
+- Add intent comments to important structs and complex functions, methods or blocks, not small helpers or self-describing code.
+- Explain wider ownership, downstream consumers, non-obvious ordering or control flow, invariants, failure conditions, fallbacks, phase joins, subtle fixes and project-specific or widely shared behaviour.
+- Use terse comments to mark stage boundaries, control-flow joins, intentional no-op branches, why an error or validation belongs at this layer and the reason a helper exists.
+- Keep comments aligned with the current design when code moves or behaviour changes. Remove stale comments.
 
-Detailed item comments belong on complex functions, stage joins, ordering constraints, invariants, unusual diagnostics and non-obvious data flow. Tiny accessors, constructors, fields, forwarding methods and obvious private helpers need no comment, or at most one short sentence.
-
-WHAT/WHY headings are optional landmarks, not a required template. Use them when they make a non-local contract easier to find. Do not add them to every item.
-
-Keep comments aligned with the current design. Migration history belongs in Git. Do not justify obsolete adapters, compatibility wrappers or deleted owners in comments.
-
-Test-only implementation belongs with tests. Production files must not grow test-only constructors, mutators, semantic variants or convenience lookups just to support fixtures.
-
-Be grammatical and readable. Do not narrate syntax, repeat a descriptive name or paraphrase a clear signature.
+Be comment-positive, but not noisy. Comments should be grammatical and readable. Do not narrate syntax, repeat a descriptive name or paraphrase a clear signature.
 
 [codeblock, $code("rust"):
     // Register same-file declarations before dependencies so aliases cannot shadow local names.
@@ -215,10 +215,8 @@ Don't use advanced Rust features just to make code shorter.
 
 Avoid:
 - nested iterator chains with side effects
-- clever `Option` / `Result` combinator pipelines for validation logic
 - large closures with mutation
 - broad generic helpers that hide compiler-stage ownership
-- macro abstractions for ordinary compiler flow
 - boolean-heavy APIs where an enum would explain the state
 - tuple-heavy returns where a named struct would explain the result
 
@@ -242,25 +240,13 @@ A few more lines are fine when the result is easier to inspect and harder to mis
 
 ### Macros
 
-Keep macro usage minimal. Use small declarative macros only where they clearly reduce repetition and avoid creating procedural macros.
+Prefer functions and types. Introduce declarative macros only where they remove meaningful repeated structure. Avoid creating procedural macros.
 
 ### Warnings and lints
 
 - Use `clippy` and the default Rust formatter.
 - Keep unused variables and dead code to a minimum.
-- Any lint suppression must be justified and documented. Use `allow(dead_code)` only for clearly identified planned work or test-only code.
-
-### Section banners
-
-Use section banners only for real phase boundaries in long functions, large files or complex orchestration such as parsing, lowering, template folding, dependency resolution, diagnostic rendering or build flow.
-
-Use exactly this format:
-
-[codeblock, $code("rust"):
-    // ------------------------
-    //  Resolve template slots
-    // ------------------------
-]
+- Any lint suppression must be justified and documented. Use `allow` only with supported reasoning.
 
 The banner has three lines. The title starts with `//  ` and uses title case or a clear imperative name. The top and bottom start with `// ` and their dashes extend equally beyond the title on both sides. Do not use banners around small helpers or to hide a file that should be split.
 
@@ -312,4 +298,3 @@ For small edits:
 - Do not add redundant end-of-section summaries.
 - Avoid semicolons, Oxford commas and em dashes. Use straight `'` apostrophes and contractions. Reserve hard `must` and `must not` wording for deliberate emphasis.
 - Vary sentence rhythm naturally. Preserve exact quotes and code syntax even when they break prose rules.
-- Use "Priya" as the first choice for example names.

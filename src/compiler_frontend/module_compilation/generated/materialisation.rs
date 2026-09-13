@@ -115,7 +115,11 @@ fn materialise_generated_request<'build>(
     match result {
         Ok(()) => Ok(()),
         Err(mut failure) => {
-            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()));
+            if let Err(error) = failure
+                .attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
+            {
+                return Err(PremergeFailure::Infrastructure(error));
+            }
             Err(failure)
         }
     }
@@ -165,49 +169,109 @@ fn materialise_generated_request_inner<'build>(
             request.identity.declaration().defining_name()
         )))
     })?;
-    let declaring_source_identity_handle = match &declaring_context {
-        DeclaringMaterialisation::Published { context, .. } => context.frozen_identity_handle(),
-        DeclaringMaterialisation::Preparing(context) => context.frozen_identity_handle.clone(),
-    };
-    let materialised = match declaring_context {
-        DeclaringMaterialisation::Published {
-            context: declaring_context,
-            template_index,
-        } => {
-            let rebased_context = declaring_context
-                .rebased_for_requester(&mut compiler.path_fork, &mut compiler.string_table)
-                .map_err(PremergeFailure::Infrastructure)?;
-            rebased_context.materialise_ast_at(
-                template_index,
-                ModuleMaterialisationInput {
-                    identity: &request.identity,
-                    requester_context,
-                    requester_call_span: request.call_span,
-                    path_fork: &mut compiler.path_fork,
-                    external_package_registry: context.external_packages.as_ref(),
-                    style_directives: context.style_directives,
-                    build_profile: context.build_profile,
-                    template_const_loop_iteration_limit: context
-                        .options
-                        .template_const_loop_iteration_limit,
-                    #[cfg(feature = "timers")]
-                    timing_context: request.timing_context,
-                },
-            )
-        }
-        DeclaringMaterialisation::Preparing(declaring_context) => declaring_context
-            .materialise_ast(
+    let (declaring_source_identity_handle, materialised) = match &declaring_context {
+        DeclaringMaterialisation::Preparing(context) => {
+            let declaring_source_identity_handle = context.frozen_identity_handle.clone();
+            let materialised = context.materialise_ast(
                 &request.identity,
                 requester_context,
                 request.call_span,
+                &compiler.string_table,
                 &mut compiler.path_fork,
                 #[cfg(feature = "timers")]
                 request.timing_context,
-            ),
-    }?;
+            )?;
+            (declaring_source_identity_handle, materialised)
+        }
+        DeclaringMaterialisation::Published {
+            context: declaring_context,
+            template_index,
+            rebase_required,
+        } => {
+            let declaring_source_identity_handle = declaring_context.frozen_identity_handle();
+            let retained_identity_tables = declaring_context
+                .retained_identity_tables()
+                .map_err(PremergeFailure::Infrastructure)?;
+            // A same-boundary provider may have been published after this requester's preparation
+            // fork was created. Its paths are then in the live boundary domain, but its retained
+            // context deliberately has no growing table snapshot. Rebase from the boundary pair
+            // for this request; only a completed package retains its own foreign pair.
+            let boundary_rebase_available =
+                retained_identity_tables.is_none()
+                    && context.global_path_table.is_some()
+                    && context.global_string_table.is_some();
+            let materialised = if *rebase_required || boundary_rebase_available {
+                let rebased_context = if let Some((path_table, source_strings)) =
+                    retained_identity_tables
+                {
+                    declaring_context.rebased_for_requester_with(
+                        path_table,
+                        source_strings,
+                        &mut compiler.path_fork,
+                        &mut compiler.string_table,
+                    )
+                } else if let (Some(path_table), Some(source_strings)) = (
+                    context.global_path_table,
+                    context.global_string_table,
+                ) {
+                    declaring_context.rebased_for_requester_with(
+                        path_table,
+                        source_strings,
+                        &mut compiler.path_fork,
+                        &mut compiler.string_table,
+                    )
+                } else {
+                    declaring_context.rebased_for_requester(
+                        &mut compiler.path_fork,
+                        &mut compiler.string_table,
+                    )
+                }
+                .map_err(PremergeFailure::Infrastructure)?;
+                rebased_context.materialise_ast_at(
+                    *template_index,
+                    ModuleMaterialisationInput {
+                        identity: &request.identity,
+                        requester_context,
+                        requester_call_span: request.call_span,
+                        boundary_string_table: &compiler.string_table,
+                        path_fork: &mut compiler.path_fork,
+                        external_package_registry: context.external_packages.as_ref(),
+                        style_directives: context.style_directives,
+                        build_profile: context.build_profile,
+                        template_const_loop_iteration_limit: context
+                            .options
+                            .template_const_loop_iteration_limit,
+                        #[cfg(feature = "timers")]
+                        timing_context: request.timing_context,
+                    },
+                )
+            } else {
+                declaring_context.materialise_ast_at(
+                    *template_index,
+                    ModuleMaterialisationInput {
+                        identity: &request.identity,
+                        requester_context,
+                        requester_call_span: request.call_span,
+                        boundary_string_table: &compiler.string_table,
+                        path_fork: &mut compiler.path_fork,
+                        external_package_registry: context.external_packages.as_ref(),
+                        style_directives: context.style_directives,
+                        build_profile: context.build_profile,
+                        template_const_loop_iteration_limit: context
+                            .options
+                            .template_const_loop_iteration_limit,
+                        #[cfg(feature = "timers")]
+                        timing_context: request.timing_context,
+                    },
+                )
+            }?;
+            (declaring_source_identity_handle, materialised)
+        }
+    };
     let MaterialisedGenericAst {
         build_result,
         string_table: generated_string_table,
+        string_table_base_len,
         instance_path,
     } = materialised;
     let AstBuildResult {
@@ -373,9 +437,9 @@ fn materialise_generated_request_inner<'build>(
             materialisation_context: None,
         },
     };
-    let generated_remap = requester_context.merge_materialisation_string_table_into(
-        &mut compiler.string_table,
+    let generated_remap = compiler.string_table.merge_delta_from(
         &generated_compiler.string_table,
+        string_table_base_len,
     );
     let generated_path_remap = compiler
         .path_fork
@@ -391,8 +455,8 @@ fn materialise_generated_request_inner<'build>(
         &generated_remap,
         &generated_path_remap,
     );
-    generated_module.executable.path_table =
-        Arc::new(compiler.path_fork.snapshot_table());
+    // The boundary install tail replaces each sidecar placeholder with the one final path table
+    // after all publications, so successful materialisation does not snapshot the growing table.
     let summary = exact_generated_sidecar_summary(&request.identity, &generated_module)
         .map_err(PremergeFailure::Infrastructure)?;
     transaction

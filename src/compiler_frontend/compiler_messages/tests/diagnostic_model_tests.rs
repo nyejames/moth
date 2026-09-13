@@ -22,6 +22,7 @@ use super::{
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, ErrorType, RenderFrozenContext,
 };
+use crate::compiler_frontend::compiler_messages::PremergeDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
 };
@@ -548,6 +549,113 @@ fn compiler_messages_with_infrastructure_error_preserve_warning_production_order
 }
 
 #[test]
+fn attach_rejects_foreign_domain_table_behind_rendered_path_payload() {
+    // The batch's string table only knows its own domain. The candidate table was issued by
+    // an independent domain whose component IDs exceed the batch's next ID, so the rendered
+    // leaf's walk resolves nowhere and pairing would silently render wrong spellings. The
+    // foreign table interns padding strings so no foreign component ID collides with a
+    // batch-table ID.
+    let mut batch_table = StringTable::new();
+    batch_table.intern("batch");
+    batch_table.intern("second");
+    let mut batch_fork = PathInternerFork::empty();
+    let batch_leaf = batch_fork
+        .try_intern_portable_path("batch/import", &mut batch_table)
+        .expect("batch path fits");
+    let diagnostic = CompilerDiagnostic::missing_import_target(batch_leaf, None);
+    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
+
+    let mut foreign_strings = StringTable::new();
+    foreign_strings.intern("foreign-pad-a");
+    foreign_strings.intern("foreign-pad-b");
+    foreign_strings.intern("foreign-pad-c");
+    let mut foreign_fork = PathInternerFork::empty();
+    foreign_fork
+        .try_intern_portable_path("foreign/import", &mut foreign_strings)
+        .expect("foreign path fits");
+    let foreign_table = Arc::new(foreign_fork.snapshot_table());
+
+    assert!(
+        batch.attach_path_table_if_missing(foreign_table).is_err(),
+        "a foreign table behind a rendered path must be rejected"
+    );
+}
+
+#[test]
+fn attach_rejects_rendered_path_beyond_the_candidate_table() {
+    // A retained diagnostic whose PathId points past the candidate table has lost its issuing
+    // table: rendering would dereference a node the table cannot address. Pairing must fail
+    // visibly instead of silently attaching a context that cannot spell the payload's path.
+    let mut batch_table = StringTable::new();
+    let orphan_path =
+        PathId::try_from_index(9).expect("index 9 fits the compact path domain");
+    let diagnostic = CompilerDiagnostic::missing_import_target(orphan_path, None);
+    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
+
+    let mut local_strings = StringTable::new();
+    let mut local_fork = PathInternerFork::empty();
+    local_fork
+        .try_intern_portable_path("local/import", &mut local_strings)
+        .expect("local path fits");
+    let local_table = Arc::new(local_fork.snapshot_table());
+
+    assert!(
+        batch.attach_path_table_if_missing(local_table).is_err(),
+        "a retained path outside the candidate table must fail pairing"
+    );
+}
+
+#[test]
+fn attach_ignores_foreign_domain_table_for_diagnostics_without_path_payloads() {
+    // A diagnostic with no PathId payload never dereferences the attached table, so an
+    // inherited table from a foreign string domain must attach as harmless render context
+    // instead of reporting infrastructure failure (the recursive materialisation lane).
+    let mut batch_table = StringTable::new();
+    let diagnostic = CompilerDiagnostic::unknown_value_name(batch_table.intern("local"), None);
+    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
+
+    let mut foreign_strings = StringTable::new();
+    let mut foreign_fork = PathInternerFork::empty();
+    foreign_fork
+        .try_intern_portable_path("foreign/import", &mut foreign_strings)
+        .expect("foreign path fits");
+    let foreign_table = Arc::new(foreign_fork.snapshot_table());
+
+    batch
+        .attach_path_table_if_missing(foreign_table)
+        .expect("a table no diagnostic dereferences must attach without a pairing error");
+}
+
+#[test]
+fn attach_rejects_unresolved_rendered_ancestor() {
+    // The leaf component resolves in the batch string table, but its rendered ancestor does not.
+    // Pairing must walk the entire referenced chain rather than validating only the leaf.
+    let mut batch_table = StringTable::new();
+    batch_table.intern("batch-padding");
+    batch_table.intern("leaf");
+
+    let mut foreign_strings = StringTable::new();
+    foreign_strings.intern("foreign-padding");
+    foreign_strings.intern("leaf");
+    foreign_strings.intern("ancestor");
+    let mut foreign_fork = PathInternerFork::empty();
+    let rendered_leaf = foreign_fork
+        .try_intern_portable_path("ancestor/leaf", &mut foreign_strings)
+        .expect("foreign path fits");
+    foreign_fork
+        .try_intern_portable_path("ancestor/leaf/unreferenced", &mut foreign_strings)
+        .expect("unreferenced foreign path fits");
+    let foreign_table = Arc::new(foreign_fork.snapshot_table());
+    let diagnostic = CompilerDiagnostic::missing_import_target(rendered_leaf, None);
+    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
+
+    assert!(
+        batch.attach_path_table_if_missing(foreign_table).is_err(),
+        "an unresolved rendered ancestor must fail pairing"
+    );
+}
+
+#[test]
 fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -577,7 +685,9 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
     let mut first_messages =
         CompilerMessages::from_diagnostics(vec![first_error], string_table.clone())
             .with_type_context_for_all_diagnostics(first_environment);
-    first_messages.attach_path_table_if_missing(Arc::clone(&path_table));
+    first_messages
+        .attach_path_table_if_missing(Arc::clone(&path_table))
+        .expect("test path tables must pair with the test string table");
     first_messages.prepend_diagnostics_preserving_context(vec![warning]);
 
     let mut second_environment = TypeEnvironment::new();
@@ -596,7 +706,9 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
     );
     let mut second_messages = CompilerMessages::from_diagnostics(vec![second_error], string_table)
         .with_type_context_for_all_diagnostics(second_environment);
-    second_messages.attach_path_table_if_missing(path_table);
+    second_messages
+        .attach_path_table_if_missing(path_table)
+        .expect("test path tables must pair with the test string table");
 
     first_messages.append_messages_preserving_context(second_messages);
     let rendered =
@@ -704,7 +816,9 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
             local_table,
         )
         .with_type_context_for_all_diagnostics(type_environment);
-        messages.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
+        messages
+            .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
+            .expect("test path tables must pair with the test string table");
         messages
     };
 
@@ -852,7 +966,9 @@ fn append_and_remap_keep_frozen_path_tables_in_owner_domain() {
             CompilerDiagnostic::unknown_value_name(unfrozen_name, None),
         ];
         let mut messages = CompilerMessages::from_diagnostics(diagnostics, local_table);
-        messages.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()));
+        messages
+            .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
+            .expect("test path tables must pair with the test string table");
         messages.render_frozen_contexts.push(RenderFrozenContext {
             diagnostic_range: 0..2,
             identity: Arc::clone(&frozen_identity),

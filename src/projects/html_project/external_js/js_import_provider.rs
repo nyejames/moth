@@ -110,6 +110,14 @@ impl ExternalImportProvider for JsExternalImportProvider {
                     context.string_table,
                 ));
             }
+            Err(PathInternError::BaseMismatch { .. }) => {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "logical path merge base is not a structural prefix of the destination table",
+                    ),
+                    context.string_table,
+                ));
+            }
         };
 
         let mut diagnostics = convert_js_parser_diagnostics(

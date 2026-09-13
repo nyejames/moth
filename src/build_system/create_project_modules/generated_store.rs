@@ -16,7 +16,9 @@ use crate::compiler_frontend::module_compilation::{
     GeneratedFunctionSidecar, KnownGeneratedFunctions, validate_completed_generated_record,
 };
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 
+use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Preflight receipt proving one delta may be committed to a boundary store.
@@ -106,6 +108,19 @@ impl BoundaryGeneratedFunctionStore {
     /// Borrow this boundary's completed sidecars in deterministic publication order.
     pub(crate) fn sidecars(&self) -> impl Iterator<Item = &GeneratedFunctionSidecar> + '_ {
         self.records.iter().map(|record| &record.sidecar)
+    }
+
+    /// Install one boundary-owned path table into every completed sidecar.
+    ///
+    /// WHAT: overwrites each sidecar's publication-time table with the single final
+    ///       `Arc<PathTable>` this boundary froze after all canonical publications.
+    /// WHY: generated publication keeps each sidecar addressable through the requester's
+    ///      module-local fork snapshot; the boundary install tail then shares one final table
+    ///      across every sidecar instead of taking one full snapshot per request.
+    pub(crate) fn install_path_table(&mut self, path_table: Arc<PathTable>) {
+        for record in &mut self.records {
+            record.sidecar.module.executable.path_table = Arc::clone(&path_table);
+        }
     }
 
     /// Move sidecar warnings in deterministic publication order.

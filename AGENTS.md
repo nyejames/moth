@@ -68,14 +68,18 @@ Core contracts:
 ## Rules before writing a patch
 
 - Moth is pre-release. Do not preserve old APIs through compatibility wrappers, forwarding shims, parallel structs, legacy entry points or fallback paths.
-- Deletion over addition. Boring over clever. Does the code you're about to write need to exist at all? If not, skip it. Be proactive about cleaning up and removing code that no longer needs to exist after you've made changes.
-- Keep one current implementation path. Thread API changes through every owner and delete the old path.
+- Deletion over addition. Boring over clever. Does the code you're about to write need to exist at all? If not, skip it. Be proactive about cleaning up and removing code that no longer needs to exist after you've made changes. 
+- Implement the smallest complete solution. Remove code made obsolete by the change. Simplicity must preserve required behaviour, useful errors and meaningful tests.
+- Keep one current implementation path. Update affected callers and remove superseded API paths in the same change. Keep alternate implementations or fallbacks only where they serve a supported requirement.
 - Fix root causes. Remove transitional duplication, stale helpers, dead code, obsolete comments, superseded fixtures and cleanup debt in the owning change.
-- Prefer readable, modular, explicit code with descriptive names, narrow helpers, context structs and concise WHAT/WHY comments. 
-- Prefer data-oriented design over object-oriented patterns.
-- Before adding a helper, pass, type, registry, validator, module or test abstraction, search the current owner, adjacent stages, backend paths and tests. Share only identical behaviour with a clear owner. Reuse existing utilities. Look before you write; don't re-implement what's a few files over.
+- Prefer readable, modular, explicit code with descriptive names and concise comments that justify **why** the code exists in a wider module context more than just what it does. 
+- Use context structs for state with a shared purpose and lifetime. Prefer explicit parameters when grouping them would hide dependencies or merely shorten the signature.
+- Add structure only when it simplifies current code or enforces a current requirement. Avoid speculative extension points, unused configuration and scaffolding for future work. A single-use helper is useful when it names a meaningful operation or isolates a responsibility, not merely because a block can be extracted.
+- Before adding a helper, pass, type, registry, validator, module or test abstraction, search the current owner, adjacent modules and tests. Share only identical behaviour with a clear owner. Reuse existing utilities. Look before you write. Don't re-implement what's a few files over.
+- Keep one owner for each fact and rule. Derive cheap secondary values rather than maintaining parallel state, and share behaviour only when its meaning and ownership match.
 - Do not move shared logic into a broad utility module unless it is genuinely shared and ownership remains clear.
-- Do not claim validation commands were run when they were not.
+- Do not claim validation commands were run when they were not. Add or update focused tests for changed behaviour and regressions. Use the project's existing test structure. Run the relevant tests and required checks, and report failures or checks that could not run.
+- Avoid wrapper types, forwarding helpers and context objects whose main effect is another navigation step.
 - Use `./tmp` for temporary snippets and artefacts that should be untracked by git.
 
 Required workflow:
@@ -128,7 +132,7 @@ After compaction, reread `AGENTS.md`, reclassify the active task and reload the 
 
 ## Slice review
 
-Every non-trivial slice ends with this review. It is a self-review checklist, not a structured audit: it needs no registered scope, produces no report and never updates the audit log. The structured audit framework under `docs/roadmap/` is a separate, explicitly invoked activity - see `docs/roadmap/audit-guide.md`. Do not block a slice review on anything that framework requires.
+Every non-trivial slice ends with this review. It is a self-review checklist, not a structured audit. The structured audit framework under `docs/roadmap/` is a separate and unrelated.
 
 Review in this order:
 

@@ -50,6 +50,7 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
         &mut external_imports,
         &crate::builder_surface::SourceFileKindRegistry::default(),
         &mut ResourceInputRegistry::new(),
+        &mut path_fork,
         &mut string_table,
     )
     .expect("synthetic single-file traversal should succeed");
@@ -153,10 +154,11 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
             let mut counter_span_builder = ExtendedSpanBuilder::new();
             crate::compiler_frontend::tokenizer::lexer::tokenize(
                 source,
-                &scope,
+                scope,
                 crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
                 &style_directives,
                 &mut expected_token_string_table,
+                &mut path_fork,
                 crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
                 &mut counter_span_builder,
             )

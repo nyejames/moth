@@ -224,6 +224,13 @@ fn compile_single_file_frontend_with_target(
                     ),
                 ));
             }
+            Err(PathInternError::BaseMismatch { .. }) => {
+                return Err(PremergeFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "logical path merge base is not a structural prefix of the destination table",
+                    ),
+                ));
+            }
         };
         let extension = string_table.intern(extension_text);
         let diagnostic =
@@ -233,7 +240,11 @@ fn compile_single_file_frontend_with_target(
         // before a source database exists, so the path snapshot must travel with the diagnostic.
         let table = std::mem::take(string_table);
         let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-        batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()));
+        if let Err(error) =
+            batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()))
+        {
+            return Err(PremergeFailure::Infrastructure(error));
+        }
         return Err(PremergeFailure::Diagnosed(batch));
     }
 
@@ -467,6 +478,7 @@ fn compile_single_file_frontend_with_target(
             source_files,
             style_directives,
             global_string_table: None,
+            global_path_table: None,
             external_packages: Arc::clone(&external_packages),
             build_config_values: Arc::new(build_config_values),
             external_dependency_resolution_table: &builder_surface
@@ -565,13 +577,23 @@ fn compile_single_file_frontend_with_target(
                 }]
             }
         };
-        let boundary = CompiledGraphBoundary {
+        let mut boundary = CompiledGraphBoundary {
             structure: graph,
             modules,
             generated: generated_store,
             diagnosed,
             blocked: Vec::new(),
         };
+        // The synthetic single-file boundary is the final project/package boundary, so its
+        // one publication already completed before this tail. The install shares one final
+        // table across the base artefact and every generated sidecar, and the local registry
+        // has been dropped by scope end, so the retained contexts install without a clone.
+        drop(provider_materialisations);
+        let frozen_path_table = path_interner.clone().freeze();
+        boundary.install_boundary_identity(
+            Arc::new(frozen_path_table),
+            Arc::new(string_table.clone().freeze()),
+        );
         ProjectFrontendCompilation::new(
             boundary.finish()?,
             CompletedSourcePackageRegistry::new(),

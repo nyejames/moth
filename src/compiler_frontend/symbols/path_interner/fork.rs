@@ -5,16 +5,16 @@
 //! WHY:  parallel workers must share inherited source paths by numeric identity while keeping
 //!       their own append-only suffix, mirroring the string-table fork pattern.
 
-use super::builder::{PathInternerBuilder, PathInternError, PathNode};
+use super::builder::{PathInternError, PathInternerBuilder, PathNode};
 use super::frozen::PathTable;
 use super::id::PathId;
 use super::remap::PathIdRemap;
 use super::NonUtf8PathComponent;
+use crate::compiler_frontend::instrumentation::{
+    add_frontend_counter, increment_frontend_counter, record_path_table_copy, FrontendCounter,
+};
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
-};
-use crate::compiler_frontend::instrumentation::{
-    FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
@@ -37,7 +37,6 @@ pub struct PathInternerForkSource {
 impl PathInternerForkSource {
     /// Construct a standalone empty path fork for legacy frontend callers that do not
     /// participate in a boundary path table.
-    #[allow(dead_code)] // Test-only standalone fork; production forks from the boundary builder.
     pub fn empty() -> PathInternerFork {
         Self::new(
             vec![PathNode {
@@ -65,7 +64,6 @@ impl PathInternerForkSource {
     }
 
     /// Return the number of inherited path nodes shared by every fork.
-    #[allow(dead_code)] // Test-only prefix assertion; production carries base_len on the fork.
     pub fn base_len(&self) -> usize {
         self.base.nodes.len()
     }
@@ -97,22 +95,7 @@ pub struct PathInternerFork {
 }
 
 impl PathInternerFork {
-    /// Recreate an empty local fork over this fork's inherited base.
-    ///
-    /// This is used only when a direct preparation caller supplied a standalone fork while its
-    /// retained outputs were issued from the authoritative source-table prefix.  Keeping the
-    /// inherited nodes and lookup intact preserves the original `PathId` domain.
-    pub(crate) fn inherited_fork(&self) -> PathInternerFork {
-        PathInternerForkSource::new(
-            self.base.nodes.clone(),
-            self.base.depths.clone(),
-            self.base.lookup.clone(),
-        )
-        .fork_for_module()
-    }
-
     /// Construct an empty standalone fork for callers outside a boundary merge.
-    #[allow(dead_code)] // Test-only standalone fork; production forks from the boundary builder.
     pub fn empty() -> Self {
         PathInternerForkSource::empty()
     }
@@ -126,14 +109,16 @@ impl PathInternerFork {
         self.base_len + self.nodes.len()
     }
 
-    /// Return whether `path` was issued by this fork or its inherited base.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
+    /// Return whether the numeric index is addressable by this fork's inherited and local rows.
+    ///
+    /// This proves range only, not provenance: an independent domain can reuse the same index
+    /// with different path components. Cross-domain ownership requires the issuing string table.
     pub fn contains(&self, path: PathId) -> bool {
         path.index() < self.len()
     }
 
     /// Return the number of worker-local nodes interned after the inherited prefix.
-    pub(super) fn local_len(&self) -> usize {
+    pub(crate) fn local_len(&self) -> usize {
         self.nodes.len()
     }
 
@@ -142,13 +127,34 @@ impl PathInternerFork {
         self.nodes[offset]
     }
 
-    /// Borrow one inherited base depth for merge-time prefix checks.
-    pub(super) fn base_depth(&self, index: usize) -> u32 {
-        self.base.depths[index]
+    /// Build a fork carrying an explicit local node list, for merge-ordering tests only.
+    ///
+    /// Production forks append only parent-linked nodes in index order, so a malformed delta
+    /// cannot arise from interning. This constructor fabricates one to prove the merge reports
+    /// a typed error instead of indexing unmapped suffix rows.
+    #[cfg(test)]
+    pub(super) fn with_local_nodes_for_test(base_len: usize, nodes: Vec<PathNode>) -> Self {
+        Self {
+            base: Arc::new(PathTableBase {
+                nodes: vec![
+                    PathNode {
+                        parent: None,
+                        component: StringId::from_index(0),
+                    };
+                    base_len
+                ]
+                .into_boxed_slice(),
+                depths: vec![0; base_len].into_boxed_slice(),
+                lookup: FxHashMap::default(),
+            }),
+            base_len,
+            depths: vec![0; nodes.len()],
+            nodes,
+            lookup: FxHashMap::default(),
+        }
     }
 
     /// Return the parent path, or `None` for the root.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn parent(&self, path: PathId) -> Option<PathId> {
         let index = path.index();
 
@@ -171,7 +177,6 @@ impl PathInternerFork {
     }
 
     /// Return the final component, or `None` for the root path.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn component(&self, path: PathId) -> Option<StringId> {
         if path == PathId::ROOT {
             return None;
@@ -224,7 +229,6 @@ impl PathInternerFork {
     }
 
     /// Return whether `path` descends from `prefix` without allocating.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn starts_with(&self, path: PathId, prefix: PathId) -> bool {
         let path_depth = self.depth(path);
         let prefix_depth = self.depth(prefix);
@@ -245,11 +249,9 @@ impl PathInternerFork {
     }
 
     /// Return whether `path` ends with `suffix` without allocating.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn ends_with(&self, path: PathId, suffix: PathId) -> bool {
         let path_depth = self.depth(path);
         let suffix_depth = self.depth(suffix);
-
         if suffix_depth > path_depth {
             return false;
         }
@@ -301,7 +303,6 @@ impl PathInternerFork {
     }
 
     /// Render a path with portable forward-slash separators.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_portable(
         &self,
         path: PathId,
@@ -312,7 +313,6 @@ impl PathInternerFork {
     }
 
     /// Render a path using immutable strings after the identity freeze boundary.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_portable_frozen(
         &self,
         path: PathId,
@@ -322,7 +322,6 @@ impl PathInternerFork {
         self.render_portable_with(path, string_table, scratch)
     }
 
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     fn render_portable_with<T: StringTableResolver + ?Sized>(
         &self,
         path: PathId,
@@ -343,7 +342,6 @@ impl PathInternerFork {
     }
 
     /// Render a path as a native `PathBuf` by pushing each resolved component.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_native(
         &self,
         path: PathId,
@@ -354,7 +352,6 @@ impl PathInternerFork {
     }
 
     /// Render a native path using immutable strings after the freeze boundary.
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     pub fn render_native_frozen(
         &self,
         path: PathId,
@@ -364,7 +361,6 @@ impl PathInternerFork {
         self.render_native_with(path, string_table, scratch)
     }
 
-    #[allow(dead_code)] // Phase 2C migrates semantic path readers to this fork surface.
     fn render_native_with<T: StringTableResolver + ?Sized>(
         &self,
         path: PathId,
@@ -403,7 +399,6 @@ impl PathInternerFork {
             // already-interned identity, so tests exercise exactly the allocation boundary.
             return None;
         }
-
 
         let parent_depth = self.depth(parent);
         let child_depth = parent_depth.checked_add(1)?;
@@ -464,7 +459,6 @@ impl PathInternerFork {
         path: &Path,
         string_table: &mut StringTable,
     ) -> Result<PathId, PathInternError> {
-
         let mut logical_path = PathId::ROOT;
 
         for component in path.components() {
@@ -488,7 +482,6 @@ impl PathInternerFork {
         spelling: &str,
         string_table: &mut StringTable,
     ) -> Result<PathId, PathInternError> {
-
         if spelling.is_empty() {
             return Ok(PathId::ROOT);
         }
@@ -507,6 +500,14 @@ impl PathInternerFork {
     /// Snapshot this fork's full table (inherited prefix plus local delta) into a reusable
     /// source for sub-forks, such as file-preparation chunks forked from one module-local fork.
     pub fn fork_source(&self) -> PathInternerForkSource {
+        let node_rows = self.base.nodes.len() + self.nodes.len();
+        let copied_bytes = node_rows
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(
+                (self.base.depths.len() + self.depths.len())
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            );
+        record_path_table_copy(node_rows, copied_bytes);
         let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
         nodes.extend_from_slice(&self.base.nodes);
         nodes.extend_from_slice(&self.nodes);
@@ -515,11 +516,7 @@ impl PathInternerFork {
         depths.extend_from_slice(&self.depths);
         let mut lookup = self.base.lookup.clone();
         lookup.extend(self.lookup.iter().map(|(key, value)| (*key, *value)));
-        PathInternerForkSource::new(
-            nodes.into_boxed_slice(),
-            depths.into_boxed_slice(),
-            lookup,
-        )
+        PathInternerForkSource::new(nodes.into_boxed_slice(), depths.into_boxed_slice(), lookup)
     }
     /// Snapshot this fork's complete path table for standalone consumers.
     ///
@@ -527,11 +524,18 @@ impl PathInternerFork {
     /// direct backend callers have no boundary builder, so they can snapshot the same inherited
     /// and local nodes without reconstructing a path component vector.
     pub fn snapshot_table(&self) -> PathTable {
-
+        let node_rows = self.base.nodes.len() + self.nodes.len();
+        let copied_bytes = node_rows
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(
+                (self.base.depths.len() + self.depths.len())
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            );
+        record_path_table_copy(node_rows, copied_bytes);
         let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
         nodes.extend_from_slice(&self.base.nodes);
         nodes.extend_from_slice(&self.nodes);
-        let mut depths = Vec::with_capacity(self.base.depths.len() + self.nodes.len());
+        let mut depths = Vec::with_capacity(self.base.depths.len() + self.depths.len());
         depths.extend_from_slice(&self.base.depths);
         depths.extend_from_slice(&self.depths);
         PathTable::from_parts(nodes, depths)
@@ -544,15 +548,22 @@ impl PathInternerFork {
         let source = self.fork_source();
         let mut lookup = source.base.lookup.clone();
         lookup.extend(self.lookup.iter().map(|(key, value)| (*key, *value)));
+        let node_rows = source.base.nodes.len();
+        let copied_bytes = node_rows
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(
+                source
+                    .base
+                    .depths
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            );
+        record_path_table_copy(node_rows, copied_bytes);
         PathInternerBuilder::from_parts(
-            PathTable::from_parts(
-                source.base.nodes.to_vec(),
-                source.base.depths.to_vec(),
-            ),
+            PathTable::from_parts(source.base.nodes.to_vec(), source.base.depths.to_vec()),
             lookup,
         )
     }
-
 
     /// Merge one sub-fork delta (forked from this fork's snapshot) into this fork.
     ///
@@ -568,36 +579,95 @@ impl PathInternerFork {
         string_remap: &StringIdRemap,
     ) -> Result<PathIdRemap, PathInternError> {
         let delta_base_len = delta.base_len();
-        debug_assert!(delta_base_len <= self.len());
-        debug_assert!(delta_base_len <= delta.len());
-        #[cfg(debug_assertions)]
-        for index in 0..delta_base_len {
-            let expected = PathId::try_from_index(index)
-                .expect("a fork base must address its own prefix");
-            debug_assert_eq!(self.try_parent(expected), delta.try_parent(expected));
-            debug_assert_eq!(self.try_component(expected), delta.try_component(expected));
-            debug_assert_eq!(self.try_depth(expected), delta.try_depth(expected));
+        if delta_base_len > self.len() || delta_base_len > delta.len() {
+            return Err(PathInternError::BaseMismatch {
+                base_len: delta_base_len,
+                destination_len: self.len(),
+                delta_len: delta.len(),
+            });
         }
-        increment_frontend_counter(FrontendCounter::PathDeltaMergeCalls);
-        add_frontend_counter(FrontendCounter::PathDeltaEntriesScanned, delta.local_len());
+
+        // The claimed base rows must be structurally equivalent to the destination rows they
+        // replace; a mismatch would remap valid IDs onto silently different paths.
+        for index in 0..delta_base_len {
+            let Some(expected) = PathId::try_from_index(index) else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            };
+            if self.try_parent(expected) != delta.try_parent(expected)
+                || self.try_component(expected) != delta.try_component(expected)
+                || self.try_depth(expected) != delta.try_depth(expected)
+            {
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            }
+        }
+        // A rejected malformed delta must leave no counter trace, so every local parent
+        // link is validated before any counter increments or the fork is extended.
         let local_len = delta.local_len();
+        for offset in 0..local_len {
+            let node = delta.local_node(offset);
+            let Some(parent) = node.parent else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            };
+            let parent_index = parent.index();
+            if parent_index >= delta_base_len && parent_index - delta_base_len >= offset {
+                // A delta parent must precede its child in node-index order; a forward
+                // or self reference would index unmapped suffix rows.
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            }
+        }
+
+        increment_frontend_counter(FrontendCounter::PathDeltaMergeCalls);
         let mut mapped_suffix = Vec::with_capacity(local_len);
         let mut is_identity = true;
         let mut non_identity_entries = 0usize;
         for offset in 0..local_len {
             let old_index = delta_base_len + offset;
             let node = delta.local_node(offset);
-            let parent = node.parent.expect("a worker-local node must carry a parent");
+            let Some(parent) = node.parent else {
+                return Err(PathInternError::BaseMismatch {
+                    base_len: delta_base_len,
+                    destination_len: self.len(),
+                    delta_len: delta.len(),
+                });
+            };
             let parent_index = parent.index();
             let remapped_parent = if parent_index < delta_base_len {
                 parent
             } else {
                 let parent_offset = parent_index - delta_base_len;
-                debug_assert!(
-                    parent_offset < offset,
-                    "a delta parent must precede its child in node-index order"
-                );
-                mapped_suffix[parent_offset]
+                if parent_offset >= offset {
+                    // A delta parent must precede its child in node-index order; a forward or
+                    // self reference would index unmapped suffix rows.
+                    return Err(PathInternError::BaseMismatch {
+                        base_len: delta_base_len,
+                        destination_len: self.len(),
+                        delta_len: delta.len(),
+                    });
+                }
+                mapped_suffix
+                    .get(parent_offset)
+                    .copied()
+                    .ok_or(PathInternError::BaseMismatch {
+                        base_len: delta_base_len,
+                        destination_len: self.len(),
+                        delta_len: delta.len(),
+                    })?
             };
             let remapped_component = string_remap.get(node.component);
             let merged = self
@@ -609,6 +679,7 @@ impl PathInternerFork {
             }
             mapped_suffix.push(merged);
         }
+        add_frontend_counter(FrontendCounter::PathDeltaEntriesScanned, local_len);
         if is_identity {
             increment_frontend_counter(FrontendCounter::PathDeltaIdentityRemaps);
         } else {
@@ -648,5 +719,4 @@ impl PathInternerFork {
         }
         Some(PathIdRemap::from_full(mapped))
     }
-
 }

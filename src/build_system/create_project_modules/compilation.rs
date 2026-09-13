@@ -166,21 +166,11 @@ pub(super) fn publish_compiled_module(
         path_fork: _,
         public_interface,
     } = compiled;
-    // Path IDs become boundary identities at this merge point. Retain an immutable snapshot on
-    // the executable lane so backend/render consumers can resolve names without a live fork.
-    let merged_path_table = std::sync::Arc::new(path_interner.paths().clone());
-    // Published templates retain the complete identity tables that issued their semantic IDs. A
-    // later project/package boundary can rebase those tables into its requester fork before
-    // materialising an imported generic.
-    if let Some(context) = &mut module.metadata.materialisation_context {
-        let source_string_table = std::sync::Arc::new(string_table.clone().freeze());
-        std::sync::Arc::make_mut(context).install_identity_tables(
-            Arc::clone(&merged_path_table),
-            source_string_table,
-        );
-    }
-    module.executable.path_table = std::sync::Arc::clone(&merged_path_table);
-    generated_delta.install_path_table(merged_path_table);
+    // Path IDs become boundary identities at this merge point. The executable lanes keep their
+    // construction placeholders; the single boundary-owned path table is installed once after
+    // every canonical publication completes, so no module publishes a full table clone.
+    // Published templates retain their issuing identity tables only through the boundary
+    // install tail, which pairs one final table with one frozen requester-domain string table.
     if !remap.is_identity() {
         module.remap_string_ids(&remap);
         generated_delta.remap_string_ids(&remap);
@@ -247,7 +237,10 @@ fn seed_completed_package_materialisations(
         registry.preflight_publish(identity, context, *template_index)?;
     }
     for (identity, context, template_index) in rows {
-        registry.publish(identity, context, template_index)?;
+        // Completed packages finished before this boundary compiled, so their retained
+        // identity domains differ from this requester's fork. Marking every seed row
+        // cross-boundary keeps the consuming requester re-interning by spelling.
+        registry.publish(identity, context, template_index, true)?;
     }
     Ok(registry)
 }
@@ -1202,6 +1195,12 @@ fn compile_directory_frontend_in_premerge_lane(
                         dependency_prefixes.push(dependency.dependency_prefix.clone());
                     }
                 }
+                // The package boundary owns its identity pair from here on: the canonical
+                // publications completed inside the wave coordinator and its install tail
+                // already shared one final table across this boundary's base artefacts,
+                // generated sidecars and retained contexts. The project boundary later seeds
+                // its registry from these contexts and marks them cross-boundary, so this
+                // install must precede that seed and no re-install is possible.
                 let package = CompiledSourcePackage {
                     package_identity,
                     root_module_id,

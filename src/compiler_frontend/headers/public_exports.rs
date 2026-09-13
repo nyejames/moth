@@ -101,6 +101,11 @@ fn intern_public_surface_path(
                     SourceSpanCapacityResource::LogicalPathTable,
                 ),
             ),
+            PathInternError::BaseMismatch { .. } => HeaderParseFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "logical path merge base is not a structural prefix of the destination table",
+                ),
+            ),
         })
 }
 
