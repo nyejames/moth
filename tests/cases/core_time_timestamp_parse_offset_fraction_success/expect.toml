@@ -4,13 +4,5 @@ entry = "."
 mode = "success"
 warnings = "forbid"
 rendered_output_contains = [
-    "timestamp_parse_offset_and_fraction millis=961063245123 iso=2000-06-15T10:00:45.123Z",
-]
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "function __moth_time_timestamp_from_iso_string(",
-    "function __moth_time_to_iso_string(",
+    "timestamp_parse_offset_and_fraction millis=961063245123 iso=2000-06-15T10:00:45.123Z truncated=961072245999 negative_offset=2024-01-01T17:30:00.000Z",
 ]

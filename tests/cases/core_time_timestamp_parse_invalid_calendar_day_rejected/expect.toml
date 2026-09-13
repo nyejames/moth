@@ -6,10 +6,3 @@ warnings = "forbid"
 rendered_output_contains = [
     "timestamp_parse_calendar_invalid_day code=310",
 ]
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "function __moth_time_timestamp_from_iso_string(",
-]

@@ -3,15 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "3.141592653589793",
-    "6.283185307179586",
-    "2.718281828459045",
-    "1.4142135623730951",
-    "0.6931471805599453",
-    "2.302585092994046",
-]
+rendered_output_exact = "core_math_constants pi=true tau=true e=true sqrt_2=true ln_2=true ln_10=true"

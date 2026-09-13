@@ -4,12 +4,5 @@ entry = "."
 mode = "success"
 warnings = "forbid"
 rendered_output_contains = [
-    "timestamp_parse_field_out_of_range code=310 offset_code=310",
-]
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "function __moth_time_timestamp_from_iso_string(",
+    "timestamp_parse_field_out_of_range code=310 offset_hour_code=310 offset_minute_code=310",
 ]

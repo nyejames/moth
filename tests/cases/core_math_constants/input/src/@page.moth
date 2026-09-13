@@ -1,15 +1,12 @@
 @core/math PI, TAU, E, SQRT_2, LN_2, LN_10
 
-pi = PI
-tau = TAU
-e_val = E
-io.line([: [pi]])
-io.line([: [tau]])
-io.line([: [e_val]])
+-- Every constant is the nearest Float to its mathematical value, so each symbol
+-- is compared with that exact Float. A swapped registration fails here.
+pi_ok = PI is 3.141592653589793
+tau_ok = TAU is 6.283185307179586
+e_ok = E is 2.718281828459045
+sqrt_2_ok = SQRT_2 is 1.4142135623730951
+ln_2_ok = LN_2 is 0.6931471805599453
+ln_10_ok = LN_10 is 2.302585092994046
 
-sqrt_2 = SQRT_2
-ln_2 = LN_2
-ln_10 = LN_10
-io.line([: [sqrt_2]])
-io.line([: [ln_2]])
-io.line([: [ln_10]])
+[:core_math_constants pi=[pi_ok] tau=[tau_ok] e=[e_ok] sqrt_2=[sqrt_2_ok] ln_2=[ln_2_ok] ln_10=[ln_10_ok]]

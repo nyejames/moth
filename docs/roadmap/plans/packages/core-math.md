@@ -148,18 +148,17 @@ the earlier pinned list is retired. Two properties worth remembering when the co
   satisfiable only under radians, so a non-radian decision would invalidate them rather than merely
   loosen them.
 - `core_math_float_boundary_validation` still fixes `exp(1.0)` to the exact decimal
-  `2.718281828459045`. That predates the precision statement, which promises exactness only for
-  results that are exactly representable, and `exp(1)` is not one of them. It is an inherited
-  assertion on a target-defined approximation and should become a bounded check when that case is
-  next touched.
+  `2.718281828459045`. That predates the precision statement, which now promises exactness only for
+  the five listed identities, and `exp(1)` is not one of them. It is an inherited assertion on a
+  target-defined approximation and should become a bounded check when that case is next touched.
 
 ### Coverage gaps that are not defects
 
 - No case exercises arity or wrong-type rejection for an individual new function; `core_math_type_errors`
   and `core_math_arity_error` own those shapes generically through `sin` and `pow`.
 - No case exercises `sinh` or `cosh` overflow. The overflow lane itself is owned through `exp`.
-- Constant coverage stays emission-only and unordered: `core_math_constants` asserts the six emitted
-  decimals in the artifact and observes no rendered output.
+- No case exercises `pow`'s restricted domains. The contract states them, and the non-finite lane
+  they fail through is owned generically by `core_math_float_boundary_validation`.
 
 ### Other extensions
 
@@ -198,7 +197,7 @@ Primary owners:
 |---|---|
 | Runtime behaviour of the 18 originally registered functions, plus the `round` tie rule, the reversed-bound `clamp` result and the four `atan2` quadrants | `tests/cases/core_math_basic_functions` |
 | Runtime behaviour of the 13 functions added by the expansion, including the overflow-avoiding `hypot` sample | `tests/cases/core_math_transcendental_functions` |
-| Emitted values of the six constants | `tests/cases/core_math_constants`, which asserts the six emitted decimals in the artifact only. Its `io.line` calls are emitted but never observed, because the case declares no rendered-output expectation, so nothing about runtime output is checked either way |
+| Values of the six constants | `tests/cases/core_math_constants`, which compares each symbol with its exact nearest `Float` and reports one labelled boolean per constant, so a swapped registration fails |
 | Inline lowering shape | `tests/cases/core_inline_expression_lowering`, plus the `sqrt` and `exp` forms in `tests/cases/core_math_float_boundary_validation` |
 | Constant folding in a const context | `tests/cases/core_math_external_constants_const_context` |
 | Non-finite results and builtin-error recovery, plus HTML-Wasm rejection | `tests/cases/core_math_float_boundary_validation` |
@@ -215,12 +214,23 @@ The expansion could not close the mandatory `just validate` gate either. After t
 the published data-layout work the inherited failure is narrower: library tests pass, six of eight
 feature lanes pass, and `ci-clippy-native` plus the `timers-counters` and `dev-output` lanes stay red
 on data-layout files. The programme plan owns that record. Focused evidence for the expansion is
-`cargo run -- tests --tag math` (14/14), `--tag core-packages` (31/31),
+`cargo run -- tests --tag math` (14/14), `--tag core-packages` (42/42),
 `cargo run -- check docs --terse`, `cargo check -p moth --lib` and `rustfmt --check` on `math.rs`.
 Both slices are mutation-proved: the hardening slice proved every registered function, constant,
 arity, ABI type and access kind has a killed mutant, and the expansion proved the new coverage by
 rewriting the `asinh` lowering to `Math.sinh(#0)`, which failed the transcendental case on
 `approximate_asinh=false` alone before the row was restored.
+
+The final review found two surviving mutants and one overbroad sentence, all now closed. `expm1` and
+`log1p` were only sampled at zero and at `1e-6`, where any near-identity function passes, so
+`expm1(1)` at `1.718282` and `log1p(1)` at `0.693147` were added: the nearest sibling results are
+`sinh(1)` at `1.175201`, `tanh(1)` at `0.761594` and `asinh(1)` at `0.881374`. `core_math_constants`
+asserted an unordered set of decimal strings in the artifact, which survived swapping two registered
+constants, so it now compares each symbol with its exact nearest `Float` and reports one labelled
+boolean per constant, leaving compile-time folding with its existing owner. The canonical precision
+rule claimed that exactly representable results stay exact, which `Math.hypot(20, 99)` returning
+`100.99999999999999` disproves, so the rule now names the five exact identities and states that an
+approximating function may round even when its mathematical result is representable.
 
 ## History
 

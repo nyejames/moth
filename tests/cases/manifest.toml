@@ -9601,7 +9601,7 @@ id = "core_time_timestamp_parse_grammar_rejected"
 path = "core_time_timestamp_parse_grammar_rejected"
 tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
 contract = "language.dependencies.core_time_timestamp_parse_grammar_acceptance"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "core_time_timestamp_parse_lowercase_designator_rejected"
@@ -9629,7 +9629,7 @@ id = "core_time_timestamp_parse_invalid_calendar_day_rejected"
 path = "core_time_timestamp_parse_invalid_calendar_day_rejected"
 tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
 contract = "language.dependencies.core_time_timestamp_parse_calendar_acceptance"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "core_time_timestamp_parse_field_out_of_range_rejected"
@@ -9650,14 +9650,14 @@ id = "core_time_timestamp_parse_window_boundary"
 path = "core_time_timestamp_parse_window_boundary"
 tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
 contract = "language.dependencies.core_time_renderable_window_acceptance"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "core_time_to_iso_string_out_of_range_rejected"
 path = "core_time_to_iso_string_out_of_range_rejected"
 tags = ["integration", "language", "external-packages", "core-packages", "time", "js", "results"]
 contract = "language.dependencies.core_time_to_iso_string_renderable_range_acceptance"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "core_time_duration_arithmetic_success"
@@ -9679,7 +9679,7 @@ id = "unary_minus_requires_numeric_operand"
 path = "unary_minus_requires_numeric_operand"
 tags = ["integration", "language", "operators", "diagnostics", "type-checking"]
 contract = "language.operators.unary_minus_requires_numeric_operand"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "core_time_namespace_binding_success"

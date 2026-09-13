@@ -5,8 +5,13 @@ parse_hour || -> Int, Error!:
     return 0
 ;
 
-parse_offset || -> Int, Error!:
-    ts = timestamp_from_iso_string("1970-01-01T00:00:00+99:99")!
+parse_offset_hour || -> Int, Error!:
+    ts = timestamp_from_iso_string("1970-01-01T00:00:00+24:00")!
+    return 0
+;
+
+parse_offset_minute || -> Int, Error!:
+    ts = timestamp_from_iso_string("1970-01-01T00:00:00+00:60")!
     return 0
 ;
 
@@ -15,9 +20,13 @@ hour_code = parse_hour() catch |hour_err|:
     then hour_err.code
 ;
 
--- The offset fields carry the same range rule as the time of day
-offset_code = parse_offset() catch |offset_err|:
-    then offset_err.code
+-- The offset hour and offset minute carry the time-of-day range rule
+-- independently, so neither field can rely on the other to reject.
+offset_hour_code = parse_offset_hour() catch |offset_hour_err|:
+    then offset_hour_err.code
+;
+offset_minute_code = parse_offset_minute() catch |offset_minute_err|:
+    then offset_minute_err.code
 ;
 
-[: timestamp_parse_field_out_of_range code=[hour_code] offset_code=[offset_code]]
+[: timestamp_parse_field_out_of_range code=[hour_code] offset_hour_code=[offset_hour_code] offset_minute_code=[offset_minute_code]]

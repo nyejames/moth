@@ -58,7 +58,8 @@ anchored regular expression, validates the calendar and offset fields, truncates
 toward zero, converts a numeric offset and range-checks the instant; the render helper tests the
 renderable window before truncating and never lets `toISOString()` throw. Failure goes through the
 canonical `__moth_error_result(message, code)` with `BuiltinErrorCode::TimeInvalidTimestampText`
-(310) or `TimeTimestampOutOfRange` (311), so no numeric literal appears in the helper source.
+(310) or `TimeTimestampOutOfRange` (311), so the package never hard-codes an error code of its own:
+the numbers in the helper source are interpolated from that enum alongside the window bounds.
 
 Both bodies are built once in a `LazyLock` because they interpolate those codes and the window
 bounds. The same inventory feeds emission and the first-party JavaScript guard, so the two consumers
@@ -73,7 +74,10 @@ The window is the four-digit year range, `0000-01-01T00:00:00.000Z` to `9999-12-
 held as two `i64` consts in the helper module. It is not the host limit: `toISOString()` accepts
 ±8 640 000 000 000 000 ms but switches to an expanded-year spelling such as `+275760-09-13` outside
 the four-digit range, which is neither the published format nor re-parseable by this package. Both
-helpers apply the same window, so parse and render are total inverses over it.
+helpers apply the same window, so every string this package renders parses back to the instant it
+names. The pair is not an inverse in the other direction: parsing canonicalises the offset and the
+extra fractional digits, and rendering truncates a fractional millisecond, so a rendered string
+recovers its instant while a parsed instant need not reproduce its original text.
 
 ### Finite-result boundary
 
@@ -179,12 +183,12 @@ Primary owners:
 | Valid parse with `!` propagation and `catch` | `tests/cases/core_time_timestamp_parse_success` |
 | Invalid parse reaching `catch` | `tests/cases/core_time_timestamp_parse_invalid_catch_success` |
 | Grammar rejection classes, each observing code 310 | `tests/cases/core_time_timestamp_parse_grammar_rejected`, `core_time_timestamp_parse_lowercase_designator_rejected`, `core_time_timestamp_parse_whitespace_rejected`, `core_time_timestamp_parse_date_only_rejected` |
-| Calendar and field rejection, including the offset fields | `tests/cases/core_time_timestamp_parse_invalid_calendar_day_rejected`, `core_time_timestamp_parse_field_out_of_range_rejected` |
-| Numeric-offset conversion and fractional truncation | `tests/cases/core_time_timestamp_parse_offset_fraction_success` |
+| Calendar rejection, and the time-of-day, offset-hour and offset-minute ranges rejected independently so neither offset field can hide behind the other | `tests/cases/core_time_timestamp_parse_invalid_calendar_day_rejected`, `core_time_timestamp_parse_field_out_of_range_rejected` |
+| Numeric-offset conversion in both signs, and fractional truncation proved by a fourth digit that would carry into the next second under rounding | `tests/cases/core_time_timestamp_parse_offset_fraction_success` |
 | The renderable window on both paths: accepted endpoints, endpoint round-trips and the post-offset rejection | `tests/cases/core_time_timestamp_parse_window_boundary` |
 | Rendering rejection outside the window, including the fractional edge that proves the check precedes truncation | `tests/cases/core_time_to_iso_string_out_of_range_rejected` |
 | Arithmetic values, argument order and composition | `tests/cases/core_time_duration_arithmetic_success` |
-| Arithmetic overflow becoming observable at the shared `Float` boundary as code 304 | `tests/cases/core_time_duration_overflow_at_float_boundary` |
+| Arithmetic overflow: the scaled duration stays an ordinary opaque value on an infallible path, then becomes code 304 where it is read as a `Float` | `tests/cases/core_time_duration_overflow_at_float_boundary` |
 | Namespace clause, alias selection | `tests/cases/core_time_namespace_binding_success`, `tests/cases/core_time_direct_selection_alias_success` |
 | Arity, wrong-type, removed-name, opaque-field and receiver-call rejection | `tests/cases/core_time_arity_error`, `core_time_wrong_argument_type_rejected`, `core_time_old_api_rejected`, `core_time_opaque_field_access_rejected`, `core_time_raw_method_call_rejected`, `core_time_namespace_raw_method_call_rejected` |
 | Unreachable JS-only call in an HTML-Wasm build | `tests/cases/core_time_unused_wasm_wrapper_success` |
@@ -196,9 +200,22 @@ Host formatting is asserted only where the contract fixes the format.
 
 This slice could not close the mandatory `just validate` gate: the inherited data-layout base fails
 the all-targets lint build and two feature lanes. The programme plan owns that record. Focused
-evidence was `cargo run -- tests --tag time` (29/29), `--tag core-packages` (41/41), the full
+evidence was `cargo run -- tests --tag time` (29/29), `--tag core-packages` (42/42), the full
 `cargo run -- tests` at the inherited failure count, `cargo run -- check docs --terse`,
 `cargo check -p moth --lib` and `rustfmt --check` on every touched Rust file.
+
+The final review closed three coverage gaps and two contract overstatements. The offset fields were
+only exercised through the combined `+99:99` sample, which either half of the range check could
+reject alone, so the case now rejects `+24:00` and `+00:60` independently and accepts `-05:30`. The
+only long fraction was `.123456789`, which truncation and rounding both resolve to `123`
+milliseconds, so `.9999Z` was added: rounding would carry into the next second. The overflow case
+observed nothing before the failing accessor, so it now reads the scaled duration on an infallible
+path through `is_negative` first, proving the overflowed value is an ordinary opaque `Duration` and
+that code 304 comes from the `Float` read. The contract's unqualified exact-arithmetic sentence was
+corrected, because adding one millisecond to `1e16` milliseconds returns the same duration, and the
+`clamp` reversed-bound result is now stated the way `math.mtf` states its own. Helper-definition
+artifact assertions were removed from the semantic and rejection cases, leaving
+`core_time_functions` as the single owner of helper emission.
 
 ## History
 

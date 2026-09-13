@@ -291,6 +291,8 @@ restricted domains are:
 - `asin(x)` and `acos(x)` require `x` between `-1` and `1` inclusive
 - `acosh(x)` requires `x >= 1`
 - `atanh(x)` requires `x` strictly between `-1` and `1`
+- `pow(base, exponent)` requires `base >= 0` when `exponent` is not a whole
+  number, and `base` other than zero when `exponent` is negative
 
 Overflow to an infinite result, such as `exp`, `cosh` or `sinh` of a large
 argument, fails at the same boundary.
@@ -314,10 +316,12 @@ subnormal value or zero and never fails the finite boundary. Which of the
 two occurs is unspecified.
 
 Transcendental results are approximations with target-defined accuracy, so
-comparisons use a tolerance. Exactly representable results stay exact:
-`exp(0)` is `1`, `log(1)` is `0`, `log2(8)` is `3`, `log10(100)` is `2` and
-`pow(2, 3)` is `8`. Every constant is the nearest `Float` to its
-mathematical value.
+comparisons use a tolerance. These identities are exact: `exp(0)` is `1`,
+`log(1)` is `0`, `log2(8)` is `3`, `log10(100)` is `2` and `pow(2, 3)` is `8`.
+An approximating function may still round when its mathematical result is
+exactly representable, so a result that happens to be a whole number is not
+guaranteed exact: `hypot(20, 99)` need not be exactly `101`. Every constant is
+the nearest `Float` to its mathematical value.
 
 ### Access and return contracts
 

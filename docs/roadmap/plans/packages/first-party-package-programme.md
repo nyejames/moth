@@ -720,9 +720,10 @@ Do not use flaky distribution thresholds as the only correctness evidence.
 surface needed no new compiler capability. Delivered: existing-behaviour coverage for the original
 eighteen functions, the registration cleanup, and the accepted scalar expansion of thirteen
 functions and three constants over the same external ABI. The numerical contract the expansion
-depends on was published in the canonical reference before any of it was implemented, so no
-assertion rests on host behaviour. A Wasm lowering set and const-eval folding remain open, each
-needing its own accepted decision.
+depends on was published in the canonical reference before any of it was implemented, so every new
+assertion rests on a published sentence. One inherited exception survives: the boundary case still
+fixes `exp(1.0)` to an exact decimal, which the contract treats as a target-defined approximation.
+A Wasm lowering set and const-eval folding remain open, each needing its own accepted decision.
 
 Mandatory closeout: full phase gate plus finite-result, domain edge and integration coverage.
 
@@ -732,7 +733,7 @@ Mandatory closeout: full phase gate plus finite-result, domain edge and integrat
 behaviour was whatever the host parser and formatter did, so the semantic contract was settled with
 the user and published in the canonical reference first. The implementation then matched it: an
 explicit grammar and calendar validation with compiler-owned error codes, a fallible `to_iso_string`
-over a validating helper, a shared renderable window that makes parsing and rendering inverse, one
+over a validating helper, a shared renderable window that makes every rendered string parse back, one
 descriptor table for registration, and the accepted Duration and Timestamp arithmetic. Remaining
 candidates are a Wasm lowering set and explicit duration range rules.
 
