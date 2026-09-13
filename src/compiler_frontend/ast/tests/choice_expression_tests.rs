@@ -16,25 +16,26 @@ use crate::compiler_frontend::tests::parse_support::{
 
 #[test]
 fn resolves_choice_variant_expressions_with_choice_types() {
-    let (ast, string_table) = parse_single_file_ast(
-        "Status :: Ready, Busy;\n\
-         echo_status |status Status| -> Status:\n\
-             return status\n\
-         ;\n\
-         make_status || -> Status:\n\
-             selected = Status::Busy\n\
-             return echo_status(selected)\n\
-         ;\n\
-         current Status = Status::Ready\n\
-         next = make_status()\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("Status :: Ready, Busy;\n\
+     echo_status |status Status| -> Status:\n\
+         return status\n\
+     ;\n\
+     make_status || -> Status:\n\
+         selected = Status::Busy\n\
+         return echo_status(selected)\n\
+     ;\n\
+     current Status = Status::Ready\n\
+     next = make_status()\n");
 
-    let start_body = start_function_body(&ast, &string_table);
+    let start_body = start_function_body(&ast, &path_fork, &string_table);
     let current_declaration = start_body
         .iter()
         .find_map(|node| match &node.kind {
             NodeKind::VariableDeclaration(declaration)
-                if declaration.id.name_str(&string_table) == Some("current") =>
+                if path_fork
+                    .component(declaration.id)
+                    .map(|id| string_table.resolve(id))
+                    == Some("current") =>
             {
                 Some(declaration)
             }
@@ -50,7 +51,9 @@ fn resolves_choice_variant_expressions_with_choice_types() {
     };
     assert_eq!(tag, 0, "expected Status::Ready to have tag 0");
     assert_eq!(
-        nominal_path.name_str(&string_table),
+        path_fork
+            .component(*nominal_path)
+            .map(|id| string_table.resolve(id)),
         Some("Status"),
         "expected nominal path to be Status"
     );
@@ -60,17 +63,23 @@ fn resolves_choice_variant_expressions_with_choice_types() {
             DataType::Choices {
                 nominal_path,
                 ..
-            } if nominal_path.name_str(&string_table) == Some("Status")
+            } if path_fork
+                .component(*nominal_path)
+                .map(|id| string_table.resolve(id))
+                == Some("Status")
         ),
         "choice literal should keep declaration-backed choice identity"
     );
 
-    let make_status_body = function_body_by_name(&ast, &string_table, "make_status");
+    let make_status_body = function_body_by_name(&ast, &path_fork, &string_table, "make_status");
     let selected_declaration = make_status_body
         .iter()
         .find_map(|node| match &node.kind {
             NodeKind::VariableDeclaration(declaration)
-                if declaration.id.name_str(&string_table) == Some("selected") =>
+                if path_fork
+                    .component(declaration.id)
+                    .map(|id| string_table.resolve(id))
+                    == Some("selected") =>
             {
                 Some(declaration)
             }
@@ -86,7 +95,9 @@ fn resolves_choice_variant_expressions_with_choice_types() {
     };
     assert_eq!(tag, 1, "expected Status::Busy to have tag 1");
     assert_eq!(
-        nominal_path.name_str(&string_table),
+        path_fork
+            .component(*nominal_path)
+            .map(|id| string_table.resolve(id)),
         Some("Status"),
         "expected nominal path to be Status"
     );
@@ -96,7 +107,10 @@ fn resolves_choice_variant_expressions_with_choice_types() {
             DataType::Choices {
                 nominal_path,
                 ..
-            } if nominal_path.name_str(&string_table) == Some("Status")
+            } if path_fork
+                .component(*nominal_path)
+                .map(|id| string_table.resolve(id))
+                == Some("Status")
         ),
         "choice literal should preserve declaration-backed choice type"
     );

@@ -31,6 +31,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateSlotReason, InvalidThisUsageReason, NameNamespace,
 };
 use crate::compiler_frontend::external_packages::ExternalConstantValue;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -43,6 +44,7 @@ pub(super) fn parse_identifier_or_call(
     allow_boundary_catch: bool,
     expected_result_evidence_allowed: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     // Fast path for reserved receiver keyword `this`.
     if token_stream.current_token_kind() == &TokenKind::This {
@@ -53,6 +55,7 @@ pub(super) fn parse_identifier_or_call(
             expression,
             allow_boundary_catch,
             string_table,
+            path_fork,
         );
     }
 
@@ -138,6 +141,7 @@ pub(super) fn parse_identifier_or_call(
                 },
                 context,
                 type_interner,
+                path_fork,
                 string_table,
             )?;
 
@@ -149,6 +153,7 @@ pub(super) fn parse_identifier_or_call(
                 expression,
                 allow_boundary_catch,
                 struct_instance,
+                path_fork,
             )?;
 
             return Ok(());
@@ -165,6 +170,7 @@ pub(super) fn parse_identifier_or_call(
                     binding.as_declaration(),
                     context,
                     type_interner,
+                    path_fork,
                     string_table,
                 )?;
                 push_expression_operand(
@@ -175,6 +181,7 @@ pub(super) fn parse_identifier_or_call(
                     expression,
                     allow_boundary_catch,
                     choice_value,
+                    path_fork,
                 )?;
 
                 return Ok(());
@@ -244,6 +251,7 @@ pub(super) fn parse_identifier_or_call(
                     expected_result_evidence_allowed,
                     type_interner,
                     string_table,
+                    path_fork,
                 })?;
 
                 return Ok(());
@@ -270,6 +278,7 @@ pub(super) fn parse_identifier_or_call(
                         operand: reference_expression,
                         wrapper_span: reference_span,
                     },
+                    path_fork,
                 )?;
                 return Ok(()); // Will have moved onto the next token already
             }
@@ -294,6 +303,7 @@ pub(super) fn parse_identifier_or_call(
                 expected_result_evidence_allowed,
                 root_name: identifier,
                 root_record: record,
+                path_fork,
                 string_table,
             });
         }
@@ -340,6 +350,7 @@ pub(super) fn parse_identifier_or_call(
             expression,
             allow_boundary_catch,
             const_expr,
+            path_fork,
         )?;
         return Ok(());
     }
@@ -377,6 +388,7 @@ pub(super) fn parse_identifier_or_call(
                 warnings: None,
                 type_interner,
                 string_table,
+                path_fork,
             })?;
 
         push_expression_operand(
@@ -387,6 +399,7 @@ pub(super) fn parse_identifier_or_call(
             expression,
             allow_boundary_catch,
             function_call_expression,
+            path_fork,
         )?;
 
         return Ok(());
@@ -458,6 +471,7 @@ fn parse_this_reference(
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let this_id = string_table.intern("this");
 
@@ -502,6 +516,7 @@ fn parse_this_reference(
             operand: reference_expression,
             wrapper_span: reference_span,
         },
+        path_fork,
     )?;
 
     Ok(())

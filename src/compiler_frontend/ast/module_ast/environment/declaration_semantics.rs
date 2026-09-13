@@ -14,7 +14,8 @@ use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+// PathId is the build-lifetime key used by every resolved AST environment table.
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -32,7 +33,7 @@ pub(crate) enum DeclarationSemanticKind {
 /// Immutable path-indexed classification table shared by body emission contexts.
 #[derive(Clone, Debug)]
 pub(crate) struct DeclarationSemanticTable {
-    by_path: FxHashMap<InternedPath, DeclarationSemanticKind>,
+    by_path: FxHashMap<PathId, DeclarationSemanticKind>,
 }
 
 impl DeclarationSemanticTable {
@@ -48,8 +49,8 @@ impl DeclarationSemanticTable {
     ///      store, phase, and overlay identity remain authoritative.
     pub(crate) fn from_environment(
         declaration_table: &TopLevelDeclarationTable,
-        resolved_function_signatures_by_path: &FxHashMap<InternedPath, ResolvedFunctionSignature>,
-        nominal_type_ids_by_path: &FxHashMap<InternedPath, TypeId>,
+        resolved_function_signatures_by_path: &FxHashMap<PathId, ResolvedFunctionSignature>,
+        nominal_type_ids_by_path: &FxHashMap<PathId, TypeId>,
         type_environment: &TypeEnvironment,
         template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     ) -> Result<Self, TemplateError> {
@@ -63,13 +64,13 @@ impl DeclarationSemanticTable {
                 type_environment,
                 template_ir_store,
             )?;
-            by_path.insert(declaration.id.clone(), kind);
+            by_path.insert(declaration.id, kind);
         }
 
         Ok(Self { by_path })
     }
 
-    pub(crate) fn kind_for_path(&self, path: &InternedPath) -> Option<DeclarationSemanticKind> {
+    pub(crate) fn kind_for_path(&self, path: &PathId) -> Option<DeclarationSemanticKind> {
         self.by_path.get(path).copied()
     }
 
@@ -77,25 +78,25 @@ impl DeclarationSemanticTable {
     ///
     /// Generated environments do not rerun declaration-shell preparation, so their stable
     /// callable blueprints join the ordinary semantic table directly after inverse projection.
-    pub(crate) fn register_materialised_function(&mut self, path: InternedPath) {
+    pub(crate) fn register_materialised_function(&mut self, path: PathId) {
         self.by_path.insert(path, DeclarationSemanticKind::Function);
     }
 
     /// Register a constant reconstructed from the stable generated-materialisation closure.
-    pub(crate) fn register_materialised_constant(&mut self, path: InternedPath) {
+    pub(crate) fn register_materialised_constant(&mut self, path: PathId) {
         self.by_path.insert(path, DeclarationSemanticKind::Constant);
     }
 
     /// Register a transparent alias declaration reconstructed from the stable closure.
-    pub(crate) fn register_materialised_value(&mut self, path: InternedPath) {
+    pub(crate) fn register_materialised_value(&mut self, path: PathId) {
         self.by_path.insert(path, DeclarationSemanticKind::Value);
     }
 }
 
 fn classify_declaration(
     declaration: &Declaration,
-    resolved_function_signatures_by_path: &FxHashMap<InternedPath, ResolvedFunctionSignature>,
-    nominal_type_ids_by_path: &FxHashMap<InternedPath, TypeId>,
+    resolved_function_signatures_by_path: &FxHashMap<PathId, ResolvedFunctionSignature>,
+    nominal_type_ids_by_path: &FxHashMap<PathId, TypeId>,
     type_environment: &TypeEnvironment,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
 ) -> Result<DeclarationSemanticKind, TemplateError> {

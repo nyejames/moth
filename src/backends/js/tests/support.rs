@@ -57,7 +57,7 @@ pub(super) fn local(local_id: u32, ty: TypeId, region: RegionId) -> HirLocal {
     }
 }
 
-pub(super) use crate::compiler_frontend::symbols::interned_path::InternedPath;
+pub(super) use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 pub(super) use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[derive(Clone, Copy)]
@@ -155,7 +155,7 @@ pub(super) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
 
     let choice_def = ChoiceTypeDefinition {
         id: NominalTypeId(0), // overwritten by register_nominal_choice
-        path: InternedPath::new(),
+        path: PathId::ROOT,
         variants: Box::new([]),
         generic_parameters: None,
     };
@@ -200,6 +200,7 @@ pub(super) fn float_expression(id: u32, value: f64, ty: TypeId, region: RegionId
 /// seeding differ, so this is not the same operation under one name. Only the HIR node
 /// constructors are shared, from `compiler_frontend::tests::hir_fixture_support`.
 pub(super) fn build_module(
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     function_name: &str,
     blocks: Vec<HirBlock>,
@@ -221,13 +222,13 @@ pub(super) fn build_module(
         variants: vec![],
     }];
 
-    let function_path = InternedPath::from_single_str(function_name, string_table);
+    let function_path = path_fork.try_intern_portable_path(function_name, string_table).expect("test path fits");
     module
         .side_table
         .bind_function_name(function_id, function_path.clone());
 
     for (local_id, local_name) in local_names {
-        let local_path = InternedPath::from_single_str(local_name, string_table);
+        let local_path = path_fork.try_intern_portable_path(local_name, string_table).expect("test path fits");
         module.side_table.bind_local_name(*local_id, local_path);
     }
 
@@ -240,6 +241,7 @@ pub(super) fn build_module(
 /// they do not care about the function body.
 pub(super) fn lower_minimal_module(function_name: &str) -> String {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let block = HirBlock {
@@ -257,15 +259,14 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
         return_type: types.unit,
     };
 
-    let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
 
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        JsLoweringConfig::direct_js(false),
-        &type_environment,
-    )
+    lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    JsLoweringConfig::direct_js(false),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed")
     .source
 }
@@ -276,6 +277,7 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
 /// a focused fixture that exercises the map prelude without duplicating HIR setup everywhere.
 pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -305,15 +307,14 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
         return_type: types.unit,
     };
 
-    let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
 
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        JsLoweringConfig::direct_js(false),
-        &type_environment,
-    )
+    lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    JsLoweringConfig::direct_js(false),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed")
     .source
 }
@@ -335,6 +336,7 @@ fn lower_minimal_module_with_cast(
     result_type: impl FnOnce(&TypeIds) -> TypeId,
 ) -> String {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -366,15 +368,14 @@ fn lower_minimal_module_with_cast(
         return_type: types.unit,
     };
 
-    let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
 
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        JsLoweringConfig::direct_js(false),
-        &type_environment,
-    )
+    lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    JsLoweringConfig::direct_js(false),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed")
     .source
 }
@@ -442,6 +443,7 @@ pub(super) fn lower_minimal_module_with_io_call(
     use crate::compiler_frontend::external_packages::CallTarget;
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -469,15 +471,14 @@ pub(super) fn lower_minimal_module_with_io_call(
         return_type: types.unit,
     };
 
-    let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
 
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        JsLoweringConfig::direct_js(false),
-        &type_environment,
-    )
+    lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    JsLoweringConfig::direct_js(false),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering with IO call should succeed")
     .source
 }
@@ -491,6 +492,7 @@ pub(super) fn lower_minimal_module_with_io_input_call(
     io_function_id: ExternalFunctionId,
 ) -> String {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -545,15 +547,14 @@ pub(super) fn lower_minimal_module_with_io_input_call(
         return_type: types.unit,
     };
 
-    let module = build_module(&mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
 
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        JsLoweringConfig::direct_js(false),
-        &type_environment,
-    )
+    lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    JsLoweringConfig::direct_js(false),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering with input IO call should succeed")
     .source
 }

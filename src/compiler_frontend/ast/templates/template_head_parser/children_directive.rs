@@ -26,6 +26,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// Typed result for the connected `$children` directive family.
 type ChildrenDirectiveResult<T> = Result<T, TemplateError>;
@@ -39,6 +40,7 @@ pub(super) fn parse_children_style_directive(
     type_interner: &mut AstTypeInterner<'_>,
     build_state: &mut TemplateBuildState,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ChildrenDirectiveResult<()> {
     let directive_argument = parse_required_parenthesized_expression(
         directive_name,
@@ -46,6 +48,7 @@ pub(super) fn parse_children_style_directive(
         context,
         type_interner,
         string_table,
+        path_fork,
     )
     .map_err(|error| error.map_diagnostic(|diagnostic| {
         // Convert the generic EmptyArguments reason into the children-specific

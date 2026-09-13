@@ -23,8 +23,8 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
 };
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
@@ -59,6 +59,7 @@ pub(super) fn collect_constant_type_hints(
                 context.dependency_selections,
                 context.source_file,
                 context.string_table,
+                context.path_fork,
                 hints,
             )
             .err();
@@ -87,8 +88,9 @@ pub(super) fn collect_named_type_ordering_hint(
     type_reference: ParsedNamedTypeReference<'_>,
     file_dependency_clauses: &[RetainedDependencyClause],
     dependency_selections: &[DependencySelection],
-    source_file: &InternedPath,
+    source_file: PathId,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
 ) -> Result<(), CompilerError> {
     match type_reference {
@@ -97,18 +99,25 @@ pub(super) fn collect_named_type_ordering_hint(
                 return Ok(());
             }
 
-            // WHY: match by local name, which is either the explicit dependency alias or
-            // the original symbol name from the path. This records the dependency spelling
-            // when a dependency alias is used as a type reference.
             let dependency_path = dependency_path_for_local_name(
                 type_name,
                 file_dependency_clauses,
                 dependency_selections,
                 string_table,
+                path_fork,
             )?;
             let hint = match dependency_path {
                 Some(path) => LocalDeclarationOrderingHint::provider_spelling(path),
-                None => LocalDeclarationOrderingHint::source_owned(source_file.append(type_name)),
+                None => {
+                    let path = path_fork
+                        .try_intern_child(source_file, type_name)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "path table exhausted while interning a source-owned type path",
+                            )
+                        })?;
+                    LocalDeclarationOrderingHint::source_owned(path)
+                }
             };
             hints.insert(hint);
         }
@@ -120,9 +129,12 @@ pub(super) fn collect_named_type_ordering_hint(
             // Keep every namespace component in the retained spelling. The declaration-file
             // visibility environment owns the mapping from this local path to its canonical
             // source declaration once provider binding has completed.
-            hints.insert(LocalDeclarationOrderingHint::qualified_type_spelling(
-                InternedPath::from_components(path.to_vec()),
-            ));
+            let path = path_fork.try_intern_components(path).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "path table exhausted while interning a qualified type path",
+                )
+            })?;
+            hints.insert(LocalDeclarationOrderingHint::qualified_type_spelling(path));
         }
     }
     Ok(())
@@ -134,18 +146,18 @@ pub(super) fn collect_named_type_ordering_hint(
 /// namespace binding resolves to the clause provider root; a direct selection resolves to the
 /// provider root plus that selection's source name.
 /// WHY: header syntax consumers such as type ordering and top-level const-template placement must
-/// share the clause-owned selection table instead of searching a derived set of provider paths.
 pub(super) fn dependency_path_for_local_name(
     local_name: StringId,
     file_dependency_clauses: &[RetainedDependencyClause],
     dependency_selections: &[DependencySelection],
     string_table: &mut StringTable,
-) -> Result<Option<InternedPath>, CompilerError> {
+    path_fork: &mut PathInternerFork,
+) -> Result<Option<PathId>, CompilerError> {
     for dependency in file_dependency_clauses {
         let selections = dependency.selections(dependency_selections)?;
         if selections.is_empty() {
-            if dependency.effective_namespace_local_name(string_table) == Some(local_name) {
-                return Ok(Some(dependency.dependency.path.clone()));
+        if dependency.effective_namespace_local_name(string_table, path_fork) == Some(local_name) {
+                return Ok(Some(dependency.dependency.path));
             }
             continue;
         }
@@ -154,9 +166,14 @@ pub(super) fn dependency_path_for_local_name(
             .iter()
             .find(|selection| selection.local_name() == local_name)
         {
-            return Ok(Some(
-                dependency.dependency.path.append(selection.source_name),
-            ));
+            let path = path_fork
+                .try_intern_child(dependency.dependency.path, selection.source_name)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "path table exhausted while interning a selected dependency path",
+                    )
+                })?;
+            return Ok(Some(path));
         }
     }
 
@@ -180,8 +197,10 @@ pub(super) fn collect_content_source_ordering_hints(
     file_references: &PreparedFileReferenceTable,
     path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
-    let content_targets = content_source_targets(file_references, path_syntax, string_table)?;
+    let content_targets =
+        content_source_targets(file_references, path_syntax, string_table, path_fork)?;
 
     for header in headers {
         let Header {
@@ -264,6 +283,7 @@ fn content_source_targets(
     file_references: &PreparedFileReferenceTable,
     path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>, CompilerError> {
     let mut targets = FxHashMap::default();
     for reference in file_references.iter() {
@@ -271,16 +291,14 @@ fn content_source_targets(
             continue;
         }
 
-        let authored_path = &path_syntax
+        let authored_path = path_syntax
             .try_path_for_token(reference.path_syntax, reference.span)?
             .root;
+        let content_path = content_constant_path(authored_path, path_fork, string_table)?;
         targets.insert(
             reference.path_syntax,
-            LocalDeclarationOrderingHint::content_source(
-                content_constant_path(authored_path, string_table),
-                reference.path_syntax,
-            )
-            .with_occurrence_span(reference.span),
+            LocalDeclarationOrderingHint::content_source(content_path, reference.path_syntax)
+                .with_occurrence_span(reference.span),
         );
     }
 

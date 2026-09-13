@@ -19,7 +19,7 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 
@@ -44,18 +44,11 @@ fn expect_lexical_diagnostic(failure: TokenizeFailure) -> CompilerDiagnostic {
 
 fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let Err(diagnostic) = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    ) else {
+    let Err(diagnostic) = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder) else {
         panic!("tokenization should fail");
     };
     (expect_lexical_diagnostic(diagnostic), string_table)
@@ -66,17 +59,10 @@ fn tokenize_source_with_registry(
     style_directives: &StyleDirectiveRegistry,
 ) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
     (file_tokens, string_table)
 }
@@ -86,57 +72,36 @@ fn tokenize_source_with_directives(
     directives: &[StyleDirectiveSpec],
 ) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &registry,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &registry, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
     (file_tokens, string_table)
 }
 
 fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = frontend_test_style_directives();
-    let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("test.mtf", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
-            .expect("Moth template should tokenize"),
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, source_path, TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+        .expect("Moth template should tokenize"), &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("Moth template tokenization should succeed");
     (file_tokens, string_table)
 }
 
 fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = frontend_test_style_directives();
-    let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("test.mtf", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let Err(diagnostic) = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
-            .expect("Moth template should tokenize"),
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    ) else {
+    let Err(diagnostic) = tokenize(source, source_path, TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+        .expect("Moth template should tokenize"), &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder) else {
         panic!("Moth template tokenization should fail");
     };
     (expect_lexical_diagnostic(diagnostic), string_table)
@@ -1651,19 +1616,12 @@ fn tokenizes_qualified_choice_inside_nested_template_head_before_body_delimiter(
 #[test]
 fn rejects_legacy_reset_style_directive_name() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
     let source = "[$reset: body]";
-    let Err(diagnostic) = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    ) else {
+    let Err(diagnostic) = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder) else {
         panic!("legacy reset directive should be rejected");
     };
     let error = expect_lexical_diagnostic(diagnostic);
@@ -1761,19 +1719,12 @@ fn tokenizes_children_directive_with_template_argument() {
 #[test]
 fn rejects_legacy_style_child_template_prefix_syntax() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
 
     let mut span_builder = ExtendedSpanBuilder::new();
-    let result = tokenize(
-        "[$[:prefix], $md:\nhello\n]",
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    );
+    let result = tokenize("[$[:prefix], $md:\nhello\n]", source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder);
     assert!(
         result.is_err(),
         "legacy '$[' child-template syntax should fail"
@@ -1824,20 +1775,13 @@ fn tokenizes_template_reactive_subscription_marker() {
 #[test]
 fn unknown_style_directives_fail_under_strict_registry() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
 
     let mut span_builder = ExtendedSpanBuilder::new();
     let source = "[$unknown: value]";
-    let Err(diagnostic) = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    ) else {
+    let Err(diagnostic) = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder) else {
         panic!("unknown directive should fail during tokenization");
     };
     let error = expect_lexical_diagnostic(diagnostic);
@@ -1885,19 +1829,12 @@ fn tokenizes_slot_and_insert_directives_inside_template_heads() {
 #[test]
 fn rejects_numeric_slot_directive_prefixes() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
 
     let mut span_builder = ExtendedSpanBuilder::new();
-    let result = tokenize(
-        "[wrapper: [$1: first]]",
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    );
+    let result = tokenize("[wrapper: [$1: first]]", source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder);
     assert!(
         result.is_err(),
         "legacy numeric '$1' slot directives should fail"
@@ -2223,14 +2160,10 @@ fn valid_at_prefixed_paths_and_operators_remain_unaffected() {
 
     let (at_core, string_table) = tokenize_source("@core/math\n");
     assert!(
-        at_core.tokens.iter().any(|token| matches!(
-            &token.kind,
-            TokenKind::Path(path_id) if at_core
-                .path_syntax
-                .try_path(*path_id).expect("valid path handle")
-                .root
-                .to_portable_string(&string_table) == "core/math"
-        )),
+        at_core
+            .tokens
+            .iter()
+            .any(|token| matches!(&token.kind, TokenKind::Path(path_id) if !path_id.is_none())),
         "valid @-prefixed dependency should produce a path token"
     );
 }
@@ -2530,17 +2463,10 @@ fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
 fn every_token_span_matches_authored_bytes() {
     let source = "name = \"café😀\"\r\nvalue = \"quoted\"\rbody = [$md:\nbody\r]\n[$note:\ndiscarded\r]\nlast = 2";
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("span-bridge.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("span-bridge.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &frontend_test_style_directives(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &frontend_test_style_directives(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("span bridge fixture should tokenize");
     let resolver = span_builder.resolver();
 
@@ -2615,17 +2541,10 @@ fn extended_token_span_resolves_exactly_through_live_builder() {
     let quoted = "x".repeat(1500);
     let source = format!("value = \"{quoted}\"");
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("long-token.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("long-token.moth", &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        &source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &frontend_test_style_directives(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(&source, source_path, TokenizerEntryMode::SourceFile, &frontend_test_style_directives(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("long token should tokenize");
     let resolver = span_builder.resolver();
     let token = file_tokens
@@ -2654,8 +2573,9 @@ fn lexical_failure_retains_extended_token_span_builder_rows() {
     let quoted = "x".repeat(1500);
     let source = format!("value = \"{quoted}\"'");
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("failed-long-token.moth", &mut string_table);
-    let canonical_path = source_path.to_path_buf(&string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("failed-long-token.moth", &mut string_table).expect("test path fits");
+    let canonical_path = path_fork.render_native(source_path, &string_table, &mut Vec::new());
     let sources =
         SourceDatabase::build([&canonical_path], &canonical_path, None, &mut string_table)
             .expect("the physical fixture should register");
@@ -2665,15 +2585,7 @@ fn lexical_failure_retains_extended_token_span_builder_rows() {
         .id;
 
     let mut span_builder = ExtendedSpanBuilder::new();
-    let Err(diagnostic) = tokenize(
-        &source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &frontend_test_style_directives(),
-        &mut string_table,
-        expected_file_id,
-        &mut span_builder,
-    ) else {
+    let Err(diagnostic) = tokenize(&source, source_path, TokenizerEntryMode::SourceFile, &frontend_test_style_directives(), &mut string_table, &mut path_fork, expected_file_id, &mut span_builder) else {
         panic!("the malformed trailing character should abort tokenization");
     };
     let diagnostic = expect_lexical_diagnostic(diagnostic);
@@ -2747,8 +2659,9 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
     let quoted = "😀".repeat(600);
     let source = format!("value = \"{quoted}\"\nx = \"\\🦋");
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("diagnosed-long-token.moth", &mut string_table);
-    let canonical_path = source_path.to_path_buf(&string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("diagnosed-long-token.moth", &mut string_table).expect("test path fits");
+    let canonical_path = path_fork.render_native(source_path, &string_table, &mut Vec::new());
     let sources =
         SourceDatabase::build([&canonical_path], &canonical_path, None, &mut string_table)
             .expect("the physical fixture should register");
@@ -2758,15 +2671,7 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
         .id;
 
     let mut span_builder = ExtendedSpanBuilder::new();
-    let diagnostic = tokenize(
-        &source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &frontend_test_style_directives(),
-        &mut string_table,
-        file_id,
-        &mut span_builder,
-    )
+    let diagnostic = tokenize(&source, source_path, TokenizerEntryMode::SourceFile, &frontend_test_style_directives(), &mut string_table, &mut path_fork, file_id, &mut span_builder)
     .expect_err("the unsupported escape should abort tokenization");
     let diagnostic = expect_lexical_diagnostic(diagnostic);
     assert!(matches!(

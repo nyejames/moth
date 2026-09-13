@@ -30,7 +30,7 @@ use crate::compiler_frontend::datatypes::generic_identity_bridge::{
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use super::resolve_type::resolve_diagnostic_type_to_type_id;
 
@@ -43,7 +43,7 @@ use super::resolve_type::resolve_diagnostic_type_to_type_id;
 /// Returns `Ok(Some(DataType))` on successful instantiation, `Ok(None)` when template data
 /// is not available (call site should fall back to GenericInstance), or `Err` on failure.
 pub(super) fn instantiate_generic_nominal(
-    base_path: &InternedPath,
+    base_path: &PathId,
     kind: &GenericDeclarationKind,
     arguments: &[DataType],
     span: Option<SourceSpan>,
@@ -111,7 +111,7 @@ pub(super) fn instantiate_generic_nominal(
 ///
 /// The base path has already been validated as a registered generic nominal by the caller.
 fn intern_generic_instance_type_id(
-    base_path: &InternedPath,
+    base_path: &PathId,
     arguments: &[DataType],
     context: &mut TypeResolutionContext<'_>,
 ) -> TypeId {

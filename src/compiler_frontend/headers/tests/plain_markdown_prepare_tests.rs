@@ -12,7 +12,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode, HeaderKind};
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
@@ -21,9 +21,11 @@ fn prepare(
 ) -> (
     crate::compiler_frontend::headers::types::FileFrontendPrepareOutput,
     StringTable,
+    PathInternerFork,
 ) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("docs/intro.md", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("docs/intro.md", &mut string_table).expect("test path fits");
 
     let output = prepare_plain_markdown_file(
         PlainMarkdownPrepareInput {
@@ -33,14 +35,16 @@ fn prepare(
             canonical_os_path: None,
         },
         &mut string_table,
-    );
+        &mut path_fork,
+    )
+    .expect("plain Markdown preparation should succeed");
 
-    (output, string_table)
+    (output, string_table, path_fork)
 }
 
 #[test]
 fn produces_exactly_one_header() {
-    let (output, _string_table) = prepare("# Heading");
+    let (output, _string_table, _path_fork) = prepare("# Heading");
 
     assert_eq!(output.headers.len(), 1);
     assert_eq!(output.token_count, 0, "Markdown files are not tokenized");
@@ -54,19 +58,22 @@ fn produces_exactly_one_header() {
 
 #[test]
 fn generated_header_path_ends_with_content() {
-    let (output, string_table) = prepare("# Heading");
+    let (output, string_table, path_fork) = prepare("# Heading");
 
     let header = &output.headers[0];
-    let header_path = header.tokens.src_path.to_portable_string(&string_table);
-    assert!(
-        header_path.ends_with("content"),
-        "expected header path to end with content, got {header_path}"
+    let terminal_component = path_fork
+        .try_component(header.tokens.src_path)
+        .expect("generated header path must have a terminal component");
+    let header_component = string_table.resolve(terminal_component);
+    assert_eq!(
+        header_component, "content",
+        "expected header path terminal component to be content, got {header_component}"
     );
 }
 
 #[test]
 fn declaration_is_private_compile_time_string_constant() {
-    let (output, _string_table) = prepare("# Heading");
+    let (output, _string_table, _path_fork) = prepare("# Heading");
 
     let header = &output.headers[0];
     assert!(matches!(header.export_mode, HeaderExportMode::Private));
@@ -95,7 +102,7 @@ fn declaration_is_private_compile_time_string_constant() {
 
 #[test]
 fn initializer_is_single_string_literal_with_rendered_html() {
-    let (output, string_table) = prepare("# Heading");
+    let (output, string_table, _path_fork) = prepare("# Heading");
 
     let header = &output.headers[0];
     let HeaderKind::Constant { declaration } = &header.kind else {
@@ -118,7 +125,7 @@ fn initializer_is_single_string_literal_with_rendered_html() {
 #[test]
 fn markdown_looking_syntax_creates_no_initializer_references() {
     let source = "This costs $100 -- not a comment.\n\nLiteral template-looking text: [not_a_template]\n\nRaw Moth-ish block: [: <p>not parsed</p>]";
-    let (output, _string_table) = prepare(source);
+    let (output, _string_table, _path_fork) = prepare(source);
 
     let header = &output.headers[0];
     let HeaderKind::Constant { declaration } = &header.kind else {
@@ -135,7 +142,7 @@ fn markdown_looking_syntax_creates_no_initializer_references() {
 #[test]
 fn rendered_html_is_preserved_exactly() {
     let source = "Text with `backticks`, \"quotes\", [brackets], and\nnewlines.";
-    let (output, string_table) = prepare(source);
+    let (output, string_table, _path_fork) = prepare(source);
 
     let header = &output.headers[0];
     let HeaderKind::Constant { declaration } = &header.kind else {
@@ -163,7 +170,7 @@ fn rendered_html_is_preserved_exactly() {
 #[test]
 fn initializer_contains_no_template_tokens() {
     let source = "# Heading\n\n[not_a_template]\n\n[:not_parsed]";
-    let (output, _string_table) = prepare(source);
+    let (output, _string_table, _path_fork) = prepare(source);
 
     let header = &output.headers[0];
     let HeaderKind::Constant { declaration } = &header.kind else {

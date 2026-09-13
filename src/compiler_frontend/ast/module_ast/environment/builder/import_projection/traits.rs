@@ -47,7 +47,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         imported_traits.sort_by(|left, right| left.0.cmp(&right.0));
 
         for (trait_origin, semantics) in &imported_traits {
-            let trait_path = imported_trait_path(trait_origin, string_table);
+            let trait_path = imported_trait_path(trait_origin, string_table, self.path_fork);
             let trait_name = string_table.intern(trait_origin.defining_name());
             let this_name = string_table.intern("This");
             let this_type = self
@@ -72,7 +72,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 id: trait_id,
                 name: trait_name,
                 canonical_path: trait_path,
-                source_file: InternedPath::new(),
+                source_file: PathId::ROOT,
                 this_type,
                 requirements,
                 declaration_span: None,
@@ -124,7 +124,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 Some((path.clone(), origin.clone()))
             })
             .collect::<Vec<_>>();
-        visible_paths.sort_by_key(|(path, _)| path.to_string(string_table));
+        visible_paths.sort_by_key(|(path, _)| {
+            self.path_fork.render_portable(*path, string_table, &mut Vec::new())
+        });
 
         for (path, origin) in visible_paths {
             let identity = CanonicalTraitIdentity::Source(origin);
@@ -143,14 +145,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     fn project_imported_trait_requirement(
         &mut self,
-        trait_path: &InternedPath,
+        trait_path: &PathId,
         this_type: TypeId,
         requirement_id: TraitRequirementId,
         requirement: &crate::compiler_frontend::public_interface::PublicTraitRequirementSurface,
         string_table: &mut StringTable,
     ) -> Result<ResolvedTraitRequirement, CompilerError> {
         let requirement_name = string_table.intern(&requirement.name);
-        let requirement_path = trait_path.append(requirement_name);
+        let requirement_path = self
+            .path_fork
+            .try_intern_child(*trait_path, requirement_name)
+            .expect("imported trait requirement path table exhausted");
         let receiver = match requirement.receiver_access {
             PublicTraitReceiverAccess::Immutable => {
                 TraitReceiverRequirement::Immutable { this_type }
@@ -168,7 +173,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let type_id =
                 self.project_imported_trait_surface_type(&parameter.type_identity, this_type)?;
             parameters.push(ResolvedTraitParameter {
-                name: requirement_path.append(name),
+                name: self
+                    .path_fork
+                    .try_intern_child(requirement_path, name)
+                    .expect("imported trait parameter path table exhausted"),
                 value_mode: parameter.value_mode.clone(),
                 type_id,
                 span: None,
@@ -328,7 +336,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 kind: TraitEvidenceKind::Canonical,
                 target_type_id,
                 trait_id,
-                source_file: InternedPath::new(),
+                source_file: PathId::ROOT,
                 declaration_span: None,
                 requirements,
             });
@@ -337,15 +345,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
-    fn imported_method_path(&self, method_origin: &OriginFunctionId) -> Option<InternedPath> {
+    fn imported_method_path(&self, method_origin: &OriginFunctionId) -> Option<PathId> {
         self.imported_receiver_method_paths_by_origin
             .get(method_origin)
             .cloned()
     }
 }
 
-fn imported_trait_path(origin: &OriginTraitId, string_table: &mut StringTable) -> InternedPath {
-    let mut path = InternedPath::from_single_str("<imported-trait>", string_table);
+fn imported_trait_path(
+    origin: &OriginTraitId,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> PathId {
     let package_origin = match origin.module_origin().package().origin() {
         crate::builder_surface::PackageOrigin::Core => "core",
         crate::builder_surface::PackageOrigin::Builder => "builder",
@@ -355,18 +366,21 @@ fn imported_trait_path(origin: &OriginTraitId, string_table: &mut StringTable) -
     let root_role = match origin.module_origin().role() {
         crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal => "normal",
         crate::compiler_frontend::semantic_identity::ModuleRootRole::Support => "support",
-        crate::compiler_frontend::semantic_identity::ModuleRootRole::ProjectPackageFacade => {
-            "facade"
-        }
+        crate::compiler_frontend::semantic_identity::ModuleRootRole::ProjectPackageFacade => "facade",
     };
-    path.push_str(package_origin, string_table);
-    path.push_str(origin.module_origin().package().name(), string_table);
-    path.push_str(root_role, string_table);
-    for component in origin.module_origin().logical_module_path().split('/') {
+    let mut path = PathId::ROOT;
+    for component in std::iter::once("<imported-trait>")
+        .chain(std::iter::once(package_origin))
+        .chain(std::iter::once(origin.module_origin().package().name()))
+        .chain(std::iter::once(root_role))
+        .chain(origin.module_origin().logical_module_path().split('/'))
+        .chain(std::iter::once(origin.defining_name()))
+    {
         if !component.is_empty() {
-            path.push_str(component, string_table);
+            path = path_fork
+                .try_intern_child(path, string_table.intern(component))
+                .expect("imported trait path table exhausted");
         }
     }
-    path.push_str(origin.defining_name(), string_table);
     path
 }

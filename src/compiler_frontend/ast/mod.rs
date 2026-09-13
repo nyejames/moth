@@ -175,7 +175,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
@@ -193,13 +193,13 @@ use std::sync::Arc;
 /// AST-shaped copy of the same semantic data.
 #[derive(Clone, Debug)]
 pub struct AstChoiceDefinition {
-    pub nominal_path: InternedPath,
+    pub nominal_path: PathId,
 }
 
 /// Consumer-local imported struct definition required by HIR declaration registration.
 #[derive(Clone, Debug)]
 pub(crate) struct AstImportedStructDefinition {
-    pub(crate) nominal_path: InternedPath,
+    pub(crate) nominal_path: PathId,
 }
 
 /// Unified AST output for all source files in one compilation unit.
@@ -216,8 +216,7 @@ pub struct Ast {
     pub const_values: ConstValueStore,
     pub doc_fragments: Vec<AstDocFragment>,
 
-    /// The path to the original entry point file.
-    pub entry_path: InternedPath,
+    pub entry_path: PathId,
 
     /// Structural role of the active module root.
     ///
@@ -251,10 +250,10 @@ pub struct Ast {
     ///      const-ness without re-walking the AST.
     pub const_facts: AstConstFacts,
     pub(crate) imported_functions_by_local_path:
-        FxHashMap<InternedPath, AstImportedFunctionContract>,
+        FxHashMap<PathId, AstImportedFunctionContract>,
     /// Provenance introduced by static configuration branch selection, keyed by function path
     /// until HIR allocates the build-local function IDs.
-    pub(crate) static_if_function_provenance: FxHashMap<InternedPath, SyntheticInterfaceProvenance>,
+    pub(crate) static_if_function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
 }
 
 /// Consumer-local semantic contract for one imported concrete source function.
@@ -348,7 +347,7 @@ impl Ast {
 
         let header_count = headers.len();
         let ast_header_counts = AstHeaderCounterSnapshot::from_headers(&headers);
-        let (phase_context, string_table) =
+        let (phase_context, string_table, path_fork) =
             AstPhaseContext::from_build_context(context, source_build_config_contract_names);
 
         timing_scope_attributed!(
@@ -357,7 +356,7 @@ impl Ast {
             phase_context.timing_context
         );
 
-        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context).build(
+        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context, path_fork).build(
             &headers,
             AstEnvironmentInput {
                 module_symbols,
@@ -374,7 +373,7 @@ impl Ast {
                 phase_context.timing_metric_family.emit(),
                 phase_context.timing_context
             );
-            AstEmitter::new(&phase_context, &mut environment, header_count)
+            AstEmitter::new(&phase_context, &mut environment, header_count, path_fork)
                 .emit(headers, string_table)?
         };
         let generic_instance_count = emitted.generic_instance_count;
@@ -385,7 +384,7 @@ impl Ast {
                 phase_context.timing_metric_family.finalise(),
                 phase_context.timing_context
             );
-            AstFinalizer::new(&phase_context, environment).finalize(
+            AstFinalizer::new(&phase_context, environment, path_fork).finalize(
                 emitted,
                 &top_level_const_fragments,
                 string_table,
@@ -493,8 +492,16 @@ pub(crate) fn function_body_to_ast(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Vec<AstNode>, ExpressionParseError> {
-    parse_function_body_statements(token_stream, context, type_interner, warnings, string_table)
+    parse_function_body_statements(
+        token_stream,
+        context,
+        type_interner,
+        warnings,
+        string_table,
+        path_fork,
+    )
 }
 
 #[cfg(test)]

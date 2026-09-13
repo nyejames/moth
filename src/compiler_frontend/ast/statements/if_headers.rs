@@ -29,6 +29,7 @@ use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum ParsedIfHeader {
     BoolCondition {
@@ -139,6 +140,7 @@ pub(crate) fn parse_if_header(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
     let classification = classify_if_header(token_stream);
 
@@ -150,11 +152,18 @@ pub(crate) fn parse_if_header(
             context,
             type_interner,
             string_table,
+            path_fork,
         );
     }
 
     if classification.shape == IfHeaderShape::FullMatch {
-        return parse_match_style_if_header(token_stream, context, type_interner, string_table);
+        return parse_match_style_if_header(
+            token_stream,
+            context,
+            type_interner,
+            string_table,
+            path_fork,
+        );
     }
 
     if if_condition_is_missing(token_stream) {
@@ -165,7 +174,7 @@ pub(crate) fn parse_if_header(
         .into());
     }
 
-    let condition_context = if_condition_parse_context(context, string_table);
+    let condition_context = if_condition_parse_context(context, string_table, path_fork);
     let mut condition_type = ExpectedType::Infer;
     let condition = create_expression(
         token_stream,
@@ -175,6 +184,7 @@ pub(crate) fn parse_if_header(
         &ValueMode::ImmutableOwned,
         false,
         string_table,
+        path_fork,
     )?;
 
     if token_stream.current_token_kind() == &TokenKind::Is {
@@ -341,13 +351,15 @@ fn parse_match_style_if_header(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
-    let condition_context = if_condition_parse_context(context, string_table);
+    let condition_context = if_condition_parse_context(context, string_table, path_fork);
     let scrutinee = parse_scrutinee_until_is(
         token_stream,
         &condition_context,
         type_interner,
         string_table,
+        path_fork,
     )?;
     token_stream.advance(); // consume `is`
 
@@ -359,13 +371,15 @@ fn parse_option_present_capture_if_header(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
-    let condition_context = if_condition_parse_context(context, string_table);
+    let condition_context = if_condition_parse_context(context, string_table, path_fork);
     let scrutinee = parse_scrutinee_until_is(
         token_stream,
         &condition_context,
         type_interner,
         string_table,
+        path_fork,
     )?;
     token_stream.advance(); // consume `is`
 
@@ -406,6 +420,7 @@ fn parse_option_present_capture_if_header(
         *pattern_span,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     Ok(ParsedIfHeader::OptionPresentCapture {
@@ -418,6 +433,7 @@ fn parse_option_present_capture_if_header(
 fn if_condition_parse_context(
     context: &ScopeContext,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ScopeContext {
-    context.new_child_control_flow(ContextKind::Condition, string_table)
+    context.new_child_control_flow(ContextKind::Condition, string_table, path_fork)
 }

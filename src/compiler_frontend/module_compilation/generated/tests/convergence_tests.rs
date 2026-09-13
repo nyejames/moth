@@ -541,6 +541,10 @@ fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(
+                crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
+                    .freeze(),
+            ),
         },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),

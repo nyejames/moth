@@ -29,6 +29,7 @@ use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
@@ -41,7 +42,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterface
 /// WHAT: preserves the authored field name as an owned stable string, the field value's
 /// canonical [`CanonicalTypeIdentity`], and the recursively owned folded value. The name
 /// derives from the declaration path's last component while the donor-local string table is
-/// available, so the field survives after donor-local `StringId` and `InternedPath`
+/// available, so the field survives after donor-local `StringId` and `PathId`
 /// identities are unavailable. The type identity lets import materialize nested values
 /// without donor field declarations: a nested anonymous const record projects to
 /// `AnonymousConstRecord` and a nested named struct to its source nominal identity.
@@ -197,7 +198,7 @@ impl Hash for FiniteFloat {
 /// directly exported constants (R2b) and function-parameter, receiver-parameter or
 /// struct-field defaults (R2c). Every leaf is an owned stable value: no `TypeId`,
 /// `NominalTypeId`, `StringId`,
-/// `InternedPath`, source location, AST/TIR identity, HIR ID, local choice tag/index or
+/// `PathId`, source location, AST/TIR identity, HIR ID, local choice tag/index or
 /// absolute path crosses this boundary. Choice variants carry a stable variant name
 /// derived from the donor-local type environment while it is available, not a local tag
 /// index. Option presence is modeled by the recursive `OptionSome`/`OptionNone` variants, not
@@ -371,12 +372,12 @@ impl GenericParameterOriginResolver for FoldedValueGenericParameterResolver {
 /// projection and absent for generated generic materialisation, which must reject structural
 /// strings until a later phase supplies the consuming module's table.
 /// WHY: resource identity is module-local while this converter emits portable public values; the
-/// optional table keeps that boundary explicit rather than allowing a caller to flatten pieces.
 pub(crate) struct FoldedValueProjectionContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) string_table: &'a StringTable,
     pub(crate) projection_context: &'a CanonicalTypeProjectionContext<'a>,
     pub(crate) resources: Option<&'a ModuleResourceTable>,
+    pub(crate) path_fork: &'a PathInternerFork,
 }
 
 /// Convert one finalized and normalized AST compile-time expression to an owned
@@ -570,11 +571,15 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                 fields
                     .into_iter()
                     .map(|field| {
-                        let name = field.name.name_str(string_table).ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "public-interface folded store record field has no resolvable name",
-                            )
-                        })?;
+                        let name = context
+                            .path_fork
+                            .component(*field.name)
+                            .map(|name| string_table.resolve(name))
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "public-interface folded store record field has no resolvable name",
+                                )
+                            })?;
                         let type_identity = project_type_id_to_canonical_identity(
                             field.type_id,
                             type_environment,
@@ -603,11 +608,15 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                 let fields = fields
                     .into_iter()
                     .map(|field| {
-                        let name = field.name.name_str(string_table).ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "public-interface folded store choice field has no resolvable name",
-                            )
-                        })?;
+                        let name = context
+                            .path_fork
+                            .component(*field.name)
+                            .map(|name| string_table.resolve(name))
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "public-interface folded store choice field has no resolvable name",
+                                )
+                            })?;
                         let field_type_identity = project_type_id_to_canonical_identity(
                             field.type_id,
                             type_environment,
@@ -655,14 +664,14 @@ pub(crate) fn convert_declaration_fields_to_folded_fields(
     let string_table = context.string_table;
     let mut folded_fields = Vec::with_capacity(fields.len());
     for field in fields {
-        let name = field
-            .id
-            .name_str(string_table)
+        let name = context
+            .path_fork
+            .component(field.id)
+            .map(|name| string_table.resolve(name))
             .ok_or_else(|| {
                 CompilerError::compiler_error(
                     "public-interface draft folded-value projection: a const-record or choice \
-             payload field declaration has no resolvable field name; the interned path \
-             is empty",
+             payload field declaration has no resolvable field name; the path is empty",
                 )
             })?
             .to_owned();

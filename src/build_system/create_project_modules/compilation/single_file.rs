@@ -21,6 +21,7 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::{
@@ -35,7 +36,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_module_root_file;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
@@ -184,6 +185,7 @@ fn compile_single_file_frontend_with_target(
     target: SingleFileFrontendTarget,
 ) -> Result<SingleFileFrontendResult, PremergeFailure> {
     let mut resource_inputs = ResourceInputRegistry::new();
+    let mut discovery_path_fork = PathInternerFork::empty();
     // 1. Verify standard Moth file extension.
     //
     // A non-UTF-8 extension is an unrepresentable filesystem input. Reject it before
@@ -198,28 +200,52 @@ fn compile_single_file_frontend_with_target(
             .into());
         }
     };
-
     if extension_text != LANGUAGE_SOURCE_EXTENSION {
-        let interned_path =
-            match InternedPath::try_from_filesystem_path(&config.entry_dir, string_table) {
-                Ok(path) => path,
-                Err(non_utf8) => {
-                    return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
-                        &non_utf8.path,
-                        "single-file entry path",
-                    )));
-                }
-            };
+        let interned_path = match discovery_path_fork
+            .try_intern_filesystem_path(&config.entry_dir, string_table)
+        {
+            Ok(path) => path,
+            Err(PathInternError::NonUtf8(non_utf8)) => {
+                return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
+                    &non_utf8.path,
+                    "single-file entry path",
+                )));
+            }
+            Err(PathInternError::TableFull) => {
+                // Authored exhaustion of the compact path table: the typed capacity diagnostic
+                // travels without a path snapshot, because the exhausted table owns no further
+                // PathId to render.
+                return Err(PremergeFailure::Diagnosed(
+                    PremergeDiagnosticBatch::from_diagnostic(
+                        CompilerDiagnostic::source_table_capacity(
+                            SourceSpanCapacityResource::LogicalPathTable,
+                        ),
+                        std::mem::take(string_table),
+                    ),
+                ));
+            }
+            Err(PathInternError::BaseMismatch { .. }) => {
+                return Err(PremergeFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "logical path merge base is not a structural prefix of the destination table",
+                    ),
+                ));
+            }
+        };
         let extension = string_table.intern(extension_text);
         let diagnostic =
             CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, None);
 
-        // Move the local table into the batch; this diagnosed path aborts discovery,
-        // so no clone is needed to carry the diagnostic.
+        // Move the local string table and path identity into the diagnosed lane. Discovery aborts
+        // before a source database exists, so the path snapshot must travel with the diagnostic.
         let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
-        ));
+        let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
+        if let Err(error) =
+            batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()))
+        {
+            return Err(PremergeFailure::Infrastructure(error));
+        }
+        return Err(PremergeFailure::Diagnosed(batch));
     }
 
     timing_scope!(
@@ -310,6 +336,7 @@ fn compile_single_file_frontend_with_target(
         &mut external_imports,
         &builder_surface.source_file_kinds,
         &mut resource_inputs,
+        &mut discovery_path_fork,
         string_table,
     ) {
         Ok(collected) => collected,
@@ -330,6 +357,7 @@ fn compile_single_file_frontend_with_target(
     // immutable database beside the retained span builders, and the builder stays the exclusive
     // owner that finalizes every table after the last span producer returns.
     let (source_files, mut source_spans) = source_owner.split();
+    let mut path_interner = source_files.clone_path_builder();
 
     // Share the effective external package registry immutably for the rest of the frontend
     // pipeline so each stage does not need its own deep clone.
@@ -342,6 +370,8 @@ fn compile_single_file_frontend_with_target(
 
         let string_table_fork = string_table.fork_for_module();
         let (local_table, base_len) = string_table_fork.into_parts();
+        let path_fork = path_interner.fork_source().fork_for_module();
+        let path_base_len = path_fork.base_len();
 
         timing_scope_attributed!(
             timing_guard_boundary_compile,
@@ -395,6 +425,7 @@ fn compile_single_file_frontend_with_target(
             &mut source_spans,
             &entry_path,
             local_table,
+            path_fork,
             source_byte_count,
             timing_module_context,
         );
@@ -405,6 +436,7 @@ fn compile_single_file_frontend_with_target(
             &mut source_spans,
             &entry_path,
             local_table,
+            path_fork,
             source_byte_count,
         );
         let mut prepared = prepare_result?;
@@ -445,6 +477,8 @@ fn compile_single_file_frontend_with_target(
             project_path_resolver: Some(&project_path_resolver),
             source_files,
             style_directives,
+            global_string_table: None,
+            global_path_table: None,
             external_packages: Arc::clone(&external_packages),
             build_config_values: Arc::new(build_config_values),
             external_dependency_resolution_table: &builder_surface
@@ -525,7 +559,9 @@ fn compile_single_file_frontend_with_target(
                     &graph_stable_origin,
                     *compiled,
                     base_len,
+                    path_base_len,
                     string_table,
+                    &mut path_interner,
                 )?;
                 Vec::new()
             }
@@ -541,13 +577,23 @@ fn compile_single_file_frontend_with_target(
                 }]
             }
         };
-        let boundary = CompiledGraphBoundary {
+        let mut boundary = CompiledGraphBoundary {
             structure: graph,
             modules,
             generated: generated_store,
             diagnosed,
             blocked: Vec::new(),
         };
+        // The synthetic single-file boundary is the final project/package boundary, so its
+        // one publication already completed before this tail. The install shares one final
+        // table across the base artefact and every generated sidecar, and the local registry
+        // has been dropped by scope end, so the retained contexts install without a clone.
+        drop(provider_materialisations);
+        let frozen_path_table = path_interner.clone().freeze();
+        boundary.install_boundary_identity(
+            Arc::new(frozen_path_table),
+            Arc::new(string_table.clone().freeze()),
+        );
         ProjectFrontendCompilation::new(
             boundary.finish()?,
             CompletedSourcePackageRegistry::new(),
@@ -560,6 +606,7 @@ fn compile_single_file_frontend_with_target(
     // current attachment behavior; a failed finish keeps the semantic failure
     // authoritative and chains the finish failure beside it instead of replacing it.
     // A successful result with a failed finish surfaces only the finish error.
+    source_owner.sources_mut().adopt_path_builder(path_interner);
     let finish_outcome = source_owner.finish();
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),

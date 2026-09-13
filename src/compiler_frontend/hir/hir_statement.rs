@@ -25,7 +25,7 @@ use crate::compiler_frontend::hir::terminators::{
     HirTerminator, classify_assertion_message_evaluation,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
 
 use crate::hir_log;
@@ -80,7 +80,7 @@ impl<'a> HirBuilder<'a> {
     //      into the next function.
     pub(super) fn lower_function_body(
         &mut self,
-        function_name: &InternedPath,
+        function_name: &PathId,
         signature: &FunctionSignature,
         body: &[AstNode],
         span: &Option<SourceSpan>,
@@ -682,6 +682,7 @@ impl<'a> HirBuilder<'a> {
             _terminator.display_with_context(
                 &crate::compiler_frontend::hir::hir_display::HirDisplayContext::new(
                     self.string_table,
+                    self.path_fork,
                 )
                 .with_side_table(&self.side_table)
                 .with_type_environment(&self.type_environment),

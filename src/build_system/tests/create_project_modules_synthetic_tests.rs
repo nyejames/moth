@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independent() {
     let forward = synthetic_identity_fixture(&["alpha", "beta"]);
@@ -299,6 +300,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
             &mut span_view,
             &entry_file_path,
             local_string_table,
+            source_files.fork_path_interner(),
             source_byte_count,
             None,
         )
@@ -311,6 +313,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
             &mut span_view,
             &entry_file_path,
             local_string_table,
+            source_files.fork_path_interner(),
             source_byte_count,
         )
         .expect("retained synthetic outputs should prepare once");
@@ -413,6 +416,8 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     };
     let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
+    let mut path_fork =
+        crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
 
     let (failure, source_database) = match super::source_discovery::collect_reachable_input_files(
         &root.join("main.moth"),
@@ -421,6 +426,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         &mut external_imports,
         &source_file_kinds,
         &mut resource_inputs,
+        &mut path_fork,
         &mut string_table,
     ) {
         Ok(_) => panic!("malformed synthetic preparation should diagnose"),

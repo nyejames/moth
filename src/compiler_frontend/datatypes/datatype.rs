@@ -13,7 +13,7 @@
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::external_packages::ExternalTypeId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use super::definitions::TypeDefinition;
@@ -59,7 +59,7 @@ pub enum DataType {
 
     // Container and composite runtime types.
     Struct {
-        nominal_path: InternedPath,
+        nominal_path: PathId,
         type_id: TypeId,
         /// Diagnostic/render-only marker. Semantic const-record decisions must
         /// use `Expression::const_record_state`, not this field.
@@ -90,7 +90,7 @@ pub enum DataType {
     Parameters(Vec<Declaration>), // Struct definitions and parameters
 
     Choices {
-        nominal_path: InternedPath,
+        nominal_path: PathId,
         type_id: TypeId,
         generic_instance_key: Option<GenericInstantiationKey>,
     }, // Choice declaration identity + variant list
@@ -132,12 +132,12 @@ impl DataType {
     //  Constructors
     // -----------------
 
-    pub fn runtime_struct(nominal_path: InternedPath, type_id: TypeId) -> Self {
+    pub fn runtime_struct(nominal_path: PathId, type_id: TypeId) -> Self {
         Self::runtime_struct_with_generic_key(nominal_path, type_id, None)
     }
 
     pub fn runtime_struct_with_generic_key(
-        nominal_path: InternedPath,
+        nominal_path: PathId,
         type_id: TypeId,
         generic_instance_key: Option<GenericInstantiationKey>,
     ) -> Self {
@@ -149,12 +149,12 @@ impl DataType {
         }
     }
 
-    pub fn const_struct_record(nominal_path: InternedPath, type_id: TypeId) -> Self {
+    pub fn const_struct_record(nominal_path: PathId, type_id: TypeId) -> Self {
         Self::const_struct_record_with_generic_key(nominal_path, type_id, None)
     }
 
     pub fn const_struct_record_with_generic_key(
-        nominal_path: InternedPath,
+        nominal_path: PathId,
         type_id: TypeId,
         generic_instance_key: Option<GenericInstantiationKey>,
     ) -> Self {
@@ -183,12 +183,12 @@ impl DataType {
                 const_record,
                 generic_instance_key: None,
                 ..
-            } if !const_record => Some(ReceiverKey::Struct(nominal_path.to_owned())),
+            } if !const_record => Some(ReceiverKey::Struct(*nominal_path)),
             DataType::Choices {
                 nominal_path,
                 generic_instance_key: None,
                 ..
-            } => Some(ReceiverKey::Choice(nominal_path.to_owned())),
+            } => Some(ReceiverKey::Choice(*nominal_path)),
             DataType::Int => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int)),
             DataType::Float => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Float)),
             DataType::Bool => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Bool)),
@@ -266,7 +266,7 @@ impl DataType {
 
     /// Display the DataType with proper string resolution for interned strings.
     /// This method should be used instead of Display when a StringTable is available.
-    pub fn display_with_table(&self, string_table: &StringTable) -> String {
+    pub fn display_with_table(&self, string_table: &StringTable, path_table: &PathTable) -> String {
         match self {
             DataType::Inferred => "Inferred".to_string(),
             DataType::NamedType(name) => string_table.resolve(*name).to_string(),
@@ -277,7 +277,7 @@ impl DataType {
                 .join("."),
             DataType::TypeParameter { name, .. } => string_table.resolve(*name).to_string(),
             DataType::GenericInstance { base, arguments } => {
-                display_generic_instance(base, arguments, string_table)
+                display_generic_instance(base, arguments, string_table, path_table)
             }
             DataType::Bool => "Bool".to_string(),
             DataType::StringSlice => "String".to_string(),
@@ -288,11 +288,11 @@ impl DataType {
             DataType::Parameters(args) => {
                 let mut arg_str = String::new();
                 for arg in args {
-                    let name = arg.id.to_string(string_table);
+                    let name = path_table.render_portable(arg.id, string_table, &mut Vec::new());
                     arg_str.push_str(&format!(
                         "{}: {}, ",
                         name,
-                        arg.value.diagnostic_type.display_with_table(string_table)
+                        arg.value.diagnostic_type.display_with_table(string_table, path_table)
                     ));
                 }
                 format!("Parameters({arg_str})")
@@ -304,10 +304,11 @@ impl DataType {
                 ..
             } => {
                 if let Some(key) = generic_instance_key {
-                    return display_generic_instantiation_key(key, string_table);
+                    return display_generic_instantiation_key(key, path_table, string_table);
                 }
-                let bare_name = nominal_path
-                    .name_str(string_table)
+                let bare_name = path_table
+                    .try_component(*nominal_path)
+                    .map(|name| string_table.resolve(name))
                     .unwrap_or("<anonymous struct>");
                 if *const_record {
                     format!("const record {bare_name}")
@@ -322,7 +323,7 @@ impl DataType {
             DataType::Returns(returns) => {
                 let returns_string = returns
                     .iter()
-                    .map(|return_type| return_type.display_with_table(string_table))
+                    .map(|return_type| return_type.display_with_table(string_table, path_table))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("Returns({returns_string})")
@@ -330,15 +331,19 @@ impl DataType {
             DataType::Function(_, signature) => {
                 let mut arg_str = String::new();
                 for arg in &signature.parameters {
-                    let name = arg.id.to_string(string_table);
+                    let name = path_table
+                        .try_component(arg.id)
+                        .map(|name| string_table.resolve(name))
+                        .unwrap_or("<parameter>");
                     arg_str.push_str(&format!(
                         "{}: {}, ",
                         name,
-                        arg.value.diagnostic_type.display_with_table(string_table)
+                        arg.value.diagnostic_type.display_with_table(string_table, path_table)
                     ));
                 }
 
-                let returns_string = display_function_return_signature(signature, string_table);
+                let returns_string =
+                    display_function_return_signature(signature, string_table, path_table);
                 format!("Function({arg_str} -> {returns_string})")
             }
 
@@ -349,13 +354,13 @@ impl DataType {
             DataType::Range => "Range".to_string(),
             DataType::Option(inner_type) => {
                 if displays_better_in_generic_surface(inner_type) {
-                    format!("{}?", inner_type.display_with_table(string_table))
+                    format!("{}?", inner_type.display_with_table(string_table, path_table))
                 } else {
-                    format!("Option({})", inner_type.display_with_table(string_table))
+                    format!("Option({})", inner_type.display_with_table(string_table, path_table))
                 }
             }
             DataType::FallibleCarrier { success, error } => {
-                display_fallible_data_type_signature(success, error, string_table)
+                display_fallible_data_type_signature(success, error, string_table, path_table)
             }
             DataType::Choices {
                 nominal_path,
@@ -363,12 +368,12 @@ impl DataType {
                 ..
             } => {
                 if let Some(key) = generic_instance_key {
-                    return display_generic_instantiation_key(key, string_table);
+                    return display_generic_instantiation_key(key, path_table, string_table);
                 }
-                nominal_path
-                    .name_str(string_table)
-                    .unwrap_or("<choice>")
-                    .to_owned()
+                path_table
+                    .try_component(*nominal_path)
+                    .map(|name| string_table.resolve(name).to_owned())
+                    .unwrap_or_else(|| "<choice>".to_owned())
             }
         }
     }
@@ -389,11 +394,12 @@ fn display_generic_instance(
     base: &GenericBaseType,
     arguments: &[DataType],
     string_table: &StringTable,
+    path_table: &PathTable,
 ) -> String {
     if let GenericBaseType::Builtin(BuiltinGenericType::Collection { fixed_capacity }) = base
         && let [single_argument] = arguments
     {
-        let element_display = single_argument.display_with_table(string_table);
+        let element_display = single_argument.display_with_table(string_table, path_table);
         return match fixed_capacity {
             Some(capacity) => format!("{{{capacity} {element_display}}}"),
             None => format!("{{{element_display}}}"),
@@ -403,30 +409,34 @@ fn display_generic_instance(
     if let GenericBaseType::Builtin(BuiltinGenericType::Map) = base
         && let [key_argument, value_argument] = arguments
     {
-        let key_display = key_argument.display_with_table(string_table);
-        let value_display = value_argument.display_with_table(string_table);
+        let key_display = key_argument.display_with_table(string_table, path_table);
+        let value_display = value_argument.display_with_table(string_table, path_table);
         return format!("{{{key_display} = {value_display}}}");
     }
 
-    let base_display = display_generic_base(base, string_table);
+    let base_display = display_generic_base(base, string_table, path_table);
     if arguments.is_empty() {
         return base_display;
     }
 
     let arguments_display = arguments
         .iter()
-        .map(|argument| argument.display_with_table(string_table))
+        .map(|argument| argument.display_with_table(string_table, path_table))
         .collect::<Vec<_>>()
         .join(", ");
 
     format!("{base_display} of {arguments_display}")
 }
-
-fn display_generic_base(base: &GenericBaseType, string_table: &StringTable) -> String {
+fn display_generic_base(
+    base: &GenericBaseType,
+    string_table: &StringTable,
+    path_table: &PathTable,
+) -> String {
     match base {
         GenericBaseType::Named(name) => string_table.resolve(*name).to_owned(),
-        GenericBaseType::ResolvedNominal(path) => path
-            .name_str(string_table)
+        GenericBaseType::ResolvedNominal(path) => path_table
+            .try_component(*path)
+            .map(|name| string_table.resolve(name))
             .unwrap_or("<generic>")
             .to_owned(),
         GenericBaseType::External(type_id) => format!("External({})", type_id.0),
@@ -567,16 +577,17 @@ fn display_fallible_data_type_signature(
     success_type: &DataType,
     error_type: &DataType,
     string_table: &StringTable,
+    path_table: &PathTable,
 ) -> String {
     let success_parts = match success_type {
         DataType::None => Vec::new(),
         DataType::Returns(success_types) => success_types
             .iter()
-            .map(|success_type| success_type.display_with_table(string_table))
+            .map(|success_type| success_type.display_with_table(string_table, path_table))
             .collect(),
-        success_type => vec![success_type.display_with_table(string_table)],
+        success_type => vec![success_type.display_with_table(string_table, path_table)],
     };
-    let error_part = error_type.display_with_table(string_table);
+    let error_part = error_type.display_with_table(string_table, path_table);
 
     format_fallible_signature_parts(success_parts, error_part)
 }
@@ -584,17 +595,18 @@ fn display_fallible_data_type_signature(
 fn display_function_return_signature(
     signature: &FunctionSignature,
     string_table: &StringTable,
+    path_table: &PathTable,
 ) -> String {
     let parts = signature
         .success_returns()
         .iter()
-        .map(|return_value| return_value.display_with_table(string_table))
+        .map(|return_value| return_value.display_with_table(string_table, path_table))
         .collect::<Vec<_>>();
 
     if let Some(error_return) = signature.error_return() {
         return format_fallible_signature_parts(
             parts,
-            error_return.display_with_table(string_table),
+            error_return.display_with_table(string_table, path_table),
         );
     }
 

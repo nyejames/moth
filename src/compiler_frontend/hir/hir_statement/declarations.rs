@@ -36,7 +36,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use crate::return_hir_transformation_error;
@@ -81,8 +81,7 @@ impl<'a> HirBuilder<'a> {
         // WHAT: the store leaves `self` once for the whole pass and returns at the end.
         // WHY: the closure passed to `fold_value` borrows the rest of `HirBuilder` mutably, so
         // the store cannot stay borrowed from `self` while lowering runs. Moving it out once
-        // lets the loop read borrowed rows directly - the previous shape collected every row
-        // into an owned `Vec`, cloning each constant's `InternedPath` purely to end the borrow,
+        // into an owned `Vec`, cloning each constant's `PathId` purely to end the borrow,
         // and then took and restored the store again for every single value.
         let store = std::mem::take(&mut self.module_const_values);
         let result = self.lower_module_constants_from(&store);
@@ -95,7 +94,7 @@ impl<'a> HirBuilder<'a> {
         store: &ConstValueStore,
     ) -> Result<(), CompilerError> {
         for (path, id) in store.path_value_bindings() {
-            self.module_constants_by_name.insert(path.clone(), id);
+            self.module_constants_by_name.insert(*path, id);
         }
 
         for row in store.iter_module_constant_views() {
@@ -108,10 +107,14 @@ impl<'a> HirBuilder<'a> {
 
             let const_id = self.allocate_const_id();
             let const_type = self.lower_type_id(row.metadata.type_id, &span)?;
+            let mut path_scratch = Vec::new();
+            let name = self
+                .path_fork
+                .render_portable(*row.path, self.string_table, &mut path_scratch);
 
             self.module.module_constants.push(HirModuleConst {
                 id: const_id,
-                name: row.path.to_string(self.string_table),
+                name,
                 ty: const_type,
                 value: const_value,
             });
@@ -125,6 +128,7 @@ impl<'a> HirBuilder<'a> {
         store: &ConstValueStore,
         value_id: ConstValueId,
     ) -> Result<HirConstValue, CompilerError> {
+        let mut path_scratch = Vec::new();
         store.fold_value(value_id, &mut |_, visit| {
             increment_frontend_counter(FrontendCounter::HirConstValueConversions);
             match visit {
@@ -150,7 +154,11 @@ impl<'a> HirBuilder<'a> {
                     fields
                         .into_iter()
                         .map(|field| HirConstField {
-                            name: field.name.to_string(self.string_table),
+                            name: self.path_fork.render_portable(
+                                *field.name,
+                                self.string_table,
+                                &mut path_scratch,
+                            ),
                             value: field.value,
                         })
                         .collect(),
@@ -160,7 +168,11 @@ impl<'a> HirBuilder<'a> {
                     fields: fields
                         .into_iter()
                         .map(|field| HirConstField {
-                            name: field.name.to_string(self.string_table),
+                            name: self.path_fork.render_portable(
+                                *field.name,
+                                self.string_table,
+                                &mut path_scratch,
+                            ),
                             value: field.value,
                         })
                         .collect(),
@@ -288,7 +300,7 @@ impl<'a> HirBuilder<'a> {
                     let fields = fields
                         .into_iter()
                         .map(|field| HirVariantField {
-                            name: field.name.name(),
+                            name: self.path_fork.component(*field.name),
                             value: field.value,
                         })
                         .collect();
@@ -415,7 +427,7 @@ impl<'a> HirBuilder<'a> {
 
     fn resolve_const_choice_id(
         &mut self,
-        nominal_path: &InternedPath,
+        nominal_path: &PathId,
         type_id: TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
@@ -429,7 +441,7 @@ impl<'a> HirBuilder<'a> {
 
     fn register_struct_declaration(
         &mut self,
-        name: &InternedPath,
+        name: &PathId,
         span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         if self.structs_by_name.contains_key(name) {
@@ -449,7 +461,7 @@ impl<'a> HirBuilder<'a> {
             .ok_or_else(|| {
                 crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
                     "HIR invariant: struct '{}' is not registered in TypeEnvironment during HIR lowering",
-                    name.to_string(self.string_table)
+                    self.symbol_name_for_diagnostics(name)
                 ))
             })?;
 
@@ -459,7 +471,7 @@ impl<'a> HirBuilder<'a> {
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "HIR invariant: nominal type '{}' is not a struct during HIR lowering",
-                    name.to_string(self.string_table)
+                    self.symbol_name_for_diagnostics(name)
                 ))
             })?
             .fields
@@ -469,9 +481,9 @@ impl<'a> HirBuilder<'a> {
         let mut hir_fields = Vec::with_capacity(fields.len());
 
         for field in &fields {
-            // AST guarantees module-wide unique InternedPath symbols. For struct fields this
+            // AST guarantees module-wide unique PathId symbols. For struct fields this
             // means each field path must be prefixed by its parent struct path.
-            let Some(parent) = field.name.parent() else {
+            let Some(parent) = self.path_fork.try_parent(field.name) else {
                 return_hir_transformation_error!(
                     format!(
                         "HIR invariant: field '{}' has no parent struct path during HIR lowering",
@@ -494,7 +506,7 @@ impl<'a> HirBuilder<'a> {
 
             if self
                 .fields_by_struct_and_name
-                .contains_key(&(struct_id, field.name.to_owned()))
+                .contains_key(&(struct_id, field.name))
             {
                 return_hir_transformation_error!(
                     format!(
@@ -516,9 +528,8 @@ impl<'a> HirBuilder<'a> {
             let field_id = self.allocate_field_id();
 
             self.fields_by_struct_and_name
-                .insert((struct_id, field.name.to_owned()), field_id);
-            self.side_table
-                .bind_field_name(field_id, field.name.to_owned());
+                .insert((struct_id, field.name), field_id);
+            self.side_table.bind_field_name(field_id, field.name);
             self.side_table
                 .map_ast_to_hir(field_location, HirLocation::Field(field_id));
             self.side_table
@@ -536,8 +547,8 @@ impl<'a> HirBuilder<'a> {
             fields: hir_fields,
         };
 
-        self.structs_by_name.insert(name.to_owned(), struct_id);
-        self.side_table.bind_struct_name(struct_id, name.to_owned());
+        self.structs_by_name.insert(*name, struct_id);
+        self.side_table.bind_struct_name(struct_id, *name);
         self.side_table
             .map_ast_to_hir(*span, HirLocation::Struct(struct_id));
         self.side_table
@@ -549,7 +560,7 @@ impl<'a> HirBuilder<'a> {
 
     fn register_function_declaration(
         &mut self,
-        name: &InternedPath,
+        name: &PathId,
         signature: &FunctionSignature,
         span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
@@ -648,9 +659,8 @@ impl<'a> HirBuilder<'a> {
             return_type,
         };
 
-        self.functions_by_name.insert(name.to_owned(), function_id);
-        self.side_table
-            .bind_function_name(function_id, name.to_owned());
+        self.functions_by_name.insert(*name, function_id);
+        self.side_table.bind_function_name(function_id, *name);
         self.side_table.map_function(*span, &function);
         self.push_function(function);
 
@@ -667,26 +677,32 @@ impl<'a> HirBuilder<'a> {
             return Ok(());
         }
 
-        let start_name = ast
-            .entry_path
-            .join_str(IMPLICIT_START_FUNC_NAME, self.string_table);
+        let start_component = self.string_table.intern(IMPLICIT_START_FUNC_NAME);
+        let start_name = self
+            .functions_by_name
+            .keys()
+            .find(|path| {
+                self.path_fork.try_parent(**path) == Some(ast.entry_path)
+                    && self.path_fork.try_component(**path) == Some(start_component)
+            })
+            .copied();
 
-        let Some(start_function) = self.functions_by_name.get(&start_name).copied() else {
+        let Some(start_name) = start_name else {
             let error_location = ast.nodes.first().map(|node| node.span).unwrap_or_default();
 
             return_hir_transformation_error!(
                 format!(
                     "HIR invariant: failed to resolve module start function '{}' during HIR lowering",
-                    self.symbol_name_for_diagnostics(&start_name)
+                    IMPLICIT_START_FUNC_NAME
                 ),
                 self.hir_error_location(&error_location)
             );
         };
 
+        let start_function = self.functions_by_name[&start_name];
         self.module.start_function = Some(start_function);
         Ok(())
     }
-
     pub(super) fn lower_parameter_locals(
         &mut self,
         function_id: crate::compiler_frontend::hir::ids::FunctionId,
@@ -771,7 +787,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn allocate_named_local(
         &mut self,
-        name: InternedPath,
+        name: PathId,
         ty: crate::compiler_frontend::datatypes::ids::TypeId,
         mutable: bool,
         span: Option<SourceSpan>,
@@ -801,7 +817,7 @@ impl<'a> HirBuilder<'a> {
         self.side_table.map_local_source(&local);
         self.register_local_in_block(block_id, local, &span)?;
 
-        self.locals_by_name.insert(name.to_owned(), local_id);
+        self.locals_by_name.insert(name, local_id);
         self.side_table.bind_local_name(local_id, name);
         self.side_table
             .bind_local_origin(local_id, HirLocalOriginKind::User, None, None);

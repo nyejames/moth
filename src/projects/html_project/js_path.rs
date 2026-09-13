@@ -144,6 +144,7 @@ pub(crate) fn compile_html_module_js(
             string_table,
             js_lowering_config,
             input.type_environment,
+            &module.executable.path_table,
         )
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
     };
@@ -177,6 +178,7 @@ pub(crate) fn compile_html_module_js(
                     string_table,
                     linked_config,
                     &linked.module.executable.type_environment,
+                    &linked.module.executable.path_table,
                 )
                 .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
             };

@@ -9,7 +9,7 @@
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ReactiveSourceId(pub u32);
@@ -27,16 +27,14 @@ pub(crate) enum HirReactiveSourceKind {
 pub(crate) struct HirReactiveSource {
     pub(crate) id: ReactiveSourceId,
     pub(crate) local_id: LocalId,
-    pub(crate) path: InternedPath,
+    pub(crate) path: PathId,
     pub(crate) kind: HirReactiveSourceKind,
     pub(crate) type_id: TypeId,
     pub(crate) span: Option<SourceSpan>,
 }
 
 impl HirReactiveSource {
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.path.remap_string_ids(remap);
-    }
+    pub(crate) fn remap_string_ids(&mut self, _remap: &StringIdRemap) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

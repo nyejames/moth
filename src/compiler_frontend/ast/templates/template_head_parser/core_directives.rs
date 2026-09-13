@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::style_directives::{CoreStyleDirectiveKind, StyleDirectiveKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 /// Typed result for the connected core-directive family.
@@ -67,6 +68,7 @@ pub(super) fn parse_core_style_directive(
     directive_name: &str,
     kind: CoreStyleDirectiveKind,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CoreDirectiveResult<()> {
     match kind {
         CoreStyleDirectiveKind::Raw => {
@@ -85,6 +87,7 @@ pub(super) fn parse_core_style_directive(
                 type_interner,
                 build_state,
                 string_table,
+                path_fork,
             )?;
         }
 

@@ -7,6 +7,7 @@
 //!           symbols, or produce runtime fragments.
 
 use crate::compiler_frontend::arena::TokenStats;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
@@ -15,7 +16,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::plain_markdown::render_plain_markdown;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use std::path::PathBuf;
@@ -26,7 +27,7 @@ use std::path::PathBuf;
 ///      long argument list through pipeline branches.
 pub(crate) struct PlainMarkdownPrepareInput<'a> {
     pub(crate) source_code: &'a str,
-    pub(crate) source_file: InternedPath,
+    pub(crate) source_file: PathId,
     pub(crate) file_id: SourceId,
     pub(crate) canonical_os_path: Option<PathBuf>,
 }
@@ -39,7 +40,8 @@ pub(crate) struct PlainMarkdownPrepareInput<'a> {
 pub(crate) fn prepare_plain_markdown_file(
     input: PlainMarkdownPrepareInput<'_>,
     string_table: &mut StringTable,
-) -> FileFrontendPrepareOutput {
+    path_fork: &mut PathInternerFork,
+) -> Result<FileFrontendPrepareOutput, CompilerError> {
     let canonical_os_path = input.canonical_os_path.clone();
     let rendered = render_plain_markdown(input.source_code);
     let rendered_html_id = string_table.intern(&rendered.html);
@@ -63,10 +65,11 @@ pub(crate) fn prepare_plain_markdown_file(
             initializer_references: Vec::new(),
         },
         string_table,
-    );
+        path_fork,
+    )?;
 
-    FileFrontendPrepareOutput {
-        source_file: content_header.source_file.clone(),
+    Ok(FileFrontendPrepareOutput {
+        source_file: content_header.source_file,
         file_id: input.file_id,
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
@@ -82,7 +85,7 @@ pub(crate) fn prepare_plain_markdown_file(
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,
         warnings: Vec::new(),
-    }
+    })
 }
 
 #[cfg(test)]

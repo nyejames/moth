@@ -16,7 +16,7 @@ use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::SourceDeclarationTarget;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -32,7 +32,7 @@ pub(crate) struct GenericParameterScopeBuildInput<'a> {
     pub(crate) visible_type_aliases: &'a FxHashMap<StringId, SourceDeclarationTarget>,
     pub(crate) visible_external_symbols: &'a FxHashMap<StringId, ExternalSymbolId>,
     pub(crate) declaration_table: &'a TopLevelDeclarationTable,
-    pub(crate) generic_declarations_by_path: &'a FxHashMap<InternedPath, GenericDeclarationKind>,
+    pub(crate) generic_declarations_by_path: &'a FxHashMap<PathId, GenericDeclarationKind>,
     pub(crate) string_table: &'a StringTable,
 }
 
@@ -105,9 +105,9 @@ pub(crate) fn build_generic_parameter_scope(
 }
 
 fn path_is_visible_type(
-    path: &InternedPath,
+    path: &PathId,
     declaration_table: &TopLevelDeclarationTable,
-    generic_declarations_by_path: &FxHashMap<InternedPath, GenericDeclarationKind>,
+    generic_declarations_by_path: &FxHashMap<PathId, GenericDeclarationKind>,
 ) -> bool {
     if let Some(kind) = generic_declarations_by_path.get(path) {
         return matches!(
@@ -129,7 +129,7 @@ fn path_is_visible_type(
 pub(crate) fn validate_generic_parameters_used(
     generic_parameters: &GenericParameterList,
     used_parameters: &FxHashSet<TypeParameterId>,
-    declaration_path: &InternedPath,
+    declaration_path: &PathId,
     span: Option<SourceSpan>,
 ) -> TypeResolutionResult<()> {
     for parameter in &generic_parameters.parameters {
@@ -138,7 +138,7 @@ pub(crate) fn validate_generic_parameters_used(
                 InvalidDeclarationReason::UnusedGenericParameter {
                     parameter_name: parameter.name,
                 },
-                declaration_path.name(),
+                None,
                 span,
             ));
         }

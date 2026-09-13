@@ -11,7 +11,8 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::datatypes::definitions::FieldDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 
 /// Lightweight view of one constructor parameter for call validation.
 ///
@@ -21,7 +22,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 /// `ExpressionKind::NoValue` just to feed the shared call-validation pipeline.
 #[derive(Debug, Clone)]
 pub(crate) struct ConstructorField {
-    pub name: InternedPath,
+    pub name: PathId,
     pub type_id: TypeId,
     pub access_mode: ConstructorFieldAccessMode,
     pub default_value: Option<Expression>,

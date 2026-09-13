@@ -20,7 +20,7 @@ use crate::compiler_frontend::hir::reactivity::{
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 fn optional_message(
     id: u32,
@@ -50,6 +50,7 @@ fn optional_message(
 }
 
 fn function_with_assertion(
+    mut path_fork: &mut PathInternerFork,
     blocks: Vec<HirBlock>,
     string_table: &mut StringTable,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
@@ -63,7 +64,7 @@ fn function_with_assertion(
         params: vec![],
         return_type: types.unit,
     };
-    let module = build_module(string_table, function_name, blocks, function, local_names);
+    let module = build_module(&mut path_fork, string_table, function_name, blocks, function, local_names);
 
     lower_hir_to_js(
         &module,
@@ -71,6 +72,7 @@ fn function_with_assertion(
         string_table,
         default_config(),
         type_environment,
+        &path_fork.snapshot_table(),
     )
     .expect("JS assertion lowering should succeed")
     .source
@@ -79,6 +81,7 @@ fn function_with_assertion(
 #[test]
 fn structured_assertion_message_is_lowered_once_and_selected() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let casted_message = expression(
@@ -98,29 +101,27 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
         ValueKind::RValue,
     );
     let message = optional_message(3, option_string, casted_message, 1, ValueKind::RValue);
-    let source = function_with_assertion(
-        vec![HirBlock {
-            id: BlockId(0),
-            region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
-            statements: vec![statement(
-                4,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: int_expression(5, 42, types.int, RegionId(0)),
-                },
-            )],
-            terminator: HirTerminator::AssertFailure {
-                message,
-                message_evaluation: HirAssertionMessageEvaluation::Runtime,
+    let source = function_with_assertion(&mut path_fork, vec![HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![local(0, types.int, RegionId(0))],
+        statements: vec![statement(
+            4,
+            HirStatementKind::Assign {
+                target: HirPlace::Local(LocalId(0)),
+                value: int_expression(5, 42, types.int, RegionId(0)),
             },
-        }],
-        &mut string_table,
-        &type_environment,
-        &types,
-        "structured_assertion",
-        &[(LocalId(0), "value")],
-    );
+        )],
+        terminator: HirTerminator::AssertFailure {
+            message,
+            message_evaluation: HirAssertionMessageEvaluation::Runtime,
+        },
+    }],
+    &mut string_table,
+    &type_environment,
+    &types,
+    "structured_assertion",
+    &[(LocalId(0), "value")],);
 
     assert_eq!(source.matches("let __assert_message_").count(), 1);
     assert_eq!(
@@ -144,6 +145,7 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
 #[test]
 fn dispatcher_assertion_message_is_lowered_once() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let casted_message = expression(
@@ -163,52 +165,50 @@ fn dispatcher_assertion_message_is_lowered_once() {
         ValueKind::RValue,
     );
     let message = optional_message(6, option_string, casted_message, 1, ValueKind::RValue);
-    let source = function_with_assertion(
-        vec![
-            HirBlock {
-                id: BlockId(0),
-                region: RegionId(0),
-                locals: vec![local(0, types.boolean, RegionId(0))],
-                statements: vec![statement(
-                    7,
-                    HirStatementKind::Assign {
-                        target: HirPlace::Local(LocalId(0)),
-                        value: bool_expression(8, true, types.boolean, RegionId(0)),
-                    },
-                )],
-                terminator: HirTerminator::If {
-                    condition: bool_expression(1, true, types.boolean, RegionId(0)),
-                    then_block: BlockId(1),
-                    else_block: BlockId(2),
+    let source = function_with_assertion(&mut path_fork, vec![
+        HirBlock {
+            id: BlockId(0),
+            region: RegionId(0),
+            locals: vec![local(0, types.boolean, RegionId(0))],
+            statements: vec![statement(
+                7,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(LocalId(0)),
+                    value: bool_expression(8, true, types.boolean, RegionId(0)),
                 },
+            )],
+            terminator: HirTerminator::If {
+                condition: bool_expression(1, true, types.boolean, RegionId(0)),
+                then_block: BlockId(1),
+                else_block: BlockId(2),
             },
-            HirBlock {
-                id: BlockId(1),
-                region: RegionId(0),
-                locals: vec![],
-                statements: vec![],
-                terminator: HirTerminator::Jump {
-                    target: BlockId(0),
-                    args: vec![],
-                },
+        },
+        HirBlock {
+            id: BlockId(1),
+            region: RegionId(0),
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::Jump {
+                target: BlockId(0),
+                args: vec![],
             },
-            HirBlock {
-                id: BlockId(2),
-                region: RegionId(0),
-                locals: vec![],
-                statements: vec![],
-                terminator: HirTerminator::AssertFailure {
-                    message,
-                    message_evaluation: HirAssertionMessageEvaluation::Runtime,
-                },
+        },
+        HirBlock {
+            id: BlockId(2),
+            region: RegionId(0),
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::AssertFailure {
+                message,
+                message_evaluation: HirAssertionMessageEvaluation::Runtime,
             },
-        ],
-        &mut string_table,
-        &type_environment,
-        &types,
-        "dispatcher_assertion",
-        &[(LocalId(0), "flag")],
-    );
+        },
+    ],
+    &mut string_table,
+    &type_environment,
+    &types,
+    "dispatcher_assertion",
+    &[(LocalId(0), "flag")],);
 
     assert!(source.contains("switch (__bb"));
     assert_eq!(source.matches("let __assert_message_").count(), 1);
@@ -233,6 +233,7 @@ fn dispatcher_assertion_message_is_lowered_once() {
 #[test]
 fn default_assertion_message_skips_optional_lowering() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let message = optional_message(
@@ -242,23 +243,21 @@ fn default_assertion_message_skips_optional_lowering() {
         0,
         ValueKind::Const,
     );
-    let source = function_with_assertion(
-        vec![HirBlock {
-            id: BlockId(0),
-            region: RegionId(0),
-            locals: vec![],
-            statements: vec![],
-            terminator: HirTerminator::AssertFailure {
-                message,
-                message_evaluation: HirAssertionMessageEvaluation::Default,
-            },
-        }],
-        &mut string_table,
-        &type_environment,
-        &types,
-        "default_assertion",
-        &[],
-    );
+    let source = function_with_assertion(&mut path_fork, vec![HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::AssertFailure {
+            message,
+            message_evaluation: HirAssertionMessageEvaluation::Default,
+        },
+    }],
+    &mut string_table,
+    &type_environment,
+    &types,
+    "default_assertion",
+    &[],);
 
     assert!(source.contains("throw new Error(\"assertion failed\");"));
     assert!(!source.contains("__assert_message_"));
@@ -268,6 +267,7 @@ fn default_assertion_message_skips_optional_lowering() {
 #[test]
 fn assertion_message_map_metadata_emits_map_helpers() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     // This synthetic nested shape exercises the backend metadata walk. Normal HIR validation
@@ -283,23 +283,21 @@ fn assertion_message_map_metadata_emits_map_helpers() {
         ValueKind::RValue,
     );
     let message = optional_message(4, option_string, map_value, 1, ValueKind::RValue);
-    let source = function_with_assertion(
-        vec![HirBlock {
-            id: BlockId(0),
-            region: RegionId(0),
-            locals: vec![],
-            statements: vec![],
-            terminator: HirTerminator::AssertFailure {
-                message,
-                message_evaluation: HirAssertionMessageEvaluation::Runtime,
-            },
-        }],
-        &mut string_table,
-        &type_environment,
-        &types,
-        "map_assertion",
-        &[],
-    );
+    let source = function_with_assertion(&mut path_fork, vec![HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::AssertFailure {
+            message,
+            message_evaluation: HirAssertionMessageEvaluation::Runtime,
+        },
+    }],
+    &mut string_table,
+    &type_environment,
+    &types,
+    "map_assertion",
+    &[],);
 
     assert!(source.contains("function __moth_map_new("));
     assert!(source.contains("__moth_map_new("));
@@ -308,6 +306,7 @@ fn assertion_message_map_metadata_emits_map_helpers() {
 #[test]
 fn reactive_assertion_message_emits_failure_snapshot_helpers() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let source_local = LocalId(0);
@@ -342,14 +341,12 @@ fn reactive_assertion_message_emits_failure_snapshot_helpers() {
         params: vec![],
         return_type: types.unit,
     };
-    let mut module = build_module(
-        &mut string_table,
-        "reactive_assertion",
-        vec![block],
-        function,
-        &[(source_local, "message")],
-    );
-    let source_path = InternedPath::from_single_str("message", &mut string_table);
+    let mut module = build_module(&mut path_fork, &mut string_table,
+    "reactive_assertion",
+    vec![block],
+    function,
+    &[(source_local, "message")],);
+    let source_path = path_fork.try_intern_portable_path("message", &mut string_table).expect("test path fits");
     module.side_table.bind_reactive_source(HirReactiveSource {
         id: ReactiveSourceId(0),
         local_id: source_local,
@@ -379,6 +376,7 @@ fn reactive_assertion_message_emits_failure_snapshot_helpers() {
         &string_table,
         default_config(),
         &type_environment,
+        &path_fork.snapshot_table(),
     )
     .expect("reactive assertion lowering should succeed")
     .source;

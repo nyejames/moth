@@ -48,10 +48,10 @@ use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
+use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -63,8 +63,8 @@ use std::sync::Arc;
 /// what is genuinely module-wide, and keeps `resolve_constant_header` down to the state that
 /// really does change between constants.
 pub(crate) struct ConstantResolutionSessionInput {
-    pub generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
-    pub nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
+    pub generic_declarations_by_path: Rc<FxHashMap<PathId, GenericDeclarationKind>>,
+    pub nominal_type_ids_by_path: Rc<FxHashMap<PathId, TypeId>>,
     pub trait_environment: Rc<TraitEnvironment>,
     pub external_package_registry: Arc<ExternalPackageRegistry>,
     pub style_directives: StyleDirectiveRegistry,
@@ -86,26 +86,27 @@ pub(crate) struct ConstantResolutionSessionInput {
 /// session must not retain handles to those tables. Holding one would both go stale and force
 /// the builder's next `Rc::make_mut` to clone the whole table.
 pub(crate) struct ConstantHeaderInput<'a> {
-    /// Current declaration table. The builder commits each resolved constant into it, so the
+    /// Current declaration table. The builder commits each resolved constant to it, so the
     /// session takes a fresh handle per constant rather than retaining one.
     pub top_level_declarations: Rc<TopLevelDeclarationTable>,
     /// Paths of the constants resolved so far, shared rather than copied into the scope frame.
     pub resolved_constants: Rc<ResolvedConstantSet>,
-    pub resolved_type_aliases: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    pub resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
-    pub choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
+    pub resolved_type_aliases: Rc<FxHashMap<PathId, ResolvedTypeAlias>>,
+    pub resolved_struct_fields_by_path: Rc<FxHashMap<PathId, Vec<Declaration>>>,
+    pub choice_variant_shells_by_path: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
     pub file_visibility: &'a Arc<FileVisibility>,
     pub type_environment: &'a mut TypeEnvironment,
     pub warnings: &'a mut Vec<CompilerDiagnostic>,
+    pub path_fork: &'a mut PathInternerFork,
 }
 
 /// The declaring-module tables one constant header scope reads.
 struct ConstantHeaderScopeInput<'a> {
     top_level_declarations: Rc<TopLevelDeclarationTable>,
     resolved_constants: Rc<ResolvedConstantSet>,
-    resolved_type_aliases: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
-    choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
+    resolved_type_aliases: Rc<FxHashMap<PathId, ResolvedTypeAlias>>,
+    resolved_struct_fields_by_path: Rc<FxHashMap<PathId, Vec<Declaration>>>,
+    choice_variant_shells_by_path: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
     file_visibility: &'a Arc<FileVisibility>,
 }
 
@@ -147,6 +148,7 @@ impl ConstantResolutionSession {
             file_visibility,
             type_environment,
             warnings,
+            path_fork,
         } = input;
 
         let HeaderKind::Constant { declaration, .. } = &header.kind else {
@@ -178,6 +180,7 @@ impl ConstantResolutionSession {
             &mut scope_context,
             &mut type_interner,
             string_table,
+            path_fork,
         );
         let mut declaration = declaration_result?;
         // Top-level constant binding anchor is the header name token, not the
@@ -190,6 +193,7 @@ impl ConstantResolutionSession {
                 &mut type_interner,
                 config_resolution,
                 string_table,
+                path_fork,
             )?;
         }
         warnings.extend(scope_context.take_emitted_warnings());
@@ -214,7 +218,7 @@ impl ConstantResolutionSession {
 
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
-                declaration.id.name(),
+                path_fork.component(declaration.id),
                 header.name_span,
             )
             .into());

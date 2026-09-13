@@ -20,7 +20,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
@@ -164,7 +164,7 @@ impl<'a> HirBuilder<'a> {
 
     fn register_template_option_capture_local(
         &mut self,
-        binding_path: &InternedPath,
+        binding_path: &PathId,
         inner_type_id: TypeId,
         span_ref: &Option<SourceSpan>,
         binding_span: Option<SourceSpan>,
@@ -183,7 +183,7 @@ impl<'a> HirBuilder<'a> {
 
         self.register_local_in_block(block_id, local, span_ref)?;
         self.side_table
-            .bind_local_name(local_id, binding_path.clone());
+            .bind_local_name(local_id, *binding_path);
 
         Ok(local_id)
     }

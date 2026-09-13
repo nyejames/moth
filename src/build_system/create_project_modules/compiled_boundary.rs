@@ -22,11 +22,13 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
-#[cfg(feature = "data_layout_memory_probe")]
-use crate::compiler_frontend::source::SourceDatabaseRetentionMetrics;
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::source::{
+    FrozenIdentityHandle, SourceDatabaseRetentionMetrics,
+};
+use crate::compiler_frontend::symbols::path_interner::PathTable;
+use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
@@ -305,6 +307,38 @@ impl CompiledGraphBoundary {
         self.successful_artefacts_in_module_id_order()
             .map(|artifact| &artifact.module)
             .chain(self.generated.sidecars().map(|sidecar| &sidecar.module))
+    }
+
+    /// Move successful-module warnings from artefact and sidecar owners in view order.
+    pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
+        let mut warnings = self.modules.take_successful_warnings();
+        warnings.extend(self.generated.take_sidecar_warnings());
+        warnings
+    }
+
+    /// Install the single boundary-owned identity pair after all canonical publications.
+    ///
+    /// WHAT: overwrites every base artefact and generated sidecar placeholder with one final
+    ///       `Arc<PathTable>` and pairs the retained materialisation contexts with that table
+    ///       plus one frozen requester-domain string table.
+    /// WHY: per-module publication used to take one full table snapshot per successful module
+    ///      and one frozen table clone per context. The boundary tail builds each once and
+    ///      shares it across every retained row; the local registry must already be dropped so
+    ///      `Arc::make_mut` proves the retained contexts are the sole owners.
+    ///
+    /// Both tables are required together because every retained `PathId` resolves through the
+    /// component IDs issued by the paired string table. A boundary with no materialisation
+    /// contexts still installs the pair on its executable rows; the string table is a single
+    /// bounded per-boundary owner, never a per-module snapshot.
+    pub(crate) fn install_boundary_identity(
+        &mut self,
+        path_table: Arc<PathTable>,
+        source_string_table: Arc<FrozenStringTable>,
+    ) {
+        self.modules.install_path_table(Arc::clone(&path_table));
+        self.generated.install_path_table(Arc::clone(&path_table));
+        self.modules
+            .install_identity_tables(path_table, source_string_table);
     }
 
     pub(crate) fn install_frozen_identity(
@@ -934,6 +968,11 @@ impl TransientPremergeBatch {
 /// The source fields count only frozen source owners reachable from the returned diagnostic
 /// vessel. Diagnostic fields count records and label slots, while `retained_identity_contexts`
 /// counts distinct frozen identity allocations reachable through range rows or donor-only handles.
+/// The `path_table_*` fields count distinct path-table owners reachable from that same returned
+/// vessel: the frozen identity contexts behind range rows or donor-only handles, explicit
+/// `RenderPathContext` tables, and any transitional source-context table still present after
+/// freezing. Successful-module executable views are deliberately not counted; a table only
+/// reachable from executable rows without a diagnostic owner is not report-retained storage.
 /// A clean result returns zeroes because the render boundary intentionally skips freezing when
 /// there is nothing to render.
 #[cfg(feature = "data_layout_memory_probe")]
@@ -945,6 +984,12 @@ pub(crate) struct FrozenRenderRetentionMetrics {
     pub(crate) diagnostic_records: usize,
     pub(crate) diagnostic_label_slots: usize,
     pub(crate) retained_identity_contexts: usize,
+    /// Distinct path-table owners reachable from the returned diagnostic report.
+    pub(crate) path_table_count: usize,
+    /// Actual retained `PathNode` rows across those deduplicated path tables.
+    pub(crate) path_table_node_rows: usize,
+    /// Backing vector capacity bytes for those deduplicated path tables.
+    pub(crate) path_table_storage_bytes: usize,
 }
 
 #[cfg(feature = "data_layout_memory_probe")]
@@ -953,6 +998,56 @@ impl FrozenRenderRetentionMetrics {
         self.source_snapshot_bytes += metrics.source_snapshot_bytes;
         self.extended_span_rows += metrics.extended_span_rows;
         self.source_identity_slots += metrics.source_identity_slots;
+    }
+    /// Count distinct path-table owners reachable from the returned diagnostic report.
+
+    /// WHAT: walks the exact owner set the diagnostic renderer can still dereference after the
+    ///       render tail: the frozen identity contexts behind range rows or donor-only handles,
+    ///       the explicit `RenderPathContext` tables, and any transitional
+    ///       `RenderSourceContext` table still present. Deduplication is by table pointer.
+    /// WHY: the report is the retention owner after the build boundary drops; counting
+    ///      executable-row tables instead would describe storage the returned report cannot
+    ///      reach, including all-diagnosed results with no successful module at all.
+    fn add_report_path_tables(&mut self, messages: &CompilerMessages) {
+        let mut seen = FxHashSet::<usize>::default();
+        let mut add = |path_table: &PathTable| {
+            let address = path_table as *const PathTable as usize;
+            if seen.insert(address) {
+                self.path_table_count += 1;
+                self.path_table_node_rows += path_table.len();
+                self.path_table_storage_bytes += path_table.storage_bytes();
+            }
+        };
+        let mut add_identity = |identity: &FrozenIdentityContext| {
+            add(identity.paths());
+        };
+        for frozen_context in &messages.render_frozen_contexts {
+            add_identity(&frozen_context.identity);
+        }
+        for diagnostic in messages.diagnostic_slice() {
+            if let Some(identity) = diagnostic
+                .primary_frozen_identity_handle
+                .as_ref()
+                .and_then(FrozenIdentityHandle::get)
+            {
+                add_identity(identity);
+            }
+            for label in &diagnostic.labels {
+                if let Some(identity) =
+                    label.frozen_identity_handle.as_ref().and_then(FrozenIdentityHandle::get)
+                {
+                    add_identity(identity);
+                }
+            }
+        }
+        if let Some(path_contexts) = messages.render_path_contexts.as_deref() {
+            for path_context in path_contexts {
+                add(path_context.path_table.as_ref());
+            }
+        }
+        for source_context in &messages.render_source_contexts {
+            add(source_context.source_database.paths());
+        }
     }
 }
 
@@ -1117,10 +1212,7 @@ impl ProjectFrontendCompilation {
             project_source_database,
             ..
         } = self;
-        let project_warnings = project
-            .successful_module_views()
-            .flat_map(|module| module.metadata.warnings.iter().cloned())
-            .collect::<Vec<_>>();
+        let project_warnings = project.take_successful_warnings();
         let (mut source_packages, package_source_arcs) =
             source_packages.into_packages_with_source_databases();
         let project_diagnosed = std::mem::take(&mut project.diagnosed);
@@ -1129,14 +1221,8 @@ impl ProjectFrontendCompilation {
             .map(|package| std::mem::take(&mut package.boundary.diagnosed))
             .collect::<Vec<_>>();
         let package_warnings = source_packages
-            .iter()
-            .map(|package| {
-                package
-                    .boundary
-                    .successful_module_views()
-                    .flat_map(|module| module.metadata.warnings.iter().cloned())
-                    .collect::<Vec<_>>()
-            })
+            .iter_mut()
+            .map(|package| package.boundary.take_successful_warnings())
             .collect::<Vec<_>>();
         // Consume the caller aggregate without cloning; success warnings already live in
         // this domain while each local batch merges exactly once below before freezing.
@@ -1367,6 +1453,10 @@ impl ProjectFrontendCompilation {
                     retention.add_source(*source_metrics);
                 }
             }
+            // Path-table ownership mirrors the identity scan above: the returned report, not the
+            // dropped build boundary, is the retention owner. A range row shares its owner's
+            // table, so deduplication by table pointer keeps repeated rows from inflating counts.
+            retention.add_report_path_tables(&messages);
         }
         Ok((messages, retention))
     }

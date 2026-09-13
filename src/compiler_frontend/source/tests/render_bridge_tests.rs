@@ -54,8 +54,12 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
         .get_by_canonical_path(&entry_config)
         .expect("entry config should be registered")
         .id;
-    let root_logical_path = database.legacy_logical_path(root_id);
-    let entry_logical_path = database.legacy_logical_path(entry_id);
+    let root_logical_path = database
+        .source_logical_path(root_id)
+        .expect("root config should have a logical path");
+    let entry_logical_path = database
+        .source_logical_path(entry_id)
+        .expect("entry source should have a logical path");
     assert_eq!(
         root_logical_path, entry_logical_path,
         "the project config and entry-root source should share config.moth's logical path"
@@ -69,7 +73,7 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
     // another source's text. The exact source span below carries the intended source identity.
     assert!(
         database
-            .unique_record_for_logical_path(&root_logical_path)
+            .unique_record_for_logical_path(root_logical_path)
             .is_none()
     );
     database

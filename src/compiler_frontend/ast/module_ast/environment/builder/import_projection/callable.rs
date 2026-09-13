@@ -6,6 +6,7 @@ use crate::compiler_frontend::ast::module_ast::environment::builder::import_proj
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 
+use crate::compiler_frontend::symbols::path_interner::PathId;
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_function_declarations(
         &mut self,
@@ -61,7 +62,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 config_qualifier: None,
             };
             Rc::make_mut(&mut self.declaration_table)
-                .append_for_construction(declaration)
+                .append_for_construction(declaration, self.path_fork)
                 .ok_or_else(|| {
                     CompilerMessages::from_error_ref(
                         CompilerError::compiler_error(
@@ -103,7 +104,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     local_path.clone(),
                     GenericFunctionTemplate {
                         function_path: local_path,
-                        source_file: InternedPath::new(),
+                        source_file: PathId::ROOT,
                         declaration_identity: Some(
                             crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity::Public(origin),
                         ),
@@ -189,7 +190,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             // visibility table. Project their receiver catalog under the deterministic imported
             // nominal path so stable evidence method origins still resolve to a callable path.
             imported.push((
-                imported_nominal_path(type_origin, string_table),
+                imported_nominal_path(type_origin, string_table, self.path_fork),
                 origin.clone(),
             ));
         }
@@ -266,7 +267,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             for method in methods {
                 let method_name = string_table.intern(method.method_origin.defining_name());
-                let method_path = imported_type_path.append(method_name);
+                let method_path = self
+                    .path_fork
+                    .try_intern_child(imported_type_path, method_name)
+                    .expect("imported receiver method path table exhausted");
                 let (signature, _, fallible_carrier_type_id) = self
                     .project_imported_callable_signature(
                         &method_path,
@@ -321,8 +325,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     self.generic_function_templates_by_path.insert(
                         method_path,
                         GenericFunctionTemplate {
-                            function_path: imported_type_path.append(method_name),
-                            source_file: InternedPath::new(),
+                            function_path: self
+                                .path_fork
+                                .try_intern_child(imported_type_path, method_name)
+                                .expect("imported receiver method path table exhausted"),
+                            source_file: PathId::ROOT,
                             declaration_identity: Some(GeneratedDeclarationIdentity::Public(
                                 method.method_origin.clone(),
                             )),
@@ -396,14 +403,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn index_imported_receiver_method_path(
         &mut self,
         method_origin: crate::compiler_frontend::semantic_identity::OriginFunctionId,
-        method_path: InternedPath,
+        method_path: PathId,
         string_table: &StringTable,
     ) {
         let replace = self
             .imported_receiver_method_paths_by_origin
             .get(&method_origin)
             .is_none_or(|existing| {
-                method_path.to_string(string_table) < existing.to_string(string_table)
+                self.path_fork.render_portable(method_path, string_table, &mut Vec::new())
+                    < self.path_fork.render_portable(*existing, string_table, &mut Vec::new())
             });
         if replace {
             self.imported_receiver_method_paths_by_origin
@@ -413,7 +421,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     fn project_imported_callable_signature(
         &mut self,
-        function_path: &InternedPath,
+        function_path: &PathId,
         parameter_surfaces: &[PublicParameterTypeSlot],
         return_surfaces: &[PublicReturnTypeSlot],
         error_surface: Option<&CanonicalTypeIdentity>,
@@ -458,12 +466,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
             if parameter.access == PublicCallParameterAccess::Reactive {
                 value.reactive_source = Some(ReactiveSource {
-                    path: function_path.append(name),
+                    path: self
+                        .path_fork
+                        .try_intern_child(*function_path, name)
+                        .expect("imported callable parameter path table exhausted"),
                     kind: ReactiveSourceKind::Parameter,
                 });
             }
             parameters.push(Declaration {
-                id: function_path.append(name),
+                id: self
+                    .path_fork
+                    .try_intern_child(*function_path, name)
+                    .expect("imported callable parameter path table exhausted"),
                 value,
                 binding_span: None,
                 config_qualifier: None,

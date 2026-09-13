@@ -9,10 +9,13 @@
 //! the single merge into `CompilerMessages`. Both owners are move-only so a diagnostic can
 //! never be observed through two owners at once.
 
-use super::compiler_errors::{CompilerError, CompilerMessages, RenderTypeContext};
+use super::compiler_errors::{
+    CompilerError, CompilerMessages, RenderPathContext, RenderTypeContext,
+};
 use super::module_diagnostics::ModuleDiagnostics;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
+use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
 
@@ -79,6 +82,14 @@ impl DiagnosticBag {
             diagnostic.remap_string_ids(remap);
         }
     }
+
+    /// Remap every complete path identity owned by the bag into the merged path table.
+    #[allow(dead_code)]
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for diagnostic in &mut self.diagnostics {
+            diagnostic.remap_path_ids(remap);
+        }
+    }
 }
 
 impl From<CompilerDiagnostic> for DiagnosticBag {
@@ -102,6 +113,7 @@ pub(crate) struct PremergeDiagnosticBatch {
     bag: DiagnosticBag,
     string_table: StringTable,
     render_type_contexts: Vec<RenderTypeContext>,
+    render_path_contexts: Vec<RenderPathContext>,
 }
 
 /// Shared premerge failure lane preserving diagnosed vs infrastructure outcomes.
@@ -166,6 +178,20 @@ impl PremergeFailure {
             }
         }
     }
+    /// Retain the path table that issued diagnostics before the local compiler owner is dropped.
+    ///
+    /// Infrastructure failures carry no path payloads, so attaching is a harmless no-op.
+    pub(crate) fn attach_path_table_if_missing(
+        &mut self,
+        path_table: Arc<PathTable>,
+    ) -> Result<(), CompilerError> {
+        match self {
+            Self::Diagnosed(batch) => batch.attach_path_table_if_missing(path_table),
+            Self::Infrastructure(_) => Ok(()),
+            Self::Mixed { batch, .. } => batch.attach_path_table_if_missing(path_table),
+        }
+    }
+
 
     /// Convert the premerge lane into the final boundary vessel exactly once.
     ///
@@ -228,18 +254,17 @@ impl From<super::compiler_errors::CompilerMessages> for PremergeFailure {
 impl PremergeDiagnosticBatch {
     /// Rebuild a batch from already-merged diagnostics, table and type contexts.
     ///
-    /// WHAT: moves each lane back into the single premerge owner without cloning.
-    /// WHY: canonical merging moves a diagnosed module into the batch lane for its single
-    /// remap, then classifies back; this constructor keeps that round-trip move-only.
     pub(crate) fn from_parts(
         diagnostics: Vec<CompilerDiagnostic>,
         string_table: StringTable,
         render_type_contexts: Vec<RenderTypeContext>,
+        render_path_contexts: Vec<RenderPathContext>,
     ) -> Self {
         Self {
             bag: DiagnosticBag::from_diagnostics(diagnostics),
             string_table,
             render_type_contexts,
+            render_path_contexts,
         }
     }
 
@@ -248,6 +273,7 @@ impl PremergeDiagnosticBatch {
             bag,
             string_table,
             render_type_contexts: Vec::new(),
+            render_path_contexts: Vec::new(),
         }
     }
 
@@ -268,11 +294,15 @@ impl PremergeDiagnosticBatch {
     ) -> Self {
         Self::new(DiagnosticBag::from_diagnostics(diagnostics), string_table)
     }
+    pub(crate) fn has_errors(&self) -> bool {
+        self.bag.has_errors()
+    }
+
     /// Attach the generated-source owner only to spans that do not already have one.
-    ///
     /// Existing primary and label owners are authoritative: this bridge supplies ownership for
     /// legacy AST/HIR diagnostics without replacing mixed-domain provenance.
     pub(crate) fn set_frozen_identity_handle_if_missing(
+
         &mut self,
         frozen_identity_handle: FrozenIdentityHandle,
     ) {
@@ -281,13 +311,49 @@ impl PremergeDiagnosticBatch {
         }
     }
 
-    pub(crate) fn has_errors(&self) -> bool {
-        self.bag.has_errors()
-    }
-    /// Prepend diagnostics emitted before this batch while preserving retained render ranges.
+    /// Attach one complete path identity snapshot to every diagnostic in this batch.
     ///
+    /// A path table is pairable only with the string table that issued its component IDs:
+    /// `PathTable::contains` proves numeric addressability only, so pairing is validated
+    /// against exactly the path identities this batch's diagnostics still render — each
+    /// payload path plus every table ancestor its resolver walks. A diagnostic with no
+    /// `PathId` payload never dereferences the table and rejects nothing. A rendered path the
+    /// candidate table cannot address at all, or whose referenced nodes carry components this
+    /// string table cannot resolve, would render the wrong spelling and returns a typed error
+    /// instead of silently dropping the context. Same-index ownership across foreign domains is
+    /// not detectable from bare tables; the provider/materialisation boundary solves it by
+    /// retaining each table with its source `FrozenStringTable` and rebasing by spelling.
+    pub(crate) fn attach_path_table_if_missing(
+        &mut self,
+        path_table: Arc<PathTable>,
+    ) -> Result<(), CompilerError> {
+        if self.bag.diagnostics.is_empty() || !self.render_path_contexts.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
+            &path_table,
+            &self.string_table,
+            self.bag
+                .diagnostics
+                .iter()
+                .map(|diagnostic| &diagnostic.payload),
+        ) {
+            return Err(CompilerError::compiler_error(format!(
+                "diagnostic path table is not pairable with this batch's string table: \
+                 rendered path node {index} is unaddressable or carries a component StringId \
+                 the batch cannot resolve"
+            )));
+        }
+
+        self.render_path_contexts.push(RenderPathContext {
+            diagnostic_range: 0..self.bag.diagnostics.len(),
+            path_table,
+        });
+        Ok(())
+    }
     /// WHAT: moves the incoming diagnostics in front of this batch and shifts each retained type
-    /// context by their count.
+    ///       context by their count.
     /// WHY: preparation warnings are collected before a later diagnosed batch; moving them here
     /// keeps authored order and avoids cloning diagnostics or their interned IDs.
     pub(crate) fn prepend_diagnostics(
@@ -308,6 +374,10 @@ impl PremergeDiagnosticBatch {
             type_context.diagnostic_range.start += shift;
             type_context.diagnostic_range.end += shift;
         }
+        for path_context in &mut self.render_path_contexts {
+            path_context.diagnostic_range.start += shift;
+            path_context.diagnostic_range.end += shift;
+        }
     }
 
     /// Remap every interned string owned by this batch into the merged global table.
@@ -321,11 +391,32 @@ impl PremergeDiagnosticBatch {
         for context in &mut self.render_type_contexts {
             context.type_environment.remap_string_ids(remap);
         }
+        for context in &mut self.render_path_contexts {
+            Arc::make_mut(&mut context.path_table).remap_string_ids(remap);
+        }
+    }
+
+    /// Remap every complete path identity owned by this batch after its path fork merges.
+    #[allow(dead_code)]
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.bag.remap_path_ids(remap);
     }
 
     /// Consume the batch into its owned parts for the final merge boundary.
-    pub(crate) fn into_parts(self) -> (DiagnosticBag, StringTable, Vec<RenderTypeContext>) {
-        (self.bag, self.string_table, self.render_type_contexts)
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        DiagnosticBag,
+        StringTable,
+        Vec<RenderTypeContext>,
+        Vec<RenderPathContext>,
+    ) {
+        (
+            self.bag,
+            self.string_table,
+            self.render_type_contexts,
+            self.render_path_contexts,
+        )
     }
 
     /// Consume the batch into the final boundary vessel, preserving type-context ranges.
@@ -336,7 +427,7 @@ impl PremergeDiagnosticBatch {
     /// attaches its finalized source database afterwards so each diagnostic keeps exactly one
     /// source association.
     pub(crate) fn into_messages(self) -> CompilerMessages {
-        let (bag, string_table, render_type_contexts) = self.into_parts();
+        let (bag, string_table, render_type_contexts, render_path_contexts) = self.into_parts();
         CompilerMessages {
             diagnostics: bag.into_diagnostics(),
             infrastructure_error: None,
@@ -344,6 +435,8 @@ impl PremergeDiagnosticBatch {
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts,
+            render_path_contexts: (!render_path_contexts.is_empty())
+                .then(|| Box::new(render_path_contexts)),
         }
     }
 }

@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use super::ids::{
@@ -51,7 +51,7 @@ pub struct BuiltinTypeDefinition {
 #[derive(Debug, Clone)]
 pub struct StructTypeDefinition {
     pub id: NominalTypeId,
-    pub path: InternedPath,
+    pub path: PathId,
     pub fields: Box<[FieldDefinition]>,
     pub generic_parameters: Option<GenericParameterListId>,
     pub const_record: bool,
@@ -61,7 +61,7 @@ pub struct StructTypeDefinition {
 #[derive(Debug, Clone)]
 pub struct ChoiceTypeDefinition {
     pub id: NominalTypeId,
-    pub path: InternedPath,
+    pub path: PathId,
     pub variants: Box<[ChoiceVariantDefinition]>,
     pub generic_parameters: Option<GenericParameterListId>,
 }
@@ -69,7 +69,7 @@ pub struct ChoiceTypeDefinition {
 /// Field inside a struct or choice payload record.
 #[derive(Debug, Clone)]
 pub struct FieldDefinition {
-    pub name: InternedPath,
+    pub name: PathId,
     pub type_id: TypeId,
     /// Exact authored field/member span, when the owning source identity is available.
     ///

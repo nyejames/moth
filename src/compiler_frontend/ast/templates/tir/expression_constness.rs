@@ -25,7 +25,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TirView;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(crate) fn effective_branch_selector_for_view(
@@ -119,10 +119,10 @@ pub(crate) fn effective_loop_header_for_view(
 /// values to the caller's exact-view traversal.
 pub(crate) fn classify_expression_const_evaluable_with_nested_template(
     expression: &Expression,
-    loop_binding_paths: &[InternedPath],
+    loop_binding_paths: &[PathId],
     nested_template: &mut impl FnMut(
         TemplateTirReference,
-        &[InternedPath],
+        &[PathId],
     ) -> Result<bool, TemplateError>,
 ) -> Result<bool, TemplateError> {
     match &expression.kind {
@@ -411,7 +411,7 @@ fn tir_tree_is_const_evaluable_standalone_value(
 fn tir_tree_is_const_evaluable_value(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
-    loop_binding_paths: &[InternedPath],
+    loop_binding_paths: &[PathId],
     string_table: &StringTable,
     visiting_templates: &mut HashSet<TemplateIrId>,
 ) -> Result<bool, TemplateError> {
@@ -561,7 +561,7 @@ fn tir_tree_is_const_evaluable_value(
 
 fn expression_is_const_evaluable(
     expression: &Expression,
-    loop_binding_paths: &[InternedPath],
+    loop_binding_paths: &[PathId],
     store: &TemplateIrStore,
     string_table: &StringTable,
     visiting_templates: &mut HashSet<TemplateIrId>,
@@ -597,11 +597,11 @@ fn expression_is_const_evaluable(
 
 fn selector_is_const(
     selector: &TemplateBranchSelector,
-    loop_binding_paths: &[InternedPath],
+    loop_binding_paths: &[PathId],
     store: &TemplateIrStore,
     string_table: &StringTable,
     visiting_templates: &mut HashSet<TemplateIrId>,
-) -> Result<Option<Vec<InternedPath>>, TemplateError> {
+)-> Result<Option<Vec<PathId>>, TemplateError> {
     match selector {
         TemplateBranchSelector::Bool(condition) => Ok(expression_is_const_evaluable(
             condition,

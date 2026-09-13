@@ -27,7 +27,8 @@ use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// One key/value pair inside a `{...}` map literal.
@@ -93,7 +94,7 @@ pub enum ExpressionKind {
         pieces: Vec<ConstStringPiece>,
     },
     /// Reference to a variable by name.
-    Reference(InternedPath),
+    Reference(PathId),
 
     /// Explicitly materialize a fresh value from an aliasing place.
     Copy(PlaceExpression),
@@ -109,7 +110,7 @@ pub enum ExpressionKind {
     /// `result_type_ids` are canonical semantic identities from the active
     /// `TypeEnvironment`; display spelling is recovered separately when needed.
     FunctionCall {
-        name: InternedPath,
+        name: PathId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
     },
@@ -123,7 +124,7 @@ pub enum ExpressionKind {
     /// Receiver method call.
     MethodCall {
         receiver: Box<Expression>,
-        method_path: InternedPath,
+        method_path: PathId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         span: Option<SourceSpan>,
@@ -153,7 +154,7 @@ pub enum ExpressionKind {
     /// The success slots stay TypeId-first so HIR lowering never needs
     /// diagnostic return spelling to build call result values.
     HandledFallibleFunctionCall {
-        name: InternedPath,
+        name: PathId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         handling: FallibleExpressionHandling,
@@ -291,7 +292,7 @@ pub enum ExpressionKind {
     /// For unit variants, `fields` is empty. For payload variants, `fields`
     /// carries the resolved constructor arguments in declaration order.
     ChoiceConstruct {
-        nominal_path: InternedPath,
+        nominal_path: PathId,
         tag: usize,
         fields: Vec<Declaration>,
     },

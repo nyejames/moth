@@ -20,7 +20,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -35,7 +35,7 @@ fn first_start_declaration_expression(source: &str) -> Expression {
 }
 
 fn nth_start_declaration_expression(source: &str, index: usize) -> Expression {
-    let (ast, _string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, _string_table) = parse_single_file_ast(source);
     let start_function = ast
         .nodes
         .iter()
@@ -67,11 +67,12 @@ fn assert_unsupported_operator(source: &str, expected_operator: DiagnosticOperat
 #[test]
 fn ordinary_expression_rejects_path_string_concatenation() {
     let mut string_table = StringTable::new();
-    let source_scope = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_scope = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
         source_scope.clone(),
-        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -105,6 +106,7 @@ fn ordinary_expression_rejects_path_string_concatenation() {
         &mut current_type,
         &ValueMode::ImmutableOwned,
         &mut string_table,
+        &path_fork,
     )
     .expect_err("ordinary expressions should stay strict");
 
@@ -129,12 +131,13 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
     // WHY: the refusal belongs only to const-required positions; rejecting runtime
     // positions would remove legal expressive power.
     let mut string_table = StringTable::new();
-    let source_scope = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_scope = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
     let context = |kind| {
         ScopeContext::new_for_tests(
             kind,
             source_scope.clone(),
-            Rc::new(TopLevelDeclarationTable::new(vec![])),
+            Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
             Arc::new(ExternalPackageRegistry::new()),
             vec![],
             0,
@@ -172,6 +175,7 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
         &mut constant_expected_type,
         &ValueMode::ImmutableOwned,
         &mut string_table,
+        &path_fork,
     )
     .expect_err("constant equality must require final structural-string text");
     let crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError::Diagnostic(
@@ -199,6 +203,7 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
         &mut runtime_expected_type,
         &ValueMode::ImmutableOwned,
         &mut string_table,
+        &path_fork,
     ) {
         Ok(expression) => expression,
         Err(_) => {
@@ -321,8 +326,7 @@ fn int_division_resolves_to_float() {
 
 #[test]
 fn grouped_integer_subexpression_does_not_override_division_result_type() {
-    let (ast, _string_table) =
-        parse_single_file_ast("value #= ((10 * 10) + (20 * 20)) / 10\n\ntyped Float = value\n");
+    let (ast, path_fork, _string_table) = parse_single_file_ast("value #= ((10 * 10) + (20 * 20)) / 10\n\ntyped Float = value\n");
     let value_id = ast
         .const_values
         .iter_module_constant_views()
@@ -437,7 +441,7 @@ fn char_relational_comparison_resolves_to_bool() {
 
 #[test]
 fn fully_constant_boolean_and_comparison_expressions_fold() {
-    let (ast, _string_table) = parse_single_file_ast("flag = not (1 < 2) or (3 < 4 and false)\n");
+    let (ast, path_fork, _string_table) = parse_single_file_ast("flag = not (1 < 2) or (3 < 4 and false)\n");
     let start_function = ast
         .nodes
         .iter()

@@ -10,6 +10,8 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
@@ -45,6 +47,7 @@ pub(crate) struct ExpressionParseResources<'a, 'env> {
     pub(crate) cast_target_context: &'a mut CastTargetContext,
     pub(crate) value_mode: &'a ValueMode,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 /// Unified input for the central expression parser.
@@ -67,6 +70,7 @@ pub(crate) struct ExpressionParseInput<'a, 'env> {
     pub(crate) value_mode: &'a ValueMode,
     pub(crate) trailing_policy: ExpressionTrailingPolicy,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 impl<'a, 'env> ExpressionParseInput<'a, 'env> {
@@ -88,6 +92,7 @@ impl<'a, 'env> ExpressionParseInput<'a, 'env> {
             value_mode: resources.value_mode,
             trailing_policy,
             string_table: resources.string_table,
+            path_fork: resources.path_fork,
         }
     }
 

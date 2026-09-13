@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDec
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::is_camel_case_type_name;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -131,7 +131,7 @@ pub(crate) struct GenericParameterScope {
 pub(crate) struct ActiveGenericTypeContext {
     pub(crate) parameter_scope: GenericParameterScope,
     pub(crate) substitutions: Option<FxHashMap<GenericParameterId, TypeId>>,
-    pub(crate) source_parameter_by_rebased_path: FxHashMap<InternedPath, GenericParameterId>,
+    pub(crate) source_parameter_by_rebased_path: FxHashMap<PathId, GenericParameterId>,
 }
 
 /// A generic parameter visible while resolving one declaration.

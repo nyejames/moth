@@ -20,7 +20,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -86,11 +86,12 @@ impl From<TemplateError> for StructFieldResolutionError {
 
 /// Resolve all declared struct field types against visible declarations.
 pub(crate) fn resolve_struct_field_types(
-    struct_path: &InternedPath,
+    struct_path: &PathId,
     fields: &[Declaration],
     type_resolution_context: &mut TypeResolutionContext<'_>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<Declaration>, StructFieldResolutionError> {
     let mut resolved_fields =
         resolve_struct_field_type_shells(fields, type_resolution_context, string_table)?;
@@ -100,9 +101,10 @@ pub(crate) fn resolve_struct_field_types(
         type_resolution_context,
         template_ir_store,
         string_table,
+        path_fork,
     )?;
 
-    validate_resolved_field_parent_paths(struct_path, &resolved_fields)?;
+    validate_resolved_field_parent_paths(struct_path, &resolved_fields, path_fork)?;
 
     Ok(resolved_fields)
 }
@@ -115,29 +117,31 @@ pub(crate) fn resolve_struct_field_types(
 /// `TypeEnvironment`; their constructors still need checked semantic field types, while
 /// defaults may legitimately reference constants that are not resolved until this stage runs.
 pub(crate) fn resolve_struct_constructor_shell_types(
-    struct_path: &InternedPath,
+    struct_path: &PathId,
     fields: &[Declaration],
     type_resolution_context: &mut TypeResolutionContext<'_>,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<Declaration>, StructFieldResolutionError> {
     let resolved_fields =
         resolve_struct_field_type_shells(fields, type_resolution_context, string_table)?;
 
-    validate_resolved_field_parent_paths(struct_path, &resolved_fields)?;
+    validate_resolved_field_parent_paths(struct_path, &resolved_fields, path_fork)?;
 
     Ok(resolved_fields)
 }
 
 fn validate_resolved_field_parent_paths(
-    struct_path: &InternedPath,
+    struct_path: &PathId,
     resolved_fields: &[Declaration],
+    path_fork: &PathInternerFork,
 ) -> Result<(), StructFieldResolutionError> {
     if resolved_fields.is_empty() {
         return Ok(());
     }
 
     for field in resolved_fields {
-        let Some(parent) = field.id.parent() else {
+        let Some(parent) = path_fork.parent(field.id) else {
             return Err(CompilerError::compiler_error(
                 "Resolved struct field is missing its parent struct path.",
             )
@@ -193,17 +197,19 @@ fn resolve_struct_field_type_shells(
 /// WHY: constructor shells need only field types, so keeping default classification here avoids
 ///      lending the TIR store through an earlier type-only pass that cannot consume it.
 fn resolve_struct_field_defaults(
-    struct_path: &InternedPath,
+    struct_path: &PathId,
     resolved_fields: &mut [Declaration],
     type_resolution_context: &mut TypeResolutionContext<'_>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), StructFieldResolutionError> {
     let scope = FieldDefaultScope {
         declaration_table: type_resolution_context.declaration_table,
         visible_declaration_ids: type_resolution_context.visible_declaration_ids,
         declaring_file_id: type_resolution_context.declaring_file_id,
-        scope: struct_path.to_owned(),
+        scope: *struct_path,
+        path_fork,
     };
     for resolved_field in resolved_fields {
         let type_environment = &mut *type_resolution_context.type_environment;
@@ -248,9 +254,10 @@ fn resolve_struct_field_defaults(
 ///      together to the evaluation scope at the bottom rather than through each hop by hand.
 struct FieldDefaultScope<'a> {
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
+    visible_declaration_ids: Option<&'a Arc<FxHashSet<PathId>>>,
     declaring_file_id: SourceId,
-    scope: InternedPath,
+    scope: PathId,
+    path_fork: &'a PathInternerFork,
 }
 
 fn inline_visible_constant_references(
@@ -268,6 +275,7 @@ fn inline_visible_constant_references(
                 scope.declaration_table,
                 scope.visible_declaration_ids,
                 template_ir_store,
+                scope.path_fork,
             )?;
 
             Ok(inlinable_declaration
@@ -309,7 +317,6 @@ fn inline_visible_constant_references(
             // field-default evaluation shares it instead of copying every visible path.
             evaluation_context.visible_declaration_ids =
                 scope.visible_declaration_ids.map(Arc::clone);
-
             let mut compatibility_cache = TypeCompatibilityCache::new();
             let mut type_interner =
                 AstTypeInterner::new(type_environment, &mut compatibility_cache);
@@ -320,6 +327,7 @@ fn inline_visible_constant_references(
                 &mut current_type,
                 &expression.value_mode,
                 string_table,
+                scope.path_fork,
             )
             .map_err(|_| {
                 CompilerDiagnostic::compile_time_evaluation_error(
@@ -436,10 +444,11 @@ fn inline_visible_constant_references(
 }
 
 fn visible_compile_time_constant_reference<'a>(
-    path: &InternedPath,
+    path: &PathId,
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
+    visible_declaration_ids: Option<&Arc<FxHashSet<PathId>>>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
+    path_fork: &PathInternerFork,
 ) -> Result<Option<&'a Declaration>, StructFieldResolutionError> {
     if let Some(declaration) = declaration_table
         .get_visible_resolved_by_path(path, visible_declaration_ids.map(Arc::as_ref))
@@ -454,7 +463,7 @@ fn visible_compile_time_constant_reference<'a>(
         }
     }
 
-    let Some(name) = path.name() else {
+    let Some(name) = path_fork.component(*path) else {
         return Ok(None);
     };
 

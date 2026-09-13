@@ -79,7 +79,9 @@ impl<'hir> JsEmitter<'hir> {
             let leaf_name_hint = self
                 .hir
                 .side_table
-                .resolve_function_name(function_id, self.string_table)
+                .function_name_path(function_id)
+                .and_then(|path| self.path_table.component(path))
+                .map(|component| self.string_table.resolve(component))
                 .unwrap_or("fn");
             let raw_name = self.build_symbol_raw("fn", function_id.0, leaf_name_hint);
             let js_name = self.assign_unique_identifier(&raw_name);
@@ -96,7 +98,8 @@ impl<'hir> JsEmitter<'hir> {
                     .hir
                     .side_table
                     .local_name_path(local.id)
-                    .and_then(|path| path.name_str(self.string_table))
+                    .and_then(|path| self.path_table.component(path))
+                    .map(|component| self.string_table.resolve(component))
                     .map(|leaf_name| self.build_symbol_raw("l", local.id.0, leaf_name))
                     .unwrap_or_else(|| self.build_symbol_raw("l", local.id.0, "local"));
 
@@ -123,7 +126,8 @@ impl<'hir> JsEmitter<'hir> {
                     .hir
                     .side_table
                     .field_name_path(field.id)
-                    .and_then(|path| path.name_str(self.string_table))
+                    .and_then(|path| self.path_table.component(path))
+                    .map(|component| self.string_table.resolve(component))
                     .ok_or_else(|| {
                         CompilerError::compiler_error(format!(
                             "JavaScript field symbol generation has no source name for FieldId({})",

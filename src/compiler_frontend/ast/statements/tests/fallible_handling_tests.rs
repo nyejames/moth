@@ -24,11 +24,9 @@ use crate::compiler_frontend::tests::parse_support::{
 
 #[test]
 fn parses_catch_handler_with_fallback() {
-    let (ast, string_table) = parse_single_file_ast(
-        "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.message]])\n        then \"fallback\"\n    ;\n    return output\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.message]])\n        then \"fallback\"\n    ;\n    return output\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::VariableDeclaration(output_decl) = &body[0].kind else {
         panic!("expected declaration statement in recover()")
     };
@@ -58,11 +56,9 @@ fn parses_catch_handler_with_fallback() {
 
 #[test]
 fn parses_catch_handler_fallback_that_reads_error_binding() {
-    let (ast, string_table) = parse_single_file_ast(
-        "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.code]])\n        then err.message\n    ;\n    return output\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.code]])\n        then err.message\n    ;\n    return output\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::VariableDeclaration(output_decl) = &body[0].kind else {
         panic!("expected declaration statement in recover()")
     };
@@ -91,11 +87,9 @@ fn parses_catch_handler_fallback_that_reads_error_binding() {
 
 #[test]
 fn parses_inline_catch_fallback_as_value_block() {
-    let (ast, string_table) = parse_single_file_ast(
-        "can_error || -> Int, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> Int:\n    value = can_error() catch then 0\n    return value\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("can_error || -> Int, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> Int:\n    value = can_error() catch then 0\n    return value\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::VariableDeclaration(value_decl) = &body[0].kind else {
         panic!("expected declaration statement in recover()")
     };
@@ -122,11 +116,9 @@ fn parses_inline_catch_fallback_as_value_block() {
 
 #[test]
 fn parses_inline_catch_fallback_that_reads_error_binding() {
-    let (ast, string_table) = parse_single_file_ast(
-        "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err| then err.message\n    return output\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err| then err.message\n    return output\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::VariableDeclaration(output_decl) = &body[0].kind else {
         panic!("expected declaration statement in recover()")
     };
@@ -158,11 +150,9 @@ fn parses_inline_catch_fallback_that_reads_error_binding() {
 
 #[test]
 fn parses_catch_handler_without_fallback_when_handler_guarantees_return() {
-    let (ast, string_table) = parse_single_file_ast(
-        "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        return \"recovered\"\n    ;\n    return output\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        return \"recovered\"\n    ;\n    return output\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::VariableDeclaration(output_decl) = &body[0].kind else {
         panic!("expected declaration statement in recover()")
     };
@@ -191,11 +181,9 @@ fn parses_catch_handler_without_fallback_when_handler_guarantees_return() {
 
 #[test]
 fn parses_catch_handler_without_fallback_when_handler_ends_with_assert_false() {
-    let (ast, string_table) = parse_single_file_ast(
-        "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.message]])\n        assert(false, \"unreachable error path\")\n    ;\n    return output\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.message]])\n        assert(false, \"unreachable error path\")\n    ;\n    return output\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::VariableDeclaration(output_decl) = &body[0].kind else {
         panic!("expected declaration statement in recover()")
     };
@@ -225,11 +213,9 @@ fn parses_catch_handler_without_fallback_when_handler_ends_with_assert_false() {
 
 #[test]
 fn parses_catch_handler_without_fallback_when_handler_ends_with_assert_false_no_binding() {
-    let (ast, string_table) = parse_single_file_ast(
-        "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch:\n        assert(false, \"unreachable error path\")\n    ;\n    return output\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch:\n        assert(false, \"unreachable error path\")\n    ;\n    return output\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::VariableDeclaration(output_decl) = &body[0].kind else {
         panic!("expected declaration statement in recover()")
     };
@@ -279,10 +265,8 @@ fn rejects_catch_handler_if_without_else_even_when_then_branch_returns() {
 
 #[test]
 fn accepts_catch_handler_with_mixed_produce_and_return_paths() {
-    let (ast, string_table) = parse_single_file_ast(
-        "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String, route Bool| -> String:\n    return can_error(value) catch |err|:\n        if route:\n            then \"fallback\"\n        else\n            return \"returned\"\n        ;\n    ;\n;\n",
-    );
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String, route Bool| -> String:\n    return can_error(value) catch |err|:\n        if route:\n            then \"fallback\"\n        else\n            return \"returned\"\n        ;\n    ;\n;\n");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     assert!(
         matches!(body[0].kind, NodeKind::Return(_)),
         "mixed produce/terminate catch handlers must parse as a value-producing return"
@@ -439,11 +423,9 @@ fn rejects_fallback_statement_after_then_multiline() {
 
 #[test]
 fn accepts_then_none_for_optional_success() {
-    let (ast, string_table) = parse_single_file_ast(
-        "find_name || -> String?, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> String?:\n    return find_name() catch:\n        then none\n    ;\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("find_name || -> String?, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> String?:\n    return find_name() catch:\n        then none\n    ;\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::Return(return_values) = &body[0].kind else {
         panic!("expected return statement in recover()")
     };
@@ -456,11 +438,9 @@ fn accepts_then_none_for_optional_success() {
 
 #[test]
 fn accepts_then_string_for_optional_success() {
-    let (ast, string_table) = parse_single_file_ast(
-        "find_name || -> String?, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> String?:\n    return find_name() catch:\n        then \"fallback\"\n    ;\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("find_name || -> String?, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> String?:\n    return find_name() catch:\n        then \"fallback\"\n    ;\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::Return(return_values) = &body[0].kind else {
         panic!("expected return statement in recover()")
     };
@@ -481,11 +461,9 @@ fn rejects_empty_catch_on_success_producing_call_without_then() {
 
 #[test]
 fn accepts_empty_catch_on_zero_success_statement() {
-    let (ast, string_table) = parse_single_file_ast(
-        "fail || -> Error!:\n    return! Error(\"boom\")\n;\n\nrecover ||:\n    fail() catch:\n    ;\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("fail || -> Error!:\n    return! Error(\"boom\")\n;\n\nrecover ||:\n    fail() catch:\n    ;\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::ExpressionStatement(expression) = &body[0].kind else {
         panic!("expected expression statement in recover()")
     };
@@ -508,11 +486,9 @@ fn accepts_empty_catch_on_zero_success_statement() {
 
 #[test]
 fn accepts_nested_postfix_propagation_in_fallback() {
-    let (ast, string_table) = parse_single_file_ast(
-        "inner || -> Int, Error!:\n    return 1\n;\n\nouter || -> Int, Error!:\n    return 2\n;\n\nrecover || -> Int, Error!:\n    return outer() catch:\n        then inner()!\n    ;\n;\n",
-    );
+    let (ast, path_fork, string_table) = parse_single_file_ast("inner || -> Int, Error!:\n    return 1\n;\n\nouter || -> Int, Error!:\n    return 2\n;\n\nrecover || -> Int, Error!:\n    return outer() catch:\n        then inner()!\n    ;\n;\n");
 
-    let body = function_body_by_name(&ast, &string_table, "recover");
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::Return(return_values) = &body[0].kind else {
         panic!("expected return statement in recover()")
     };

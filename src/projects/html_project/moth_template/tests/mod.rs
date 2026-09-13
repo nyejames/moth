@@ -20,7 +20,11 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::single_source_compilation::{
+    compile_moth_template_source, MothTemplateCompilationRequest,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateCompileRequest,
@@ -475,10 +479,27 @@ fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
         diagnostic.kind,
         DiagnosticKind::Import(ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor)
     ));
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. }
-    ));
+    let (first_path, second_path) = match &diagnostic.payload {
+        DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
+            first_path,
+            second_path,
+        } => (*first_path, *second_path),
+        payload => panic!("expected no-common-ancestor paths, got {payload:?}"),
+    };
+    let context = messages.diagnostic_render_context(0);
+    assert_eq!(
+        context.render_path(first_path),
+        "memory/intro.mtf",
+        "no-common-ancestor diagnostics should render their first actual input path",
+    );
+    let second_rendered_path = messages
+        .diagnostic_render_context(0)
+        .render_path(second_path);
+    assert!(
+        second_rendered_path.ends_with("absolute.mtf"),
+        "no-common-ancestor diagnostics should render their second actual input path, got \
+         {second_rendered_path:?}",
+    );
 }
 
 /// Reconstruct the stable module-owned origin a direct compile mints for one resource.
@@ -652,10 +673,11 @@ fn content_source_identities_follow_canonical_logical_order_not_reference_order(
         ("alpha.mtf", "# Alpha"),
     ]);
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut units = request(MothTemplateInput::Files(vec![
         temp_dir.path().join("zeta.mtf"),
     ]))
-    .collect_sources(&mut string_table)
+    .collect_sources(&mut string_table, &mut path_fork)
     .expect("the template unit should collect");
     assert_eq!(units.len(), 1);
 
@@ -700,10 +722,11 @@ fn content_source_preparation_failures_name_the_logical_source() {
         ("docs/broken.mtf", "# Broken\n\n[$insert(\"unterminated]\n"),
     ]);
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut units = request(MothTemplateInput::Files(vec![
         temp_dir.path().join("page.mtf"),
     ]))
-    .collect_sources(&mut string_table)
+    .collect_sources(&mut string_table, &mut path_fork)
     .expect("the template unit should collect");
 
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
@@ -733,13 +756,61 @@ fn content_source_preparation_failures_name_the_logical_source() {
         Some("# Broken\n\n[$insert(\"unterminated]\n"),
         "the diagnosed boundary should retain the exact content snapshot",
     );
-    let scope = source_database
-        .legacy_logical_path(span.source())
-        .to_path_buf(&string_table);
+    let logical_path = source_database
+        .source_logical_path(span.source())
+        .expect("the diagnosed source should have a logical path");
+    let scope = messages.diagnostic_render_context(0).render_path(logical_path);
     assert_eq!(
         scope,
-        Path::new("docs/broken.mtf"),
+        "docs/broken.mtf",
         "the failure should name the logical content source, got {scope:?}"
+    );
+}
+
+/// A canonical content target can differ from the authored spelling when a symlink is involved.
+/// If that target fails before preparation, final registration still adds its logical path; the
+/// diagnosed source owner must retain that path in the same table as the discovery fork.
+#[cfg(unix)]
+#[test]
+fn aborted_content_walk_retains_unvisited_canonical_source_identity() {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = temp_project(&[
+        ("page.mtf", "# Page\n\n[@alias.md]"),
+        ("real.md", "placeholder"),
+    ]);
+    let real_path = temp_dir.path().join("real.md");
+    fs::write(&real_path, [0xff]).expect("invalid UTF-8 should be written");
+    symlink(&real_path, temp_dir.path().join("alias.md"))
+        .expect("the authored alias should point at the unreadable target");
+
+    let mut string_table = StringTable::new();
+    let Err(messages) = compile_moth_template(
+        request(MothTemplateInput::File(temp_dir.path().join("page.mtf"))),
+        &mut string_table,
+    ) else {
+        panic!("the unreadable canonical content target should fail discovery");
+    };
+
+    assert!(messages.has_infrastructure_error());
+    let source_database = messages
+        .source_database_for_diagnostic(0)
+        .expect("the diagnosed boundary should retain its source database");
+    let canonical_real_path =
+        fs::canonicalize(&real_path).expect("the canonical target should resolve");
+    let source = source_database
+        .get_by_canonical_path(&canonical_real_path)
+        .expect("the canonical target should remain registered after failure");
+    assert!(
+        source_database.paths().contains(source.logical_path),
+        "the retained source logical path must belong to the finalized path table",
+    );
+    let rendered_path = messages
+        .diagnostic_render_context(0)
+        .render_path(source.logical_path);
+    assert_eq!(
+        rendered_path, "real.md",
+        "the finalized source database should render the canonical target path",
     );
 }
 
@@ -750,10 +821,11 @@ fn content_source_preparation_failures_name_the_logical_source() {
 fn retained_resolution_diagnostics_name_the_final_logical_source() {
     let temp_dir = temp_project(&[("page.mtf", "# Page\n\n[@absent.md]")]);
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut units = request(MothTemplateInput::Files(vec![
         temp_dir.path().join("page.mtf"),
     ]))
-    .collect_sources(&mut string_table)
+    .collect_sources(&mut string_table, &mut path_fork)
     .expect("the template unit should collect");
 
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
@@ -938,6 +1010,112 @@ fn in_memory_sources_compile_without_filesystem_output() {
 }
 
 #[test]
+fn template_bundle_source_and_header_paths_survive_success_finalization() {
+    let temp_dir = temp_project(&[
+        ("page.mtf", "About\n\n[@docs/legal.md]"),
+        ("docs/legal.md", "# Legal"),
+    ]);
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut units = request(MothTemplateInput::Files(vec![
+        temp_dir.path().join("page.mtf"),
+    ]))
+    .collect_sources(&mut string_table, &mut path_fork)
+    .expect("the template unit should collect");
+    let source_path = units[0].source_path.clone();
+    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
+        .expect("style directives should merge");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let bundle = prepare_file_value_bundle(
+        &mut units[0],
+        &style_directives,
+        &mut string_table,
+        &mut resource_inputs,
+    )
+    .expect("the content closure should prepare");
+
+    let source_table = bundle.source_files.sources();
+    let entry_source = source_table
+        .get_by_canonical_path(&source_path)
+        .expect("the finalized source database should register the entry");
+    assert_eq!(
+        entry_source.logical_path, bundle.prepared_entry.source_file,
+        "the entry source record and prepared output should share one PathId",
+    );
+    let mut prepared_paths = Vec::new();
+    let mut header_count = 0;
+    for prepared in std::iter::once(&bundle.prepared_entry)
+        .chain(bundle.prepared_content_sources.iter())
+    {
+        prepared_paths.push(prepared.source_file);
+        for header in &prepared.headers {
+            header_count += 1;
+            assert_eq!(
+                header.source_file, prepared.source_file,
+                "header source identity should match its prepared file",
+            );
+            assert!(
+                source_table
+                    .paths()
+                    .starts_with(header.tokens.src_path, prepared.source_file),
+                "header token source path should remain rooted at its prepared file",
+            );
+            prepared_paths.push(header.source_file);
+            prepared_paths.push(header.tokens.src_path);
+        }
+        prepared_paths.extend(
+            prepared
+                .path_syntax
+                .table()
+                .paths()
+                .iter()
+                .map(|path| path.root),
+        );
+    }
+    assert!(header_count > 0, "the bundle should retain at least one header");
+    prepared_paths.sort();
+    prepared_paths.dedup();
+
+    let mut scratch = Vec::new();
+    let expected_rendered_paths = prepared_paths
+        .iter()
+        .map(|path| {
+            assert!(
+                source_table.paths().contains(*path),
+                "prepared path should belong to the finalized source table before folding",
+            );
+            source_table
+                .paths()
+                .render_portable(*path, &string_table, &mut scratch)
+        })
+        .collect::<Vec<_>>();
+
+    let folded = compile_moth_template_source(
+        MothTemplateCompilationRequest {
+            source_path: &source_path,
+            source_code: None,
+            style_directives: &style_directives,
+            file_value_resolution: Some(bundle),
+        },
+        &mut string_table,
+    )
+    .expect("the finalized bundle should compile successfully");
+
+    let final_paths = folded.source_database.paths();
+    for (path, expected) in prepared_paths.iter().zip(expected_rendered_paths) {
+        assert!(
+            final_paths.contains(*path),
+            "prepared path should survive the successful source freeze: {expected:?}",
+        );
+        assert_eq!(
+            final_paths.render_portable(*path, &string_table, &mut scratch),
+            expected,
+            "successful folding should preserve the prepared path spelling",
+        );
+    }
+}
+
+#[test]
 fn duplicate_source_paths_are_diagnostics() {
     let temp_dir = temp_project(&[("intro.mtf", "intro")]);
     let path = temp_dir.path().join("intro.mtf");
@@ -962,6 +1140,18 @@ fn duplicate_source_paths_are_diagnostics() {
         diagnostic.payload,
         DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
     ));
+    let duplicate_path = match &diagnostic.payload {
+        DiagnosticPayload::DuplicateMothTemplateInputPath { path } => *path,
+        payload => panic!("expected duplicate path payload, got {payload:?}"),
+    };
+    let rendered_path = messages
+        .diagnostic_render_context(0)
+        .render_path(duplicate_path);
+    assert!(
+        rendered_path.ends_with("intro.mtf"),
+        "duplicate diagnostics should render the actual input path, got {rendered_path:?}",
+    );
+
     assert_eq!(diagnostic.labels.len(), 1);
     assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Secondary);
 }

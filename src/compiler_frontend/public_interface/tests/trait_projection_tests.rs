@@ -44,7 +44,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -87,9 +87,10 @@ fn param(
     value_mode: ValueMode,
     type_id: TypeId,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ResolvedTraitParameterFact {
     ResolvedTraitParameterFact {
-        name: path(name, string_table),
+        name: path(name, string_table, path_fork),
         value_mode,
         type_id,
     }
@@ -102,30 +103,31 @@ fn ret(type_id: TypeId, channel: ReturnChannel) -> ResolvedTraitReturnFact {
 fn build_traits(
     trait_roots: &[ResolvedPublicTraitRoot],
     bindings: Vec<ExportBinding>,
-    nominal_origins: &FxHashMap<InternedPath, OriginTypeId>,
-    trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    nominal_origins: &FxHashMap<PathId, OriginTypeId>,
+    trait_origins: &FxHashMap<PathId, OriginTraitId>,
     env: &TypeEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<PublicTraitSemantics>, CompilerError> {
-    build_traits_with_facts(
-        trait_roots,
-        bindings,
-        &FxHashMap::default(),
-        nominal_origins,
-        trait_origins,
-        env,
-        string_table,
-    )
+    build_traits_with_facts(trait_roots,
+    bindings,
+    &FxHashMap::default(),
+    nominal_origins,
+    trait_origins,
+    env,
+    string_table,
+    path_fork)
 }
 
 fn build_traits_with_facts(
     trait_roots: &[ResolvedPublicTraitRoot],
     bindings: Vec<ExportBinding>,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
-    nominal_origins: &FxHashMap<InternedPath, OriginTypeId>,
-    trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
+    nominal_origins: &FxHashMap<PathId, OriginTypeId>,
+    trait_origins: &FxHashMap<PathId, OriginTraitId>,
     env: &TypeEnvironment,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<PublicTraitSemantics>, CompilerError> {
     let registry = ExternalPackageRegistry::new();
     let mut projection = DirectTraitProjection::new(DirectTraitProjectionInput {
@@ -136,6 +138,7 @@ fn build_traits_with_facts(
         type_environment: env,
         external_registry: &registry,
         string_table,
+        path_fork,
     })?;
     let mut semantics = Vec::new();
     for binding in &bindings {
@@ -163,9 +166,10 @@ fn trait_root_with_incompatibilities(
     this_type: TypeId,
     incompatible_trait_ids: Vec<TraitId>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ResolvedPublicTraitRoot {
     ResolvedPublicTraitRoot {
-        canonical_path: path(name, string_table),
+        canonical_path: path(name, string_table, path_fork),
         this_type,
         requirements: Vec::new(),
         incompatible_trait_ids,
@@ -188,6 +192,7 @@ fn core_cast_fact(
 #[test]
 fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let int_id = env.builtins().int;
@@ -202,6 +207,7 @@ fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
                 ValueMode::MutableOwned,
                 int_id,
                 &mut string_table,
+                &mut path_fork,
             )],
             vec![ret(bool_id, ReturnChannel::Success)],
             &mut string_table,
@@ -215,19 +221,17 @@ fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
         ),
     ];
 
-    let root = trait_root("Shape", this_id, requirements, &mut string_table);
+    let root = trait_root("Shape", this_id, requirements, &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let surfaces = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("trait projection succeeds");
 
     assert_eq!(surfaces.len(), 1);
@@ -248,25 +252,24 @@ fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
 #[test]
 fn aliased_trait_binding_joins_the_defining_trait_root() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
-    let root = trait_root("Shape", this_id, Vec::new(), &mut string_table);
+    let root = trait_root("Shape", this_id, Vec::new(), &mut string_table, &mut path_fork);
     let origin = trait_origin("Shape");
     let binding = ExportBinding::new(
         module_origin(),
         "PublicShape".to_owned(),
         OriginDeclarationId::Trait(origin.clone()),
     );
-    let trait_origins = trait_origins_map(vec![("Shape", origin)], &mut string_table);
+    let trait_origins = trait_origins_map(vec![("Shape", origin)], &mut string_table, &mut path_fork);
 
-    let surfaces = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("an alias preserves the defining trait root identity");
 
     assert_eq!(surfaces.len(), 1);
@@ -275,6 +278,7 @@ fn aliased_trait_binding_joins_the_defining_trait_root() {
 #[test]
 fn projects_self_type_for_direct_this_type_parameter_and_return_occurrences() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
@@ -286,24 +290,23 @@ fn projects_self_type_for_direct_this_type_parameter_and_return_occurrences() {
             ValueMode::default(),
             this_id,
             &mut string_table,
+            &mut path_fork,
         )],
         vec![ret(this_id, ReturnChannel::Success)],
         &mut string_table,
     )];
 
-    let root = trait_root("Shape", this_id, requirements, &mut string_table);
+    let root = trait_root("Shape", this_id, requirements, &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let surfaces = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("trait projection succeeds");
 
     let requirement = &surfaces[0].requirements[0];
@@ -320,11 +323,12 @@ fn projects_self_type_for_direct_this_type_parameter_and_return_occurrences() {
 #[test]
 fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let int_id = env.builtins().int;
     let (_, widget_id) =
-        register_struct(&mut env, &mut string_table, "Widget", empty_fields(), None);
+        register_struct(&mut env, &mut string_table, "Widget", empty_fields(), None, &mut path_fork);
 
     let requirements = vec![requirement(
         "build",
@@ -334,26 +338,25 @@ fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
             ValueMode::default(),
             int_id,
             &mut string_table,
+            &mut path_fork,
         )],
         vec![ret(widget_id, ReturnChannel::Success)],
         &mut string_table,
     )];
 
-    let root = trait_root("Shape", this_id, requirements, &mut string_table);
+    let root = trait_root("Shape", this_id, requirements, &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let nominal_origins =
-        nominal_origins_map(vec![("Widget", struct_origin("Widget"))], &mut string_table);
+        nominal_origins_map(vec![("Widget", struct_origin("Widget"))], &mut string_table, &mut path_fork);
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let surfaces = build_traits(
-        &[root],
-        vec![binding],
-        &nominal_origins,
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces = build_traits(&[root],
+    vec![binding],
+    &nominal_origins,
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("trait projection succeeds");
 
     let requirement = &surfaces[0].requirements[0];
@@ -372,6 +375,7 @@ fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
 #[test]
 fn retains_value_mode_and_return_channel_facts() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let int_id = env.builtins().int;
@@ -385,6 +389,7 @@ fn retains_value_mode_and_return_channel_facts() {
             ValueMode::MutableOwned,
             int_id,
             &mut string_table,
+            &mut path_fork,
         )],
         vec![
             ret(bool_id, ReturnChannel::Success),
@@ -393,19 +398,17 @@ fn retains_value_mode_and_return_channel_facts() {
         &mut string_table,
     )];
 
-    let root = trait_root("Shape", this_id, requirements, &mut string_table);
+    let root = trait_root("Shape", this_id, requirements, &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let surfaces = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("trait projection succeeds");
 
     let requirement = &surfaces[0].requirements[0];
@@ -425,6 +428,7 @@ fn retains_value_mode_and_return_channel_facts() {
 #[test]
 fn rejects_requirement_receiver_this_type_mismatch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let other_id = this_type(&mut env, &mut string_table);
@@ -437,19 +441,17 @@ fn rejects_requirement_receiver_this_type_mismatch() {
         &mut string_table,
     )];
 
-    let root = trait_root("Shape", this_id, requirements, &mut string_table);
+    let root = trait_root("Shape", this_id, requirements, &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let result = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
@@ -462,6 +464,7 @@ fn rejects_requirement_receiver_this_type_mismatch() {
 #[test]
 fn rejects_mutable_receiver_this_type_mismatch() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let other_id = this_type(&mut env, &mut string_table);
@@ -474,19 +477,17 @@ fn rejects_mutable_receiver_this_type_mismatch() {
         &mut string_table,
     )];
 
-    let root = trait_root("Shape", this_id, requirements, &mut string_table);
+    let root = trait_root("Shape", this_id, requirements, &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let result = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
 }
@@ -498,10 +499,11 @@ fn rejects_mutable_receiver_this_type_mismatch() {
 #[test]
 fn ignores_non_trait_export_bindings() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
-    let root = trait_root("Shape", this_id, vec![], &mut string_table);
+    let root = trait_root("Shape", this_id, vec![], &mut string_table, &mut path_fork);
     // A free-function binding must not produce a trait surface and must not block the trait.
     let function_binding = ExportBinding::new(
         module_origin(),
@@ -513,16 +515,14 @@ fn ignores_non_trait_export_bindings() {
     );
     let trait_binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let surfaces = build_traits(
-        &[root],
-        vec![function_binding, trait_binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces = build_traits(&[root],
+    vec![function_binding, trait_binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("non-trait bindings are skipped");
 
     assert_eq!(surfaces.len(), 1);
@@ -535,19 +535,18 @@ fn ignores_non_trait_export_bindings() {
 #[test]
 fn rejects_trait_binding_without_matching_root() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
 
     let binding = trait_binding("Missing");
-    let trait_origins = trait_origins_map(vec![], &mut string_table);
+    let trait_origins = trait_origins_map(vec![], &mut string_table, &mut path_fork);
 
-    let result = build_traits(
-        &[],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
@@ -557,23 +556,22 @@ fn rejects_trait_binding_without_matching_root() {
 #[test]
 fn rejects_duplicate_trait_roots_sharing_a_name() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
-    let root = trait_root("Shape", this_id, vec![], &mut string_table);
-    let duplicate = trait_root("Shape", this_id, vec![], &mut string_table);
+    let root = trait_root("Shape", this_id, vec![], &mut string_table, &mut path_fork);
+    let duplicate = trait_root("Shape", this_id, vec![], &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let result = build_traits(
-        &[root, duplicate],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[root, duplicate],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
@@ -583,21 +581,20 @@ fn rejects_duplicate_trait_roots_sharing_a_name() {
 #[test]
 fn rejects_trait_root_without_matching_binding() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
-    let root = trait_root("Orphan", this_id, vec![], &mut string_table);
+    let root = trait_root("Orphan", this_id, vec![], &mut string_table, &mut path_fork);
     let trait_origins =
-        trait_origins_map(vec![("Orphan", trait_origin("Orphan"))], &mut string_table);
+        trait_origins_map(vec![("Orphan", trait_origin("Orphan"))], &mut string_table, &mut path_fork);
 
-    let result = build_traits(
-        &[root],
-        vec![],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[root],
+    vec![],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
@@ -607,10 +604,11 @@ fn rejects_trait_root_without_matching_binding() {
 #[test]
 fn rejects_trait_binding_origin_mismatching_root_resolved_origin() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
-    let root = trait_root("Shape", this_id, vec![], &mut string_table);
+    let root = trait_root("Shape", this_id, vec![], &mut string_table, &mut path_fork);
     // The binding names a different trait origin than the root resolves to.
     let wrong_binding = ExportBinding::new(
         module_origin(),
@@ -618,16 +616,14 @@ fn rejects_trait_binding_origin_mismatching_root_resolved_origin() {
         OriginDeclarationId::Trait(OriginTraitId::new(module_origin(), "OtherShape".to_owned())),
     );
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let result = build_traits(
-        &[root],
-        vec![wrong_binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[root],
+    vec![wrong_binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
@@ -637,21 +633,20 @@ fn rejects_trait_binding_origin_mismatching_root_resolved_origin() {
 #[test]
 fn rejects_trait_root_without_retained_source_trait_origin() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
-    let root = trait_root("Shape", this_id, vec![], &mut string_table);
+    let root = trait_root("Shape", this_id, vec![], &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     // The public source-trait origin index is empty, so the root canonical path has no origin.
 
-    let result = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &FxHashMap::default(),
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &FxHashMap::default(),
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
@@ -665,23 +660,22 @@ fn rejects_trait_root_without_retained_source_trait_origin() {
 #[test]
 fn rejects_trait_root_with_builtin_this_type() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
 
     // A builtin int TypeId is not a GenericParameter named "This".
-    let root = trait_root("Shape", int_id, vec![], &mut string_table);
+    let root = trait_root("Shape", int_id, vec![], &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let result = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
@@ -694,24 +688,23 @@ fn rejects_trait_root_with_builtin_this_type() {
 #[test]
 fn rejects_trait_root_with_wrong_name_generic_parameter() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
     // Register a synthetic generic parameter with the wrong name.
     let wrong_id = env.register_synthetic_generic_parameter(string_table.intern("Other"));
 
-    let root = trait_root("Shape", wrong_id, vec![], &mut string_table);
+    let root = trait_root("Shape", wrong_id, vec![], &mut string_table, &mut path_fork);
     let binding = trait_binding("Shape");
     let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table);
+        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
 
-    let result = build_traits(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
@@ -724,33 +717,32 @@ fn rejects_trait_root_with_wrong_name_generic_parameter() {
 #[test]
 fn projects_source_to_source_incompatibility_identity() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
     // Alpha (the direct public trait) is incompatible with Beta (another source trait). Both
     // resolve to Source(OriginTraitId) through the public source-trait origin index.
-    let alpha_path = path("Alpha", &mut string_table);
-    let beta_path = path("Beta", &mut string_table);
+    let alpha_path = path("Alpha", &mut string_table, &mut path_fork);
+    let beta_path = path("Beta", &mut string_table, &mut path_fork);
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(TraitId(0), ResolvedTraitSourceFact::Source(alpha_path));
     trait_source_facts.insert(TraitId(1), ResolvedTraitSourceFact::Source(beta_path));
 
     let root =
-        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(1)], &mut string_table);
+        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(1)], &mut string_table, &mut path_fork);
     let binding = trait_binding("Alpha");
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("Alpha", &mut string_table), trait_origin("Alpha"));
-    trait_origins.insert(path("Beta", &mut string_table), trait_origin("Beta"));
+    trait_origins.insert(path("Alpha", &mut string_table, &mut path_fork), trait_origin("Alpha"));
+    trait_origins.insert(path("Beta", &mut string_table, &mut path_fork), trait_origin("Beta"));
 
-    let surfaces = build_traits_with_facts(
-        &[root],
-        vec![binding],
-        &trait_source_facts,
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces = build_traits_with_facts(&[root],
+    vec![binding],
+    &trait_source_facts,
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("a source-to-source public incompatibility projects to a canonical Source identity");
 
     assert_eq!(surfaces.len(), 1);
@@ -763,12 +755,13 @@ fn projects_source_to_source_incompatibility_identity() {
 #[test]
 fn projects_source_to_core_incompatibility_identity() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
     // Alpha (a direct public source trait) is incompatible with a compiler-owned core cast
     // trait. The core trait side resolves to a stable CanonicalCoreTraitIdentity.
-    let alpha_path = path("Alpha", &mut string_table);
+    let alpha_path = path("Alpha", &mut string_table, &mut path_fork);
     let (core_id, core_fact) = core_cast_fact(
         7,
         BuiltinCastTarget::String,
@@ -779,20 +772,18 @@ fn projects_source_to_core_incompatibility_identity() {
     trait_source_facts.insert(core_id, core_fact);
 
     let root =
-        trait_root_with_incompatibilities("Alpha", this_id, vec![core_id], &mut string_table);
+        trait_root_with_incompatibilities("Alpha", this_id, vec![core_id], &mut string_table, &mut path_fork);
     let binding = trait_binding("Alpha");
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("Alpha", &mut string_table), trait_origin("Alpha"));
+    trait_origins.insert(path("Alpha", &mut string_table, &mut path_fork), trait_origin("Alpha"));
 
-    let surfaces = build_traits_with_facts(
-        &[root],
-        vec![binding],
-        &trait_source_facts,
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces = build_traits_with_facts(&[root],
+    vec![binding],
+    &trait_source_facts,
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("a source-to-core public incompatibility projects to a canonical Core identity");
 
     assert_eq!(surfaces.len(), 1);
@@ -810,14 +801,15 @@ fn projects_source_to_core_incompatibility_identity() {
 #[test]
 fn incompatibility_identity_is_stable_across_local_trait_id_allocation() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
     // Two independent local TraitId allocations (10 and 99) for the same source trait path
     // produce the same canonical incompatibility fact, because identity derives from the
     // stable OriginTraitId, not from the donor-local TraitId.
-    let beta_path = path("Beta", &mut string_table);
-    let alpha_path = path("Alpha", &mut string_table);
+    let beta_path = path("Beta", &mut string_table, &mut path_fork);
+    let alpha_path = path("Alpha", &mut string_table, &mut path_fork);
 
     let mut facts_a = FxHashMap::default();
     facts_a.insert(
@@ -840,32 +832,28 @@ fn incompatibility_identity_is_stable_across_local_trait_id_allocation() {
     );
 
     let root_a =
-        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(10)], &mut string_table);
+        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(10)], &mut string_table, &mut path_fork);
     let root_b =
-        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(99)], &mut string_table);
+        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(99)], &mut string_table, &mut path_fork);
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("Alpha", &mut string_table), trait_origin("Alpha"));
-    trait_origins.insert(path("Beta", &mut string_table), trait_origin("Beta"));
+    trait_origins.insert(path("Alpha", &mut string_table, &mut path_fork), trait_origin("Alpha"));
+    trait_origins.insert(path("Beta", &mut string_table, &mut path_fork), trait_origin("Beta"));
 
-    let surfaces_a = build_traits_with_facts(
-        &[root_a],
-        vec![trait_binding("Alpha")],
-        &facts_a,
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces_a = build_traits_with_facts(&[root_a],
+    vec![trait_binding("Alpha")],
+    &facts_a,
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("first allocation projects");
-    let surfaces_b = build_traits_with_facts(
-        &[root_b],
-        vec![trait_binding("Alpha")],
-        &facts_b,
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    )
+    let surfaces_b = build_traits_with_facts(&[root_b],
+    vec![trait_binding("Alpha")],
+    &facts_b,
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork)
     .expect("second allocation projects");
 
     assert_eq!(
@@ -881,14 +869,15 @@ fn incompatibility_identity_is_stable_across_local_trait_id_allocation() {
 #[test]
 fn rejects_duplicate_canonical_incompatibility_identity() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
     // Two distinct local TraitIds resolve to the same source trait path, so both
     // incompatibilities canonicalize to the same CanonicalTraitIdentity and the projection
     // rejects the duplicate.
-    let beta_path = path("Beta", &mut string_table);
-    let alpha_path = path("Alpha", &mut string_table);
+    let beta_path = path("Beta", &mut string_table, &mut path_fork);
+    let alpha_path = path("Alpha", &mut string_table, &mut path_fork);
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(TraitId(0), ResolvedTraitSourceFact::Source(alpha_path));
     trait_source_facts.insert(
@@ -897,26 +886,22 @@ fn rejects_duplicate_canonical_incompatibility_identity() {
     );
     trait_source_facts.insert(TraitId(2), ResolvedTraitSourceFact::Source(beta_path));
 
-    let root = trait_root_with_incompatibilities(
-        "Alpha",
-        this_id,
-        vec![TraitId(1), TraitId(2)],
-        &mut string_table,
-    );
+    let root = trait_root_with_incompatibilities("Alpha",
+    this_id,
+    vec![TraitId(1), TraitId(2)],
+    &mut string_table, &mut path_fork);
     let binding = trait_binding("Alpha");
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("Alpha", &mut string_table), trait_origin("Alpha"));
-    trait_origins.insert(path("Beta", &mut string_table), trait_origin("Beta"));
+    trait_origins.insert(path("Alpha", &mut string_table, &mut path_fork), trait_origin("Alpha"));
+    trait_origins.insert(path("Beta", &mut string_table, &mut path_fork), trait_origin("Beta"));
 
-    let result = build_traits_with_facts(
-        &[root],
-        vec![binding],
-        &trait_source_facts,
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits_with_facts(&[root],
+    vec![binding],
+    &trait_source_facts,
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     let message = result
         .expect_err("a duplicate canonical incompatibility identity must be rejected")
@@ -930,26 +915,25 @@ fn rejects_duplicate_canonical_incompatibility_identity() {
 #[test]
 fn rejects_incompatibility_without_retained_source_fact() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
     // The incompatible TraitId has no entry in the trait-source-fact table, so the projection
     // cannot classify it and fails through a CompilerError.
     let root =
-        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(5)], &mut string_table);
+        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(5)], &mut string_table, &mut path_fork);
     let binding = trait_binding("Alpha");
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("Alpha", &mut string_table), trait_origin("Alpha"));
+    trait_origins.insert(path("Alpha", &mut string_table, &mut path_fork), trait_origin("Alpha"));
 
-    let result = build_traits_with_facts(
-        &[root],
-        vec![binding],
-        &FxHashMap::default(),
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits_with_facts(&[root],
+    vec![binding],
+    &FxHashMap::default(),
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     let message = result
         .expect_err("a missing trait source fact must be rejected")
@@ -963,33 +947,32 @@ fn rejects_incompatibility_without_retained_source_fact() {
 #[test]
 fn rejects_incompatibility_source_without_public_source_trait_origin() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
     // The incompatible trait is a source trait, but its canonical path has no entry in the
     // public source-trait origin index, so it is private/unexported and must not enter the
     // public trait surface.
-    let beta_path = path("Beta", &mut string_table);
-    let alpha_path = path("Alpha", &mut string_table);
+    let beta_path = path("Beta", &mut string_table, &mut path_fork);
+    let alpha_path = path("Alpha", &mut string_table, &mut path_fork);
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(TraitId(0), ResolvedTraitSourceFact::Source(alpha_path));
     trait_source_facts.insert(TraitId(1), ResolvedTraitSourceFact::Source(beta_path));
 
     let root =
-        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(1)], &mut string_table);
+        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(1)], &mut string_table, &mut path_fork);
     let binding = trait_binding("Alpha");
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("Alpha", &mut string_table), trait_origin("Alpha"));
+    trait_origins.insert(path("Alpha", &mut string_table, &mut path_fork), trait_origin("Alpha"));
 
-    let result = build_traits_with_facts(
-        &[root],
-        vec![binding],
-        &trait_source_facts,
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits_with_facts(&[root],
+    vec![binding],
+    &trait_source_facts,
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     let message = result
         .expect_err("a missing public source-trait origin must be rejected")
@@ -1003,31 +986,30 @@ fn rejects_incompatibility_source_without_public_source_trait_origin() {
 #[test]
 fn rejects_internal_self_incompatibility_relation() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
 
     // The direct public trait Alpha carries an incompatibility that resolves to itself. An
     // authored self-relation is rejected earlier by a user-facing diagnostic, so reaching
     // this point means inconsistent resolved metadata and must fail through a CompilerError.
-    let alpha_path = path("Alpha", &mut string_table);
+    let alpha_path = path("Alpha", &mut string_table, &mut path_fork);
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(TraitId(0), ResolvedTraitSourceFact::Source(alpha_path));
 
     let root =
-        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(0)], &mut string_table);
+        trait_root_with_incompatibilities("Alpha", this_id, vec![TraitId(0)], &mut string_table, &mut path_fork);
     let binding = trait_binding("Alpha");
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("Alpha", &mut string_table), trait_origin("Alpha"));
+    trait_origins.insert(path("Alpha", &mut string_table, &mut path_fork), trait_origin("Alpha"));
 
-    let result = build_traits_with_facts(
-        &[root],
-        vec![binding],
-        &trait_source_facts,
-        &FxHashMap::default(),
-        &trait_origins,
-        &env,
-        &string_table,
-    );
+    let result = build_traits_with_facts(&[root],
+    vec![binding],
+    &trait_source_facts,
+    &FxHashMap::default(),
+    &trait_origins,
+    &env,
+    &string_table, &path_fork);
 
     let message = result
         .expect_err("an internal self-relation must be rejected")
@@ -1041,6 +1023,7 @@ fn rejects_internal_self_incompatibility_relation() {
 #[test]
 fn builder_carries_incompatibilities_on_trait_record() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
     let int_id = env.builtins().int;
@@ -1048,8 +1031,8 @@ fn builder_carries_incompatibilities_on_trait_record() {
     // Build a minimal draft where the only trait (Shape) carries one public incompatibility
     // with another source trait (Mark). The builder must surface the canonical incompatibility
     // on the trait declaration record.
-    let shape_path = path("Shape", &mut string_table);
-    let mark_path = path("Mark", &mut string_table);
+    let shape_path = path("Shape", &mut string_table, &mut path_fork);
+    let mark_path = path("Mark", &mut string_table, &mut path_fork);
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(TraitId(0), ResolvedTraitSourceFact::Source(shape_path));
     trait_source_facts.insert(TraitId(1), ResolvedTraitSourceFact::Source(mark_path));
@@ -1062,12 +1045,13 @@ fn builder_carries_incompatibilities_on_trait_record() {
             ValueMode::MutableOwned,
             int_id,
             &mut string_table,
+            &mut path_fork,
         )],
         vec![ret(env.builtins().bool, ReturnChannel::Success)],
         &mut string_table,
     );
     let trait_root = ResolvedPublicTraitRoot {
-        canonical_path: path("Shape", &mut string_table),
+        canonical_path: path("Shape", &mut string_table, &mut path_fork),
         this_type: this_id,
         requirements: vec![requirement_fact],
         incompatible_trait_ids: vec![TraitId(1)],
@@ -1079,10 +1063,10 @@ fn builder_carries_incompatibilities_on_trait_record() {
         trait_source_facts,
     };
 
-    let nominal_origins: FxHashMap<InternedPath, OriginTypeId> = FxHashMap::default();
+    let nominal_origins: FxHashMap<PathId, OriginTypeId> = FxHashMap::default();
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("Shape", &mut string_table), trait_origin("Shape"));
-    trait_origins.insert(path("Mark", &mut string_table), trait_origin("Mark"));
+    trait_origins.insert(path("Shape", &mut string_table, &mut path_fork), trait_origin("Shape"));
+    trait_origins.insert(path("Mark", &mut string_table, &mut path_fork), trait_origin("Mark"));
 
     let export_seed = DirectExportSeed::new(
         module_origin(),
@@ -1090,23 +1074,21 @@ fn builder_carries_incompatibilities_on_trait_record() {
         FxHashMap::default(),
     );
 
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-        export_seed,
-        public_interface_projection_input: AstPublicInterfaceProjectionInput {
-            root_table,
-            trait_roots: vec![trait_root],
-            trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
-            trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        },
-        public_source_nominal_type_origins: &nominal_origins,
-        public_source_trait_origins: &trait_origins,
-        type_environment: &env,
-        external_registry: &ExternalPackageRegistry::new(),
-        string_table: &string_table,
-        generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
-        module_resources: None,
-    })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
+    public_interface_projection_input: AstPublicInterfaceProjectionInput {
+        root_table,
+        trait_roots: vec![trait_root],
+        trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
+        trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+    },
+    public_source_nominal_type_origins: &nominal_origins,
+    public_source_trait_origins: &trait_origins,
+    type_environment: &env,
+    external_registry: &ExternalPackageRegistry::new(),
+    string_table: &string_table,
+    generic_function_templates: &FxHashMap::default(),
+    const_values: &ConstValueStore::default(),
+    module_resources: None, })
     .build()
     .expect("a trait record with one public incompatibility builds a draft")
     .draft;

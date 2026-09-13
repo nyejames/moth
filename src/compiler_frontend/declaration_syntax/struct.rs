@@ -22,9 +22,9 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
-
 /// Two-lane result for struct shell parsing.
 ///
 /// WHAT: mirrors `RecordBodyParseResult` so the thin `parse_struct_shell` wrapper
@@ -42,7 +42,8 @@ pub fn parse_struct_shell(
     token_stream: &mut FileTokens,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
-    owner_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
+    owner_path: PathId,
+    path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> StructShellResult {
     parse_record_body(
@@ -51,6 +52,7 @@ pub fn parse_struct_shell(
         warnings,
         SignatureMemberContext::StructField,
         owner_path,
+        path_fork,
         span_builder,
     )
 }

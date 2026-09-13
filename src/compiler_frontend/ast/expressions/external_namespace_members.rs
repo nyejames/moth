@@ -22,6 +22,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -40,6 +41,7 @@ pub(super) struct ExternalNamespaceFunctionMemberInput<'a, 'env> {
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
     pub(super) string_table: &'a mut StringTable,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Parse a call to an external package function accessed through a namespace record.
@@ -61,6 +63,7 @@ pub(super) fn parse_external_namespace_function_member(
         expression,
         allow_boundary_catch,
         string_table,
+        path_fork,
     } = input;
 
     // External function calls are not permitted in constant evaluation contexts.
@@ -105,6 +108,7 @@ pub(super) fn parse_external_namespace_function_member(
             warnings: None,
             type_interner,
             string_table,
+            path_fork,
         })?;
 
     push_expression_operand(
@@ -115,6 +119,7 @@ pub(super) fn parse_external_namespace_function_member(
         expression,
         allow_boundary_catch,
         function_call_expression,
+        path_fork,
     )?;
 
     Ok(())
@@ -135,6 +140,7 @@ pub(super) struct ExternalNamespaceConstantMemberInput<'a, 'env> {
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
     pub(super) string_table: &'a mut StringTable,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Parse an external package constant accessed through a namespace record.
@@ -156,6 +162,7 @@ pub(super) fn parse_external_namespace_constant_member(
         expression,
         allow_boundary_catch,
         string_table,
+        path_fork,
     } = input;
     // Verify the external constant metadata is still registered.
     let Some(constant_definition) = context
@@ -199,6 +206,7 @@ pub(super) fn parse_external_namespace_constant_member(
         expression,
         allow_boundary_catch,
         constant_expression,
+        path_fork,
     )?;
 
     Ok(())

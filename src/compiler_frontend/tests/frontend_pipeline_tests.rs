@@ -18,8 +18,8 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
-    prepare_header_syntax,
+    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax, BoundModuleHeaders,
+    HeaderParseOptions,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::module::HirModule;
@@ -35,6 +35,7 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -53,6 +54,7 @@ struct FrontendServices {
         Arc<crate::compiler_frontend::external_packages::ExternalPackageRegistry>,
     style_directives: StyleDirectiveRegistry,
     string_table: StringTable,
+    path_fork: PathInternerFork,
     project_path_resolver: Option<ProjectPathResolver>,
     source_files: Arc<SourceDatabase>,
 }
@@ -62,6 +64,7 @@ impl FrontendServices {
         let mut compiler = CompilerFrontend::new(
             self.options.clone(),
             std::mem::take(&mut self.string_table),
+            std::mem::replace(&mut self.path_fork, self.source_files.fork_path_interner()),
             &self.style_directives,
             &self.external_package_registry,
             self.project_path_resolver.as_ref(),
@@ -69,6 +72,7 @@ impl FrontendServices {
         );
         let result = run(&mut compiler);
         self.string_table = compiler.string_table;
+        self.path_fork = compiler.path_fork;
         result
     }
 }
@@ -129,9 +133,11 @@ impl FrontendProject {
             .expect("source file table should build"),
         );
 
+        let path_fork = source_files.fork_path_interner();
         let frontend = FrontendServices {
             options: Config::new(canonical_project_root).frontend_options(),
             string_table,
+            path_fork,
             style_directives,
             external_package_registry: Arc::new(
                 crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
@@ -197,6 +203,7 @@ impl FrontendProject {
                 const_template_offset,
                 runtime_fragment_offset,
                 &mut span_builder,
+                &mut self.frontend.path_fork,
             )
             .expect("header parsing should succeed");
 
@@ -209,6 +216,7 @@ impl FrontendProject {
             &mut prepared_outputs,
             &mut self.frontend.string_table,
             &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+            &mut self.frontend.path_fork,
         )
         .expect("header syntax preparation should succeed");
         bind_module_headers(
@@ -219,6 +227,7 @@ impl FrontendProject {
             options.project_path_resolver,
             self.frontend.source_files.as_ref(),
             &mut self.frontend.string_table,
+            &mut self.frontend.path_fork,
         )
         .expect("header binding should succeed")
     }
@@ -531,7 +540,7 @@ fn html_style_directive_available_during_header_parsing() {
     let head_id = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path.name_str(&project.frontend.string_table) == Some("head"))
+        .next()
         .expect("head constant should exist")
         .id;
     // [$html: <div>Hello</div>] has no runtime slots → folds to a string.

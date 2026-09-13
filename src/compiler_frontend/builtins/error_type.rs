@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -41,10 +41,10 @@ pub(crate) struct ResolvedBuiltinType {
 /// WHY: AST orchestration should consume one manifest instead of manually reconstructing builtin
 /// declarations and field maps.
 pub(crate) struct BuiltinErrorManifest {
-    pub(crate) visible_symbol_paths: FxHashSet<InternedPath>,
+    pub(crate) visible_symbol_paths: FxHashSet<PathId>,
     pub(crate) declarations: Vec<Declaration>,
-    pub(crate) resolved_struct_fields_by_path: FxHashMap<InternedPath, Vec<Declaration>>,
-    pub(crate) struct_source_by_path: FxHashMap<InternedPath, InternedPath>,
+    pub(crate) resolved_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
+    pub(crate) struct_source_by_path: FxHashMap<PathId, PathId>,
     pub(crate) ast_struct_nodes: Vec<AstNode>,
 }
 
@@ -52,47 +52,58 @@ pub(crate) fn is_reserved_builtin_symbol(name: &str) -> bool {
     matches!(name, ERROR_TYPE_NAME)
 }
 
-pub(crate) fn builtin_error_type_path(string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str(ERROR_TYPE_NAME, string_table)
+pub(crate) fn builtin_error_type_path(
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> PathId {
+    path_fork
+        .try_intern_portable_path(ERROR_TYPE_NAME, string_table)
+        .expect("builtin Error path must fit the path table")
 }
 
-pub(crate) fn register_builtin_error_types(string_table: &mut StringTable) -> BuiltinErrorManifest {
-    let error_path = builtin_error_type_path(string_table);
+pub(crate) fn register_builtin_error_types(
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> BuiltinErrorManifest {
+    let error_path = builtin_error_type_path(path_fork, string_table);
 
     let mut visible_symbol_paths = FxHashSet::default();
-    visible_symbol_paths.insert(error_path.to_owned());
+    visible_symbol_paths.insert(error_path);
+
+    let message_path = path_fork
+        .try_intern_child(error_path, string_table.intern(ERROR_FIELD_MESSAGE))
+        .expect("builtin Error.message path must fit the path table");
+    let code_path = path_fork
+        .try_intern_child(error_path, string_table.intern(ERROR_FIELD_CODE))
+        .expect("builtin Error.code path must fit the path table");
 
     let error_fields = vec![
-        required_field(
-            error_path.join_str(ERROR_FIELD_MESSAGE, string_table),
-            DataType::StringSlice,
-            None,
-        ),
-        defaulted_int_field(error_path.join_str(ERROR_FIELD_CODE, string_table), 0, None),
+        required_field(message_path, DataType::StringSlice, None),
+        defaulted_int_field(code_path, 0, None),
     ];
 
     let declarations = vec![type_declaration(
-        error_path.to_owned(),
-        DataType::runtime_struct(error_path.to_owned(), builtin_type_ids::NONE),
+        error_path,
+        DataType::runtime_struct(error_path, builtin_type_ids::NONE),
         None,
     )];
 
     let mut resolved_struct_fields_by_path = FxHashMap::default();
-    resolved_struct_fields_by_path.insert(error_path.to_owned(), error_fields);
+    resolved_struct_fields_by_path.insert(error_path, error_fields);
 
     let mut struct_source_by_path = FxHashMap::default();
-    struct_source_by_path.insert(error_path.to_owned(), InternedPath::new());
+    struct_source_by_path.insert(error_path, PathId::ROOT);
 
     let ast_struct_nodes = vec![AstNode {
         kind: NodeKind::StructDefinition(
-            error_path.to_owned(),
+            error_path,
             resolved_struct_fields_by_path
                 .get(&error_path)
                 .cloned()
                 .unwrap_or_default(),
         ),
         span: None,
-        scope: error_path.to_owned(),
+        scope: error_path,
     }];
 
     BuiltinErrorManifest {
@@ -137,7 +148,7 @@ fn resolve_builtin_named_type(
 }
 
 fn type_declaration(
-    id: InternedPath,
+    id: PathId,
     data_type: DataType,
     span: Option<SourceSpan>,
 ) -> Declaration {
@@ -154,7 +165,7 @@ fn type_declaration(
         config_qualifier: None,
     }
 }
-fn required_field(id: InternedPath, data_type: DataType, span: Option<SourceSpan>) -> Declaration {
+fn required_field(id: PathId, data_type: DataType, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
         value: Expression::no_value(span, data_type, ValueMode::ImmutableOwned),
@@ -163,7 +174,7 @@ fn required_field(id: InternedPath, data_type: DataType, span: Option<SourceSpan
     }
 }
 
-fn defaulted_int_field(id: InternedPath, value: i32, span: Option<SourceSpan>) -> Declaration {
+fn defaulted_int_field(id: PathId, value: i32, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
         value: Expression::int(value, span, ValueMode::ImmutableOwned),

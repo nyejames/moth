@@ -1,7 +1,7 @@
 use super::{
-    FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceId, SourceKind,
-    SourceProvenance, SourceRegistrationIndex, line_index::LinePosition,
-    record::ensure_source_snapshot_fits,
+    database::SourceCapacityError, FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase,
+    SourceDatabaseError, SourceId, SourceKind, SourceProvenance, SourceRegistrationIndex,
+    line_index::LinePosition, record::ensure_source_snapshot_fits,
 };
 
 use crate::builder_surface::SourceFileKind;
@@ -498,6 +498,13 @@ fn conflicting_logical_identity_for_canonical_source_is_rejected() {
         )
         .expect_err("a canonical source cannot change logical identity");
 
+    let error = match error {
+        SourceDatabaseError::Infrastructure(error) => error,
+        SourceDatabaseError::Capacity(capacity) => panic!(
+            "a logical-identity conflict is an invariant failure, not source capacity: {capacity:?}"
+        ),
+    };
+
     // Both spellings are suffixes of the canonical path, so a substring test cannot tell them
     // apart; the occurrence count proves the message names the stored and requested identities
     // as well as the file it is rejecting.
@@ -555,6 +562,12 @@ fn conflicting_kind_for_canonical_source_is_rejected() {
         .expect_err("a canonical source cannot change authored kind");
 
     assert_eq!(first_id, repeated_id);
+    let error = match error {
+        SourceDatabaseError::Infrastructure(error) => error,
+        SourceDatabaseError::Capacity(capacity) => panic!(
+            "a kind conflict is an invariant failure, not source capacity: {capacity:?}"
+        ),
+    };
     assert!(
         error.msg.contains("/project/src/shared.moth")
             && error.msg.contains(&format!("{moth:?}"))
@@ -571,6 +584,95 @@ fn conflicting_kind_for_canonical_source_is_rejected() {
         "the rejected registration must leave the first identity and kind in place"
     );
 }
+
+#[test]
+fn forced_path_exhaustion_at_source_registration_reports_logical_path_capacity() {
+    let canonical_path = PathBuf::from("/project/src/first.moth");
+    let entry_path = PathBuf::from("/project/entry.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::empty();
+
+    // The first registration interns its logical path while the gate is down, so the gate
+    // below rejects only the new node for the second, differently-named source.
+    database
+        .insert(
+            canonical_path,
+            SourceKind::Compiler(SourceFileKind::Moth),
+            &entry_path,
+            None,
+            &mut string_table,
+        )
+        .expect("the first registration should intern its logical path");
+
+    let _gate = crate::compiler_frontend::symbols::path_interner::ForcedExhaustionGuard::new();
+    let error = database
+        .insert(
+            PathBuf::from("/project/src/second.moth"),
+            SourceKind::Compiler(SourceFileKind::Moth),
+            &PathBuf::from("/project/entry.moth"),
+            None,
+            &mut string_table,
+        )
+        .expect_err("authored path exhaustion must fail the registration");
+
+    match error {
+        SourceDatabaseError::Capacity(SourceCapacityError::LogicalPathTableFull) => {}
+        other => panic!(
+            "authored logical-path exhaustion must surface the typed capacity error: {other:?}"
+        ),
+    }
+    assert!(
+        database
+            .get_by_canonical_path(&PathBuf::from("/project/src/second.moth"))
+            .is_none(),
+        "the rejected registration must not leave a partial source record"
+    );
+}
+
+#[test]
+fn forced_source_identity_exhaustion_at_registration_reports_identity_capacity() {
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::empty();
+    // The logical path must already be interned so the gate rejects the new source identity,
+    // not the new path node; a same-name registration reuses the interned path as a lookup hit.
+    database
+        .insert(
+            PathBuf::from("/project/src/only.moth"),
+            SourceKind::Compiler(SourceFileKind::Moth),
+            &PathBuf::from("/project/entry.moth"),
+            None,
+            &mut string_table,
+        )
+        .expect("the seed registration should intern the logical path and source identity");
+    database
+        .remove_for_test_reuse(&PathBuf::from("/project/src/only.moth"))
+        .expect("the seed slot should be removable without touching the path table");
+
+    let _gate = crate::compiler_frontend::symbols::path_interner::ForcedExhaustionGuard::new();
+    let error = database
+        .insert(
+            PathBuf::from("/project/src/only.moth"),
+            SourceKind::Compiler(SourceFileKind::Moth),
+            &PathBuf::from("/project/entry.moth"),
+            None,
+            &mut string_table,
+        )
+        .expect_err("authored source-identity exhaustion must fail the registration");
+
+    match error {
+        SourceDatabaseError::Capacity(SourceCapacityError::SourceIdentityTableFull) => {}
+        other => panic!(
+            "authored source-identity exhaustion must surface the typed capacity error: {other:?}"
+        ),
+    }
+    assert!(
+        database
+            .get_by_canonical_path(&PathBuf::from("/project/src/only.moth"))
+            .is_none(),
+        "the rejected registration must not leave a partial source record"
+    );
+}
+
 
 #[test]
 fn source_snapshot_size_bound_rejects_u32_max_by_provenance() {
@@ -753,7 +855,9 @@ fn source_database_resolves_retained_text_by_logical_path() {
         .get_by_canonical_path(&source_path)
         .expect("source should be registered")
         .id;
-    let logical_path = database.legacy_logical_path(source_id);
+    let logical_path = database
+        .source_logical_path(source_id)
+        .expect("source should have a logical path");
 
     database
         .retain_text(source_id, "compiled snapshot\n".to_owned())
@@ -761,7 +865,7 @@ fn source_database_resolves_retained_text_by_logical_path() {
 
     assert_eq!(
         database
-            .unique_record_for_logical_path(&logical_path)
+            .unique_record_for_logical_path(logical_path)
             .and_then(|slot| database.retained_text(slot.id)),
         Some("compiled snapshot\n"),
     );

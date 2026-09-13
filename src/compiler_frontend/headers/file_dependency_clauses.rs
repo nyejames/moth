@@ -22,6 +22,7 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
@@ -98,12 +99,17 @@ fn parse_and_record_dependency_clause(
     // Path validity is independent of the selected binding shape. Validate it first so an
     // obsolete provider spelling such as `@./drawing.js` receives the same path diagnostic
     validate_dependency_path(
-        &parsed.provider.path,
+        parsed.provider.path,
         &parsed.provider.path_span,
+        context.path_fork,
         context.string_table,
     )?;
 
-    let target = classify_dependency_target(&parsed.provider.path, context.string_table);
+    let target = classify_dependency_target(
+        parsed.provider.path,
+        context.path_fork,
+        context.string_table,
+    );
     if matches!(
         &parsed.binding,
         ScannedDependencyBinding::Namespace { alias: None }
@@ -144,6 +150,7 @@ fn parse_and_record_dependency_clause(
         target,
         export_mode,
         context.string_table,
+        &*context.path_fork,
     );
 
     token_stream.index = next_index;
@@ -158,6 +165,7 @@ fn retain_scanned_clause(
     target: DependencyTargetKind,
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) {
     let binding = match scanned.binding {
         ScannedDependencyBinding::Namespace { alias } => {
@@ -201,7 +209,8 @@ fn retain_scanned_clause(
         export_mode,
     };
 
-    if let Some(name) = retained_clause.effective_namespace_local_name(string_table)
+    if let Some(name) =
+        retained_clause.effective_namespace_local_name(string_table, path_fork)
         && let Some(span) = retained_clause.namespace_binding_span()
     {
         state.encountered_symbols.entry(name).or_insert(*span);

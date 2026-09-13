@@ -30,7 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -41,7 +41,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// the caller (identifier expression dispatch) can hand off a fully-resolved struct
 /// identity without repeating lookup work.
 pub(crate) struct StructConstructorParseInput<'a> {
-    pub(crate) struct_path: &'a InternedPath,
+    pub(crate) struct_path: &'a PathId,
     pub(crate) struct_name: StringId,
     pub(crate) fields: &'a [Declaration],
     pub(crate) struct_value_mode: &'a ValueMode,
@@ -67,6 +67,7 @@ pub(super) fn parse_struct_constructor_expression(
     input: StructConstructorParseInput<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<Expression, ExpressionParseError> {
     let StructConstructorParseInput {
@@ -95,7 +96,8 @@ pub(super) fn parse_struct_constructor_expression(
     //  Parse raw arguments with constructor-field expectations
     // ------------------------
     let constructor_field_views = ConstructorField::from_struct_declarations(fields);
-    let field_expectations = expectations_from_constructor_fields(&constructor_field_views);
+    let field_expectations =
+        expectations_from_constructor_fields(&constructor_field_views, path_fork);
     let raw_args = parse_call_arguments_typed_with_expectations(
         token_stream,
         context,
@@ -105,6 +107,7 @@ pub(super) fn parse_struct_constructor_expression(
         CallArgumentSyntax::Supported {
             callee_name: Some(struct_name),
         },
+        path_fork,
     )?;
 
     // ------------------------
@@ -123,6 +126,7 @@ pub(super) fn parse_struct_constructor_expression(
                 constructor_fields: Some(&constructor_field_views),
                 raw_args: Some(&raw_args),
                 span: constructor_span,
+                path_fork,
             },
             context,
             type_interner,
@@ -151,7 +155,7 @@ pub(super) fn parse_struct_constructor_expression(
     // ------------------------
     //  Validate arguments against fields
     // ------------------------
-    let expectations = expectations_from_constructor_fields(&resolved_fields);
+    let expectations = expectations_from_constructor_fields(&resolved_fields, path_fork);
     let type_check_context = type_interner.type_check_context();
     let resolved_args = resolve_call_arguments(
         CallDiagnosticContext::struct_constructor(&struct_name_display),
@@ -160,6 +164,7 @@ pub(super) fn parse_struct_constructor_expression(
         constructor_span,
         CallArgumentResolutionContext {
             string_table,
+            path_fork,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
         },
@@ -178,7 +183,7 @@ pub(super) fn parse_struct_constructor_expression(
             // Header-stage struct shells may carry placeholder references until AST environment
             // construction resolves constants in graph order.
             let is_placeholder_reference = if let ExpressionKind::Reference(path) = &value.kind {
-                path.name().is_some_and(|name| {
+                path_fork.component(*path).is_some_and(|name| {
                     context.get_reference(&name).is_some_and(|declaration| {
                         declaration
                             .as_declaration()
@@ -200,9 +205,8 @@ pub(super) fn parse_struct_constructor_expression(
             };
 
             if !value_is_compile_time_constant {
-                let field_name = field
-                    .name
-                    .name()
+                let field_name = path_fork
+                    .component(field.name)
                     .unwrap_or_else(|| string_table.intern("<field>"));
                 return Err(CompilerDiagnostic::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,

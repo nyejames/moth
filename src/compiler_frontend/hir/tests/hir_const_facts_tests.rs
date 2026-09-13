@@ -13,147 +13,142 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::function_node;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
-fn projects_ast_const_facts_into_hir_metadata() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn projects_ast_const_facts_into_hir_metadata() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path.clone());
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path.clone());
 
-    let explicit_path = InternedPath::from_single_str("site_name", &mut string_table);
-    let private_path = InternedPath::from_single_str("page_title", &mut string_table);
+let explicit_path = super::symbol("site_name", &mut path_fork, &mut string_table);
+let private_path = super::symbol("page_title", &mut path_fork, &mut string_table);
 
-    ast.const_facts.declarations.insert(
-        explicit_path.clone(),
-        AstConstDeclarationFact {
-            declaration_path: explicit_path.clone(),
-            scope: ConstBindingScope::ExplicitTopLevel,
-            source: ConstBindingSource::ExplicitHash,
-            value_kind: ConstFactValueKind::Literal,
-            value: AstConstFactValue::Expression(Box::new(Expression::string_slice(
-                string_table.intern("Moth"),
-                None,
-                ValueMode::ImmutableOwned,
-            ))),
-        },
-    );
+ast.const_facts.declarations.insert(
+    explicit_path.clone(),
+    AstConstDeclarationFact {
+        declaration_path: explicit_path.clone(),
+        scope: ConstBindingScope::ExplicitTopLevel,
+        source: ConstBindingSource::ExplicitHash,
+        value_kind: ConstFactValueKind::Literal,
+        value: AstConstFactValue::Expression(Box::new(Expression::string_slice(
+            string_table.intern("Moth"),
+            None,
+            ValueMode::ImmutableOwned,
+        ))),
+    },
+);
 
-    ast.const_facts.declarations.insert(
-        private_path.clone(),
-        AstConstDeclarationFact {
-            declaration_path: private_path.clone(),
-            scope: ConstBindingScope::PrivateTopLevel,
-            source: ConstBindingSource::InferredImmutable,
-            value_kind: ConstFactValueKind::Literal,
-            value: AstConstFactValue::Expression(Box::new(Expression::int(
-                42,
-                None,
-                ValueMode::ImmutableOwned,
-            ))),
-        },
-    );
+ast.const_facts.declarations.insert(
+    private_path.clone(),
+    AstConstDeclarationFact {
+        declaration_path: private_path.clone(),
+        scope: ConstBindingScope::PrivateTopLevel,
+        source: ConstBindingSource::InferredImmutable,
+        value_kind: ConstFactValueKind::Literal,
+        value: AstConstFactValue::Expression(Box::new(Expression::int(
+            42,
+            None,
+            ValueMode::ImmutableOwned,
+        ))),
+    },
+);
 
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    assert_eq!(module.const_facts.declarations.len(), 2);
+assert_eq!(module.const_facts.declarations.len(), 2);
 
-    let explicit = module
-        .const_facts
-        .declarations
-        .get(&explicit_path)
-        .expect("explicit fact should be present");
-    assert_eq!(explicit.declaration_path, explicit_path);
-    assert_eq!(explicit.scope, ConstBindingScope::ExplicitTopLevel);
-    assert_eq!(explicit.source, ConstBindingSource::ExplicitHash);
-    assert_eq!(explicit.value_kind, ConstFactValueKind::Literal);
-    assert_eq!(explicit.span, None);
+let explicit = module
+    .const_facts
+    .declarations
+    .get(&explicit_path)
+    .expect("explicit fact should be present");
+assert_eq!(explicit.declaration_path, explicit_path);
+assert_eq!(explicit.scope, ConstBindingScope::ExplicitTopLevel);
+assert_eq!(explicit.source, ConstBindingSource::ExplicitHash);
+assert_eq!(explicit.value_kind, ConstFactValueKind::Literal);
+assert_eq!(explicit.span, None);
 
-    let private = module
-        .const_facts
-        .declarations
-        .get(&private_path)
-        .expect("private fact should be present");
-    assert_eq!(private.declaration_path, private_path);
-    assert_eq!(private.scope, ConstBindingScope::PrivateTopLevel);
-    assert_eq!(private.source, ConstBindingSource::InferredImmutable);
-    assert_eq!(private.value_kind, ConstFactValueKind::Literal);
-    assert_eq!(private.span, None);
-}
+let private = module
+    .const_facts
+    .declarations
+    .get(&private_path)
+    .expect("private fact should be present");
+assert_eq!(private.declaration_path, private_path);
+assert_eq!(private.scope, ConstBindingScope::PrivateTopLevel);
+assert_eq!(private.source, ConstBindingSource::InferredImmutable);
+assert_eq!(private.value_kind, ConstFactValueKind::Literal);
+assert_eq!(private.span, None); }
 
 #[test]
-fn empty_ast_const_facts_produces_empty_hir_const_facts() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn empty_ast_const_facts_produces_empty_hir_const_facts() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![],
+    None,
+);
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let ast = build_ast_with_registered_types(vec![start_function], entry_path);
 
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    assert!(module.const_facts.declarations.is_empty());
-}
+assert!(module.const_facts.declarations.is_empty()); }
 
 #[test]
-fn remaps_const_fact_keys_and_payload_paths() {
-    let mut source_table = StringTable::new();
-    let original_path = InternedPath::from_single_str("site_name", &mut source_table);
+fn remaps_const_fact_keys_and_payload_paths() { let mut path_fork = super::PathInternerFork::empty(); let mut source_table = StringTable::new();
+let original_path = path_fork
+    .try_intern_portable_path("site_name", &mut source_table)
+    .expect("test path fits");
 
-    let mut ast_facts = AstConstFacts::default();
-    ast_facts.declarations.insert(
-        original_path.clone(),
-        AstConstDeclarationFact {
-            declaration_path: original_path.clone(),
-            scope: ConstBindingScope::ExplicitTopLevel,
-            source: ConstBindingSource::ExplicitHash,
-            value_kind: ConstFactValueKind::Literal,
-            value: AstConstFactValue::Expression(Box::new(Expression::int(
-                1,
-                None,
-                ValueMode::ImmutableOwned,
-            ))),
-        },
-    );
+let mut ast_facts = AstConstFacts::default();
+ast_facts.declarations.insert(
+    original_path.clone(),
+    AstConstDeclarationFact {
+        declaration_path: original_path.clone(),
+        scope: ConstBindingScope::ExplicitTopLevel,
+        source: ConstBindingSource::ExplicitHash,
+        value_kind: ConstFactValueKind::Literal,
+        value: AstConstFactValue::Expression(Box::new(Expression::int(
+            1,
+            None,
+            ValueMode::ImmutableOwned,
+        ))),
+    },
+);
 
-    let mut hir_facts = HirConstFacts::from(&ast_facts);
-    let mut target_table = StringTable::new();
-    target_table.intern("prefix");
-    let remap = target_table.merge_from(&source_table);
+let mut hir_facts = HirConstFacts::from(&ast_facts);
+let mut target_table = StringTable::new();
+target_table.intern("prefix");
+let remap = target_table.merge_from(&source_table);
 
-    let mut remapped_path = original_path.clone();
-    remapped_path.remap_string_ids(&remap);
-    hir_facts.remap_string_ids(&remap);
+let remapped_path = original_path;
+hir_facts.remap_string_ids(&remap);
 
-    assert!(!hir_facts.declarations.contains_key(&original_path));
-    let fact = hir_facts
-        .declarations
-        .get(&remapped_path)
-        .expect("remapped fact should be keyed by remapped path");
-    assert_eq!(fact.declaration_path, remapped_path);
-}
+assert!(hir_facts.declarations.contains_key(&original_path));
+let fact = hir_facts
+    .declarations
+    .get(&remapped_path)
+    .expect("const fact should retain its path identity");
+assert_eq!(fact.declaration_path, remapped_path); }

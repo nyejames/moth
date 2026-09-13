@@ -3556,3 +3556,84 @@ The predecessor comparison remains historical context only:
 The corrected live-report and after-report-drop fields are process-global allocator proxies, not owner
 attribution. The probe still does not partition common versus cold allocations or attribute allocator
 bytes to individual owners.
+
+## Data-layout regression investigation - 2026-09-11
+
+Branch `diagnostic-data-layout-changes`. Compiler checkpoint `debe6db61`. Toolchain rustc/cargo 1.97.1 `aarch64-apple-darwin`. Host `6D851D`.
+
+The 19:18 UTC CLI print versus `232f207f` (`+16ms avg`, 16 slower) was a read-only `bench-check`. Its revision and dirty state were never persisted. Exact reconstruction is blocked. Later clean-tree measurements are not a reproduction of that record.
+
+### Throughput
+
+Public summaries use mean (`avg`). There was no material regression to accept, so the five-invocation median policy was not applied.
+
+| Suite | Time (UTC) | Public mean | Faster / slower | Compared cases |
+| --- | --- | --- | --- | --- |
+| `just bench-check` | 22:47 | **-2ms avg** | 3 / 0 | 39/40; `docs_check` workload-changed |
+| `just bench-frontend-check` | 22:49 | **-8ms avg** | 15 / 0 | 41/42; `docs_frontend` workload-changed |
+| `just bench-data-layout-check` | 22:49 | **-4ms avg** | 1 / 0 | 2/2 |
+| `just bench-scaling` | 22:49 | all 3 series within budget |  |  |
+
+Same-session Phase 1 A/B versus harness predecessor `2843b9d6` was faster on every screened CLI case, including `generic_scaling_160_check` wall median 464.76 vs 524.42 ms. That speedup is not the cause of the 19:18 print.
+
+### Retention probe (single process each)
+
+Recipe: `cargo build --release --bin data_layout_memory_probe --features data_layout_memory_probe`. Allocator deltas are process-global proxies, not owner attribution.
+
+| Workload | Outcome | Errors / warnings | Snapshot bytes | Source identity slots | Diagnostic records | Identity contexts | After-report-drop bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `benchmarks/speed-test.moth` | Success | 0 / 0 | 0 | 0 | 0 | 0 | 1,494 |
+| `benchmarks/data-layout/warning-heavy.moth` | Success | 0 / 39 | 1,200 | 2 | 39 | 1 | 1,479 |
+| `benchmarks/data-layout/diagnosed` | Diagnosed | 40 / 0 | 903 | 42 | 40 | 1 | 1,488 |
+
+Clean-result freeze skip still retains no source snapshots or identity contexts. Warned and diagnosed reports retain the contexts needed to render.
+
+### Patches and dispositions
+
+- Proven timing cause: none.
+- DLR-04: mixed `append_messages_preserving_context` then `freeze_source_contexts` no longer drops existing frozen rows. Correctness repair, not a timing claim.
+- DLR-05: consuming render conversion moves artefact/sidecar warnings instead of cloning them.
+- DLR-07: one `Token::new`; leftover logical-path and span-resolver helpers are `#[cfg(test)]`.
+- DLR-08: original-plan Phase 1 current-state matches `SourceDatabaseBuilder::finish` and `TokenStream::next`.
+- Deferred: DLR-02, DLR-03, DLR-06. Historical 19:18 cause remains unresolved.
+
+Resume the original layout plan at Phase 2 on this branch.
+
+## Data Layout Migration - Phase 2 Path Identity Retention Probe (2026-09-11)
+
+This Phase 2 checkpoint measures path identity ownership after the shared-boundary publication
+change, invariant cleanup, generated identity pairing, and report-owner metric correction. The
+implementation/review-correction checkpoint is `aed38042f` on branch
+`diagnostic-data-layout-changes`. Environment: Apple M1 Pro, `aarch64-apple-darwin`, Rust 1.97.1.
+
+Each row is one direct probe invocation:
+
+```text
+cargo run --quiet --features data_layout_memory_probe --bin data_layout_memory_probe -- <entry>
+```
+
+The probe enables `timers` and `benchmark_counters`. `path_node_count` is the number of unique
+complete path nodes created by the process. `path_table_copy_*` counts transient path-table
+snapshots/clones and their vector-capacity bytes. `retained.path_table_*` counts the final frozen
+path table reachable from the retained report. `string_table_full_clones` counts full
+materialisation string-table clones. Allocator deltas are process-global proxies, not owner
+attribution; `total_ms` and stage values are single-run timings, not medians.
+
+| Workload | Outcome | Errors / warnings | Total ms | Boundary compile ms | Frontend prepare ms | Frontend semantic ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `benchmarks/adversarial/import-external-churn` | Success | 0 / 0 | 80.359250 | 42.001792 | 3.831250 | 41.028709 |
+| `benchmarks/data-layout/warning-heavy.moth` | Success | 0 / 39 | 22.321042 | 7.419000 | 0.469458 | 6.857458 |
+
+| Workload | Unique path nodes | Retained table count / node rows / storage bytes | Path-table copies / copied rows / copied bytes | Full string-table clones | Path merges / entries scanned | Identity remaps (identity / non-identity) | Live / peak / after-drop bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `import-external-churn` | 371 | 0 / 0 / 0 | 8 / 416 / 4,992 | 2 | 2 / 356 | 2 / 0 | 27,212 / 1,938,984 / 1,502 |
+| `warning-heavy.moth` | 77 | 1 / 78 / 1,536 | 7 / 100 / 1,200 | 1 | 3 / 76 | 3 / 0 | 30,127 / 2,047,168 / 1,479 |
+
+The clean result intentionally drops its render context, so its retained path-table metrics are
+zero. The warning-heavy result retains one final path table with 78 node rows and 1,536 bytes of
+vector capacity for its 39 diagnostics. Multi-module Arc-sharing coverage
+(`directory_project_discovers_multiple_entry_modules` and
+`installed_path_table_is_shared_by_every_completed_sidecar`) verifies that completed modules and
+sidecars in one boundary reuse the installed table rather than retaining one deep snapshot each.
+The path-table copy counters remain useful transient-allocation evidence and are not a retained
+owner-size claim.

@@ -6,8 +6,12 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, SourceSpanCapacityResource,
+};
+use crate::compiler_frontend::symbols::path_interner::{
+    NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashSet;
 use std::fs;
@@ -42,6 +46,7 @@ impl MothTemplateCompileRequest {
     pub(super) fn collect_sources(
         self,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) -> Result<Vec<MothTemplateSourceUnit>, CompilerMessages> {
         let units = match self.input {
             MothTemplateInput::File(path) => vec![read_file_unit(path, None, string_table)?],
@@ -55,7 +60,7 @@ impl MothTemplateCompileRequest {
                 for path in paths {
                     units.push(read_file_unit(path, None, string_table)?);
                 }
-                assign_common_ancestor_relative_paths(&mut units, string_table)?;
+                assign_common_ancestor_relative_paths(&mut units, string_table, path_fork)?;
                 units
             }
             MothTemplateInput::Sources(sources) => {
@@ -68,12 +73,12 @@ impl MothTemplateCompileRequest {
                     })
                     .collect::<Vec<_>>();
 
-                assign_in_memory_relative_paths(&mut units, string_table)?;
+                assign_in_memory_relative_paths(&mut units, string_table, path_fork)?;
                 units
             }
         };
 
-        reject_duplicate_source_paths(&units, string_table)?;
+        reject_duplicate_source_paths(&units, string_table, path_fork)?;
 
         Ok(units)
     }
@@ -110,6 +115,7 @@ fn collect_directory_units(
 fn assign_common_ancestor_relative_paths(
     units: &mut [MothTemplateSourceUnit],
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerMessages> {
     if units.is_empty() {
         return Ok(());
@@ -124,6 +130,7 @@ fn assign_common_ancestor_relative_paths(
             &canonical_paths[0],
             &canonical_paths[1],
             string_table,
+            path_fork,
         ));
     };
 
@@ -143,6 +150,7 @@ fn assign_common_ancestor_relative_paths(
 fn assign_in_memory_relative_paths(
     units: &mut [MothTemplateSourceUnit],
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerMessages> {
     if units.is_empty() {
         return Ok(());
@@ -159,6 +167,7 @@ fn assign_in_memory_relative_paths(
             &first_path,
             &mixed_path,
             string_table,
+            path_fork,
         ));
     }
 
@@ -181,6 +190,7 @@ fn assign_in_memory_relative_paths(
             &display_paths[0],
             &display_paths[1],
             string_table,
+            path_fork,
         ));
     };
 
@@ -228,13 +238,14 @@ fn no_common_ancestor_messages(
     first_path: &Path,
     second_path: &Path,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CompilerMessages {
-    let first_interned = intern_filesystem_path_identity(first_path, string_table);
-    let second_interned = intern_filesystem_path_identity(second_path, string_table);
+    let first_interned = intern_filesystem_path_identity(first_path, path_fork, string_table);
+    let second_interned = intern_filesystem_path_identity(second_path, path_fork, string_table);
     let (first_interned, second_interned) = match (first_interned, second_interned) {
         (Ok(first), Ok(second)) => (first, second),
         (Err(failure), _) | (_, Err(failure)) => {
-            return CompilerMessages::from_error_ref(failure, string_table);
+            return failure;
         }
     };
     let diagnostic = CompilerDiagnostic::moth_template_inputs_share_no_common_ancestor(
@@ -247,22 +258,42 @@ fn no_common_ancestor_messages(
 }
 
 /// Intern one filesystem path for user-facing identity, failing non-UTF-8 paths like the
-/// duplicate-input check does.
+/// duplicate-input check does. Compact-table exhaustion is authored input rejection, so it maps
+/// to the typed source capacity diagnostic.
 fn intern_filesystem_path_identity(
     path: &Path,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<InternedPath, CompilerError> {
-    InternedPath::try_from_filesystem_path(path, string_table).map_err(
-        |NonUtf8PathComponent { path: bad_path }| {
-            CompilerError::file_error(
-                &bad_path,
-                format!(
-                    "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
-                 identity requires UTF-8 paths."
+) -> Result<PathId, CompilerMessages> {
+    let table = string_table.clone();
+    path_fork
+        .try_intern_filesystem_path(path, string_table)
+        .map_err(|error| match error {
+            PathInternError::NonUtf8(NonUtf8PathComponent { path: bad_path }) => {
+                CompilerMessages::from_error(
+                    CompilerError::file_error(
+                        &bad_path,
+                        format!(
+                            "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
+                             identity requires UTF-8 paths."
+                        ),
+                    ),
+                    table,
+                )
+            }
+            PathInternError::TableFull => CompilerMessages::from_diagnostic(
+                CompilerDiagnostic::source_table_capacity(
+                    SourceSpanCapacityResource::LogicalPathTable,
                 ),
-            )
-        },
-    )
+                table,
+            ),
+            PathInternError::BaseMismatch { .. } => CompilerMessages::from_error(
+                CompilerError::compiler_error(
+                    "logical path merge base is not a structural prefix of the destination table",
+                ),
+                table,
+            ),
+        })
 }
 
 fn collect_moth_template_paths_in_directory(
@@ -362,6 +393,7 @@ fn canonicalize_path(
 fn reject_duplicate_source_paths(
     units: &[MothTemplateSourceUnit],
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerMessages> {
     let mut seen_paths = HashSet::new();
     let mut diagnostics = Vec::new();
@@ -370,20 +402,7 @@ fn reject_duplicate_source_paths(
         let normalized = normalize_path_for_identity(&unit.source_path);
 
         if !seen_paths.insert(normalized.clone()) {
-            let path = match InternedPath::try_from_filesystem_path(&normalized, string_table) {
-                Ok(interned) => interned,
-                Err(NonUtf8PathComponent { path: bad_path }) => {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::file_error(
-                            &bad_path,
-                            format!(
-                                "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                            ),
-                        ),
-                        string_table,
-                    ));
-                }
-            };
+            let path = intern_filesystem_path_identity(&normalized, path_fork, string_table)?;
             diagnostics.push(CompilerDiagnostic::duplicate_moth_template_input_path(
                 path, None, None,
             ));

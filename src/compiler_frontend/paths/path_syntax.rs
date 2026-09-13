@@ -10,8 +10,7 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use rustc_hash::FxHashMap;
 
@@ -42,9 +41,9 @@ impl PathSyntaxId {
 ///
 /// Path syntax owns no dependency selections. The root is the full authored path; the span carries
 /// the source identity that owns the token bytes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PathSyntax {
-    pub root: InternedPath,
+    pub root: PathId,
     pub span: SourceSpan,
 }
 
@@ -116,29 +115,25 @@ impl PathSyntaxTable {
     }
 
     /// Append one authored path row and return its handle.
-    pub fn push(&mut self, root: InternedPath, span: SourceSpan) -> PathSyntaxId {
+    pub fn push(&mut self, root: PathId, span: SourceSpan) -> PathSyntaxId {
         self.paths.push(PathSyntax { root, span });
         add_frontend_counter(FrontendCounter::PathSyntaxRowCount, 1);
         PathSyntaxId::from_index(self.paths.len() - 1)
     }
 
-    /// Remap every interned string in this table once.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.try_remap_string_ids(&mut |id| {
-            Ok::<StringId, std::convert::Infallible>(remap.get(id))
-        })
-        .expect("ordinary string-ID remapping is infallible");
-    }
-
-    /// Remap every interned path component. Source spans contain no interned strings.
-    pub(crate) fn try_remap_string_ids<E>(
-        &mut self,
-        map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-    ) -> Result<(), E> {
-        for path in &mut self.paths {
-            path.root.try_remap_string_ids(map)?;
+    /// Remap every complete-path identity in this table once.
+    ///
+    /// WHAT: rewrites each authored row's `PathId` through a worker-local merge remap.
+    /// WHY: path rows are interned against a chunk-local fork; the canonical chunk merge
+    ///      re-interns those nodes into the module fork and must rewrite rows that still
+    ///      address worker-local suffixes. Source spans contain no path identities.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if remap.is_identity() {
+            return;
         }
-        Ok(())
+        for path in &mut self.paths {
+            path.root = remap.get(path.root);
+        }
     }
 
     /// Rebind every path row to the finalized source identity without changing its local range.

@@ -19,7 +19,7 @@ use super::{ExternalSymbolPath, ExternalSymbolPathError};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::return_compiler_error;
 use std::collections::HashMap;
@@ -911,10 +911,12 @@ impl ExternalPackageRegistry {
     ///      dependencies from reimplementing subtly different package matching.
     pub(crate) fn longest_package_prefix_for_dependency(
         &self,
-        import_path: &InternedPath,
+        import_path: PathId,
+        path_fork: &PathInternerFork,
         string_table: &StringTable,
     ) -> Option<ExternalPackagePathMatch> {
-        let components = import_path.as_components();
+        let mut components = Vec::new();
+        let components = path_fork.resolve_components(import_path, &mut components);
         if components.is_empty() {
             return None;
         }
@@ -1013,14 +1015,13 @@ impl ExternalPackageRegistry {
     /// rather than a filesystem dependency.
     ///
     /// WHAT: tries progressively shorter prefixes of the dependency path against known packages.
-    /// WHY: file discovery must skip dependencies that target virtual packages so AST resolution
-    ///      can handle them with proper error messages.
     pub fn is_virtual_package_dependency(
         &self,
-        import_path: &InternedPath,
+        import_path: PathId,
+        path_fork: &PathInternerFork,
         string_table: &StringTable,
     ) -> bool {
-        self.longest_package_prefix_for_dependency(import_path, string_table)
+        self.longest_package_prefix_for_dependency(import_path, path_fork, string_table)
             .is_some()
     }
 
@@ -1033,10 +1034,12 @@ impl ExternalPackageRegistry {
     /// missing source file.
     pub fn unsupported_known_package_dependency(
         &self,
-        import_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
-        string_table: &crate::compiler_frontend::symbols::string_interning::StringTable,
+        import_path: PathId,
+        path_fork: &PathInternerFork,
+        string_table: &StringTable,
     ) -> Option<&'static str> {
-        let components = import_path.as_components();
+        let mut components = Vec::new();
+        let components = path_fork.resolve_components(import_path, &mut components);
         for package_path in crate::builder_surface::core_packages::OPTIONAL_CORE_PACKAGE_PATHS {
             if self.has_package(package_path) {
                 continue;

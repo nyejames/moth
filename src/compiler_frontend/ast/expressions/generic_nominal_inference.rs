@@ -34,7 +34,7 @@ use crate::compiler_frontend::datatypes::generic_identity_bridge::{
 };
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
@@ -44,12 +44,13 @@ pub(crate) enum GenericNominalTemplate<'a> {
 }
 
 pub(crate) struct GenericNominalConstructorInput<'a> {
-    pub nominal_path: &'a InternedPath,
+    pub nominal_path: &'a PathId,
     pub display_name: &'a str,
     pub template: GenericNominalTemplate<'a>,
     pub constructor_fields: Option<&'a [ConstructorField]>,
     pub raw_args: Option<&'a [CallArgument]>,
     pub span: Option<SourceSpan>,
+    pub path_fork: &'a PathInternerFork,
 }
 
 pub(crate) struct GenericNominalInference {
@@ -228,7 +229,7 @@ impl NominalBindingEvidenceLocations {
 
 /// Shared state for fallible nominal binding collection with evidence tracking.
 struct NominalBindingEvidenceContext<'a> {
-    nominal_path: &'a InternedPath,
+    nominal_path: &'a PathId,
     display_name: &'a str,
     bindings: &'a mut GenericTypeBindings,
     evidence_locations: &'a mut NominalBindingEvidenceLocations,
@@ -359,7 +360,7 @@ fn collect_constructor_argument_bindings(
         return Ok(());
     };
 
-    let expectations = expectations_from_constructor_fields(fields);
+    let expectations = expectations_from_constructor_fields(fields, input.path_fork);
     let resolved_slots = order_call_arguments_by_retained_slot(raw_args, expectations.len())?;
 
     let mut evidence_context = NominalBindingEvidenceContext {

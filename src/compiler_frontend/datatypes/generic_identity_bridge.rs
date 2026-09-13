@@ -11,7 +11,9 @@ use super::display::format_fallible_signature_parts;
 use super::environment::TypeEnvironment;
 use super::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalTypeId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathIdRemap, PathInternerFork, PathTable,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 // -----------------------------------------------------------
@@ -21,7 +23,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GenericBaseType {
     Named(StringId),
-    ResolvedNominal(InternedPath),
+    ResolvedNominal(PathId),
     #[allow(dead_code)] // Deferred until external generic type metadata exists.
     External(ExternalTypeId),
     Builtin(BuiltinGenericType),
@@ -48,14 +50,14 @@ pub enum BuiltinTypeKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GenericInstantiationKey {
-    pub base_path: InternedPath,
+    pub base_path: PathId,
     pub arguments: Vec<TypeIdentityKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeIdentityKey {
     Builtin(BuiltinTypeKey),
-    Nominal(InternedPath),
+    Nominal(PathId),
     External(ExternalTypeId),
     Collection {
         element: Box<TypeIdentityKey>,
@@ -72,71 +74,149 @@ pub enum TypeIdentityKey {
     },
     GenericInstance(GenericInstantiationKey),
 }
+impl GenericInstantiationKey {
+    /// Rewrite all path identities after the module-local path fork merges.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.base_path = remap.get(self.base_path);
+        for argument in &mut self.arguments {
+            argument.remap_path_ids(remap);
+        }
+    }
+}
 
-// -----------------------------------------------------------
-//  Display Helpers
-// -----------------------------------------------------------
+impl TypeIdentityKey {
+    /// Rewrite every nested nominal path after the module-local path fork merges.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        match self {
+            Self::Nominal(path) => *path = remap.get(*path),
+            Self::Collection { element, .. } | Self::Option(element) => {
+                element.remap_path_ids(remap)
+            }
+            Self::Map { key, value } => {
+                key.remap_path_ids(remap);
+                value.remap_path_ids(remap);
+            }
+            Self::FallibleCarrier { success, error } => {
+                success.remap_path_ids(remap);
+                error.remap_path_ids(remap);
+            }
+            Self::GenericInstance(instance) => instance.remap_path_ids(remap),
+            Self::Builtin(_) | Self::External(_) => {}
+        }
+    }
+}
+
+// Display helpers below retain the existing two-argument compatibility surface for
+// callers that have not yet been threaded with a path reader. New callers must use
+// one of the path-aware variants so a `PathId` is never rendered as source text.
+
+trait PathNameResolver {
+    fn component(&self, path: PathId) -> Option<StringId>;
+}
+
+impl PathNameResolver for PathInternerFork {
+    fn component(&self, path: PathId) -> Option<StringId> {
+        PathInternerFork::component(self, path)
+    }
+}
+
+impl PathNameResolver for PathTable {
+    fn component(&self, path: PathId) -> Option<StringId> {
+        PathTable::component(self, path)
+    }
+}
+
+pub fn display_generic_instantiation_key_with_fork(
+    key: &GenericInstantiationKey,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> String {
+    display_generic_instantiation_key_with_resolver(key, path_fork, string_table)
+}
 
 pub fn display_generic_instantiation_key(
     key: &GenericInstantiationKey,
+    path_table: &PathTable,
     string_table: &StringTable,
 ) -> String {
-    let base_name = key.base_path.name_str(string_table).unwrap_or("<generic>");
+    display_generic_instantiation_key_with_resolver(key, path_table, string_table)
+}
+
+fn display_generic_instantiation_key_with_resolver<R: PathNameResolver>(
+    key: &GenericInstantiationKey,
+    path_reader: &R,
+    string_table: &StringTable,
+) -> String {
+    let base_name = path_reader
+        .component(key.base_path)
+        .map(|component| string_table.resolve(component))
+        .unwrap_or("<generic>");
     let args = key
         .arguments
         .iter()
-        .map(|arg| display_type_identity_key(arg, string_table))
+        .map(|arg| display_type_identity_key_with_resolver(arg, path_reader, string_table))
         .collect::<Vec<_>>()
         .join(", ");
     format!("{base_name} of {args}")
 }
 
-fn display_type_identity_key(key: &TypeIdentityKey, string_table: &StringTable) -> String {
+fn display_type_identity_key_with_resolver<R: PathNameResolver>(
+    key: &TypeIdentityKey,
+    path_reader: &R,
+    string_table: &StringTable,
+) -> String {
     match key {
         TypeIdentityKey::Builtin(builtin) => match builtin {
             BuiltinTypeKey::Bool => "Bool".to_owned(),
             BuiltinTypeKey::Int => "Int".to_owned(),
             BuiltinTypeKey::Float => "Float".to_owned(),
-            // Decimal is intentionally inactive in the Alpha surface.
             BuiltinTypeKey::Decimal => "Decimal".to_owned(),
             BuiltinTypeKey::String => "String".to_owned(),
             BuiltinTypeKey::Char => "Char".to_owned(),
             BuiltinTypeKey::Range => "Range".to_owned(),
         },
-        TypeIdentityKey::Nominal(path) => path
-            .name_str(string_table)
-            .unwrap_or("<nominal>")
-            .to_owned(),
-        TypeIdentityKey::External(type_id) => format!("External({})", type_id.0),
+        TypeIdentityKey::Nominal(path) => path_reader
+            .component(*path)
+            .map(|component| string_table.resolve(component).to_owned())
+            .unwrap_or_else(|| "<nominal>".to_owned()),
         TypeIdentityKey::Collection {
             element: inner,
             fixed_capacity,
         } => match fixed_capacity {
             Some(cap) => format!(
                 "{{{cap} {}}}",
-                display_type_identity_key(inner, string_table)
+                display_type_identity_key_with_resolver(inner, path_reader, string_table)
             ),
-            None => format!("{{{}}}", display_type_identity_key(inner, string_table)),
+            None => format!(
+                "{{{}}}",
+                display_type_identity_key_with_resolver(inner, path_reader, string_table)
+            ),
         },
-        TypeIdentityKey::Map { key, value } => {
-            format!(
-                "{{{key_display} = {value_display}}}",
-                key_display = display_type_identity_key(key, string_table),
-                value_display = display_type_identity_key(value, string_table)
-            )
-        }
-        TypeIdentityKey::Option(inner) => {
-            format!("{}?", display_type_identity_key(inner, string_table))
-        }
+        TypeIdentityKey::Map { key, value } => format!(
+            "{{{} = {}}}",
+            display_type_identity_key_with_resolver(key, path_reader, string_table),
+            display_type_identity_key_with_resolver(value, path_reader, string_table)
+        ),
+        TypeIdentityKey::Option(inner) => format!(
+            "{}?",
+            display_type_identity_key_with_resolver(inner, path_reader, string_table)
+        ),
         TypeIdentityKey::FallibleCarrier { success, error } => format_fallible_signature_parts(
-            vec![display_type_identity_key(success, string_table)],
-            display_type_identity_key(error, string_table),
+            vec![display_type_identity_key_with_resolver(
+                success,
+                path_reader,
+                string_table,
+            )],
+            display_type_identity_key_with_resolver(error, path_reader, string_table),
         ),
         TypeIdentityKey::GenericInstance(instance) => {
-            display_generic_instantiation_key(instance, string_table)
+            display_generic_instantiation_key_with_resolver(instance, path_reader, string_table)
         }
+        TypeIdentityKey::External(external) => format!("<external:{}>", external.0),
     }
 }
+
+
 
 // -----------------------------------------------------------
 //  DataType -> Identity Key Bridge

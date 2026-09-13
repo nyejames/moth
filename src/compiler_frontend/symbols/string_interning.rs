@@ -109,6 +109,15 @@ pub struct StringIdRemap {
 }
 
 impl StringIdRemap {
+    /// Build a remap for a source table whose IDs are already valid in the destination.
+    pub(crate) fn identity(source_len: usize) -> Self {
+        Self {
+            identity_prefix_len: source_len,
+            mapped_suffix: Vec::new(),
+            is_identity: true,
+        }
+    }
+
     pub fn get(&self, old: StringId) -> StringId {
         let old_index = old.0 as usize;
         if old_index < self.identity_prefix_len {

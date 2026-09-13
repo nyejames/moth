@@ -22,11 +22,12 @@ use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_
 struct PreparedModule {
     preparation: ModuleMaterialisationPreparation,
     public_interface: PublicSemanticInterface,
+    path_fork: crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: StringTable,
 }
 
 fn prepared_module(source: &str, package: &str) -> PreparedModule {
-    let (mut build_result, string_table) =
+    let (mut build_result, path_fork, string_table) =
         parse_single_file_ast_build_result(source).expect("generic source should build");
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local(package),
@@ -69,6 +70,7 @@ fn prepared_module(source: &str, package: &str) -> PreparedModule {
             reusable_evidence: Vec::new(),
             concrete_call_summaries: Vec::new(),
         },
+        path_fork,
         string_table,
     }
 }
@@ -89,7 +91,11 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
     let control = prepared_module(ALIAS_SOURCE, "closure-alias-control");
     control
         .preparation
-        .freeze(&control.public_interface, &ModuleResourceTable::new())
+        .freeze(
+            &control.public_interface,
+            &ModuleResourceTable::new(),
+            &control.path_fork,
+        )
         .expect("a completed alias target must freeze")
         .expect("the retained generic should produce a materialisation context");
 
@@ -100,7 +106,13 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         .preparation
         .resolved_type_aliases_by_path
         .keys()
-        .find(|path| path.name_str(&prepared.string_table) == Some("Count"))
+        .find(|path| {
+            prepared
+                .path_fork
+                .component(**path)
+                .map(|id| prepared.string_table.resolve(id))
+                == Some("Count")
+        })
         .cloned()
         .expect("the module should retain its Count alias");
     let alias = prepared
@@ -109,22 +121,33 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         .get_mut(&alias_path)
         .expect("the alias row should be present");
     alias.target_type_id = TypeId(u32::MAX);
+    let alias_declaration_span = alias.declaration_span;
 
     let freeze_result = prepared
         .preparation
-        .freeze(&prepared.public_interface, &ModuleResourceTable::new());
+        .freeze(
+            &prepared.public_interface,
+            &ModuleResourceTable::new(),
+            &prepared.path_fork,
+        );
     let Err(error) = freeze_result else {
         panic!("an unprojectable alias target must not freeze");
     };
 
     assert_eq!(error.error_type, ErrorType::Compiler);
+    // The message renders the alias path through PathId's debug form (the fixture has no
+    // production path-name spelling at the freeze boundary), so assert the message identifies
+    // the exact retained alias row this test corrupted.
     assert!(
-        error.msg.contains("Count") && error.msg.contains("completed-target invariant"),
+        error.msg.contains("completed-target invariant")
+            && error.msg.contains(&format!("{alias_path:?}")),
         "unexpected alias freeze error: {error:?}"
     );
-    // The alias declaration retains authored provenance rather than falling back to file start.
-    assert!(
-        error.source_span.is_some(),
-        "the alias declaration span must survive transport",
+    // The alias declaration retains authored provenance rather than falling back to file start:
+    // the transported span must be exactly the alias's declaration span.
+    assert_eq!(
+        error.source_span,
+        alias_declaration_span,
+        "the alias declaration span must survive transport unchanged",
     );
 }

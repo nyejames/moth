@@ -39,7 +39,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::headers::types::DependencySelection;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -53,7 +53,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PublicExportTarget {
     SourceDeclaration {
-        path: InternedPath,
+        path: PathId,
     },
     ProviderSelection {
         /// Retained selection identity used to join this re-export to the completed provider
@@ -64,13 +64,13 @@ pub enum PublicExportTarget {
         source_name: StringId,
         /// Authored provider-plus-selection path retained for source diagnostics and receiver
         /// method rejection before provider projection completes.
-        diagnostic_path: InternedPath,
+        diagnostic_path: PathId,
     },
     External(crate::compiler_frontend::external_packages::ExternalSymbolId),
 }
 
 impl PublicExportTarget {
-    pub(crate) fn source_path(&self) -> Option<&InternedPath> {
+    pub(crate) fn source_path(&self) -> Option<&PathId> {
         match self {
             Self::SourceDeclaration { path } => Some(path),
             Self::External(_) => None,
@@ -89,7 +89,7 @@ impl PublicExportTarget {
     ///      instead of duplicating the source/external match arms, so nameability and origin
     ///      indexing cannot drift on what a public export targets. Provider selections are
     ///      intentionally excluded because their diagnostic path is not semantic source identity.
-    pub(crate) fn is_source_path(&self, path: &InternedPath) -> bool {
+    pub(crate) fn is_source_path(&self, path: &PathId) -> bool {
         self.source_path()
             .is_some_and(|exported_path| exported_path == path)
     }
@@ -113,9 +113,9 @@ pub struct PublicExportEntry {
 ///      filename from the dependency prefix.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ModuleRootBoundary {
-    pub(crate) dependency_prefix: InternedPath,
-    pub(crate) module_root: InternedPath,
-    pub(crate) root_file: InternedPath,
+    pub(crate) dependency_prefix: PathId,
+    pub(crate) module_root: PathId,
+    pub(crate) root_file: PathId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,7 +147,7 @@ impl DeclarationId {
 pub(crate) struct OrderedSemanticDeclaration {
     pub(crate) declaration_id: DeclarationId,
     pub(crate) header_index: usize,
-    pub(crate) path: InternedPath,
+    pub(crate) path: PathId,
     pub(crate) kind: OrderedSemanticDeclarationKind,
     pub(crate) declaration: Option<Declaration>,
 }
@@ -202,40 +202,40 @@ pub(crate) struct ModuleSymbols {
     pub(crate) builtin_declarations: Vec<Declaration>,
 
     // Order-independent maps built during header parsing.
-    pub(crate) canonical_source_by_symbol_path: FxHashMap<InternedPath, InternedPath>,
+    pub(crate) canonical_source_by_symbol_path: FxHashMap<PathId, PathId>,
     /// Exact authored declaration-name spans keyed by canonical symbol path.
     ///
     /// WHAT: carries source-owned declaration anchors into binding collision diagnostics.
     /// WHY: declaration provenance is a byte range and remains source-qualified until a
     ///      diagnostic crosses the module boundary.
-    pub(crate) declaration_spans_by_symbol_path: FxHashMap<InternedPath, SourceSpan>,
-    pub(crate) module_file_paths: FxHashSet<InternedPath>,
-    pub(crate) file_roles_by_source: FxHashMap<InternedPath, FileRole>,
-    pub(crate) source_ids_by_source: FxHashMap<InternedPath, SourceId>,
+    pub(crate) declaration_spans_by_symbol_path: FxHashMap<PathId, SourceSpan>,
+    pub(crate) module_file_paths: FxHashSet<PathId>,
+    pub(crate) file_roles_by_source: FxHashMap<PathId, FileRole>,
+    pub(crate) source_ids_by_source: FxHashMap<PathId, SourceId>,
     pub(crate) file_dependency_clauses_by_source:
-        FxHashMap<InternedPath, Vec<RetainedDependencyClause>>,
+        FxHashMap<PathId, Vec<RetainedDependencyClause>>,
     // One flat selection table per prepared source file. Clause ranges index this table.
-    pub(crate) dependency_selections_by_source: FxHashMap<InternedPath, Vec<DependencySelection>>,
+    pub(crate) dependency_selections_by_source: FxHashMap<PathId, Vec<DependencySelection>>,
     // Source declarations eligible for dependency-binding surfaces. Private root-file
     // declarations are intentionally absent because they are reachable only inside the root
     // file that authored them.
-    pub(crate) dependency_bindable_source_symbol_paths: FxHashSet<InternedPath>,
-    pub(crate) declared_paths_by_file: FxHashMap<InternedPath, FxHashSet<InternedPath>>,
-    pub(crate) declared_names_by_file: FxHashMap<InternedPath, FxHashSet<StringId>>,
+    pub(crate) dependency_bindable_source_symbol_paths: FxHashSet<PathId>,
+    pub(crate) declared_paths_by_file: FxHashMap<PathId, FxHashSet<PathId>>,
+    pub(crate) declared_names_by_file: FxHashMap<PathId, FxHashSet<StringId>>,
     // Source constants detected during header symbol collection.
     // WHY: Moth template's implicit body scope is header-stage visibility over source constants only.
     // AST later decides whether those constants actually fold to plain values or const records.
-    pub(crate) constant_paths: FxHashSet<InternedPath>,
-    pub(crate) type_alias_paths: FxHashSet<InternedPath>,
-    pub(crate) nominal_type_paths: FxHashSet<InternedPath>,
-    pub(crate) trait_paths: FxHashSet<InternedPath>,
-    pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationKind>,
+    pub(crate) constant_paths: FxHashSet<PathId>,
+    pub(crate) type_alias_paths: FxHashSet<PathId>,
+    pub(crate) nominal_type_paths: FxHashSet<PathId>,
+    pub(crate) trait_paths: FxHashSet<PathId>,
+    pub(crate) generic_declarations_by_path: FxHashMap<PathId, GenericDeclarationKind>,
 
     // Builtin data merged during header parsing.
-    pub(crate) builtin_visible_symbol_paths: FxHashSet<InternedPath>,
+    pub(crate) builtin_visible_symbol_paths: FxHashSet<PathId>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
-    pub(crate) resolved_struct_fields_by_path: FxHashMap<InternedPath, Vec<Declaration>>,
-    pub(crate) struct_source_by_path: FxHashMap<InternedPath, InternedPath>,
+    pub(crate) resolved_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
+    pub(crate) struct_source_by_path: FxHashMap<PathId, PathId>,
 
     // Receiver-method paths detected during header parsing.
     // WHAT: every function whose first parameter is named `this` is recorded here so binding
@@ -243,12 +243,12 @@ pub(crate) struct ModuleSymbols {
     //       instead of treating them as free-function value members.
     // WHY: header stage needs to distinguish receiver methods from ordinary functions for
     //      namespace-record shape and direct-selection dependency routing without re-resolving signatures.
-    pub(crate) receiver_method_paths: FxHashSet<InternedPath>,
+    pub(crate) receiver_method_paths: FxHashSet<PathId>,
     // Best-effort receiver type name from the parsed signature.
     // WHY: binding a struct also binds same-surface methods for that struct only. The header
     //      stage has not resolved semantic receiver types yet, but the parsed receiver name is
     //      enough to avoid binding unrelated methods from the same source file.
-    pub(crate) receiver_method_receiver_names: FxHashMap<InternedPath, StringId>,
+    pub(crate) receiver_method_receiver_names: FxHashMap<PathId, StringId>,
 
     // Public export data: maps source-backed package prefixes to exported root-file entries.
     // Each entry records the export name (which may differ from the target path name via alias)
@@ -258,14 +258,14 @@ pub(crate) struct ModuleSymbols {
     // Maps each source-backed package prefix to the actual logical root source file.
     // WHY: namespace bindings need the prepared root file itself, not a synthetic path spelling,
     // because source-backed package roots usually live under configured folders such as `lib/`.
-    pub(crate) source_package_root_files: FxHashMap<String, InternedPath>,
+    pub(crate) source_package_root_files: FxHashMap<String, PathId>,
     // Maps source file logical path to its package prefix, if the file belongs to a source-backed package.
-    pub(crate) file_package_membership: FxHashMap<InternedPath, String>,
+    pub(crate) file_package_membership: FxHashMap<PathId, String>,
     // Module root membership for entry-root files (not source-backed packages).
     // Maps file path (logical or canonical) to its module root path.
-    pub(crate) file_module_membership: FxHashMap<InternedPath, InternedPath>,
+    pub(crate) file_module_membership: FxHashMap<PathId, PathId>,
     // Public exports for module roots, keyed by module root path.
-    pub(crate) module_root_public_exports: FxHashMap<InternedPath, FxHashSet<PublicExportEntry>>,
+    pub(crate) module_root_public_exports: FxHashMap<PathId, FxHashSet<PublicExportEntry>>,
     // Prepared entry-root boundary identities, sorted by dependency prefix longest first.
     // Used for intercepting cross-module dependencies before file resolution and for resolving the
     // actual prepared root file for namespace bindings.
@@ -276,7 +276,7 @@ impl ModuleSymbols {
     /// Resolve one clause range through the selection table owned by its source file.
     pub(crate) fn selections_for_clause<'a>(
         &'a self,
-        source_file: &InternedPath,
+        source_file: &PathId,
         clause: &RetainedDependencyClause,
     ) -> Result<&'a [DependencySelection], CompilerError> {
         let selections = self
@@ -289,11 +289,11 @@ impl ModuleSymbols {
 
     /// Join a module source's logical path to its build-lifetime registration slot.
     ///
-    /// WHY: neighbouring tables stay keyed by `InternedPath`; canonical OS path and kind live
+    /// WHY: neighbouring tables stay keyed by `PathId`; canonical OS path and kind live
     ///      only on `SourceSlot`. Callers with no registered identity observe `None`.
     pub(crate) fn source_record<'a>(
         &'a self,
-        source_file: &InternedPath,
+        source_file: &PathId,
         source_files: &'a SourceDatabase,
     ) -> Option<&'a SourceSlot> {
         let source_id = *self.source_ids_by_source.get(source_file)?;
@@ -347,6 +347,7 @@ impl ModuleSymbols {
         &mut self,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
     ) {
         self.ordered_semantic_declarations.clear();
         self.compiler_owned_declarations.clear();
@@ -361,9 +362,9 @@ impl ModuleSymbols {
                         header_index,
                         path: header.tokens.src_path.clone(),
                         kind,
-                        declaration: declaration_from_header(header, string_table),
+                        declaration: declaration_from_header(header, string_table, path_fork),
                     });
-            } else if let Some(declaration) = declaration_from_header(header, string_table) {
+            } else if let Some(declaration) = declaration_from_header(header, string_table, path_fork) {
                 self.compiler_owned_declarations.push(declaration);
             }
         }
@@ -391,7 +392,11 @@ fn ordered_semantic_declaration_kind(
     }
 }
 
-fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> Option<Declaration> {
+fn declaration_from_header(
+    header: &Header,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Option<Declaration> {
     match &header.kind {
         HeaderKind::Function { .. } => Some(Declaration {
             id: header.tokens.src_path.to_owned(),
@@ -453,9 +458,12 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
         HeaderKind::StartFunction => {
             // The implicit start function is a compiler-owned synthetic declaration scoped under
             // the entry source file.
-            let start_name = header
-                .source_file
-                .join_str(IMPLICIT_START_FUNC_NAME, string_table);
+            let start_name = path_fork
+                .try_intern_child(
+                    header.source_file,
+                    string_table.intern(IMPLICIT_START_FUNC_NAME),
+                )
+                .expect("path table exhausted while interning implicit start path");
             Some(Declaration {
                 id: start_name.to_owned(),
                 value: {
@@ -489,7 +497,7 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
 }
 
 fn constant_declaration_placeholder(
-    path: &InternedPath,
+    path: &PathId,
     declaration: &DeclarationSyntax,
     name_span: Option<SourceSpan>,
 ) -> Declaration {
@@ -514,9 +522,10 @@ fn constant_declaration_placeholder(
 /// Dependency-bindable source symbols are also recorded for direct clause resolution.
 pub(crate) fn register_declared_symbol(
     module_symbols: &mut ModuleSymbols,
-    symbol_path: &InternedPath,
-    source_file: &InternedPath,
+    symbol_path: &PathId,
+    source_file: &PathId,
     is_dependency_bindable_source_symbol: bool,
+    path_fork: &PathInternerFork,
 ) {
     if is_dependency_bindable_source_symbol {
         module_symbols
@@ -528,7 +537,7 @@ pub(crate) fn register_declared_symbol(
         .entry(source_file.to_owned())
         .or_default()
         .insert(symbol_path.to_owned());
-    if let Some(name) = symbol_path.name() {
+    if let Some(name) = path_fork.component(*symbol_path) {
         module_symbols
             .declared_names_by_file
             .entry(source_file.to_owned())

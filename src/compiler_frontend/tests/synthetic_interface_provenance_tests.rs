@@ -21,7 +21,7 @@ use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, Bu
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -221,22 +221,23 @@ fn aggregate_value_constructors_union_child_provenance() {
     );
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let field_a = Declaration {
-        id: InternedPath::from_single_str("first", &mut string_table),
+        id: path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits"),
         value: Expression::int(3, span, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(project_provenance.clone()),
         binding_span: None,
         config_qualifier: None,
     };
     let field_b = Declaration {
-        id: InternedPath::from_single_str("second", &mut string_table),
+        id: path_fork.try_intern_portable_path("second", &mut string_table).expect("test path fits"),
         value: Expression::int(4, span, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(builder_provenance.clone()),
         binding_span: None,
         config_qualifier: None,
     };
     let struct_expression = Expression::struct_instance(
-        InternedPath::from_single_str("Record", &mut string_table),
+        path_fork.try_intern_portable_path("Record", &mut string_table).expect("test path fits"),
         vec![field_a, field_b],
         span,
         ValueMode::ImmutableOwned,
@@ -250,10 +251,10 @@ fn aggregate_value_constructors_union_child_provenance() {
     );
 
     let choice_expression = Expression::choice_construct(ChoiceConstructInput {
-        nominal_path: InternedPath::from_single_str("Choice", &mut string_table),
+        nominal_path: path_fork.try_intern_portable_path("Choice", &mut string_table).expect("test path fits"),
         tag: 0,
         fields: vec![Declaration {
-            id: InternedPath::from_single_str("payload", &mut string_table),
+            id: path_fork.try_intern_portable_path("payload", &mut string_table).expect("test path fits"),
             value: Expression::int(5, span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance),
             binding_span: None,
@@ -324,6 +325,7 @@ fn provenance_unioned_through_constant_folding() {
     };
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let folded = match constant_fold(rpn.items, &mut string_table).expect("folding should succeed")
     {
         ConstantFoldOutcome::Folded(stack) => stack,

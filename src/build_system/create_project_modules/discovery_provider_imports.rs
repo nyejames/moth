@@ -1,44 +1,59 @@
 use super::*;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
 // -------------------------
 //  Provider-backed import resolution
 // -------------------------
 
 pub(super) struct ProviderBackedImportRequest<'a> {
     pub(super) consumer_canonical_path: &'a Path,
-    pub(super) import_path: &'a InternedPath,
+    pub(super) import_path: PathId,
     pub(super) source_span: Option<SourceSpan>,
-    pub(super) prefix_path: &'a InternedPath,
+    pub(super) prefix_path: PathId,
     pub(super) raw_prefix: &'a str,
     pub(super) provider: &'a std::sync::Arc<dyn ExternalImportProvider>,
     pub(super) project_path_resolver: &'a ProjectPathResolver,
-    pub(super) directory_dependency_resolution: Option<DirectoryDependencyResolution<'a>>,
+    /// The caller-owned discovery fork the provider must intern into.
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Resolves a provider-backed import prefix to a canonical filesystem path, checks the build cache,
 /// calls the provider if needed, and records the result in the resolution table and package registry.
 pub(super) fn resolve_provider_backed_import(
     request: ProviderBackedImportRequest<'_>,
+    directory_target: Option<PathBuf>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
     // Directory projects resolve provider-owned targets through the same boundary-aware
     // namespace as compiler-semantic dependencies. Single-file synthetic compilation retains its
-    // separate filesystem-backed resolver.
-    let canonical_source_path = match request.directory_dependency_resolution {
-        Some(resolution) => resolution
-            .resolve_provider_target(
-                request.prefix_path,
-                request.consumer_canonical_path,
-                request.source_span,
-                string_table,
-            )
-            .map_err(SourceDiscoveryError::from)?,
+    // separate filesystem-backed resolver. Both lanes finish before the mutable fork is moved
+    // into the provider context.
+    let canonical_source_path = match directory_target {
+        Some(canonical_source_path) => canonical_source_path,
         None => resolve_provider_target_via_filesystem(&request, string_table)?,
     };
 
+    let ProviderBackedImportRequest {
+        consumer_canonical_path,
+        import_path,
+        source_span,
+        prefix_path: _,
+        raw_prefix,
+        provider,
+        project_path_resolver,
+        path_fork,
+    } = request;
+
     invoke_provider_and_record_resolution(
         canonical_source_path,
-        &request,
+        consumer_canonical_path,
+        import_path,
+        source_span,
+        raw_prefix,
+        provider,
+        project_path_resolver,
+        path_fork,
         external_imports,
         string_table,
     )
@@ -55,6 +70,7 @@ fn resolve_provider_target_via_filesystem(
 ) -> Result<PathBuf, SourceDiscoveryError> {
     let canonical_source_path = resolve_provider_prefix_to_canonical_path(
         request.prefix_path,
+        request.path_fork,
         request.consumer_canonical_path,
         request.project_path_resolver,
         string_table,
@@ -72,31 +88,32 @@ fn resolve_provider_target_via_filesystem(
     Ok(canonical_source_path)
 }
 
-/// Check the build cache, call the provider when needed, and record the result in the
-/// resolution table and package registry.
-///
-/// WHAT: shared between the directory index path and the single-file filesystem path. The
-/// `canonical_source_path` is the resolved target's IO handle from either path.
 fn invoke_provider_and_record_resolution(
     canonical_source_path: PathBuf,
-    request: &ProviderBackedImportRequest<'_>,
+    consumer_canonical_path: &Path,
+    import_path: PathId,
+    source_span: Option<SourceSpan>,
+    raw_prefix: &str,
+    provider: &std::sync::Arc<dyn ExternalImportProvider>,
+    project_path_resolver: &ProjectPathResolver,
+    path_fork: &mut PathInternerFork,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
     let cache_key = ExternalImportCacheKey {
         canonical_source_path: canonical_source_path.clone(),
-        provider_kind: request.provider.kind(),
+        provider_kind: provider.kind(),
     };
 
     // Use cached result when available.
     if let Some(cached) = external_imports.cache.get(&cache_key) {
         let source_file_logical = source_file_logical_path(
-            request.consumer_canonical_path,
-            request.project_path_resolver,
+            consumer_canonical_path,
+            project_path_resolver,
         )?;
         external_imports.resolution_table.insert(
             source_file_logical,
-            request.raw_prefix,
+            raw_prefix,
             cached.clone(),
         );
         return Ok(());
@@ -104,29 +121,28 @@ fn invoke_provider_and_record_resolution(
 
     // The provider request carries the portable logical spelling so stable package and asset
     // identity never keys on this machine's checkout path.
-    let logical_source = request
-        .project_path_resolver
+    let logical_source = project_path_resolver
         .logical_path_for_canonical_file(&canonical_source_path)
         .map_err(SourceDiscoveryError::from)?;
     let logical_source_path = PortableResourcePath::from_relative_logical_path(&logical_source)
         .map_err(SourceDiscoveryError::from)?;
 
     let provider_request = ExternalImportRequest {
-        import_path: request.import_path.to_portable_string(string_table),
+        import_path: path_fork.render_portable(import_path, string_table, &mut Vec::new()),
         logical_source_path,
         canonical_source_path: canonical_source_path.clone(),
-        source_span: request.source_span,
+        source_span,
     };
 
     let result = {
         let mut context = ExternalImportProviderContext {
             package_registry: external_imports.external_packages,
             cache: external_imports.cache,
+            path_fork,
             string_table,
         };
 
-        request
-            .provider
+        provider
             .resolve_external_import(provider_request, &mut context)
             .map_err(SourceDiscoveryError::from)?
     };
@@ -135,16 +151,17 @@ fn invoke_provider_and_record_resolution(
         external_imports.cache.insert(cache_key, resolved.clone());
 
         let source_file_logical = source_file_logical_path(
-            request.consumer_canonical_path,
-            request.project_path_resolver,
+            consumer_canonical_path,
+            project_path_resolver,
         )?;
         external_imports
             .resolution_table
-            .insert(source_file_logical, request.raw_prefix, resolved);
+            .insert(source_file_logical, raw_prefix, resolved);
     }
 
     Ok(())
 }
+
 
 /// Resolves a provider import prefix to a canonical filesystem path without selecting a compiler
 /// source extension candidate.
@@ -152,13 +169,18 @@ fn invoke_provider_and_record_resolution(
 /// WHAT: reuses the normal base/boundary/case rules from `ProjectPathResolver` but skips the
 /// extension candidate selection used by isolated compiler-source resolution.
 fn resolve_provider_prefix_to_canonical_path(
-    prefix_path: &InternedPath,
+    prefix_path: PathId,
+    path_fork: &PathInternerFork,
     declaring_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<PathBuf, SourceDiscoveryError> {
     let (base_kind, filesystem_base) = if let Some(package_root) =
-        project_path_resolver.source_package_root_for_dependency(prefix_path, string_table)
+        project_path_resolver.source_package_root_for_dependency(
+            prefix_path,
+            path_fork,
+            string_table,
+        )
     {
         (
             crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase::SourcePackageRoot,
@@ -177,7 +199,8 @@ fn resolve_provider_prefix_to_canonical_path(
         )
     };
 
-    let normalized = join_and_normalize_path(&filesystem_base, prefix_path, string_table);
+    let normalized =
+        join_and_normalize_path(&filesystem_base, prefix_path, path_fork, string_table);
 
     let canonical = fs::canonicalize(&normalized)
         .map_err(|error| {
@@ -196,6 +219,7 @@ fn resolve_provider_prefix_to_canonical_path(
         &base_kind,
         &filesystem_base,
         prefix_path,
+        path_fork,
     )
     .map_err(SourceDiscoveryError::from)?;
 
@@ -233,7 +257,7 @@ fn source_file_logical_path(
 fn check_provider_dependency_module_boundary(
     declaring_file: &Path,
     target_file: &Path,
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
     source_span: Option<SourceSpan>,
     project_path_resolver: &ProjectPathResolver,
 ) -> Result<(), SourceDiscoveryError> {
@@ -293,14 +317,14 @@ pub(super) fn unsupported_builder_package_error(
 }
 
 pub(super) fn unsupported_external_extension_error(
-    import_path: &InternedPath,
+    import_path: PathId,
     extension: &str,
     source_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let extension_id = string_table.intern(extension);
     CompilerDiagnostic::unsupported_external_extension(
-        import_path.clone(),
+        import_path,
         extension_id,
         source_span,
     )

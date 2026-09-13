@@ -9,7 +9,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
@@ -25,7 +25,8 @@ pub fn parse_record_body(
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     member_context: SignatureMemberContext,
-    owner_path: &InternedPath,
+    owner_path: PathId,
+    path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> RecordBodyParseResult {
     token_stream.advance();
@@ -35,6 +36,7 @@ pub fn parse_record_body(
         warnings,
         member_context,
         owner_path,
+        path_fork,
         span_builder,
     )?;
 

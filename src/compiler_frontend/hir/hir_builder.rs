@@ -41,7 +41,7 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::return_hir_transformation_error;
 use rustc_hash::FxHashMap;
@@ -56,11 +56,17 @@ mod reactivity;
 pub(in crate::compiler_frontend) fn lower_module(
     ast: Ast,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     function_origin_lookup: HirFunctionOriginLookup,
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
 ) -> Result<HirLoweringResult, CompilerMessages> {
     let type_environment = ast.type_environment.clone();
-    let mut ctx = HirBuilder::new(string_table, type_environment, function_origin_lookup);
+    let mut ctx = HirBuilder::new(
+        string_table,
+        path_fork,
+        type_environment,
+        function_origin_lookup,
+    );
 
     ctx.set_module_resources(module_resources);
     ctx.build_hir_module(ast)
@@ -110,7 +116,8 @@ pub struct HirBuilder<'a> {
 
     // === For variable name resolution ===
     pub(super) string_table: &'a mut StringTable,
-
+    /// Module-local path identity table used to resolve all `PathId` names.
+    pub(super) path_fork: &'a mut PathInternerFork,
     // === ID Counters ===
     next_block_id: u32,
     next_local_id: u32,
@@ -148,18 +155,18 @@ pub struct HirBuilder<'a> {
     pub(super) side_table: HirSideTable,
 
     // === Name resolution tables (filled during declaration pass) ===
-    // AST guarantees module-wide unique InternedPath symbol IDs. HIR keys symbol resolution
+    // AST guarantees module-wide unique PathId symbol IDs. HIR keys symbol resolution
     // by full paths, never by scope-local leaf strings.
-    pub(super) locals_by_name: FxHashMap<InternedPath, LocalId>,
-    pub(super) functions_by_name: FxHashMap<InternedPath, FunctionId>,
-    pub(super) imported_functions_by_name: FxHashMap<InternedPath, AstImportedFunctionContract>,
+    pub(super) locals_by_name: FxHashMap<PathId, LocalId>,
+    pub(super) functions_by_name: FxHashMap<PathId, FunctionId>,
+    pub(super) imported_functions_by_name: FxHashMap<PathId, AstImportedFunctionContract>,
     pub(super) imported_fallible_carriers_by_origin: FxHashMap<OriginFunctionId, TypeId>,
     pub(super) module_private_fallible_carriers_by_identity:
         FxHashMap<ModulePrivateExecutableIdentity, TypeId>,
     pub(super) generated_fallible_carriers_by_identity:
         FxHashMap<GeneratedFunctionIdentity, TypeId>,
-    pub(super) structs_by_name: FxHashMap<InternedPath, StructId>,
-    pub(super) choices_by_name: FxHashMap<InternedPath, ChoiceId>,
+    pub(super) structs_by_name: FxHashMap<PathId, StructId>,
+    pub(super) choices_by_name: FxHashMap<PathId, ChoiceId>,
     /// Generic struct instantiations keyed by structured identity, not string paths.
     /// WHAT: `Box of Int` and `Box of String` need distinct StructIds.
     pub(super) generic_structs_by_key: FxHashMap<
@@ -171,8 +178,8 @@ pub struct HirBuilder<'a> {
         crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey,
         ChoiceId,
     >,
-    pub(super) fields_by_struct_and_name: FxHashMap<(StructId, InternedPath), FieldId>,
-    pub(super) module_constants_by_name: FxHashMap<InternedPath, ConstValueId>,
+    pub(super) fields_by_struct_and_name: FxHashMap<(StructId, PathId), FieldId>,
+    pub(super) module_constants_by_name: FxHashMap<PathId, ConstValueId>,
     pub(super) module_const_values: ConstValueStore,
 
     // === Fast ID -> arena index maps ===
@@ -235,6 +242,7 @@ impl<'a> HirBuilder<'a> {
 
     pub fn new(
         string_table: &'a mut StringTable,
+        path_fork: &'a mut PathInternerFork,
         type_environment: TypeEnvironment,
         function_origin_lookup: HirFunctionOriginLookup,
     ) -> HirBuilder<'a> {
@@ -245,10 +253,10 @@ impl<'a> HirBuilder<'a> {
             ast_warnings: Vec::new(),
 
             string_table,
+            path_fork,
             type_environment,
             module_resources: None,
             function_origin_lookup,
-
             next_block_id: 0,
             next_local_id: 0,
             next_node_id: 0,
@@ -698,7 +706,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn with_temporary_local_bindings<T>(
         &mut self,
-        bindings: impl IntoIterator<Item = (InternedPath, LocalId)>,
+        bindings: impl IntoIterator<Item = (PathId, LocalId)>,
         f: impl FnOnce(&mut Self) -> Result<T, CompilerError>,
     ) -> Result<T, CompilerError> {
         let mut previous_bindings = Vec::new();
@@ -811,12 +819,11 @@ impl<'a> HirBuilder<'a> {
     // -------------------------
     //  Diagnostics Support
     // -------------------------
-
-    pub(super) fn symbol_name_for_diagnostics(&self, symbol: &InternedPath) -> String {
-        symbol
-            .name_str(self.string_table)
-            .map(str::to_owned)
-            .unwrap_or_else(|| symbol.to_string(self.string_table))
+    pub(super) fn symbol_name_for_diagnostics(&self, symbol: &PathId) -> String {
+        self.path_fork
+            .component(*symbol)
+            .map(|component| self.string_table.resolve(component).to_owned())
+            .unwrap_or_else(|| format!("{symbol:?}"))
     }
 }
 

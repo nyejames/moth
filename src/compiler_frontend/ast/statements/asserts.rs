@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -36,6 +37,7 @@ pub(crate) fn parse_assert_statement(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let assert_span = Some(token_stream.current_span());
     let assert_name = string_table.intern("assert");
@@ -81,6 +83,7 @@ pub(crate) fn parse_assert_statement(
         CallArgumentSyntax::Supported {
             callee_name: Some(assert_name),
         },
+        path_fork,
     )?;
 
     let resolved_arguments = {
@@ -93,6 +96,7 @@ pub(crate) fn parse_assert_statement(
             CallArgumentResolutionContext {
                 string_table,
                 type_environment: type_check_context.type_environment,
+                path_fork,
                 compatibility_cache: type_check_context.compatibility_cache,
             },
         )?

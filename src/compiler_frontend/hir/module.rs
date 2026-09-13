@@ -26,6 +26,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
+use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::FxHashMap;
@@ -152,6 +153,11 @@ impl HirModule {
             const_facts: HirConstFacts::default(),
             function_provenance: FxHashMap::default(),
         }
+    }
+
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.side_table.remap_path_ids(remap);
+        self.const_facts.remap_path_ids(remap);
     }
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {

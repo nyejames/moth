@@ -9,14 +9,14 @@ use super::{
     BindingEnvironmentBuilder, FileVisibility, ReceiverMethodVisibility, SourceFunctionTarget,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 impl<'a> BindingEnvironmentBuilder<'a> {
     pub(super) fn add_visible_receiver_method(
         file_visibility: &mut FileVisibility,
         local_name: StringId,
-        function_path: &InternedPath,
+        function_path: &PathId,
         span: Option<SourceSpan>,
     ) {
         let methods = file_visibility

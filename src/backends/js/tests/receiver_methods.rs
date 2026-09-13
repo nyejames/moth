@@ -10,6 +10,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 // Receiver method call emission tests [receiver]
 // ---------------------------------------------------------------------------
@@ -18,6 +19,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 #[test]
 fn receiver_method_call_emits_receiver_as_first_arg() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -85,19 +87,19 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        InternedPath::from_single_str("main", &mut string_table),
+        path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits"),
     );
     module.side_table.bind_function_name(
         FunctionId(1),
-        InternedPath::from_single_str("bump", &mut string_table),
+        path_fork.try_intern_portable_path("bump", &mut string_table).expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(0),
-        InternedPath::from_single_str("receiver", &mut string_table),
+        path_fork.try_intern_portable_path("receiver", &mut string_table).expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(1),
-        InternedPath::from_single_str("result", &mut string_table),
+        path_fork.try_intern_portable_path("result", &mut string_table).expect("test path fits"),
     );
     module
         .function_origins
@@ -106,13 +108,12 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         .function_origins
         .insert(FunctionId(1), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
 
     let receiver_name = expected_dev_local_name("receiver", 0);
@@ -130,6 +131,7 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
 #[test]
 fn receiver_method_call_assigns_value_for_return() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -182,19 +184,19 @@ fn receiver_method_call_assigns_value_for_return() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        InternedPath::from_single_str("main", &mut string_table),
+        path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits"),
     );
     module.side_table.bind_function_name(
         FunctionId(1),
-        InternedPath::from_single_str("bump", &mut string_table),
+        path_fork.try_intern_portable_path("bump", &mut string_table).expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(0),
-        InternedPath::from_single_str("receiver", &mut string_table),
+        path_fork.try_intern_portable_path("receiver", &mut string_table).expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(1),
-        InternedPath::from_single_str("result", &mut string_table),
+        path_fork.try_intern_portable_path("result", &mut string_table).expect("test path fits"),
     );
     module
         .function_origins
@@ -203,13 +205,12 @@ fn receiver_method_call_assigns_value_for_return() {
         .function_origins
         .insert(FunctionId(1), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
 
     let result_name = expected_dev_local_name("result", 1);

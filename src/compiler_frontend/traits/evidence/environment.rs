@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId, TraitRequirementId};
 use rustc_hash::FxHashMap;
 
@@ -18,12 +18,11 @@ pub(crate) enum TraitEvidenceKind {
     Builtin,
 }
 
-/// One requirement mapped to the receiver method that implements it.
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // Kept complete for frontend validation and static bound checks.
 pub(crate) struct TraitRequirementEvidence {
     pub(crate) requirement_id: TraitRequirementId,
-    pub(crate) method_path: InternedPath,
+    pub(crate) method_path: PathId,
 }
 
 /// Resolved evidence for one accepted conformance declaration.
@@ -40,7 +39,7 @@ pub(crate) struct TraitEvidenceDefinition {
     pub(crate) kind: TraitEvidenceKind,
     pub(crate) target_type_id: TypeId,
     pub(crate) trait_id: TraitId,
-    pub(crate) source_file: InternedPath,
+    pub(crate) source_file: PathId,
     pub(crate) declaration_span: Option<SourceSpan>,
     pub(crate) requirements: Vec<TraitRequirementEvidence>,
 }

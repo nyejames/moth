@@ -38,7 +38,7 @@ just bench-data-layout
 
 `just bench-data-layout` records the diagnostic data-layout suite under its own history section. Benchmark fixtures in this suite are evidence for compiler memory and timing measurements, not correctness coverage.
 
-Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights all 74 standard cases before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
+Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights every standard manifest case before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
 
 Non-recording commands never append local JSONL history or change tracked summaries.
 
@@ -46,7 +46,7 @@ Recorded runs (`just bench`, `just bench-frontend` and `just bench-data-layout`)
 
 ## Manifest And Stable Identity
 
-`benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 46 workloads, 76 cases and 2 scaling series.
+`benchmarks/manifest.toml` owns the ordered workload and case inventory. Do not copy those counts into this README; they drift as cases are added.
 
 A workload names the source inputs that determine one compilation workload:
 
@@ -495,8 +495,8 @@ Monthly summaries show absolute average times for `all` cases and for each group
 ## Optimization Phase Protocol
 
 For compiler optimisation phases, run both focused frontend and end-to-end suites five independent
-times and compare the benchmark-system medians. Keep the suite's normal warmup/measured iteration
-model. Repeat the whole recorded command rather than changing per-case iteration counts.
+times and compare the benchmark-system medians. Public summaries still print mean (`avg`) movement.
+Keep the suite's normal warmup/measured iteration model. Repeat the whole recorded command rather than changing per-case iteration counts.
 
 Use `just bench-report` and targeted `just profile-case <case-id>` runs for attribution. Record
 only concise conclusions in `benchmarks/frontend-optimization-results.md` and the tracked monthly

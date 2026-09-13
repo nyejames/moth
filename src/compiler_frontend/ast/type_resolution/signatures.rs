@@ -13,7 +13,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
 use crate::compiler_frontend::datatypes::{ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 // -------------------------------
@@ -22,16 +22,16 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 
 /// Resolve a function signature and extract receiver metadata for method cataloging.
 pub(crate) fn resolve_function_signature(
-    function_path: &InternedPath,
+    function_path: &PathId,
     signature: &FunctionSignature,
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_resolution_context: &mut TypeResolutionContext<'_>,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> TypeResolutionResult<ResolvedFunctionSignature> {
     let this_name = string_table.intern("this");
-    let _function_name = function_path.name_str(string_table).unwrap_or("<function>");
-    let function_name_id = function_path
-        .name()
+    let function_name_id = path_fork
+        .component(*function_path)
         .unwrap_or_else(|| string_table.intern("<function>"));
 
     let function_span = type_resolution_context
@@ -64,7 +64,7 @@ pub(crate) fn resolve_function_signature(
             type_resolution_context.type_environment,
             resolved_parameter.value.span,
         )?;
-        if resolved_parameter.id.name() == Some(this_name) {
+        if path_fork.component(resolved_parameter.id) == Some(this_name) {
             if receiver.is_some() {
                 return Err(CompilerDiagnostic::invalid_this_usage(
                     InvalidThisUsageReason::DuplicateThis {
@@ -89,6 +89,7 @@ pub(crate) fn resolve_function_signature(
                 generic_parameter_list_id,
                 type_resolution_context.type_environment,
                 parameter.value.span,
+                path_fork,
                 string_table,
             )?;
 
@@ -141,6 +142,7 @@ fn receiver_key_for_resolved_parameter(
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> TypeResolutionResult<ReceiverKey> {
     if let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(receiver_type_id)
@@ -157,6 +159,7 @@ fn receiver_key_for_resolved_parameter(
                         receiver_type_id,
                         type_environment,
                         span,
+                        path_fork,
                         string_table,
                     )
                 });
@@ -167,6 +170,7 @@ fn receiver_key_for_resolved_parameter(
             receiver_type_id,
             type_environment,
             span,
+            path_fork,
             string_table,
         ));
     }
@@ -179,6 +183,7 @@ fn receiver_key_for_resolved_parameter(
                 receiver_type_id,
                 type_environment,
                 span,
+                path_fork,
                 string_table,
             )
         })
@@ -237,9 +242,10 @@ fn generic_receiver_type_diagnostic(
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    let type_name = receiver_type_name(receiver_type_id, type_environment, string_table);
+    let type_name = receiver_type_name(receiver_type_id, type_environment, path_fork, string_table);
     CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::GenericReceiverType {
             function_name: function_name_id,
@@ -254,9 +260,10 @@ fn unsupported_receiver_type_diagnostic(
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    let type_name = receiver_type_name(receiver_type_id, type_environment, string_table);
+    let type_name = receiver_type_name(receiver_type_id, type_environment, path_fork, string_table);
     CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name: function_name_id,
@@ -269,8 +276,10 @@ fn unsupported_receiver_type_diagnostic(
 fn receiver_type_name(
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> StringId {
     let spelling = diagnostic_type_spelling(receiver_type_id, type_environment);
-    string_table.intern(&spelling.display_with_table(string_table))
+    let path_table = path_fork.snapshot_table();
+    string_table.intern(&spelling.display_with_table(string_table, &path_table))
 }

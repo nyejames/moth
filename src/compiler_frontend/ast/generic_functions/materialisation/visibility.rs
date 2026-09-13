@@ -1,5 +1,4 @@
 //! Stable visibility and namespace capture for generated materialisation.
-use super::frozen_syntax::{materialise_path, stable_path};
 use super::stable_types::{
     StableFunctionSignature, StableFunctionTarget, StableGenericParameter, StableReceiverKey,
 };
@@ -13,7 +12,7 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
@@ -30,7 +29,7 @@ pub(super) struct StableFileVisibility {
 #[derive(Clone)]
 pub(super) struct StableVisibleDeclaration {
     pub(super) visible_name: String,
-    pub(super) local_path: Box<[String]>,
+    pub(super) local_path: PathId,
     pub(super) origin: Option<OriginDeclarationId>,
 }
 
@@ -56,7 +55,7 @@ pub(super) struct StableNamespaceRecord {
 
 #[derive(Clone)]
 pub(super) enum StableNamespaceRecordSource {
-    SourceFile(Box<[String]>),
+    SourceFile(PathId),
     ExternalPackage(String),
 }
 
@@ -81,7 +80,7 @@ pub(super) enum StableNamespaceTypeMember {
 #[derive(Clone)]
 pub(super) struct StableReceiverMethod {
     pub(super) visible_name: String,
-    pub(super) local_path: Box<[String]>,
+    pub(super) local_path: PathId,
     pub(super) target: StableFunctionTarget,
     pub(super) receiver: StableReceiverKey,
     pub(super) signature: StableFunctionSignature,
@@ -89,12 +88,83 @@ pub(super) struct StableReceiverMethod {
     pub(super) generic_parameters: Box<[StableGenericParameter]>,
     pub(super) span: Option<SourceSpan>,
 }
+impl StableFileVisibility {
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for declaration in self
+            .source_names
+            .iter_mut()
+            .chain(self.type_alias_names.iter_mut())
+            .chain(self.trait_names.iter_mut())
+        {
+            declaration.remap_path_ids(remap);
+        }
+        for namespace in &mut self.namespace_records {
+            namespace.remap_path_ids(remap);
+        }
+        for method in &mut self.receiver_methods {
+            method.remap_path_ids(remap);
+        }
+    }
+}
+
+impl StableVisibleDeclaration {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.local_path = remap.get(self.local_path);
+    }
+}
+
+impl StableNamespaceBinding {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.record.remap_path_ids(remap);
+    }
+}
+
+impl StableNamespaceRecord {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let StableNamespaceRecordSource::SourceFile(path) = &mut self.record_source {
+            *path = remap.get(*path);
+        }
+        for member in &mut self.value_members {
+            member.remap_path_ids(remap);
+        }
+        for member in &mut self.type_members {
+            member.remap_path_ids(remap);
+        }
+        for namespace in &mut self.child_namespaces {
+            namespace.remap_path_ids(remap);
+        }
+    }
+}
+
+impl StableNamespaceValueMember {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let Self::Source(declaration) = self {
+            declaration.remap_path_ids(remap);
+        }
+    }
+}
+
+impl StableNamespaceTypeMember {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let Self::Source(declaration) = self {
+            declaration.remap_path_ids(remap);
+        }
+    }
+}
+
+impl StableReceiverMethod {
+    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.local_path = remap.get(self.local_path);
+        self.receiver.remap_path_ids(remap);
+    }
+}
+
 // WHY: Mirrors `StableFileVisibility::collect_namespace_source_paths` below, but stays local
 // because a frozen artefact must survive without its donor preparation environment.
 
 pub(super) fn collect_namespace_source_paths(
     record: &NamespaceRecord,
-    selected: &mut FxHashSet<InternedPath>,
+    selected: &mut FxHashSet<PathId>,
 ) {
     for member in record.value_members.values() {
         if let NamespaceValueMember::SourceDeclaration(target) = member {
@@ -118,7 +188,7 @@ impl StableFileVisibility {
     ) -> Result<StableNamespaceRecord, CompilerError> {
         let record_source = match &record.record_source {
             NamespaceRecordSource::SourceFile(path) => {
-                StableNamespaceRecordSource::SourceFile(stable_path(path, string_table))
+                StableNamespaceRecordSource::SourceFile(*path)
             }
             NamespaceRecordSource::ExternalPackage(package) => {
                 StableNamespaceRecordSource::ExternalPackage(
@@ -135,7 +205,7 @@ impl StableFileVisibility {
                     NamespaceValueMember::SourceDeclaration(target) => {
                         StableNamespaceValueMember::Source(StableVisibleDeclaration {
                             visible_name: visible_name.clone(),
-                            local_path: stable_path(target.local_path(), string_table),
+                            local_path: *target.local_path(),
                             origin: match target {
                                 SourceDeclarationTarget::Local(_) => None,
                                 SourceDeclarationTarget::Imported { origin, .. } => {
@@ -171,7 +241,7 @@ impl StableFileVisibility {
                     NamespaceTypeMember::SourceDeclaration(target) => {
                         StableNamespaceTypeMember::Source(StableVisibleDeclaration {
                             visible_name: visible_name.clone(),
-                            local_path: stable_path(target.local_path(), string_table),
+                            local_path: *target.local_path(),
                             origin: match target {
                                 SourceDeclarationTarget::Local(_) => None,
                                 SourceDeclarationTarget::Imported { origin, .. } => {
@@ -237,7 +307,7 @@ impl StableFileVisibility {
     ) -> Result<NamespaceRecord, CompilerError> {
         let record_source = match &record.record_source {
             StableNamespaceRecordSource::SourceFile(path) => {
-                NamespaceRecordSource::SourceFile(materialise_path(path, string_table))
+                NamespaceRecordSource::SourceFile(*path)
             }
             StableNamespaceRecordSource::ExternalPackage(package) => {
                 NamespaceRecordSource::ExternalPackage(string_table.intern(package))
@@ -248,7 +318,7 @@ impl StableFileVisibility {
             match member {
                 StableNamespaceValueMember::Source(binding) => {
                     let name = string_table.intern(&binding.visible_name);
-                    let local_path = materialise_path(&binding.local_path, string_table);
+                    let local_path = binding.local_path;
                     let target = match &binding.origin {
                         Some(origin) => SourceDeclarationTarget::Imported {
                             origin: origin.clone(),
@@ -282,7 +352,7 @@ impl StableFileVisibility {
             match member {
                 StableNamespaceTypeMember::Source(binding) => {
                     let name = string_table.intern(&binding.visible_name);
-                    let local_path = materialise_path(&binding.local_path, string_table);
+                    let local_path = binding.local_path;
                     let target = match &binding.origin {
                         Some(origin) => SourceDeclarationTarget::Imported {
                             origin: origin.clone(),
@@ -327,6 +397,7 @@ impl StableFileVisibility {
     pub(super) fn materialise(
         &self,
         external_package_registry: &ExternalPackageRegistry,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         string_table: &mut StringTable,
     ) -> Result<FileVisibility, CompilerError> {
         let mut visibility = FileVisibility::default();
@@ -340,8 +411,8 @@ impl StableFileVisibility {
                  target: &mut FxHashMap<StringId, SourceDeclarationTarget>| {
                     for binding in bindings {
                         let name = string_table.intern(&binding.visible_name);
-                        let local_path = materialise_path(&binding.local_path, string_table);
-                        visible_declaration_paths.insert(local_path.clone());
+                        let local_path = binding.local_path;
+                        visible_declaration_paths.insert(local_path);
                         let declaration_target = match &binding.origin {
                             Some(origin) => SourceDeclarationTarget::Imported {
                                 origin: origin.clone(),
@@ -361,10 +432,13 @@ impl StableFileVisibility {
         }
 
         let error_path =
-            crate::compiler_frontend::builtins::error_type::builtin_error_type_path(string_table);
+            crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+                path_fork,
+                string_table,
+            );
         let error_name =
             string_table.intern(crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME);
-        visible_declaration_paths.insert(error_path.clone());
+        visible_declaration_paths.insert(error_path);
         visibility.visible_declaration_paths = Arc::new(visible_declaration_paths);
         visibility
             .visible_source_names
@@ -392,7 +466,7 @@ impl StableFileVisibility {
             );
         }
         for method in &self.receiver_methods {
-            let local_path = materialise_path(&method.local_path, string_table);
+            let local_path = method.local_path;
             visibility
                 .visible_receiver_methods
                 .entry(string_table.intern(&method.visible_name))
@@ -402,51 +476,45 @@ impl StableFileVisibility {
                     span: method.span,
                 });
         }
+
         Ok(visibility)
     }
-
     pub(super) fn materialised_selected_paths(
         &self,
-        string_table: &mut StringTable,
-    ) -> FxHashSet<InternedPath> {
+    ) -> FxHashSet<PathId> {
         let mut selected = self
             .source_names
             .iter()
             .chain(self.type_alias_names.iter())
             .chain(self.trait_names.iter())
-            .map(|binding| materialise_path(&binding.local_path, string_table))
+            .map(|binding| binding.local_path)
             .collect::<FxHashSet<_>>();
-        selected.extend(
-            self.receiver_methods
-                .iter()
-                .map(|method| materialise_path(&method.local_path, string_table)),
-        );
+        selected.extend(self.receiver_methods.iter().map(|method| method.local_path));
         for namespace in &self.namespace_records {
-            Self::collect_namespace_source_paths(&namespace.record, &mut selected, string_table);
+            Self::collect_namespace_source_paths(&namespace.record, &mut selected);
         }
         selected
     }
 
     // WHY: Mirrors the live `collect_namespace_source_paths` above, but stays local because a
     // frozen artefact must survive without its donor preparation environment.
-
     fn collect_namespace_source_paths(
         record: &StableNamespaceRecord,
-        selected: &mut FxHashSet<InternedPath>,
-        string_table: &mut StringTable,
+        selected: &mut FxHashSet<PathId>,
     ) {
         for member in &record.value_members {
             if let StableNamespaceValueMember::Source(binding) = member {
-                selected.insert(materialise_path(&binding.local_path, string_table));
+                selected.insert(binding.local_path);
             }
         }
         for member in &record.type_members {
             if let StableNamespaceTypeMember::Source(binding) = member {
-                selected.insert(materialise_path(&binding.local_path, string_table));
+                selected.insert(binding.local_path);
             }
         }
         for child in &record.child_namespaces {
-            Self::collect_namespace_source_paths(&child.record, selected, string_table);
+            Self::collect_namespace_source_paths(&child.record, selected);
         }
     }
+
 }

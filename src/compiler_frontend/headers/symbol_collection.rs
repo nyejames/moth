@@ -26,6 +26,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
@@ -38,6 +39,7 @@ pub(super) fn build_module_symbols(
     prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
     capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+    path_fork: &mut PathInternerFork,
 ) -> Result<ModuleSymbols, HeaderPreparationFailure> {
     let mut module_symbols = ModuleSymbols::empty();
     let mut diagnostic_bag = DiagnosticBag::new();
@@ -55,7 +57,7 @@ pub(super) fn build_module_symbols(
 
         for header in &file_output.headers {
             if let Some(mut diagnostic) =
-                validate_declared_name(header, file_output.file_role, string_table)
+                validate_declared_name(header, file_output.file_role, string_table, path_fork)
             {
                 capture(file_output.file_id, &mut diagnostic)
                     .map_err(HeaderPreparationFailure::Infrastructure)?;
@@ -75,7 +77,7 @@ pub(super) fn build_module_symbols(
                     .insert(header.tokens.src_path.to_owned(), name_span);
             }
 
-            register_header_symbol(&mut module_symbols, header, string_table);
+            register_header_symbol(&mut module_symbols, header, string_table, path_fork);
         }
     }
 
@@ -101,7 +103,7 @@ pub(super) fn build_module_symbols(
         }
     }
 
-    register_builtin_symbols(&mut module_symbols, string_table);
+    register_builtin_symbols(&mut module_symbols, string_table, path_fork);
 
     Ok(module_symbols)
 }
@@ -110,8 +112,9 @@ fn validate_declared_name(
     header: &Header,
     file_role: FileRole,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Option<CompilerDiagnostic> {
-    let symbol_name = header.tokens.src_path.name()?;
+    let symbol_name = path_fork.component(header.tokens.src_path)?;
 
     let symbol_name_text = string_table.resolve(symbol_name);
 
@@ -161,12 +164,15 @@ fn validate_declared_name(
 pub(super) fn is_receiver_method_candidate(
     signature: &FunctionSignatureSyntax,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> bool {
     let Some(first_parameter) = signature.parameters.first() else {
         return false;
     };
 
-    first_parameter.id.name_str(string_table) == Some("this")
+    path_fork
+        .component(first_parameter.id)
+        .is_some_and(|name| string_table.resolve(name) == "this")
 }
 
 /// Extract the parsed receiver type name from a receiver-method candidate.
@@ -177,10 +183,14 @@ pub(super) fn is_receiver_method_candidate(
 fn receiver_method_receiver_name(
     signature: &FunctionSignatureSyntax,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Option<StringId> {
     let first_parameter = signature.parameters.first()?;
 
-    if first_parameter.id.name_str(string_table) != Some("this") {
+    if !path_fork
+        .component(first_parameter.id)
+        .is_some_and(|name| string_table.resolve(name) == "this")
+    {
         return None;
     }
 
@@ -223,6 +233,7 @@ fn register_header_symbol(
     module_symbols: &mut ModuleSymbols,
     header: &Header,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) {
     match &header.kind {
         HeaderKind::Function {
@@ -234,6 +245,7 @@ fn register_header_symbol(
                 &header.tokens.src_path,
                 &header.source_file,
                 is_dependency_bindable_for_symbol_collection(header),
+                path_fork,
             );
             register_generic_declaration_kind(
                 module_symbols,
@@ -241,12 +253,13 @@ fn register_header_symbol(
                 generic_parameters,
                 GenericDeclarationKind::Function,
             );
-            if is_receiver_method_candidate(signature, string_table) {
+            if is_receiver_method_candidate(signature, string_table, &*path_fork) {
                 module_symbols
                     .receiver_method_paths
                     .insert(header.tokens.src_path.to_owned());
 
-                if let Some(receiver_name) = receiver_method_receiver_name(signature, string_table)
+                if let Some(receiver_name) =
+                    receiver_method_receiver_name(signature, string_table, &*path_fork)
                 {
                     module_symbols
                         .receiver_method_receiver_names
@@ -263,6 +276,7 @@ fn register_header_symbol(
                 &header.tokens.src_path,
                 &header.source_file,
                 is_dependency_bindable_for_symbol_collection(header),
+                path_fork,
             );
             module_symbols
                 .nominal_type_paths
@@ -283,6 +297,7 @@ fn register_header_symbol(
                 &header.tokens.src_path,
                 &header.source_file,
                 is_dependency_bindable_for_symbol_collection(header),
+                path_fork,
             );
             module_symbols
                 .nominal_type_paths
@@ -297,10 +312,13 @@ fn register_header_symbol(
 
         HeaderKind::StartFunction => {
             // Register the compiler-owned implicit start function under its entry source file.
-            let start_name = header
-                .source_file
-                .join_str(IMPLICIT_START_FUNC_NAME, string_table);
-            register_declared_symbol(module_symbols, &start_name, &header.source_file, false);
+            let start_name = path_fork
+                .try_intern_child(
+                    header.source_file,
+                    string_table.intern(IMPLICIT_START_FUNC_NAME),
+                )
+                .expect("path table exhausted while interning implicit start path");
+            register_declared_symbol(module_symbols, &start_name, &header.source_file, false, path_fork);
         }
 
         HeaderKind::Constant { .. } => {
@@ -309,6 +327,7 @@ fn register_header_symbol(
                 &header.tokens.src_path,
                 &header.source_file,
                 is_dependency_bindable_for_symbol_collection(header),
+                path_fork,
             );
             module_symbols
                 .constant_paths
@@ -321,6 +340,7 @@ fn register_header_symbol(
                 &header.tokens.src_path,
                 &header.source_file,
                 is_dependency_bindable_for_symbol_collection(header),
+                path_fork,
             );
             module_symbols
                 .type_alias_paths
@@ -335,6 +355,7 @@ fn register_header_symbol(
                 &header.tokens.src_path,
                 &header.source_file,
                 is_dependency_bindable_for_symbol_collection(header),
+                path_fork,
             );
             module_symbols
                 .trait_paths
@@ -353,10 +374,14 @@ fn register_header_symbol(
     }
 }
 
-fn register_builtin_symbols(module_symbols: &mut ModuleSymbols, string_table: &mut StringTable) {
+fn register_builtin_symbols(
+    module_symbols: &mut ModuleSymbols,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) {
     // Builtins are merged once here so AST passes see them without a separate absorption step.
     // Mutation: builtin error types register compiler-owned fixed symbols into the table.
-    let builtin_manifest = register_builtin_error_types(string_table);
+    let builtin_manifest = register_builtin_error_types(path_fork, string_table);
     module_symbols
         .builtin_visible_symbol_paths
         .extend(builtin_manifest.visible_symbol_paths.iter().cloned());

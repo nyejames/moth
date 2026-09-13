@@ -18,7 +18,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement,
@@ -47,7 +47,7 @@ pub(super) struct RequirementValidationContext<'a, 'strings> {
 pub(super) fn validate_requirements(
     trait_definition: &ResolvedTraitDefinition,
     target: &ConformanceTarget,
-    conformance_source_file: &InternedPath,
+    conformance_source_file: &PathId,
     context: &mut RequirementValidationContext<'_, '_>,
 ) -> RequirementValidationResult<Vec<TraitRequirementEvidence>> {
     let mut requirement_methods = Vec::with_capacity(trait_definition.requirements.len());
@@ -76,7 +76,7 @@ pub(super) fn validate_requirements(
 
         requirement_methods.push(TraitRequirementEvidence {
             requirement_id: requirement.id,
-            method_path: method.entry.function_path.clone(),
+            method_path: method.entry.function_path,
         });
     }
 
@@ -87,7 +87,7 @@ fn find_same_file_method<'a>(
     receiver_methods: &'a ReceiverMethodCatalog,
     target: &ConformanceTarget,
     method_name: StringId,
-    conformance_source_file: &InternedPath,
+    conformance_source_file: &PathId,
     type_environment: &TypeEnvironment,
 ) -> Option<ImplementationMethod<'a>> {
     let entries = receiver_methods

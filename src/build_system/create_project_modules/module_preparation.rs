@@ -11,14 +11,15 @@
 //! validation and generated completion belong to `compiler_frontend::module_compilation`.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
-use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
-    HeaderParseOptions, HeaderPreparationFailure, PreparedHeaderSyntax, SourcePreparationDelta,
-    prepare_header_syntax,
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::headers::parse_file_headers::{
+    prepare_header_syntax, FileFrontendPrepareError, FileFrontendPrepareFailure,
+    FileFrontendPrepareOutput, FileRole, HeaderParseOptions, HeaderPreparationFailure,
+    PreparedHeaderSyntax, SourcePreparationDelta,
+};
+use crate::compiler_frontend::instrumentation::{add_frontend_counter, FrontendCounter};
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReference, ResolvedFileReferenceTable,
@@ -31,6 +32,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::{PathInternerFork, PathInternerForkSource};
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -86,10 +88,10 @@ const FILE_PREPARATION_TARGET_TASKS_PER_THREAD: usize = 2;
 /// WHY: chunking only helps if each scheduled task does enough serial file preparation to amortize
 /// fork and scheduling overhead.
 const FILE_PREPARATION_MIN_CHUNK_SIZE: usize = 4;
-
 struct FilePreparationChunk {
     chunk_index: usize,
     local_string_table: StringTable,
+    local_path_fork: PathInternerFork,
     results: Vec<PreparedFileResult>,
     span_builders: Vec<(SourceId, ExtendedSpanBuilder)>,
 }
@@ -297,6 +299,9 @@ pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
     /// boundary. Cloning this handle does not duplicate the boundary-wide rows.
     source_module_origins: Arc<SourceModuleOriginTable>,
     string_table: StringTable,
+    /// Module-local path delta forked from the boundary builder. Discovery interns no
+    /// `PathId`s in this slice; the fork travels to the merge tail after the string delta.
+    path_fork: PathInternerFork,
     prepared_outputs: Vec<Option<FileFrontendPrepareOutput>>,
     resolved_file_references: ResolvedFileReferenceTable,
     warnings: Vec<CompilerDiagnostic>,
@@ -334,9 +339,12 @@ impl ModulePreparationContext<'_> {
         entry_file_path: &Path,
         entry_file_role: Option<FileRole>,
         string_table: StringTable,
+        path_fork: PathInternerFork,
         selected_source_texts: &'texts mut SelectedSourceTextMap,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<ModuleSyntaxDiscovery<'a, 'texts>, PremergeFailure> {
+        Self::validate_path_fork_base(&path_fork, self.source_files)?;
+
         let candidate_source_ids = registered_sources.candidate_source_ids;
         let mut prepared_outputs = Vec::new();
         prepared_outputs.resize_with(candidate_source_ids.len(), || None);
@@ -352,6 +360,7 @@ impl ModulePreparationContext<'_> {
             source_module_origins: registered_sources.source_module_origins,
             string_table,
             prepared_outputs,
+            path_fork,
             resolved_file_references: ResolvedFileReferenceTable::new(),
             warnings: Vec::new(),
             source_byte_count: 0,
@@ -389,11 +398,15 @@ impl ModulePreparationContext<'_> {
         source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
         mut string_table: StringTable,
+        mut path_fork: PathInternerFork,
         source_byte_count: usize,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<PreparedModule, PremergeFailure> {
-        let mut warnings = Vec::new();
+        // The supplied fork must carry the authoritative source-table prefix: retained inputs
+        // and outputs address source paths through this database's numeric `PathId` domain.
+        Self::validate_path_fork_base(&path_fork, self.source_files)?;
 
+        let mut warnings = Vec::new();
         // Discovery owns the final source identity domain and supplies this database in
         // deterministic logical-path order. Prepared inputs carry only these final IDs, so the
         // preparation phase does not construct or rebind a traversal-local identity table.
@@ -420,6 +433,7 @@ impl ModulePreparationContext<'_> {
             {
                 self.prepare_module_files(
                     &mut string_table,
+                    &mut path_fork,
                     module,
                     source_spans,
                     entry_file_path,
@@ -451,7 +465,7 @@ impl ModulePreparationContext<'_> {
         )?;
 
         // Retain the deterministic preparation context so semantic compilation can continue
-        // against the same string table and boundary source identities.
+        // against the same string table, path fork and boundary source identities.
         Ok(PreparedModule {
             semantic: PreparedModuleInput {
                 active_root_file_id,
@@ -460,12 +474,37 @@ impl ModulePreparationContext<'_> {
                 prepared_header_syntax,
                 resolved_file_references: ResolvedFileReferenceTable::new(),
                 string_table,
+                path_fork,
                 warnings,
                 source_file_count: module_file_count,
                 source_byte_count,
             },
             contains_moth_template,
         })
+    }
+
+    /// Validate that a caller-provided path fork carries the authoritative source prefix.
+    ///
+    /// WHAT: the fork's addressable length must cover the source database's registered path
+    ///       count. Preparation rejects a short fork instead of repairing it.
+    /// WHY: retained inputs and prepared outputs address source paths through this database's
+    ///      numeric `PathId` domain; silently replacing a short fork would hide a caller that
+    ///      supplied the wrong identity base.
+    fn validate_path_fork_base(
+        path_fork: &PathInternerFork,
+        source_files: &SourceDatabase,
+    ) -> Result<(), PremergeFailure> {
+        let expected = source_files.paths().len();
+        let actual = path_fork.len();
+        if actual < expected {
+            return Err(PremergeFailure::Infrastructure(
+                CompilerError::compiler_error(format!(
+                    "module preparation path fork must carry the authoritative source-table \
+                     prefix: expected {expected} paths, got {actual}"
+                )),
+            ));
+        }
+        Ok(())
     }
 
     /// Resolve the entry file's `SourceId` from the boundary `SourceDatabase` and validate that
@@ -523,12 +562,16 @@ impl ModulePreparationContext<'_> {
     fn prepare_module_files(
         &self,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
         module: Vec<PreparedSourceInput>,
         source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PremergeFailure> {
+        // Retained direct-preparation inputs use the source database's path domain. The mutable
+        // module fork must carry that authoritative prefix before worker snapshots are created.
+        Self::validate_path_fork_base(path_fork, self.source_files)?;
         let entry_file_id = source_id_for_canonical_path(self.source_files, entry_file_path);
 
         let options = HeaderParseOptions {
@@ -537,12 +580,14 @@ impl ModulePreparationContext<'_> {
             entry_file_role: None,
             active_root_role,
         };
-
         // Create one shared fork source for all file-preparation workers. Each scheduled chunk
         // gets a local table forked from this immutable base, so preparation never needs mutable
         // access to the module string table during tokenization or header parsing.
         let fork_source = string_table.fork_source();
         let base_len = fork_source.base_len();
+        // Path chunks fork from the module-local path snapshot so worker `PathId`s share the
+        // module prefix and merge back in canonical chunk order after the string delta.
+        let path_fork_source = path_fork.fork_source();
 
         // Offsets are only relevant for the active module root, and there is exactly one root per
         // module. Imported and ordinary files produce zero const templates and runtime fragments, so
@@ -574,12 +619,13 @@ impl ModulePreparationContext<'_> {
         let mut preparation_chunks = Self::prepare_module_file_chunks(
             module,
             &fork_source,
+            &path_fork_source,
             &prepare_context,
             const_template_offset,
             runtime_fragment_offset,
             strategy,
             source_spans,
-        );
+        )?;
         // Restore all owners before any diagnostic, remap or aggregation path can return early.
         for chunk in &mut preparation_chunks {
             for (source, builder) in chunk.span_builders.drain(..) {
@@ -589,6 +635,7 @@ impl ModulePreparationContext<'_> {
 
         Self::merge_file_preparation_chunks(
             string_table,
+            path_fork,
             preparation_chunks,
             module_file_count,
             base_len,
@@ -604,6 +651,7 @@ impl ModulePreparationContext<'_> {
     ///      source was never prepared and an occupied slot means one was prepared twice.
     fn merge_file_preparation_chunks(
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
         mut preparation_chunks: Vec<FilePreparationChunk>,
         module_file_count: usize,
         base_len: usize,
@@ -613,14 +661,25 @@ impl ModulePreparationContext<'_> {
         // header order never depends on which worker finished first.
         preparation_chunks.sort_by_key(|chunk| chunk.chunk_index);
         validate_distinct_chunk_indexes(&preparation_chunks)?;
-
+        let destination_base_len = path_fork.len();
+        for chunk in &preparation_chunks {
+            let chunk_base_len = chunk.local_path_fork.base_len();
+            if chunk_base_len != destination_base_len {
+                return Err(PremergeFailure::Infrastructure(
+                    CompilerError::compiler_error(format!(
+                        "file preparation chunk path fork base length mismatch: destination \
+                         base length {destination_base_len}, chunk inherited base length \
+                         {chunk_base_len}"
+                    )),
+                ));
+            }
+        }
         let mut prepared_outputs = Vec::with_capacity(module_file_count);
         prepared_outputs.resize_with(module_file_count, || None);
         let mut warnings = Vec::new();
         let mut diagnostics = Vec::new();
         let mut const_fragment_source_count = 0usize;
         let mut runtime_fragment_source_count = 0usize;
-
         for chunk in preparation_chunks {
             let remap = string_table.merge_delta_from(&chunk.local_string_table, base_len);
             let remap_is_identity = remap.is_identity();
@@ -630,6 +689,29 @@ impl ModulePreparationContext<'_> {
             } else {
                 add_frontend_counter(FrontendCounter::FilePreparationNonIdentityRemapCount, 1);
             }
+            // Merge the path delta after the string delta so worker `StringId` components
+            // rewrite through this chunk's string remap. Source-prefix `PathId`s stay
+            // identity; an empty worker delta is an identity remap with no payload walk.
+            // Authored exhaustion of the compact path table during a chunk delta merge is a
+            // deterministic source-capacity rejection: the module's own prepared paths are the
+            // authored entries that exhausted the table.
+            let path_remap = path_fork
+                .merge_delta_from(&chunk.local_path_fork, &remap)
+                .map_err(|error| match error {
+                    crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
+                        PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
+                            CompilerDiagnostic::source_table_capacity(
+                                SourceSpanCapacityResource::LogicalPathTable,
+                            ),
+                            std::mem::take(string_table),
+                        ))
+                    }
+                    error => PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                        format!("file preparation path merge failed: {error:?}"),
+                    )),
+                })?;
+
+            let path_remap_is_identity = path_remap.is_identity();
 
             for prepared_file in chunk.results {
                 match prepared_file.result {
@@ -670,7 +752,10 @@ impl ModulePreparationContext<'_> {
                                     );
                                     output.remap_string_ids(&remap)?;
                                 }
-                                output.freeze_path_syntax(string_table)?;
+                                if !path_remap_is_identity {
+                                    output.remap_path_ids(&path_remap)?;
+                                }
+                                output.freeze_path_syntax(string_table, path_fork)?;
                             }
                             PreparedFileStringDomain::AlreadyGlobal => {
                                 if !remap_is_identity {
@@ -686,16 +771,22 @@ impl ModulePreparationContext<'_> {
                         prepared_outputs[prepared_file.file_index] = Some(output);
                     }
                     Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
-                        if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal
-                            && !remap_is_identity
-                        {
-                            add_frontend_counter(FrontendCounter::FilePrepareErrorRemapCalls, 1);
-                            #[cfg(feature = "benchmark_counters")]
-                            add_frontend_counter(
-                                FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
-                                1,
-                            );
-                            error.remap_string_ids(&remap);
+                        if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal {
+                            if !remap_is_identity {
+                                add_frontend_counter(
+                                    FrontendCounter::FilePrepareErrorRemapCalls,
+                                    1,
+                                );
+                                #[cfg(feature = "benchmark_counters")]
+                                add_frontend_counter(
+                                    FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
+                                    1,
+                                );
+                                error.remap_string_ids(&remap);
+                            }
+                            if !path_remap_is_identity {
+                                error.remap_path_ids(&path_remap);
+                            }
                         }
                         let FileFrontendPrepareError {
                             warnings: file_warnings,
@@ -726,6 +817,11 @@ impl ModulePreparationContext<'_> {
             // diagnosed path, so no clone is needed to carry the diagnostics.
             let table = std::mem::take(string_table);
             let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
+            if let Err(error) =
+                batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
+            {
+                return Err(PremergeFailure::Infrastructure(error));
+            }
             batch.prepend_diagnostics(warnings);
             return Err(PremergeFailure::Diagnosed(batch));
         }
@@ -748,6 +844,7 @@ impl ModulePreparationContext<'_> {
             &mut filled_outputs,
             string_table,
             &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+            path_fork,
         ) {
             Ok(prepared) => prepared,
             Err(bag) => {
@@ -755,9 +852,13 @@ impl ModulePreparationContext<'_> {
                     HeaderPreparationFailure::Diagnosed(bag) => {
                         // Move the module table and owned warnings into the batch; header
                         // aggregation failed, so the caller discards both and the batch
-                        // becomes the sole owner with no diagnostic clone.
-                        let table = std::mem::take(string_table);
-                        let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
+                        let mut batch =
+                            PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table));
+                        if let Err(error) =
+                            batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
+                        {
+                            return Err(PremergeFailure::Infrastructure(error));
+                        }
                         batch.prepend_diagnostics(warnings);
                         PremergeFailure::Diagnosed(batch)
                     }
@@ -774,18 +875,28 @@ impl ModulePreparationContext<'_> {
     fn prepare_module_file_chunks(
         module: Vec<PreparedSourceInput>,
         fork_source: &StringTableForkSource,
+        path_fork_source: &PathInternerForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
         runtime_fragment_offset: usize,
         strategy: FilePreparationStrategy,
         source_spans: &mut SourceSpanBuilders<'_>,
-    ) -> Vec<FilePreparationChunk> {
+    ) -> Result<Vec<FilePreparationChunk>, CompilerError> {
+        // The chunk path source must carry the authoritative source-registration prefix so
+        // worker `PathId`s stay addressable in the module fork; a truncated base is rejected.
+        if path_fork_source.base_len() < prepare_context.source_files.paths().len() {
+            return Err(CompilerError::compiler_error(format!(
+                "module file preparation path fork source carries {} of {} registered paths",
+                path_fork_source.base_len(),
+                prepare_context.source_files.paths().len(),
+            )));
+        }
         let module_file_count = module.len();
         let files = module.into_iter().map(|file| {
             let builder = source_spans.take_span_builder(file.source_id());
             (file, builder)
         });
-        match strategy {
+        Ok(match strategy {
             FilePreparationStrategy::Serial => vec![Self::prepare_module_file_chunk(
                 FilePreparationChunkPlan {
                     chunk_index: 0,
@@ -793,6 +904,7 @@ impl ModulePreparationContext<'_> {
                 },
                 files.enumerate(),
                 fork_source,
+                path_fork_source,
                 prepare_context,
                 const_template_offset,
                 runtime_fragment_offset,
@@ -809,6 +921,7 @@ impl ModulePreparationContext<'_> {
                         },
                         std::iter::once((file_index, file)),
                         fork_source,
+                        path_fork_source,
                         prepare_context,
                         const_template_offset,
                         runtime_fragment_offset,
@@ -837,6 +950,7 @@ impl ModulePreparationContext<'_> {
                             plan,
                             files,
                             fork_source,
+                            path_fork_source,
                             prepare_context,
                             const_template_offset,
                             runtime_fragment_offset,
@@ -844,18 +958,20 @@ impl ModulePreparationContext<'_> {
                     })
                     .collect()
             }
-        }
+        })
     }
 
     fn prepare_module_file_chunk(
         plan: FilePreparationChunkPlan,
         module: impl IntoIterator<Item = (usize, (PreparedSourceInput, ExtendedSpanBuilder))>,
         fork_source: &StringTableForkSource,
+        path_fork_source: &PathInternerForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
         runtime_fragment_offset: usize,
     ) -> FilePreparationChunk {
         let (mut local_string_table, _) = fork_source.fork_for_module().into_parts();
+        let mut local_path_fork = path_fork_source.fork_for_module();
         let mut results = Vec::with_capacity(plan.file_range.len());
         let mut span_builders = Vec::with_capacity(plan.file_range.len());
 
@@ -888,6 +1004,7 @@ impl ModulePreparationContext<'_> {
                                 runtime_fragment_offset,
                             },
                             &mut local_string_table,
+                            &mut local_path_fork,
                         ),
                         Err(error) => SourcePreparationDelta {
                             file_id: source_id,
@@ -914,6 +1031,7 @@ impl ModulePreparationContext<'_> {
         FilePreparationChunk {
             chunk_index: plan.chunk_index,
             local_string_table,
+            local_path_fork,
             results,
             span_builders,
         }
@@ -924,11 +1042,29 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         &mut self.string_table
     }
 
+    pub(super) fn path_fork_mut(&mut self) -> &mut PathInternerFork {
+        &mut self.path_fork
+    }
+
     /// Borrow both mutable selection inputs for one source preparation call.
     pub(super) fn source_preparation_inputs_mut(
         &mut self,
     ) -> (&mut StringTable, &mut SelectedSourceTextMap) {
         (&mut self.string_table, self.selected_source_texts)
+    }
+
+    pub(super) fn source_preparation_inputs_and_path_fork_mut(
+        &mut self,
+    ) -> (
+        &mut StringTable,
+        &mut SelectedSourceTextMap,
+        &mut PathInternerFork,
+    ) {
+        (
+            &mut self.string_table,
+            self.selected_source_texts,
+            &mut self.path_fork,
+        )
     }
 
     /// Resolve one prepared file-reference row while keeping the source table and its string
@@ -952,6 +1088,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             reference,
             self.context.source_files,
             &mut self.string_table,
+            &self.path_fork,
             discovered_content_sources,
         )
     }
@@ -1027,16 +1164,22 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 &prepare_context,
                 input,
                 &mut self.string_table,
+                &mut self.path_fork,
             ),
         );
         source_spans.retain_span_builder(file_id, span_builder);
         let output = match result {
-            Ok(output) => output,
+            Ok(delta) => delta,
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
                 // Move the discovery table into the batch; this source failed, so the
                 // discovery owner hands its table to the diagnosed lane instead of cloning.
                 let table = std::mem::take(&mut self.string_table);
-                let batch = error.into_premerge_batch(table);
+                let mut batch = error.into_premerge_batch(table);
+                if let Err(error) =
+                    batch.attach_path_table_if_missing(Arc::new(self.path_fork.snapshot_table()))
+                {
+                    return Err(PremergeFailure::Infrastructure(error));
+                }
                 return Err(PremergeFailure::Diagnosed(batch));
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
@@ -1087,7 +1230,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             .flatten()
             .collect::<Vec<_>>();
         for output in &mut prepared_outputs {
-            output.freeze_path_syntax(&self.string_table)?;
+            output.freeze_path_syntax(&self.string_table, &mut self.path_fork)?;
         }
         let source_file_count = prepared_outputs.len();
         record_successful_prepared_outputs(&prepared_outputs);
@@ -1098,6 +1241,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 &mut prepared_outputs,
                 &mut self.string_table,
                 &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+                &mut self.path_fork,
             )
         ) {
             Ok(prepared_header_syntax) => prepared_header_syntax,
@@ -1106,8 +1250,12 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                     HeaderPreparationFailure::Diagnosed(bag) => {
                         // `finish` owns `self`, so move its table and warnings into the batch
                         // instead of cloning the local table to carry the diagnostics.
-                        let batch = PremergeDiagnosticBatch::from_bag(bag, self.string_table);
-                        let mut batch = batch;
+                        let mut batch = PremergeDiagnosticBatch::from_bag(bag, self.string_table);
+                        if let Err(error) = batch
+                            .attach_path_table_if_missing(Arc::new(self.path_fork.snapshot_table()))
+                        {
+                            return Err(PremergeFailure::Infrastructure(error));
+                        }
                         batch.prepend_diagnostics(self.warnings);
                         PremergeFailure::Diagnosed(batch)
                     }
@@ -1133,6 +1281,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 prepared_header_syntax,
                 resolved_file_references: self.resolved_file_references,
                 string_table: self.string_table,
+                path_fork: self.path_fork,
                 warnings: self.warnings,
                 source_file_count,
                 source_byte_count: self.source_byte_count,

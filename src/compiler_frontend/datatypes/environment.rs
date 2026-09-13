@@ -15,7 +15,8 @@ use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::traits::ids::TraitId;
 
@@ -122,7 +123,7 @@ pub struct TypeEnvironment {
     trait_bounds_by_generic_parameter_id: FxHashMap<GenericParameterId, Vec<TraitId>>,
 
     // Path -> NominalTypeId lookup.
-    nominal_by_path: FxHashMap<InternedPath, NominalTypeId>,
+    nominal_by_path: FxHashMap<PathId, NominalTypeId>,
 
     // NominalTypeId -> TypeId lookup.
     nominal_to_type_id: FxHashMap<NominalTypeId, TypeId>,
@@ -478,8 +479,6 @@ impl TypeEnvironment {
         for variants in self.generic_instance_variants.values_mut() {
             Self::remap_variants(variants, remap);
         }
-
-        self.remap_nominal_path_index(remap);
     }
 
     // -----------------
@@ -645,13 +644,12 @@ impl TypeEnvironment {
     /// Semantic arity and parameter names come from registration rather than parsed header copies.
     pub(crate) fn canonical_parameters_for_nominal(
         &self,
-        nominal_path: &InternedPath,
+        nominal_path: &PathId,
     ) -> Option<&[GenericParameter]> {
         let nominal_id = self.nominal_id_for_path(nominal_path)?;
         let nominal_type_id = self.type_id_for_nominal_id(nominal_id)?;
         let parameter_list_id = self.generic_parameter_list_id_for_type(nominal_type_id)?;
         let parameter_list = self.generic_parameters(parameter_list_id)?;
-
         Some(parameter_list.parameters.as_slice())
     }
 
@@ -1215,7 +1213,7 @@ impl TypeEnvironment {
     }
 
     /// Returns the nominal path registered for a `NominalTypeId`, if any.
-    pub fn nominal_path_by_id(&self, id: NominalTypeId) -> Option<&InternedPath> {
+    pub fn nominal_path_by_id(&self, id: NominalTypeId) -> Option<&PathId> {
         let index = id.0 as usize;
         let inherited_count = self.inherited_nominal_count();
         if index < inherited_count {
@@ -1228,7 +1226,7 @@ impl TypeEnvironment {
     }
 
     /// Returns the `NominalTypeId` for a path, if registered.
-    pub fn nominal_id_for_path(&self, path: &InternedPath) -> Option<NominalTypeId> {
+    pub fn nominal_id_for_path(&self, path: &PathId) -> Option<NominalTypeId> {
         self.nominal_by_path.get(path).copied().or_else(|| {
             self.base
                 .as_ref()
@@ -1243,7 +1241,7 @@ impl TypeEnvironment {
     /// same nominal identity; the alias is a lookup fact and does not create another type.
     pub(crate) fn register_nominal_path_alias(
         &mut self,
-        path: InternedPath,
+        path: PathId,
         type_id: TypeId,
     ) -> Result<(), CompilerError> {
         let nominal_id = match self.get(type_id) {
@@ -1676,10 +1674,15 @@ impl TypeEnvironment {
     /// WHAT: this is the direct lookup path for member access and constructor
     /// inference. It keeps lookup ownership inside `TypeEnvironment` instead of
     /// making callers clone field lists and search them locally.
-    pub fn field_for(&self, type_id: TypeId, field_name: StringId) -> Option<&FieldDefinition> {
+    pub fn field_for(
+        &self,
+        type_id: TypeId,
+        field_name: StringId,
+        path_fork: &PathInternerFork,
+    ) -> Option<&FieldDefinition> {
         self.fields_for(type_id)?
             .iter()
-            .find(|field| field.name.name() == Some(field_name))
+            .find(|field| path_fork.component(field.name) == Some(field_name))
     }
 
     /// Returns the borrowed variants of a choice or generic instance type, if any.
@@ -1731,7 +1734,7 @@ impl TypeEnvironment {
     ///
     /// WHAT: extracts the user-declared path for struct, choice, and generic instance types.
     /// WHY: receiver key derivation and diagnostics need the nominal identity.
-    pub fn nominal_path(&self, id: TypeId) -> Option<&InternedPath> {
+    pub fn nominal_path(&self, id: TypeId) -> Option<&PathId> {
         match self.get(id)? {
             TypeDefinition::Struct(def) => Some(&def.path),
             TypeDefinition::Choice(def) => Some(&def.path),
@@ -2106,20 +2109,13 @@ impl TypeEnvironment {
     }
 
     fn remap_struct_definition(definition: &mut StructTypeDefinition, remap: &StringIdRemap) {
-        definition.path.remap_string_ids(remap);
         Self::remap_fields(definition.fields.as_mut(), remap);
     }
 
     fn remap_choice_definition(definition: &mut ChoiceTypeDefinition, remap: &StringIdRemap) {
-        definition.path.remap_string_ids(remap);
         Self::remap_variants(definition.variants.as_mut(), remap);
     }
-
-    fn remap_fields(fields: &mut [FieldDefinition], remap: &StringIdRemap) {
-        for field in fields {
-            field.name.remap_string_ids(remap);
-        }
-    }
+    fn remap_fields(_fields: &mut [FieldDefinition], _remap: &StringIdRemap) {}
 
     fn remap_variants(variants: &mut [ChoiceVariantDefinition], remap: &StringIdRemap) {
         for variant in variants {
@@ -2134,18 +2130,61 @@ impl TypeEnvironment {
         }
     }
 
-    fn remap_nominal_path_index(&mut self, remap: &StringIdRemap) {
+    /// Remap every path identity through a merged module path table.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if remap.is_identity() {
+            return;
+        }
+        if let Some(base) = &mut self.base {
+            Arc::make_mut(base).remap_path_ids(remap);
+        }
+        for definition in &mut self.types {
+            match definition {
+                TypeDefinition::Struct(definition) => {
+                    definition.path = remap.get(definition.path);
+                    Self::remap_path_fields(definition.fields.as_mut(), remap);
+                }
+                TypeDefinition::Choice(definition) => {
+                    definition.path = remap.get(definition.path);
+                    Self::remap_variant_path_fields(definition.variants.as_mut(), remap);
+                }
+                _ => {}
+            }
+        }
+        for definition in &mut self.struct_definitions {
+            definition.path = remap.get(definition.path);
+            Self::remap_path_fields(definition.fields.as_mut(), remap);
+        }
+        for definition in &mut self.choice_definitions {
+            definition.path = remap.get(definition.path);
+            Self::remap_variant_path_fields(definition.variants.as_mut(), remap);
+        }
+        for fields in self.generic_instance_fields.values_mut() {
+            Self::remap_path_fields(fields.as_mut_slice(), remap);
+        }
+        for variants in self.generic_instance_variants.values_mut() {
+            Self::remap_variant_path_fields(variants.as_mut_slice(), remap);
+        }
         let previous = std::mem::take(&mut self.nominal_by_path);
-        self.nominal_by_path =
-            FxHashMap::with_capacity_and_hasher(previous.len(), Default::default());
+        self.nominal_by_path = previous
+            .into_iter()
+            .map(|(path, nominal_id)| (remap.get(path), nominal_id))
+            .collect();
+    }
 
-        for (mut path, nominal_id) in previous {
-            path.remap_string_ids(remap);
-            if let Some(existing) = self.nominal_by_path.insert(path, nominal_id) {
-                assert_eq!(
-                    existing, nominal_id,
-                    "String remapping merged paths for different nominal types"
-                );
+    fn remap_path_fields(fields: &mut [FieldDefinition], remap: &PathIdRemap) {
+        for field in fields {
+            field.name = remap.get(field.name);
+        }
+    }
+
+    fn remap_variant_path_fields(
+        variants: &mut [ChoiceVariantDefinition],
+        remap: &PathIdRemap,
+    ) {
+        for variant in variants {
+            if let ChoiceVariantPayloadDefinition::Record { fields } = &mut variant.payload {
+                Self::remap_path_fields(fields.as_mut(), remap);
             }
         }
     }

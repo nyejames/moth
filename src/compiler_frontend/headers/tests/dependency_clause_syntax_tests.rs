@@ -8,7 +8,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyClaus
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -25,17 +25,10 @@ fn tokenize_named_source_with_id(
     source_id: SourceId,
 ) -> (FileTokens, StringTable, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str(file_name, &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path(file_name, &mut string_table).expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let tokens = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        source_id,
-        &mut span_builder,
-    )
+    let tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, source_id, &mut span_builder)
     .expect("source should tokenize");
     (tokens, string_table, span_builder)
 }
@@ -226,6 +219,7 @@ fn rejects_namespace_alias_followed_by_selections_and_delimiters() {
 
 #[test]
 fn corrupted_path_lookup_is_infrastructure_error() {
+    let mut path_fork = PathInternerFork::empty();
     let (tokens, _, _span_builder) = tokenize_source("@core/math sin\n");
     let path_index = path_token_index(&tokens);
     let (two_path_tokens, _, _span_builder) = tokenize_source("@core/math\n@other/path\n");
@@ -246,7 +240,7 @@ fn corrupted_path_lookup_is_infrastructure_error() {
     }
     let mut one_row_table = PathSyntaxTable::new();
     one_row_table.push(
-        InternedPath::from_single_str("only", &mut StringTable::new()),
+        path_fork.try_intern_portable_path("only", &mut StringTable::new()).expect("test path fits"),
         SourceSpan::new(tokens.file_id, tokens.tokens[path_index].span),
     );
     let empty_table = PathSyntaxTable::new();

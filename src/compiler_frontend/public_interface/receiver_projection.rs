@@ -35,7 +35,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
     StableModuleOriginIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -56,7 +56,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// excluded by the upstream public-surface filter and never receive a seed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CallableSeed {
-    pub(crate) path: InternedPath,
+    pub(crate) path: PathId,
     pub(crate) origin: OriginFunctionId,
     pub(crate) generic_template: bool,
     pub(crate) kind: CallableSeedKind,
@@ -101,18 +101,18 @@ pub(crate) enum CallableSeedKind {
 pub(crate) fn build_callable_seed_table(
     export_bindings: &[ExportBinding],
     module_origin: &StableModuleOriginIdentity,
-    public_nominal_type_origins: &FxHashMap<InternedPath, OriginTypeId>,
+    public_nominal_type_origins: &FxHashMap<PathId, OriginTypeId>,
     root_table: &ResolvedPublicTypeRootTable,
-    generic_function_templates: &FxHashMap<InternedPath, GenericFunctionTemplate>,
+    generic_function_templates: &FxHashMap<PathId, GenericFunctionTemplate>,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<CallableSeed>, CompilerError> {
-    let mut seeds: Vec<CallableSeed> = Vec::new();
+    let mut seeds = Vec::new();
 
     // Free-function seeds: match function export bindings to roots for the exact path and
     // generic-parameter classification. Non-function bindings produce no seed but still consume
     // their root so a binding with no matching root is rejected here.
-    let mut root_index = RootIndex::new(&root_table.roots, string_table)?;
-
+    let mut root_index = RootIndex::new(&root_table.roots, string_table, path_fork)?;
     let mut seen_origins = FxHashSet::default();
 
     for binding in export_bindings {
@@ -185,13 +185,16 @@ pub(crate) fn build_callable_seed_table(
                 )));
             }
 
-            let method_name = entry.function_path.name_str(string_table).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "callable seed construction: a receiver-method entry has no resolvable \
-                         defining method name (path: {:?})",
-                    entry.function_path
-                ))
-            })?;
+            let method_name = path_fork
+                .component(entry.function_path)
+                .map(|component| string_table.resolve(component))
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "callable seed construction: a receiver-method entry has no resolvable \
+                             defining method name (path: {:?})",
+                        entry.function_path
+                    ))
+                })?;
 
             let method_origin = OriginFunctionId::new_receiver(
                 module_origin.clone(),
@@ -227,7 +230,7 @@ pub(crate) fn build_callable_seed_table(
 /// so they are never rejected here.
 fn push_seed(
     seeds: &mut Vec<CallableSeed>,
-    path: InternedPath,
+    path: PathId,
     origin: OriginFunctionId,
     generic_template: bool,
     kind: CallableSeedKind,
@@ -256,11 +259,11 @@ fn push_seed(
 ///
 /// WHAT: keeps the canonical type environment, projection context, string table and structural
 /// folded-string resources together so receiver signatures do not grow raw resource parameters.
-/// WHY: receiver defaults use the same public folded-value owner as direct constants and fields.
 pub(super) struct ReceiverProjectionContext<'a> {
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) projection_context: &'a CanonicalTypeProjectionContext<'a>,
     pub(super) string_table: &'a StringTable,
+    pub(super) path_fork: &'a PathInternerFork,
     pub(super) folded_value_context: &'a FoldedValueProjectionContext<'a>,
 }
 
@@ -304,10 +307,10 @@ pub(crate) fn project_receiver_method_signatures(
             .parameters
             .iter()
             .map(|declaration| {
-                let name = declaration
-                    .id
-                    .name_str(string_table)
-                    .map(|name| name.to_owned());
+                let name = context
+                    .path_fork
+                    .component(declaration.id)
+                    .map(|name| string_table.resolve(name).to_owned());
                 let type_identity = project_type_id_to_canonical_identity(
                     declaration.value.type_id,
                     type_environment,

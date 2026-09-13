@@ -1,12 +1,12 @@
 //! Low-level Moth path normalization helpers.
 //!
-//! These helpers translate already-tokenized `InternedPath` components into filesystem candidate
+//! These helpers translate already-tokenized `PathId` components into filesystem candidate
 //! paths and public path values. They do not own dependency visibility, public-surface policy, or
 //! diagnostic construction.
 
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::path::{Path, PathBuf};
 
 /// A source-file dependency candidate derived from one extensionless dependency path.
@@ -32,22 +32,26 @@ pub(crate) enum DependencyCandidateSupport {
 /// WHAT: checks whether a dependency path contains any `..` components.
 /// WHY: parent-directory traversal is not supported in Moth dependencies.
 pub(crate) fn dependency_contains_dotdot(
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> bool {
-    dependency_path
-        .as_components()
+    let mut scratch = Vec::new();
+    path_fork
+        .resolve_components(dependency_path, &mut scratch)
         .iter()
         .any(|component| string_table.resolve(*component) == "..")
 }
 
 pub(crate) fn is_relative_dependency_path(
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> bool {
+    let mut scratch = Vec::new();
     matches!(
-        dependency_path
-            .as_components()
+        path_fork
+            .resolve_components(dependency_path, &mut scratch)
             .first()
             .map(|component| string_table.resolve(*component)),
         Some(".") | Some("..")
@@ -56,12 +60,23 @@ pub(crate) fn is_relative_dependency_path(
 
 pub(crate) fn join_and_normalize_path(
     base: &Path,
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> PathBuf {
+    let mut scratch = Vec::new();
+    let components = path_fork.resolve_components(dependency_path, &mut scratch);
+    join_and_normalize_components(base, components, string_table)
+}
+
+pub(crate) fn join_and_normalize_components(
+    base: &Path,
+    components: &[StringId],
     string_table: &StringTable,
 ) -> PathBuf {
     let mut joined = base.to_path_buf();
 
-    for component in dependency_path.as_components() {
+    for component in components {
         match string_table.resolve(*component) {
             "." => {}
             ".." => {

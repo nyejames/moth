@@ -13,7 +13,8 @@ use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValu
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 #[derive(Clone)]
@@ -36,7 +37,7 @@ impl StableResolvedFileReference {
         path_syntax: PathSyntaxId,
         resolved: Stage0ResolvedFileReferenceView<'_>,
         intern_resource_path: &mut impl FnMut(&str) -> StringId,
-        content_value_at_path: &impl Fn(&InternedPath) -> Result<PublicFoldedValue, CompilerError>,
+        content_value_at_path: &impl Fn(&PathId) -> Result<PublicFoldedValue, CompilerError>,
     ) -> Result<Self, CompilerError> {
         let outcome = match resolved.outcome {
             Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => {

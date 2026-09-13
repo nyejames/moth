@@ -75,9 +75,10 @@ use crate::compiler_frontend::public_interface::{
     PublicFunctionCategory, PublicGenericParameterSurface, PublicParameterTypeSlot,
     PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::{
@@ -105,9 +106,9 @@ pub(crate) use import_projection::imported_nominal_path;
 /// WHY: the resolved public type-root table needs to include re-exported declarations so the
 /// public-interface draft builder can project their semantic facts into the published interface.
 fn collect_reexport_target_paths(
-    active_root_source: &InternedPath,
+    active_root_source: &PathId,
     module_symbols: &ModuleSymbols,
-) -> FxHashSet<InternedPath> {
+) -> FxHashSet<PathId> {
     let mut paths = FxHashSet::default();
 
     let Some(module_root) = module_symbols
@@ -301,7 +302,7 @@ struct ImportedGenericParameterRegistration {
 
 pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) context: &'context AstPhaseContext<'services>,
-
+    pub(crate) path_fork: &'services mut PathInternerFork,
     // Header-owned module symbol package from the header/dependency-sort phase.
     pub(crate) module_symbols: ModuleSymbols,
 
@@ -326,22 +327,22 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     // of the member passes follows the number of headers instead of headers times module size.
     // Writers go through `Rc::make_mut`: the scope that borrowed a handle is always dropped before
     // the next write, so the builder is the sole owner at write time and no copy is made.
-    pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
-    pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
-    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
+    pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<PathId, Vec<Declaration>>>,
+    pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
+    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<PathId, ResolvedTypeAlias>>,
     /// Generic declaration kinds, moved out of `module_symbols` when the builder starts.
     ///
     /// Import projection adds imported nominal kinds before the environment passes consume the
     /// shared map, avoiding a separate copy for each header.
-    pub(crate) generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
+    pub(crate) generic_declarations_by_path: Rc<FxHashMap<PathId, GenericDeclarationKind>>,
 
-    pub(crate) struct_source_by_path: FxHashMap<InternedPath, InternedPath>,
-    pub(crate) choice_source_by_path: FxHashMap<InternedPath, InternedPath>,
+    pub(crate) struct_source_by_path: FxHashMap<PathId, PathId>,
+    pub(crate) choice_source_by_path: FxHashMap<PathId, PathId>,
     pub(crate) resolved_function_signatures_by_path:
-        FxHashMap<InternedPath, ResolvedFunctionSignature>,
-    pub(crate) generic_function_templates_by_path: FxHashMap<InternedPath, GenericFunctionTemplate>,
+        FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
     pub(crate) generic_parameter_lists_by_path:
-        FxHashMap<InternedPath, RegisteredGenericParameterList>,
+        FxHashMap<PathId, RegisteredGenericParameterList>,
 
     // Frontend semantic type identity built during environment construction.
     // WHY: parsed types are resolved into canonical TypeIds as declarations are processed.
@@ -349,7 +350,7 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
 
     // Canonical TypeId for each nominal struct/choice registered in type_environment.
     // Copy-on-write for the same reason as the side tables above.
-    pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
+    pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<PathId, TypeId>>,
     imported_type_ids_by_origin: FxHashMap<OriginTypeId, TypeId>,
     imported_generic_parameter_type_ids: FxHashMap<
         crate::compiler_frontend::canonical_type_identity::ExportedGenericParameterIdentity,
@@ -357,22 +358,26 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     >,
     imported_generic_parameter_registrations: Vec<ImportedGenericParameterRegistration>,
     pub(super) projected_imported_functions_by_local_path:
-        FxHashMap<InternedPath, AstImportedFunctionContract>,
+        FxHashMap<PathId, AstImportedFunctionContract>,
     /// Every imported receiver-method path, including generic methods without a concrete
     /// summary. The category-neutral table feeds the receiver catalog; the origin index below
     /// gives imported evidence one deterministic path without scanning concrete contracts.
     pub(super) projected_imported_receiver_methods_by_local_path:
-        FxHashMap<InternedPath, crate::compiler_frontend::semantic_identity::OriginFunctionId>,
+        FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginFunctionId>,
     pub(super) imported_receiver_method_paths_by_origin:
-        FxHashMap<crate::compiler_frontend::semantic_identity::OriginFunctionId, InternedPath>,
+        FxHashMap<crate::compiler_frontend::semantic_identity::OriginFunctionId, PathId>,
     imported_struct_definitions: Vec<AstImportedStructDefinition>,
     imported_choice_definitions: Vec<AstChoiceDefinition>,
 }
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
-    pub(crate) fn new(context: &'context AstPhaseContext<'services>) -> Self {
+    pub(crate) fn new(
+        context: &'context AstPhaseContext<'services>,
+        path_fork: &'services mut PathInternerFork,
+    ) -> Self {
         Self {
             context,
+            path_fork,
             module_symbols: ModuleSymbols::empty(),
             binding_environment: HeaderBindingEnvironment::default(),
             warnings: Vec::new(),
@@ -437,6 +442,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let declaration_table = TopLevelDeclarationTable::from_stage3_order(
             ordered_semantic_declarations,
             compiler_owned_declarations,
+            self.path_fork,
         )
         .map_err(|error| self.error_messages(error, string_table))?;
         self.declaration_table = Rc::new(declaration_table);
@@ -594,6 +600,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &mut trait_evidence_environment,
             &self.type_environment,
             string_table,
+            self.path_fork,
         )?;
         self.project_imported_trait_evidence(
             &trait_environment,
@@ -665,6 +672,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 trait_environment: &trait_environment,
                 type_environment: &self.type_environment,
                 string_table,
+                path_fork: &*self.path_fork,
                 reexport_target_paths: &reexport_target_paths,
             })
             .map_err(|error| self.error_messages(error, string_table))?;
@@ -920,8 +928,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn register_builtin_structs_in_type_environment(
         &mut self,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        let builtin_paths = [builtin_error_type_path(string_table)];
+) -> Result<(), CompilerMessages> {
+        let builtin_paths = [builtin_error_type_path(self.path_fork, string_table)];
 
         for path in &builtin_paths {
             let Some(fields) = self.resolved_struct_fields_by_path.get(path).cloned() else {
@@ -1067,7 +1075,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         owner_name: StringId,
         generic_parameters: &GenericParameterList,
         resolved_bounds_by_local: &FxHashMap<TypeParameterId, Vec<TraitId>>,
-        public_root_file: &InternedPath,
+        public_root_file: &PathId,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {

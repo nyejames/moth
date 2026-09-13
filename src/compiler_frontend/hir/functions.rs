@@ -10,7 +10,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,14 +29,14 @@ pub enum HirFunctionOrigin {
 /// on declaration order. The seed is consumed before the completed HIR artefact boundary.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct FunctionOriginSeed {
-    pub(crate) path: InternedPath,
+    pub(crate) path: PathId,
     pub(crate) origin: OriginFunctionId,
 }
 
 /// Stable executable seed for a module-private function required by a generated sidecar.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PrivateFunctionOriginSeed {
-    pub(crate) path: InternedPath,
+    pub(crate) path: PathId,
     pub(crate) origin: ModulePrivateExecutableIdentity,
 }
 
@@ -53,9 +53,9 @@ pub(crate) enum HirStableFunctionOrigin {
 /// boundary instead of deferring a silently unmatched seed to public-interface finalization.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HirFunctionOriginLookup {
-    by_path: FxHashMap<InternedPath, OriginFunctionId>,
-    private_by_path: FxHashMap<InternedPath, ModulePrivateExecutableIdentity>,
-    consumed_paths: FxHashSet<InternedPath>,
+    by_path: FxHashMap<PathId, OriginFunctionId>,
+    private_by_path: FxHashMap<PathId, ModulePrivateExecutableIdentity>,
+    consumed_paths: FxHashSet<PathId>,
 }
 
 impl HirFunctionOriginLookup {
@@ -121,14 +121,14 @@ impl HirFunctionOriginLookup {
     /// second parallel origin set.
     pub(crate) fn consume_origin_for(
         &mut self,
-        path: &InternedPath,
+        path: &PathId,
     ) -> Option<HirStableFunctionOrigin> {
         if let Some(origin) = self.by_path.get(path) {
-            self.consumed_paths.insert(path.clone());
+            self.consumed_paths.insert(*path);
             return Some(HirStableFunctionOrigin::Public(origin.clone()));
         }
         let origin = self.private_by_path.get(path)?;
-        self.consumed_paths.insert(path.clone());
+        self.consumed_paths.insert(*path);
         Some(HirStableFunctionOrigin::ModulePrivate(origin.clone()))
     }
 

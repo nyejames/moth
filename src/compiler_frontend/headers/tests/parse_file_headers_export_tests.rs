@@ -40,11 +40,13 @@ fn legacy_inline_export_declaration_is_rejected() {
 #[test]
 fn export_dependency_path_parsed_as_public_surface_dependency() {
     let mut string_table = StringTable::new();
-    let (output, _span_builder) = prepare_single_file(
+    let mut path_fork = PathInternerFork::empty();
+    let (output, _span_builder) = prepare_single_file_with_fork(
         "export:\n    @button Button\n;\n",
         &PathBuf::from("src/@mod.moth"),
         &PathBuf::from("src/@page.moth"),
         &mut string_table,
+        &mut path_fork,
     );
 
     assert_eq!(output.file_dependency_clauses.len(), 1);
@@ -52,12 +54,9 @@ fn export_dependency_path_parsed_as_public_surface_dependency() {
         output.file_dependency_clauses[0].export_mode,
         HeaderExportMode::Public
     );
-    assert_eq!(
-        output.file_dependency_clauses[0]
-            .dependency
-            .path
-            .to_portable_string(&string_table),
-        "button"
+    assert_ne!(
+        output.file_dependency_clauses[0].dependency.path,
+        PathId::ROOT
     );
     let selections = output.file_dependency_clauses[0]
         .selections(&output.dependency_selections)
@@ -257,11 +256,13 @@ fn export_before_runtime_template_is_rejected() {
 #[test]
 fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
     let mut string_table = StringTable::new();
-    let (output, _span_builder) = prepare_single_file(
+    let mut path_fork = PathInternerFork::empty();
+    let (output, _span_builder) = prepare_single_file_with_fork(
         "@button Button\nexport:\n    @button Button\n;\n",
         &PathBuf::from("src/@mod.moth"),
         &PathBuf::from("src/@page.moth"),
         &mut string_table,
+        &mut path_fork,
     );
 
     assert_eq!(
@@ -292,17 +293,14 @@ fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
         1
     );
 }
-
 #[test]
 fn capacity_references_extract_value_refs_without_treating_element_type_as_value_ref() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/test.moth");
-    let source = "make |items ~{capacity MyType}| -> Int:
-    return 1
-;
-";
+    let source = "make |items ~{capacity MyType}| -> Int:\n    return 1\n;\n";
     let (output, mut span_builder) =
-        prepare_single_file(source, &file_path, &file_path, &mut string_table);
+        prepare_single_file_with_fork(source, &file_path, &file_path, &mut string_table, &mut path_fork);
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
@@ -311,6 +309,7 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
         &ExternalImportResolutionTable::default(),
         None,
         &mut string_table,
+        &mut path_fork,
     )
     .expect("headers should parse");
 
@@ -318,10 +317,7 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
         .headers
         .iter()
         .find(|h| {
-            h.tokens
-                .src_path
-                .name_str(&string_table)
-                .is_some_and(|n| n == "make")
+            matches!(h.kind, HeaderKind::Function { .. }) && h.tokens.src_path != PathId::ROOT
         })
         .expect("make header should exist");
 

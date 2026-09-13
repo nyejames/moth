@@ -28,7 +28,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -40,13 +40,17 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 fn start_function_node(
-    entry_dir: &InternedPath,
+    entry_dir: &PathId,
     body: Vec<AstNode>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> AstNode {
+    let start_path = path_fork
+        .try_intern_child(*entry_dir, string_table.intern(IMPLICIT_START_FUNC_NAME))
+        .expect("test path fits");
     AstNode {
         kind: NodeKind::Function(
-            entry_dir.join_str(IMPLICIT_START_FUNC_NAME, string_table),
+            start_path,
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![ReturnSlot::success(DataType::StringSlice)],
@@ -58,7 +62,7 @@ fn start_function_node(
     }
 }
 
-fn push_start_runtime_fragment_node(template: Template, scope: InternedPath) -> AstNode {
+fn push_start_runtime_fragment_node(template: Template, scope: PathId) -> AstNode {
     AstNode {
         kind: NodeKind::PushStartRuntimeFragment(Expression::template(
             template,
@@ -105,18 +109,26 @@ wrapper #= [:<div class="frame">[$slot]</div>]
 content #= [wrapper: [:Hello]]
 "#;
 
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
     let wrapper_id = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path.name_str(&string_table) == Some("wrapper"))
+        .find(|row| {
+            path_fork
+                .component(*row.path)
+                .is_some_and(|name| string_table.resolve(name) == "wrapper")
+        })
         .expect("wrapper constant should exist")
         .id;
     let content_id = ast
         .const_values
         .iter_module_constant_views()
-        .find(|row| row.path.name_str(&string_table) == Some("content"))
+        .find(|row| {
+            path_fork
+                .component(*row.path)
+                .is_some_and(|name| string_table.resolve(name) == "content")
+        })
         .expect("content constant should exist")
         .id;
 
@@ -141,7 +153,7 @@ content #= [wrapper: [:Hello]]
 
 #[test]
 fn collects_and_strips_top_level_doc_comment_templates() {
-    let (ast, string_table) = parse_single_file_ast("[$doc:doc]\n[:runtime]");
+    let (ast, path_fork, string_table) = parse_single_file_ast("[$doc:doc]\n[:runtime]");
 
     assert_eq!(ast.doc_fragments.len(), 1);
     assert!(matches!(ast.doc_fragments[0].kind, AstDocFragmentKind::Doc));
@@ -167,7 +179,7 @@ fn collects_and_strips_top_level_doc_comment_templates() {
 
 #[test]
 fn collects_doc_comment_with_site_root_markdown_link() {
-    let (ast, string_table) = parse_single_file_ast("[$doc: See @/docs (Docs)]\n[:runtime]");
+    let (ast, path_fork, string_table) = parse_single_file_ast("[$doc: See @/docs (Docs)]\n[:runtime]");
 
     assert_eq!(ast.doc_fragments.len(), 1);
     assert_eq!(
@@ -178,7 +190,7 @@ fn collects_doc_comment_with_site_root_markdown_link() {
 
 #[test]
 fn collects_top_level_doc_fragments_in_source_order() {
-    let (ast, string_table) = parse_single_file_ast("[$doc:first]\n[$doc:second]\n[$doc:third]");
+    let (ast, path_fork, string_table) = parse_single_file_ast("[$doc:first]\n[$doc:second]\n[$doc:third]");
     let doc_fragments = ast.doc_fragments;
 
     assert_eq!(doc_fragments.len(), 3);
@@ -272,7 +284,8 @@ fn formatted_doc_template_with_direct_tir(
 #[test]
 fn doc_fragment_folding_reads_directly_constructed_formatted_tir_root() {
     let mut string_table = StringTable::new();
-    let entry_dir = InternedPath::from_single_str("main.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let entry_dir = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
     let entry_scope = entry_dir.to_owned();
 
     let (doc_template, store) =
@@ -282,6 +295,7 @@ fn doc_fragment_folding_reads_directly_constructed_formatted_tir_root() {
         &entry_dir,
         vec![push_start_runtime_fragment_node(doc_template, entry_scope)],
         &mut string_table,
+        &mut path_fork,
     )];
 
     let doc_fragments = collect_and_strip_comment_templates_for_tests_with_store(
@@ -307,7 +321,7 @@ doc body
 ]
 "#;
 
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
     assert_eq!(
         ast.doc_fragments.len(),
@@ -324,7 +338,8 @@ doc body
 #[test]
 fn collects_const_top_level_fragments_from_tir_result_record() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
     let value = string_table.intern("const html");
 
     let mut results = FxHashMap::default();
@@ -350,7 +365,8 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
 #[test]
 fn collects_const_top_level_fragments_from_folded_value() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
     let value = string_table.intern("folded html");
 
     let mut results = FxHashMap::default();
@@ -376,8 +392,9 @@ fn collects_const_top_level_fragments_from_folded_value() {
 #[test]
 fn collects_mixed_const_top_level_fragments_in_source_order() {
     let mut string_table = StringTable::new();
-    let first_path = InternedPath::from_single_str("first.moth", &mut string_table);
-    let second_path = InternedPath::from_single_str("second.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let first_path = path_fork.try_intern_portable_path("first.moth", &mut string_table).expect("test path fits");
+    let second_path = path_fork.try_intern_portable_path("second.moth", &mut string_table).expect("test path fits");
 
     let first_value = string_table.intern("first");
     let second_value = string_table.intern("second");
@@ -438,9 +455,10 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
     // WHY: structural const values must remain in the AST-local vocabulary until service conversion
     //      and the builder's final-text boundary.
     let mut string_table = StringTable::new();
-    let piece_path = InternedPath::from_single_str("piece.moth", &mut string_table);
-    let all_text_path = InternedPath::from_single_str("all-text.moth", &mut string_table);
-    let text_path = InternedPath::from_single_str("text.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let piece_path = path_fork.try_intern_portable_path("piece.moth", &mut string_table).expect("test path fits");
+    let all_text_path = path_fork.try_intern_portable_path("all-text.moth", &mut string_table).expect("test path fits");
+    let text_path = path_fork.try_intern_portable_path("text.moth", &mut string_table).expect("test path fits");
     let prefix = string_table.intern("before");
     let suffix = string_table.intern("after");
     let all_text_prefix = string_table.intern("all-text-before");
@@ -512,9 +530,10 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
 #[test]
 fn missing_const_top_level_fragment_result_returns_compiler_error() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
 
-    let results = FxHashMap::<InternedPath, FoldedConstTemplateResult>::default();
+    let results = FxHashMap::<PathId, FoldedConstTemplateResult>::default();
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 0,
         header_path: path,

@@ -44,6 +44,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Template-body parsing owns recursive template construction, so it carries the template error
 /// boundary rather than reducing an inner retained-data failure to a user diagnostic.
@@ -72,6 +73,7 @@ pub(crate) fn parse_template_body(
         control_context,
         string_table,
         default_style,
+        path_fork,
     } = input;
 
     // Pre-intern common single-character literals used on every newline and
@@ -91,6 +93,7 @@ pub(crate) fn parse_template_body(
         open_bracket_id,
         close_bracket_id,
         default_style,
+        path_fork,
     };
 
     match body_mode {
@@ -119,9 +122,6 @@ pub(crate) fn parse_template_body(
 /// Shared input bundle for one template body parse.
 ///
 /// WHAT: carries the mutable AST/body parser services used by every recursive
-/// body mode.
-/// WHY: control-flow body parsing needs the same token/type/string-table state
-/// across normal, if, and loop paths without threading long argument lists.
 pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
     pub(crate) context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'types>,
@@ -132,6 +132,7 @@ pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
     pub(crate) string_table: &'a mut StringTable,
     /// Source-kind policy applied to child templates without an explicit formatter.
     pub(crate) default_style: Option<Style>,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 /// Options that stay stable for one template node while its head and body are parsed.
@@ -208,6 +209,7 @@ struct TemplateBodyParser<'a, 'types> {
     open_bracket_id: StringId,
     close_bracket_id: StringId,
     default_style: Option<Style>,
+    path_fork: &'a mut PathInternerFork,
 }
 
 impl<'a, 'types> TemplateBodyParser<'a, 'types> {
@@ -493,6 +495,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             base_context,
             self.type_interner,
             self.string_table,
+            self.path_fork,
         )?;
 
         if self.token_stream.index != close_index
@@ -593,6 +596,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             nested_direct_child_wrappers,
             self.string_table,
             parse_options,
+            self.path_fork,
         )?;
         let child_template = child_construction.template;
 
@@ -765,8 +769,11 @@ fn branch_selector_and_context_from_parsed_if_header(
 ) -> BodyParseResult<(TemplateBranchSelector, ScopeContext)> {
     match parsed_header {
         ParsedIfHeader::BoolCondition { condition } => {
-            let branch_context =
-                base_context.new_child_control_flow(ContextKind::Branch, parser.string_table);
+            let branch_context = base_context.new_child_control_flow(
+                ContextKind::Branch,
+                parser.string_table,
+                parser.path_fork,
+            );
 
             Ok((TemplateBranchSelector::Bool(condition), branch_context))
         }
@@ -776,8 +783,11 @@ fn branch_selector_and_context_from_parsed_if_header(
             pattern,
             then_context,
         } => {
-            let branch_context =
-                then_context.new_child_control_flow(ContextKind::Branch, parser.string_table);
+            let branch_context = then_context.new_child_control_flow(
+                ContextKind::Branch,
+                parser.string_table,
+                parser.path_fork,
+            );
 
             Ok((
                 TemplateBranchSelector::OptionPresentCapture {

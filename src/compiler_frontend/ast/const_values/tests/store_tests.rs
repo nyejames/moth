@@ -26,7 +26,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
@@ -35,9 +35,14 @@ use std::path::Path;
 //  Fixtures
 // ------------------------------------
 
-fn text_declaration(path: &str, text: StringId, string_table: &mut StringTable) -> Declaration {
+fn text_declaration(
+    path: &str,
+    text: StringId,
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> Declaration {
     Declaration {
-        id: InternedPath::from_single_str(path, string_table),
+        id: path_fork.try_intern_portable_path(path, string_table).expect("test path fits"),
         value: Expression::string_slice(text, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -63,17 +68,22 @@ fn resource_id(table: &mut ModuleResourceTable, relative: &str) -> ResourceId {
 fn structural_string_declaration(
     path: &str,
     pieces: Vec<ConstStringPiece>,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Declaration {
     Declaration {
-        id: InternedPath::from_single_str(path, string_table),
+        id: path_fork.try_intern_portable_path(path, string_table).expect("test path fits"),
         value: Expression::structural_string(pieces, None),
         binding_span: None,
         config_qualifier: None,
     }
 }
 
-fn template_declaration(path: &str, string_table: &mut StringTable) -> Declaration {
+fn template_declaration(
+    path: &str,
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> Declaration {
     let template = Template {
         tir_reference: TemplateTirReference {
             root: TemplateIrId::new(0),
@@ -83,7 +93,7 @@ fn template_declaration(path: &str, string_table: &mut StringTable) -> Declarati
         span: None,
     };
     Declaration {
-        id: InternedPath::from_single_str(path, string_table),
+        id: path_fork.try_intern_portable_path(path, string_table).expect("test path fits"),
         value: Expression::template(template, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -120,17 +130,19 @@ fn visit_string_value(
 #[test]
 fn plain_text_stays_on_the_fast_path() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
     let text = string_table.intern("plain");
-    let declaration = text_declaration("greeting", text, &mut string_table);
+    let declaration = text_declaration("greeting", text, &mut path_fork, &mut string_table);
 
     let store = ConstValueStore::from_test_declarations(vec![declaration], &type_environment)
         .expect("a plain text constant is representable in the store");
     let id = store
-        .value_for_path(&InternedPath::from_single_str(
-            "greeting",
-            &mut string_table,
-        ))
+        .value_for_path(
+            &path_fork
+                .try_intern_portable_path("greeting", &mut string_table)
+                .expect("test path fits"),
+        )
         .expect("the defining path indexes the store");
 
     assert!(matches!(
@@ -151,6 +163,7 @@ fn plain_text_stays_on_the_fast_path() {
 #[test]
 fn pieces_round_trip_through_the_visitor_in_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
     let mut resources = ModuleResourceTable::new();
     let prefix = string_table.intern("docs/");
@@ -163,11 +176,12 @@ fn pieces_round_trip_through_the_visitor_in_order() {
             ConstStringPiece::Resource(logo),
             ConstStringPiece::SiteRoot,
         ],
+        &mut path_fork,
         &mut string_table,
     );
     let store = ConstValueStore::from_test_declarations(vec![declaration], &type_environment)
         .expect("a piece-bearing constant is representable in the store");
-    let id = store.value_for_path(&InternedPath::from_single_str("logo", &mut string_table));
+    let id = store.value_for_path(&path_fork.try_intern_portable_path("logo", &mut string_table).expect("test path fits"));
 
     let Some(id) = id else {
         panic!("the defining path indexes the store");
@@ -186,6 +200,7 @@ fn pieces_round_trip_through_the_visitor_in_order() {
 #[test]
 fn mixed_pieces_keep_authored_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
     let mut resources = ModuleResourceTable::new();
     let site_root_suffix = string_table.intern("docs/");
@@ -200,15 +215,17 @@ fn mixed_pieces_keep_authored_order() {
             ConstStringPiece::Resource(stylesheet),
             ConstStringPiece::Text(extension),
         ],
+        &mut path_fork,
         &mut string_table,
     );
     let store = ConstValueStore::from_test_declarations(vec![declaration], &type_environment)
         .expect("a piece-bearing constant is representable in the store");
     let id = store
-        .value_for_path(&InternedPath::from_single_str(
-            "docs_url",
-            &mut string_table,
-        ))
+        .value_for_path(
+            &path_fork
+                .try_intern_portable_path("docs_url", &mut string_table)
+                .expect("test path fits"),
+        )
         .expect("the defining path indexes the store");
 
     assert_eq!(
@@ -229,9 +246,10 @@ fn mixed_pieces_keep_authored_order() {
 #[test]
 fn a_plain_text_template_fold_stays_on_the_text_fast_path() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
     let folded = string_table.intern("rendered body");
-    let declaration = template_declaration("page", &mut string_table);
+    let declaration = template_declaration("page", &mut path_fork, &mut string_table);
 
     let store = ConstValueStore::from_test_template_folds(
         vec![declaration],
@@ -240,7 +258,7 @@ fn a_plain_text_template_fold_stays_on_the_text_fast_path() {
     )
     .expect("a folded template result is representable in the store");
     let id = store
-        .value_for_path(&InternedPath::from_single_str("page", &mut string_table))
+        .value_for_path(&path_fork.try_intern_portable_path("page", &mut string_table).expect("test path fits"))
         .expect("the defining path indexes the store");
 
     // The fold must land on the compact text fast path, not a one-element piece vector.
@@ -258,12 +276,13 @@ fn a_plain_text_template_fold_stays_on_the_text_fast_path() {
 #[test]
 fn a_piece_bearing_template_fold_round_trips_its_pieces_in_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
     let mut resources = ModuleResourceTable::new();
     let prefix = string_table.intern("docs/");
     let logo = resource_id(&mut resources, "assets/logo.svg");
 
-    let declaration = template_declaration("docs_url", &mut string_table);
+    let declaration = template_declaration("docs_url", &mut path_fork, &mut string_table);
     let store = ConstValueStore::from_test_template_folds(
         vec![declaration],
         ConstStringValue::Pieces(vec![
@@ -275,10 +294,11 @@ fn a_piece_bearing_template_fold_round_trips_its_pieces_in_order() {
     )
     .expect("a piece-bearing template fold is representable in the store");
     let id = store
-        .value_for_path(&InternedPath::from_single_str(
-            "docs_url",
-            &mut string_table,
-        ))
+        .value_for_path(
+            &path_fork
+                .try_intern_portable_path("docs_url", &mut string_table)
+                .expect("test path fits"),
+        )
         .expect("the defining path indexes the store");
 
     // A template fold is a structural string like any other: the pieces must survive the
@@ -304,6 +324,7 @@ fn a_piece_bearing_template_fold_round_trips_its_pieces_in_order() {
 #[test]
 fn the_text_only_accessor_refuses_pieces() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
     let mut resources = ModuleResourceTable::new();
     let prefix = string_table.intern("docs/");
@@ -315,12 +336,17 @@ fn the_text_only_accessor_refuses_pieces() {
             ConstStringPiece::Text(prefix),
             ConstStringPiece::Resource(logo),
         ],
+        &mut path_fork,
         &mut string_table,
     );
     let store = ConstValueStore::from_test_declarations(vec![declaration], &type_environment)
         .expect("a piece-bearing constant is representable in the store");
     let id = store
-        .value_for_path(&InternedPath::from_single_str("logo", &mut string_table))
+        .value_for_path(
+            &path_fork
+                .try_intern_portable_path("logo", &mut string_table)
+                .expect("test path fits"),
+        )
         .expect("the defining path indexes the store");
 
     // No piece may flatten to text through the accessor while the URL context is unresolved.
@@ -335,12 +361,15 @@ fn the_text_only_accessor_refuses_pieces() {
 fn record_declaration(
     path: &str,
     fields: Vec<Declaration>,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Declaration {
     Declaration {
-        id: InternedPath::from_single_str(path, string_table),
+        id: path_fork.try_intern_portable_path(path, string_table).expect("test path fits"),
         value: Expression::struct_instance(
-            InternedPath::from_single_str("Record", string_table),
+            path_fork
+                .try_intern_portable_path("Record", string_table)
+                .expect("test path fits"),
             fields,
             None,
             ValueMode::ImmutableOwned,
@@ -356,10 +385,11 @@ fn record_declaration(
 fn int_field(
     name: &str,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Declaration {
     Declaration {
-        id: InternedPath::from_single_str(name, string_table),
+        id: path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
         value: Expression::int(7, span, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -369,21 +399,27 @@ fn int_field(
 #[test]
 fn record_fields_keep_authored_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
 
     let declaration = record_declaration(
         "meta",
         vec![
-            int_field("alpha", None, &mut string_table),
-            int_field("beta", None, &mut string_table),
+            int_field("alpha", None, &mut path_fork, &mut string_table),
+            int_field("beta", None, &mut path_fork, &mut string_table),
         ],
+        &mut path_fork,
         &mut string_table,
     );
 
     let store = ConstValueStore::from_test_declarations(vec![declaration], &type_environment)
         .expect("a two-field record is representable in the store");
     let id = store
-        .value_for_path(&InternedPath::from_single_str("meta", &mut string_table))
+        .value_for_path(
+            &path_fork
+                .try_intern_portable_path("meta", &mut string_table)
+                .expect("test path fits"),
+        )
         .expect("the defining path indexes the store");
 
     let Some(ConstValuePayload::Record(fields)) = store.payload(id) else {
@@ -391,21 +427,37 @@ fn record_fields_keep_authored_order() {
     };
 
     assert_eq!(fields.len(), 2);
-    assert_eq!(fields[0].name.name(), Some(string_table.intern("alpha")));
-    assert_eq!(fields[1].name.name(), Some(string_table.intern("beta")));
+    assert_eq!(
+        string_table.resolve(
+            path_fork
+                .component(fields[0].name)
+                .expect("first field path has a component"),
+        ),
+        "alpha"
+    );
+    assert_eq!(
+        string_table.resolve(
+            path_fork
+                .component(fields[1].name)
+                .expect("second field path has a component"),
+        ),
+        "beta"
+    );
 }
 
 #[test]
 fn duplicate_record_field_name_is_a_construction_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
 
     let declaration = record_declaration(
         "meta",
         vec![
-            int_field("name", None, &mut string_table),
-            int_field("name", None, &mut string_table),
+            int_field("name", None, &mut path_fork, &mut string_table),
+            int_field("name", None, &mut path_fork, &mut string_table),
         ],
+        &mut path_fork,
         &mut string_table,
     );
 
@@ -423,19 +475,30 @@ fn duplicate_record_field_name_is_a_construction_error() {
 #[test]
 fn const_record_aliases_share_the_target_root() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::default();
-    let meta = InternedPath::from_single_str("meta", &mut string_table);
-    let alias = InternedPath::from_single_str("also", &mut string_table);
+    let meta = path_fork
+        .try_intern_portable_path("meta", &mut string_table)
+        .expect("test path fits");
+    let alias = path_fork
+        .try_intern_portable_path("also", &mut string_table)
+        .expect("test path fits");
 
     let target = record_declaration(
         "meta",
-        vec![int_field("alpha", None, &mut string_table)],
+        vec![int_field(
+            "alpha",
+            None,
+            &mut path_fork,
+            &mut string_table,
+        )],
+        &mut path_fork,
         &mut string_table,
     );
     let alias_declaration = Declaration {
-        id: alias.clone(),
+        id: alias,
         value: Expression::reference_with_type_id(
-            meta.clone(),
+            meta,
             DataType::Inferred,
             type_environment.anonymous_const_record_type(),
             None,
@@ -456,7 +519,7 @@ fn const_record_aliases_share_the_target_root() {
 
     let alpha = string_table.intern("alpha");
     assert_eq!(
-        store.field_value(target_id, alpha),
-        store.field_value(alias_id, alpha)
+        store.field_value(target_id, alpha, &path_fork),
+        store.field_value(alias_id, alpha, &path_fork)
     );
 }

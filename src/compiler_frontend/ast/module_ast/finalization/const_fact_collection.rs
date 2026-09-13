@@ -30,7 +30,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
@@ -85,7 +85,7 @@ impl<'a> ConstFactCollector<'a> {
         mut self,
         const_values: &ConstValueStore,
         ast_nodes: &[AstNode],
-        start_function_path: Option<&InternedPath>,
+        start_function_path: Option<&PathId>,
     ) -> Result<AstConstFacts, TemplateNormalizationError> {
         self.collect_explicit_top_level_facts(const_values);
         self.collect_private_and_body_local_facts(ast_nodes, start_function_path)?;
@@ -131,7 +131,7 @@ impl<'a> ConstFactCollector<'a> {
     fn collect_private_and_body_local_facts(
         &mut self,
         ast_nodes: &[AstNode],
-        start_function_path: Option<&InternedPath>,
+        start_function_path: Option<&PathId>,
     ) -> Result<(), TemplateNormalizationError> {
         for node in ast_nodes {
             if let NodeKind::Function(path, _, body) = &node.kind {

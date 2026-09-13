@@ -10,7 +10,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId}
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) use crate::compiler_frontend::tests::hir_fixture_support::{
     bool_expression, expression, int_expression, local, statement, string_expression,
@@ -56,8 +56,9 @@ pub(crate) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
 /// seeding differ, so this is not the same operation under one name. Only the HIR node
 /// constructors are shared, from `compiler_frontend::tests::hir_fixture_support`.
 pub(crate) fn build_module(
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-    functions: Vec<(HirFunction, InternedPath, HirFunctionOrigin)>,
+    functions: Vec<(HirFunction, PathId, HirFunctionOrigin)>,
     blocks: Vec<HirBlock>,
     start_function: FunctionId,
 ) -> HirModule {
@@ -94,7 +95,7 @@ pub(crate) fn build_module(
     for block in &module.blocks {
         for local in &block.locals {
             let local_path =
-                InternedPath::from_single_str(&format!("local_{}", local.id.0), string_table);
+                path_fork.try_intern_portable_path(&format!("local_{}", local.id.0), string_table).expect("test path fits");
             module.side_table.bind_local_name(local.id, local_path);
         }
     }

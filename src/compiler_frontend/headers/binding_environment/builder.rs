@@ -27,7 +27,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fmt::Debug;
@@ -65,9 +65,9 @@ type BuilderResult<T> = Result<T, BindingEnvironmentError>;
 ///      for path, selection and source-file facts.
 struct SelectedDependencyInput<'a> {
     selection: &'a DependencySelection,
-    selected_path: &'a InternedPath,
-    source_file: &'a InternedPath,
-    dependency_bindable_symbol_paths: &'a FxHashSet<InternedPath>,
+    selected_path: &'a PathId,
+    source_file: &'a PathId,
+    dependency_bindable_symbol_paths: &'a FxHashSet<PathId>,
 }
 
 /// Inputs for one provider declaration binding.
@@ -80,7 +80,7 @@ struct ProviderDeclarationBindingInput<'a> {
     public_name: StringId,
     local_name: StringId,
     local_alias: Option<&'a DependencyAlias>,
-    local_path: &'a InternedPath,
+    local_path: &'a PathId,
     source_span: Option<SourceSpan>,
     provider_id: ProviderInterfaceId,
 }
@@ -93,10 +93,10 @@ struct ProviderDeclarationBindingInput<'a> {
 /// and consumer path are owned by the binding clause.
 struct PublicProviderSelectionInput<'a> {
     selection: &'a DependencySelection,
-    selected_path: &'a InternedPath,
+    selected_path: &'a PathId,
     provider_selection: DependencySelectionId,
     provider_source_name: StringId,
-    diagnostic_path: &'a InternedPath,
+    diagnostic_path: &'a PathId,
 }
 
 /// Insert one provider fact only when every publisher of the same key agrees.
@@ -140,6 +140,7 @@ pub(crate) struct BindingEnvironmentBuilder<'a> {
     pub(super) source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     pub(super) source_files: &'a SourceDatabase,
     pub(super) string_table: &'a mut StringTable,
+    pub(super) path_fork: &'a mut PathInternerFork,
     pub(super) environment: HeaderBindingEnvironment,
     pub(super) warnings: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
     /// Provider IDs whose closed semantics have already been imported into the module-wide
@@ -178,8 +179,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     /// before deciding whether receiver methods may travel with the dependency-bound surface.
     pub(super) fn source_files_share_dependency_boundary(
         &self,
-        consumer_file: &InternedPath,
-        target_file: &InternedPath,
+        consumer_file: &PathId,
+        target_file: &PathId,
     ) -> bool {
         let consumer_package = self
             .module_symbols
@@ -207,7 +208,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     pub(super) fn build_file_visibility(
         &mut self,
-        source_file: &InternedPath,
+        source_file: &PathId,
         selection_table: &[DependencySelection],
     ) -> BuilderResult<()> {
         let mut file_visibility = FileVisibility::default();
@@ -226,7 +227,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .visible_declaration_paths_mut()
                     .insert(path.clone());
 
-                let Some(name) = path.name() else {
+                let Some(name) = self.path_fork.component(*path) else {
                     continue;
                 };
 
@@ -290,7 +291,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             file_visibility
                 .visible_declaration_paths_mut()
                 .insert(path.clone());
-            if let Some(name) = path.name() {
+            if let Some(name) = self.path_fork.component(*path) {
                 registry.register(name, VisibleNameBinding::Builtin, None)?;
                 file_visibility
                     .visible_source_names
@@ -345,10 +346,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 // LeadingAtInPathComponent rejection. Support roots and config files need
                 // this later check because `+` and `config` are valid path component characters.
                 if dependency_path_references_support_root_file(
-                    &dependency.dependency.path,
+                    dependency.dependency.path,
+                    &*self.path_fork,
                     self.string_table,
                 ) || dependency_path_references_config_file(
-                    &dependency.dependency.path,
+                    dependency.dependency.path,
+                    &*self.path_fork,
                     self.string_table,
                 ) {
                     return Err(super::diagnostics::direct_special_file_dependency(
@@ -438,8 +441,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         //      across compilations; lexicographic order by function path is stable.
         for paths in file_visibility.visible_receiver_methods.values_mut() {
             paths.sort_by(|a, b| {
-                let a_str = a.target.local_path().to_string(self.string_table);
-                let b_str = b.target.local_path().to_string(self.string_table);
+                let a_str = self.path_fork.render_portable(
+                    *a.target.local_path(),
+                    self.string_table,
+                    &mut Vec::new(),
+                );
+                let b_str = self.path_fork.render_portable(
+                    *b.target.local_path(),
+                    self.string_table,
+                    &mut Vec::new(),
+                );
                 a_str.cmp(&b_str)
             });
         }
@@ -727,7 +738,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let public_name_id = selection.source_name;
             let public_name = self.string_table.resolve(public_name_id);
             if view.exported_origin(public_name).is_some() {
-                let local_path = dependency.dependency.path.append(public_name_id);
+            let local_path = self
+                .path_fork
+                .try_intern_child(dependency.dependency.path, public_name_id)
+                .expect("path interner fork exhausted while binding provider declaration");
                 self.register_provider_declaration_binding(
                     file_visibility,
                     registry,
@@ -779,7 +793,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         selection: &DependencySelection,
         interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
     ) -> CompilerDiagnostic {
-        let selected_path = dependency.dependency.path.append(selection.source_name);
+        let selected_path = self
+            .path_fork
+            .try_intern_child(dependency.dependency.path, selection.source_name)
+            .expect("path interner fork exhausted while building provider diagnostic path");
 
         super::provider_public_surface_diagnostic(
             &selected_path,
@@ -829,7 +846,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 )
             })?;
             let name = self.string_table.intern(binding.public_name());
-            let local_path = dependency.dependency.path.append(name);
+            let local_path = self
+                .path_fork
+                .try_intern_child(dependency.dependency.path, name)
+                .expect("path interner fork exhausted while binding imported declaration");
             let target = SourceDeclarationTarget::Imported {
                 origin: binding.origin().clone(),
                 local_path: local_path.clone(),
@@ -943,7 +963,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     pub(super) fn register_imported_receiver_methods(
         &mut self,
         file_visibility: &mut FileVisibility,
-        imported_type_path: &InternedPath,
+        imported_type_path: &PathId,
         methods: &[crate::compiler_frontend::public_interface::PublicReceiverMethodSemantics],
         provider_id: ProviderInterfaceId,
         dependency_span: Option<SourceSpan>,
@@ -954,7 +974,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let method_name = self
                 .string_table
                 .intern(method.method_origin.defining_name());
-            let method_path = imported_type_path.append(method_name);
+            let method_path = self
+                .path_fork
+                .try_intern_child(*imported_type_path, method_name)
+                .expect("path interner fork exhausted while binding receiver method");
             let target = SourceFunctionTarget::Imported {
                 origin: method.method_origin.clone(),
                 local_path: method_path.clone(),
@@ -987,7 +1010,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         &mut self,
         file_visibility: &mut FileVisibility,
         registry: &mut VisibleNameRegistry,
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> BuilderResult<()> {
         if !self.is_moth_template_source_file(source_file) {
             return Ok(());
@@ -1028,7 +1051,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         &self,
         file_visibility: &mut FileVisibility,
         registry: &mut VisibleNameRegistry,
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) {
         let Some((content_name, content_path)) = file_visibility
             .visible_source_names
@@ -1071,7 +1094,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     fn collect_implicit_template_scope_constants(
         &mut self,
-        implicit_constants: &mut Vec<(StringId, InternedPath, Option<SourceSpan>)>,
+        implicit_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
     ) -> BuilderResult<()> {
         for (prefix, provider_id) in self
             .source_provider_dependencies
@@ -1121,10 +1144,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 // cross-module constant. Include the provider prefix so each selected source
                 // package retains a distinct identity in collision diagnostics.
                 let package_name = self.string_table.intern(prefix);
-                let synthetic_path = InternedPath::from_components(vec![package_name, name_id]);
+                let synthetic_path = self
+                    .path_fork
+                    .try_intern_components(&[package_name, name_id])
+                    .expect("implicit package constant path must fit the path table");
                 self.environment
                     .imported_declarations_by_local_path
-                    .entry(synthetic_path.clone())
+                    .entry(synthetic_path)
                     .or_insert_with(|| origin);
                 // Provider declaration provenance does not cross the interface boundary. This
                 // compiler-generated implicit binding therefore carries no authored span.
@@ -1137,8 +1163,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     fn collect_same_directory_public_export_constants(
         &mut self,
-        source_file: &InternedPath,
-        implicit_constants: &mut Vec<(StringId, InternedPath, Option<SourceSpan>)>,
+        source_file: &PathId,
+        implicit_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
     ) {
         let Some(root_file) = self.same_directory_root_file(source_file) else {
             return;
@@ -1162,8 +1188,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn collect_constant_exports(
         &mut self,
         entries: &FxHashSet<PublicExportEntry>,
-        implicit_constants: &mut Vec<(StringId, InternedPath, Option<SourceSpan>)>,
-        excluded_source_file: Option<&InternedPath>,
+        implicit_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
+        excluded_source_file: Option<&PathId>,
     ) {
         for entry in entries {
             let Some(path) = entry.target.source_path() else {
@@ -1191,8 +1217,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     fn symbol_origin_matches_source(
         &self,
-        symbol_path: &InternedPath,
-        source_file: &InternedPath,
+        symbol_path: &PathId,
+        source_file: &PathId,
     ) -> bool {
         let Some(origin) = self
             .module_symbols
@@ -1213,11 +1239,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .source_record(source_file, self.source_files)
             .and_then(|record| record.canonical_os_path.as_ref())
             .is_some_and(|canonical_path| {
-                origin.to_path_buf(self.string_table).into_boxed_path() == *canonical_path
+                self.path_fork
+                    .render_native(*origin, self.string_table, &mut Vec::new())
+                    == canonical_path.as_ref()
             })
     }
 
-    fn is_moth_template_source_file(&self, source_file: &InternedPath) -> bool {
+    fn is_moth_template_source_file(&self, source_file: &PathId) -> bool {
         matches!(
             self.module_symbols
                 .source_record(source_file, self.source_files)
@@ -1225,8 +1253,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
         )
     }
-
-    fn same_directory_root_file(&self, source_file: &InternedPath) -> Option<InternedPath> {
+    fn same_directory_root_file(&self, source_file: &PathId) -> Option<PathId> {
         let moth_template_directory = self.source_directory(source_file)?;
 
         self.module_symbols
@@ -1239,24 +1266,24 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
                 let candidate_directory = self.source_directory(candidate_source)?;
                 if candidate_directory == moth_template_directory {
-                    Some(candidate_source.clone())
+                    Some(*candidate_source)
                 } else {
                     None
                 }
             })
     }
 
-    fn source_directory(&self, source_file: &InternedPath) -> Option<InternedPath> {
+    fn source_directory(&self, source_file: &PathId) -> Option<PathId> {
         // Same-directory public-export visibility is a module-scope question. Canonical OS
         // parents can disagree with logical parents under a symlink that places two logical
         // siblings on different physical directories, or that collides two logical directories
         // onto one physical directory. Visibility follows the logical interned path uniformly.
-        source_file.parent()
+        self.path_fork.try_parent(*source_file)
     }
 
     fn source_package_public_exports_for_file(
         &self,
-        root_file: &InternedPath,
+        root_file: &PathId,
     ) -> Option<&FxHashSet<PublicExportEntry>> {
         let prefix = self
             .module_symbols
@@ -1277,7 +1304,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     fn module_root_public_exports_for_file(
         &self,
-        root_file: &InternedPath,
+        root_file: &PathId,
     ) -> Option<&FxHashSet<PublicExportEntry>> {
         let module_root = self.module_symbols.file_module_membership.get(root_file)?;
 
@@ -1292,7 +1319,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         registry: &mut VisibleNameRegistry,
         dependency: &RetainedDependencyClause,
         selections: &[DependencySelection],
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> BuilderResult<()> {
         let source_provider_clause = self
             .source_provider_dependencies
@@ -1328,7 +1355,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         for selection in selections {
-            let selected_path = dependency.dependency.path.append(selection.source_name);
+            let selected_path = self
+                .path_fork
+                .try_intern_child(dependency.dependency.path, selection.source_name)
+                .expect("path interner fork exhausted while resolving selected dependency");
             self.resolve_and_register_selected_dependency(
                 file_visibility,
                 registry,
@@ -1361,7 +1391,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         let local_name = selection.local_name();
 
-        let public_export_input = PublicExportResolutionInput {
+        let mut public_export_input = PublicExportResolutionInput {
             consumer_file: source_file,
             header_path: selected_path,
             source_package_public_exports: &self.module_symbols.source_package_public_exports,
@@ -1370,9 +1400,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             file_module_membership: &self.module_symbols.file_module_membership,
             module_root_boundaries: &self.module_symbols.module_root_boundaries,
             string_table: self.string_table,
+            path_fork: &mut *self.path_fork,
         };
 
-        if let Some(public_export_result) = resolve_public_export_boundary(&public_export_input) {
+        if let Some(public_export_result) = resolve_public_export_boundary(&mut public_export_input) {
             match public_export_result {
                 PublicExportLookupResult::ExportedSource {
                     path,
@@ -1453,6 +1484,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             dependency_bindable_symbol_paths,
             external_package_registry: self.external_package_registry,
             string_table: self.string_table,
+            path_fork: &*self.path_fork,
         })?;
 
         match target {
@@ -1540,11 +1572,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         let mut found = false;
         for selection in selections {
-            let selected_path = dependency.dependency.path.append(selection.source_name);
+            let selected_path = self
+                .path_fork
+                .try_intern_child(dependency.dependency.path, selection.source_name)
+                .expect("path interner fork exhausted while resolving external dependency");
             match resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
                 dependency_path: &selected_path,
                 external_package_registry: self.external_package_registry,
                 string_table: self.string_table,
+                path_fork: &*self.path_fork,
             }) {
                 ExternalPackageSymbolLookup::Found { symbol_id } => {
                     found = true;
@@ -1593,10 +1629,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         file_visibility: &mut FileVisibility,
         registry: &mut VisibleNameRegistry,
         dependency: &RetainedDependencyClause,
-        source_file: &InternedPath,
+        source_file: &PathId,
     ) -> BuilderResult<()> {
         // Reject explicit `.moth` extension in dependency paths.
-        if has_explicit_moth_extension(&dependency.dependency.path, self.string_table) {
+        if has_explicit_moth_extension(
+            &dependency.dependency.path,
+            self.string_table,
+            &*self.path_fork,
+        ) {
             return Err(CompilerDiagnostic::explicit_moth_extension(
                 dependency.dependency.path.clone(),
                 Some(dependency.dependency.span),
@@ -1637,6 +1677,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     module_file_paths: &self.module_symbols.module_file_paths,
                     external_package_registry: self.external_package_registry,
                     string_table: self.string_table,
+                    path_fork: &*self.path_fork,
                 })
             });
 
@@ -1661,6 +1702,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .dependency_bindable_source_symbol_paths,
             external_package_registry: self.external_package_registry,
             string_table: self.string_table,
+            path_fork: &*self.path_fork,
         })?;
 
         // If normal resolution succeeds for a bare dependency, it's a direct symbol-path dependency.

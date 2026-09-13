@@ -12,8 +12,9 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::headers::types::{FileRole, Header, HeaderExportMode, HeaderKind};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
@@ -27,7 +28,7 @@ const SYNTHETIC_CONTENT_NAME: &str = "content";
 /// WHY: grouping these fields avoids a long argument list and keeps the caller responsible for
 ///      source-identity and initializer facts while this helper owns the repetitive header shape.
 pub(crate) struct SyntheticContentHeaderInput {
-    pub(crate) source_file: InternedPath,
+    pub(crate) source_file: PathId,
     pub(crate) file_id: SourceId,
     pub(crate) canonical_os_path: Option<PathBuf>,
     pub(crate) initializer_tokens: Vec<Token>,
@@ -41,10 +42,14 @@ pub(crate) struct SyntheticContentHeaderInput {
 /// WHY: declaration ordering and the header stage must agree on the content constant identity from
 ///       one owner of the synthetic name.
 pub(crate) fn content_constant_path(
-    content_source: &InternedPath,
+    content_source: PathId,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> InternedPath {
-    content_source.append(string_table.intern(SYNTHETIC_CONTENT_NAME))
+) -> Result<PathId, CompilerError> {
+    let content_name = string_table.intern(SYNTHETIC_CONTENT_NAME);
+    path_fork
+        .try_intern_child(content_source, content_name)
+        .ok_or_else(|| CompilerError::compiler_error("path table exhausted while interning content path"))
 }
 
 /// Build a private `content #String` constant header from generated initializer tokens.
@@ -56,11 +61,12 @@ pub(crate) fn content_constant_path(
 pub(crate) fn synthetic_content_header(
     input: SyntheticContentHeaderInput,
     string_table: &mut StringTable,
-) -> Header {
-    let header_path = content_constant_path(&input.source_file, string_table);
+    path_fork: &mut PathInternerFork,
+) -> Result<Header, CompilerError> {
+    let header_path = content_constant_path(input.source_file, path_fork, string_table)?;
 
     let header_tokens = FileTokens::new_deferred_with_identity(
-        header_path.clone(),
+        header_path,
         input.file_id,
         input.canonical_os_path,
         Vec::new(),
@@ -75,7 +81,7 @@ pub(crate) fn synthetic_content_header(
         span: None,
     };
 
-    Header {
+    Ok(Header {
         kind: HeaderKind::Constant { declaration },
         file_role: FileRole::Normal,
         export_mode: HeaderExportMode::Private,
@@ -84,5 +90,5 @@ pub(crate) fn synthetic_content_header(
         tokens: header_tokens,
         source_file: input.source_file,
         capacity_references: Vec::new(),
-    }
+    })
 }

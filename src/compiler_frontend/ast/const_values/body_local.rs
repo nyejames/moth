@@ -18,7 +18,8 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 
 /// Fold every body-local const record in `nodes` into `store`.
 ///
@@ -29,7 +30,7 @@ pub(crate) fn insert_body_local_const_records(
     nodes: &[AstNode],
     type_environment: &TypeEnvironment,
     template_builder: &mut impl FnMut(
-        Option<&InternedPath>,
+        Option<&PathId>,
         &Template,
     ) -> Result<ConstTemplateValue, ConstValueStoreError>,
 ) -> Result<(), ConstValueStoreError> {
@@ -45,7 +46,7 @@ fn insert_from_node(
     node: &AstNode,
     type_environment: &TypeEnvironment,
     template_builder: &mut impl FnMut(
-        Option<&InternedPath>,
+        Option<&PathId>,
         &Template,
     ) -> Result<ConstTemplateValue, ConstValueStoreError>,
 ) -> Result<(), ConstValueStoreError> {
@@ -171,7 +172,7 @@ fn insert_declaration(
     declaration: &Declaration,
     type_environment: &TypeEnvironment,
     template_builder: &mut impl FnMut(
-        Option<&InternedPath>,
+        Option<&PathId>,
         &Template,
     ) -> Result<ConstTemplateValue, ConstValueStoreError>,
 ) -> Result<(), ConstValueStoreError> {
@@ -191,7 +192,7 @@ fn insert_from_expressions(
     expressions: &[Expression],
     type_environment: &TypeEnvironment,
     template_builder: &mut impl FnMut(
-        Option<&InternedPath>,
+        Option<&PathId>,
         &Template,
     ) -> Result<ConstTemplateValue, ConstValueStoreError>,
 ) -> Result<(), ConstValueStoreError> {
@@ -206,7 +207,7 @@ fn insert_from_call_arguments(
     arguments: &[CallArgument],
     type_environment: &TypeEnvironment,
     template_builder: &mut impl FnMut(
-        Option<&InternedPath>,
+        Option<&PathId>,
         &Template,
     ) -> Result<ConstTemplateValue, ConstValueStoreError>,
 ) -> Result<(), ConstValueStoreError> {
@@ -221,7 +222,7 @@ fn insert_from_match_pattern(
     pattern: &MatchPattern,
     type_environment: &TypeEnvironment,
     template_builder: &mut impl FnMut(
-        Option<&InternedPath>,
+        Option<&PathId>,
         &Template,
     ) -> Result<ConstTemplateValue, ConstValueStoreError>,
 ) -> Result<(), ConstValueStoreError> {
@@ -250,7 +251,7 @@ fn insert_from_fallible_handling(
     handling: &FallibleHandling,
     type_environment: &TypeEnvironment,
     template_builder: &mut impl FnMut(
-        Option<&InternedPath>,
+        Option<&PathId>,
         &Template,
     ) -> Result<ConstTemplateValue, ConstValueStoreError>,
 ) -> Result<(), ConstValueStoreError> {
@@ -265,7 +266,7 @@ fn insert_from_expression(
     expression: &Expression,
     type_environment: &TypeEnvironment,
     template_builder: &mut impl FnMut(
-        Option<&InternedPath>,
+        Option<&PathId>,
         &Template,
     ) -> Result<ConstTemplateValue, ConstValueStoreError>,
 ) -> Result<(), ConstValueStoreError> {

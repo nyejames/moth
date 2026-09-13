@@ -26,7 +26,7 @@ use crate::compiler_frontend::semantic_identity::{
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -198,27 +198,30 @@ impl ProjectGlobalsInterface {
 /// against `project`. Component count is checked explicitly: nested paths such as
 /// `@project/details` and coincident suffixes never claim the synthetic root.
 pub(crate) fn is_project_globals_dependency(
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> bool {
-    dependency_path.len() == 1
-        && dependency_path.name_str(string_table) == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+    path_fork.depth(dependency_path) == 1
+        && path_fork
+            .component(dependency_path)
+            .map(|component| string_table.resolve(component))
+            == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
 }
 
-/// Return whether a dependency path enters the permanently reserved `@project` namespace.
-///
-/// The exact root is handled as the synthetic provider. Descendants are never valid filesystem,
-/// source-package or binding-provider paths, so Stage 0 can reject them before ordinary discovery.
 pub(crate) fn is_project_globals_namespace(
-    dependency_path: &InternedPath,
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> bool {
-    dependency_path
-        .as_components()
+    // `PathInternerFork::component` returns the leaf component, but the reserved provider is
+    // identified by the first component after `@`.  Nested paths such as `@project/details` must
+    // therefore inspect the forward component sequence rather than its final segment.
+    let mut scratch = Vec::new();
+    path_fork
+        .resolve_components(dependency_path, &mut scratch)
         .first()
-        .is_some_and(|component| {
-            string_table.resolve(*component) == PROJECT_GLOBALS_DEPENDENCY_NAME
-        })
+        .is_some_and(|component| string_table.resolve(*component) == PROJECT_GLOBALS_DEPENDENCY_NAME)
 }
 
 #[cfg(test)]
@@ -358,18 +361,21 @@ mod tests {
     #[test]
     fn project_dependency_helper_matches_only_exact_one_component_root() {
         let mut strings = StringTable::new();
-        let project = InternedPath::from_single_str("project", &mut strings);
-        let nested = InternedPath::from_components(vec![
-            strings.intern("project"),
-            strings.intern("details"),
-        ]);
-        let other = InternedPath::from_single_str("projects", &mut strings);
+        let mut path_fork = PathInternerFork::empty();
+        let project = path_fork.try_intern_portable_path("project", &mut strings).expect("test path fits");
+        let nested = path_fork
+            .try_intern_components(&[
+                strings.intern("project"),
+                strings.intern("details"),
+            ])
+            .expect("test path fits");
+        let other = path_fork.try_intern_portable_path("projects", &mut strings).expect("test path fits");
 
-        assert!(is_project_globals_dependency(&project, &strings));
-        assert!(!is_project_globals_dependency(&nested, &strings));
-        assert!(!is_project_globals_dependency(&other, &strings));
-        assert!(is_project_globals_namespace(&project, &strings));
-        assert!(is_project_globals_namespace(&nested, &strings));
-        assert!(!is_project_globals_namespace(&other, &strings));
+        assert!(is_project_globals_dependency(project, &path_fork, &strings));
+        assert!(!is_project_globals_dependency(nested, &path_fork, &strings));
+        assert!(!is_project_globals_dependency(other, &path_fork, &strings));
+        assert!(is_project_globals_namespace(project, &path_fork, &strings));
+        assert!(is_project_globals_namespace(nested, &path_fork, &strings));
+        assert!(!is_project_globals_namespace(other, &path_fork, &strings));
     }
 }

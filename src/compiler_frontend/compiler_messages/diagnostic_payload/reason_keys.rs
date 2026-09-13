@@ -13,20 +13,18 @@ macro_rules! define_reasoned_diagnostic_registry {
             remap: remap;
             Import::InvalidImportPath => {
                 payload: InvalidImportPath;
-                fields: { path: InternedPath, reason: InvalidImportPathReason }
+                fields: { path: PathId, reason: InvalidImportPathReason }
                 bindings: { path, reason }
                 remap: {
-                    path.remap_string_ids(remap);
                     reason.remap_string_ids(remap);
                 }
                 descriptor: { "MOTH-IMPORT-0016", "Invalid dependency path", Error }
             },
             Import::InvalidExternalModule => {
                 payload: InvalidExternalModule;
-                fields: { path: InternedPath, reason: InvalidExternalModuleReason }
+                fields: { path: PathId, reason: InvalidExternalModuleReason }
                 bindings: { path, reason }
                 remap: {
-                    path.remap_string_ids(remap);
                     reason.remap_string_ids(remap);
                 }
                 descriptor: { "MOTH-IMPORT-0022", "Invalid external JS module", Error }
@@ -608,10 +606,9 @@ macro_rules! define_reasoned_diagnostic_registry {
             },
             Rule::InvalidCompileTimePath => {
                 payload: InvalidCompileTimePath;
-                fields: { path: InternedPath, reason: InvalidCompileTimePathReason }
+                fields: { path: PathId, reason: InvalidCompileTimePathReason }
                 bindings: { path, reason }
                 remap: {
-                    path.remap_string_ids(remap);
                     reason.remap_string_ids(remap);
                 }
                 descriptor: { "MOTH-RULE-0063", "Invalid compile-time path", Error }

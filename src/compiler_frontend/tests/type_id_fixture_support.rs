@@ -34,7 +34,8 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::tests::ast_fixture_support::param_with_type_id;
@@ -44,9 +45,11 @@ use crate::compiler_frontend::tests::ast_fixture_support::param_with_type_id;
 // ---------------------------------------------------------------------------
 
 pub(crate) struct HirTestChoiceDefinition {
-    pub(crate) nominal_path: InternedPath,
+    pub(crate) nominal_path: PathId,
     pub(crate) variants: Vec<ChoiceVariant>,
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Return-slot helpers
@@ -65,17 +68,8 @@ pub(crate) fn error_return_slot(type_id: TypeId) -> ReturnSlot {
 // Parameter / declaration helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn loop_binding_with_type_id(
-    name: &str,
-    type_id: TypeId,
-    string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-) -> Declaration {
-    param_with_type_id(
-        InternedPath::from_single_str(name, string_table),
-        type_id,
-        false,
-        None,
-    )
+pub(crate) fn loop_binding_with_type_id(name: PathId, type_id: TypeId) -> Declaration {
+    param_with_type_id(name, type_id, false, None)
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +77,7 @@ pub(crate) fn loop_binding_with_type_id(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn const_record_reference_expr(
-    name: InternedPath,
+    name: PathId,
     type_id: TypeId,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
@@ -141,7 +135,7 @@ pub(crate) fn runtime_operator_item(
 }
 
 pub(crate) fn runtime_function_call_item(
-    name: InternedPath,
+    name: PathId,
     result_type_ids: Vec<TypeId>,
     span: Option<SourceSpan>,
 ) -> ExpressionRpnItem {
@@ -161,7 +155,7 @@ pub(crate) fn runtime_function_call_item(
 }
 
 pub(crate) fn runtime_handled_function_call_item(
-    name: InternedPath,
+    name: PathId,
     result_type_ids: Vec<TypeId>,
     handling: FallibleHandling,
     span: Option<SourceSpan>,
@@ -229,7 +223,7 @@ pub(crate) fn collection_expr(
 }
 
 pub(crate) fn multi_bind_target(
-    id: InternedPath,
+    id: PathId,
     type_id: TypeId,
     value_mode: ValueMode,
     kind: MultiBindTargetKind,
@@ -267,12 +261,12 @@ pub(crate) fn field_access_node(
     AstNode {
         kind: NodeKind::ExpressionStatement(expression),
         span,
-        scope: InternedPath::new(),
+        scope: PathId::ROOT,
     }
 }
 
 pub(crate) fn choice_construct_expr(
-    nominal_path: InternedPath,
+    nominal_path: PathId,
     tag: usize,
     fields: Vec<Declaration>,
     type_id: TypeId,
@@ -473,7 +467,7 @@ fn register_collection_types_from_expression(
 }
 
 pub(crate) fn choice_type_id(
-    path: InternedPath,
+    path: PathId,
     variants: &[crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant],
 ) -> TypeId {
     let mut type_environment = TypeEnvironment::new();
@@ -527,14 +521,14 @@ pub(crate) fn choice_type_id(
 ///       fail for reasons that have nothing to do with the test's subject.
 pub(crate) fn build_ast_with_registered_types(
     nodes: Vec<AstNode>,
-    entry_path: InternedPath,
+    entry_path: PathId,
 ) -> Ast {
     build_ast_with_choices(nodes, entry_path, vec![])
 }
 
 pub(crate) fn build_ast_with_choices(
     mut nodes: Vec<AstNode>,
-    entry_path: InternedPath,
+    entry_path: PathId,
     choice_definitions: Vec<HirTestChoiceDefinition>,
 ) -> Ast {
     let mut type_environment = TypeEnvironment::new();
@@ -643,7 +637,8 @@ pub(crate) fn build_ast_with_choices(
 ///       and type environment and should not know about extracted module metadata.
 pub(crate) fn lower_ast(
     ast: Ast,
-    string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<
     (
         HirModule,
@@ -651,7 +646,7 @@ pub(crate) fn lower_ast(
     ),
     CompilerMessages,
 > {
-    let result = lower_ast_with_metadata(ast, string_table)?;
+    let result = lower_ast_with_metadata(ast, string_table, path_fork)?;
     Ok((result.hir_module, result.type_environment))
 }
 
@@ -662,11 +657,13 @@ pub(crate) fn lower_ast(
 ///       fragments or rendered-path metadata. It does not widen the common `lower_ast` contract.
 pub(crate) fn lower_ast_with_metadata(
     ast: Ast,
-    string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<crate::compiler_frontend::module_metadata::HirLoweringResult, CompilerMessages> {
     let type_environment = ast.type_environment.clone();
     HirBuilder::new(
         string_table,
+        path_fork,
         type_environment,
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
     )

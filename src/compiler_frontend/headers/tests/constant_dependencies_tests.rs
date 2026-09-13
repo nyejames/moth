@@ -7,16 +7,16 @@
 
 use super::*;
 use std::path::PathBuf;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn missing_constant_position_produces_infrastructure_error() {
     let mut string_table = StringTable::new();
-    let constant_path = InternedPath::try_from_filesystem_path(
-        &PathBuf::from("src/missing.moth"),
-        &mut string_table,
-    )
-    .expect("test path should be UTF-8");
-    let error = missing_constant_position_error(&constant_path, &string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let constant_path = path_fork
+        .try_intern_filesystem_path(&PathBuf::from("src/missing.moth"), &mut string_table)
+        .expect("test path should be UTF-8");
+    let error = missing_constant_position_error(&constant_path, &path_fork, &string_table);
 
     assert!(
         error.msg.contains("Missing constant position metadata"),

@@ -25,19 +25,20 @@ use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
 fn assertion_failure_module(
+    mut path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
     message_evaluation: HirAssertionMessageEvaluation,
 ) -> crate::compiler_frontend::hir::module::HirModule {
-    let unit_type = type_environment.builtins().none;
     let string_type = type_environment.builtins().string;
+    let unit_type = type_environment.builtins().none;
     let option_string = type_environment.intern_option(string_type);
-    let path = InternedPath::from_single_str("assertion_failure", string_table);
+    let path = path_fork.try_intern_portable_path("assertion_failure", string_table).expect("test path fits");
     let region = RegionId(0);
     let (message, locals, statements) = match message_evaluation {
         HirAssertionMessageEvaluation::Default => (
@@ -116,12 +117,10 @@ fn assertion_failure_module(
         },
     };
 
-    build_module(
-        string_table,
-        vec![(function, path, HirFunctionOrigin::EntryStart)],
-        vec![block],
-        FunctionId(0),
-    )
+    build_module(&mut path_fork, string_table,
+    vec![(function, path, HirFunctionOrigin::EntryStart)],
+    vec![block],
+    FunctionId(0),)
 }
 
 #[test]
@@ -131,16 +130,16 @@ fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() 
         HirAssertionMessageEvaluation::Folded,
     ] {
         let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
         let (mut type_environment, _types) = build_type_environment();
         let module =
-            assertion_failure_module(&mut string_table, &mut type_environment, message_evaluation);
-        let result = lower_hir_to_wasm_lir(
-            &module,
-            &default_borrow_facts(),
-            &WasmBackendRequest::default(),
-            &string_table,
-            &type_environment,
-        )
+            assertion_failure_module(&mut path_fork, &mut string_table, &mut type_environment, message_evaluation);
+        let result = lower_hir_to_wasm_lir(&module,
+        &default_borrow_facts(),
+        &WasmBackendRequest::default(),
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table())
         .expect("static assertion messages should lower to Wasm traps");
         let function = result
             .lir_module
@@ -155,19 +154,17 @@ fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() 
     }
 
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, _types) = build_type_environment();
-    let module = assertion_failure_module(
-        &mut string_table,
-        &mut type_environment,
-        HirAssertionMessageEvaluation::Runtime,
-    );
-    let error = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let module = assertion_failure_module(&mut path_fork, &mut string_table,
+    &mut type_environment,
+    HirAssertionMessageEvaluation::Runtime,);
+    let error = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect_err("runtime assertion messages must be rejected before Wasm lowering");
     assert!(
         format!("{error:?}").contains("runtime assertion message after target validation"),
@@ -178,10 +175,11 @@ fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() 
 #[test]
 fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
-    let callee_path = InternedPath::from_single_str("callee", &mut string_table);
-    let main_path = InternedPath::from_single_str("main", &mut string_table);
+    let callee_path = path_fork.try_intern_portable_path("callee", &mut string_table).expect("test path fits");
+    let main_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
 
     let callee_block = HirBlock {
         id: BlockId(10),
@@ -253,23 +251,20 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         return_type: types.int,
     };
 
-    let module = build_module(
-        &mut string_table,
-        vec![
-            (callee, callee_path, HirFunctionOrigin::Normal),
-            (main, main_path, HirFunctionOrigin::EntryStart),
-        ],
-        vec![callee_block, main_entry, then_block, else_block],
-        FunctionId(1),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![
+        (callee, callee_path, HirFunctionOrigin::Normal),
+        (main, main_path, HirFunctionOrigin::EntryStart),
+    ],
+    vec![callee_block, main_entry, then_block, else_block],
+    FunctionId(1),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("Wasm lowering should succeed");
 
     let main_lir = result
@@ -329,8 +324,9 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
 #[test]
 fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let runtime_path = InternedPath::from_single_str("__moth_frag_0", &mut string_table);
+    let runtime_path = path_fork.try_intern_portable_path("__moth_frag_0", &mut string_table).expect("test path fits");
 
     let concat = expression(
         202,
@@ -369,20 +365,17 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
         return_type: types.string,
     };
 
-    let module = build_module(
-        &mut string_table,
-        vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
-        vec![runtime_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
+    vec![runtime_block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("Wasm lowering should succeed");
 
     let runtime_lir = result
@@ -412,8 +405,9 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
 #[test]
 fn lowers_runtime_template_with_cfg_before_final_return() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let runtime_path = InternedPath::from_single_str("__moth_frag_cfg", &mut string_table);
+    let runtime_path = path_fork.try_intern_portable_path("__moth_frag_cfg", &mut string_table).expect("test path fits");
 
     let entry_block = HirBlock {
         id: BlockId(0),
@@ -503,20 +497,17 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         return_type: types.string,
     };
 
-    let module = build_module(
-        &mut string_table,
-        vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
-        vec![entry_block, header_block, body_block, exit_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
+    vec![entry_block, header_block, body_block, exit_block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("runtime template CFG should lower successfully");
 
     let runtime_lir = result
@@ -544,8 +535,9 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
 #[test]
 fn lowers_internal_string_append_as_buffer_concat() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let function_path = InternedPath::from_single_str("render_title", &mut string_table);
+    let function_path = path_fork.try_intern_portable_path("render_title", &mut string_table).expect("test path fits");
 
     let concat = expression(
         1300,
@@ -577,20 +569,17 @@ fn lowers_internal_string_append_as_buffer_concat() {
         params: vec![LocalId(0)],
         return_type: types.string,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(function, function_path, HirFunctionOrigin::Normal)],
-        vec![block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(function, function_path, HirFunctionOrigin::Normal)],
+    vec![block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("internal StringAppend should lower to buffer operations");
 
     let lowered = result
@@ -616,8 +605,9 @@ fn lowers_internal_string_append_as_buffer_concat() {
 #[test]
 fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let function_path = InternedPath::from_single_str("render_runtime_int", &mut string_table);
+    let function_path = path_fork.try_intern_portable_path("render_runtime_int", &mut string_table).expect("test path fits");
 
     let concat = expression(
         1310,
@@ -643,20 +633,17 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
         params: vec![LocalId(0)],
         return_type: types.string,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(function, function_path, HirFunctionOrigin::Normal)],
-        vec![block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(function, function_path, HirFunctionOrigin::Normal)],
+    vec![block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("internal StringAppend should bridge i64 chunks");
     let lowered = result
         .lir_module
@@ -677,8 +664,9 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
 #[test]
 fn lowers_string_equality_by_content_comparison_operations() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let function_path = InternedPath::from_single_str("compare_strings", &mut string_table);
+    let function_path = path_fork.try_intern_portable_path("compare_strings", &mut string_table).expect("test path fits");
 
     let equal = expression(
         1320,
@@ -737,20 +725,17 @@ fn lowers_string_equality_by_content_comparison_operations() {
         params: vec![LocalId(0), LocalId(1)],
         return_type: types.boolean,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(function, function_path, HirFunctionOrigin::Normal)],
-        vec![block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(function, function_path, HirFunctionOrigin::Normal)],
+    vec![block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("String equality should lower through content comparison operations");
     let lowered = result
         .lir_module
@@ -784,8 +769,9 @@ fn lowers_string_equality_by_content_comparison_operations() {
 #[test]
 fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let function_path = InternedPath::from_single_str("loop_like_fn", &mut string_table);
+    let function_path = path_fork.try_intern_portable_path("loop_like_fn", &mut string_table).expect("test path fits");
 
     let condition = expression(
         1400,
@@ -889,20 +875,17 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         params: vec![],
         return_type: types.int,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(function, function_path, HirFunctionOrigin::Normal)],
-        vec![entry_block, then_block, else_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(function, function_path, HirFunctionOrigin::Normal)],
+    vec![entry_block, then_block, else_block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("ordered comparisons and Add should lower in non-runtime functions");
 
     let lowered = result
@@ -938,8 +921,9 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
 #[test]
 fn deduplicates_static_utf8_segments() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = InternedPath::from_single_str("main", &mut string_table);
+    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
 
     let start_block = HirBlock {
         id: BlockId(0),
@@ -976,20 +960,17 @@ fn deduplicates_static_utf8_segments() {
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-        vec![start_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+    vec![start_block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("Wasm lowering should succeed");
     assert_eq!(result.lir_module.static_data.len(), 1);
 }
@@ -997,8 +978,9 @@ fn deduplicates_static_utf8_segments() {
 #[test]
 fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = InternedPath::from_single_str("main", &mut string_table);
+    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
 
     let start_block = HirBlock {
         id: BlockId(0),
@@ -1013,23 +995,20 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
         params: vec![],
         return_type: types.unit,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-        vec![start_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+    vec![start_block],
+    FunctionId(0),);
 
     let borrow_facts =
         borrow_facts_with_drop_site(BlockId(0), BorrowDropSiteKind::Return, vec![LocalId(0)]);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &borrow_facts,
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &borrow_facts,
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("Wasm lowering should succeed");
     let lowered_start = result
         .lir_module
@@ -1059,8 +1038,9 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
 #[test]
 fn synthesizes_export_wrappers_with_stable_names() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = InternedPath::from_single_str("main", &mut string_table);
+    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
 
     let start_block = HirBlock {
         id: BlockId(0),
@@ -1075,12 +1055,10 @@ fn synthesizes_export_wrappers_with_stable_names() {
         params: vec![],
         return_type: types.int,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-        vec![start_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+    vec![start_block],
+    FunctionId(0),);
 
     let mut export_names = FxHashMap::default();
     export_names.insert(FunctionId(0), "main".to_owned());
@@ -1102,13 +1080,12 @@ fn synthesizes_export_wrappers_with_stable_names() {
         function_emission_policy: Default::default(),
     };
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &request,
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &request,
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("Wasm lowering should succeed");
 
     assert_eq!(result.lir_module.exports.len(), 1);
@@ -1146,8 +1123,9 @@ fn synthesizes_export_wrappers_with_stable_names() {
 #[test]
 fn rejects_invalid_export_request_with_structured_diagnostic() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = InternedPath::from_single_str("main", &mut string_table);
+    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
 
     let start_block = HirBlock {
         id: BlockId(0),
@@ -1162,12 +1140,10 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         params: vec![],
         return_type: types.int,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-        vec![start_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+    vec![start_block],
+    FunctionId(0),);
 
     let invalid_request = WasmBackendRequest {
         export_policy: WasmExportPolicy {
@@ -1178,13 +1154,12 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         ..Default::default()
     };
 
-    let error = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &invalid_request,
-        &string_table,
-        &type_environment,
-    )
+    let error = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &invalid_request,
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect_err("invalid request should produce a lowering diagnostic");
     let error = error
         .infrastructure_error()
@@ -1199,8 +1174,9 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
 #[test]
 fn rejects_unsupported_host_call_with_diagnostic() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = InternedPath::from_single_str("main", &mut string_table);
+    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
 
     let unknown_id =
         crate::compiler_frontend::external_packages::ExternalFunctionId::Synthetic(9999);
@@ -1226,20 +1202,17 @@ fn rejects_unsupported_host_call_with_diagnostic() {
         params: vec![],
         return_type: types.unit,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-        vec![start_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+    vec![start_block],
+    FunctionId(0),);
 
-    let error = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let error = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect_err("unsupported host call should produce diagnostic");
     let error = error
         .infrastructure_error()
@@ -1250,9 +1223,10 @@ fn rejects_unsupported_host_call_with_diagnostic() {
 #[test]
 fn selected_function_policy_ignores_unselected_host_calls() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = InternedPath::from_single_str("main", &mut string_table);
-    let unused_path = InternedPath::from_single_str("unused", &mut string_table);
+    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
+    let unused_path = path_fork.try_intern_portable_path("unused", &mut string_table).expect("test path fits");
 
     let start_block = HirBlock {
         id: BlockId(0),
@@ -1292,15 +1266,13 @@ fn selected_function_policy_ignores_unselected_host_calls() {
         params: vec![],
         return_type: types.unit,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![
-            (start_function, start_path, HirFunctionOrigin::EntryStart),
-            (unused_function, unused_path, HirFunctionOrigin::Normal),
-        ],
-        vec![start_block, unused_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![
+        (start_function, start_path, HirFunctionOrigin::EntryStart),
+        (unused_function, unused_path, HirFunctionOrigin::Normal),
+    ],
+    vec![start_block, unused_block],
+    FunctionId(0),);
 
     let mut export_names = FxHashMap::default();
     export_names.insert(FunctionId(0), "main".to_owned());
@@ -1326,13 +1298,12 @@ fn selected_function_policy_ignores_unselected_host_calls() {
         ..Default::default()
     };
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &request,
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &request,
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("unreachable unsupported host call should not be lowered");
 
     assert_eq!(result.lir_module.imports.len(), 0);
@@ -1352,13 +1323,12 @@ fn selected_function_policy_ignores_unselected_host_calls() {
         .export_names
         .insert(FunctionId(1), "unused".to_owned());
 
-    let error = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &invalid_export_request,
-        &string_table,
-        &type_environment,
-    )
+    let error = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &invalid_export_request,
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect_err("an unselected function must not become a Wasm export");
     let error = error
         .infrastructure_error()
@@ -1369,8 +1339,9 @@ fn selected_function_policy_ignores_unselected_host_calls() {
 #[test]
 fn lower_type_to_abi_maps_all_hir_types_correctly() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = InternedPath::from_single_str("main", &mut string_table);
+    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
 
     // Build a minimal module so we can construct a WasmLirLoweringContext.
     let start_block = HirBlock {
@@ -1386,12 +1357,10 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
         params: vec![],
         return_type: types.int,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-        vec![start_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+    vec![start_block],
+    FunctionId(0),);
 
     // Additional builtin types to test all ABI mappings.
     let builtins = type_environment.builtins();
@@ -1404,11 +1373,13 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
 
     let borrow_facts = default_borrow_facts();
     let request = WasmBackendRequest::default();
+    let path_table = path_fork.snapshot_table();
     let context = crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext::new(
         &module,
         &borrow_facts,
         &request,
         &string_table,
+        &path_table,
         &type_environment,
     );
 
@@ -1430,8 +1401,9 @@ fn multi_fragment_template_produces_all_push_operations() {
     // Verifies that a runtime template with literal + handle + literal + handle
     // produces the correct sequence: NewBuffer, PushLiteral, PushHandle, PushLiteral, PushHandle, Finish.
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let runtime_path = InternedPath::from_single_str("__moth_frag_0", &mut string_table);
+    let runtime_path = path_fork.try_intern_portable_path("__moth_frag_0", &mut string_table).expect("test path fits");
 
     // Build: "prefix" + param0 + "middle" + param1 + "suffix"
     let inner_concat_1 = expression(
@@ -1497,20 +1469,17 @@ fn multi_fragment_template_produces_all_push_operations() {
         return_type: types.string,
     };
 
-    let module = build_module(
-        &mut string_table,
-        vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
-        vec![runtime_block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
+    vec![runtime_block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("multi-fragment template should lower successfully");
 
     let runtime_lir = result
@@ -1538,8 +1507,9 @@ fn multi_fragment_template_produces_all_push_operations() {
 #[test]
 fn debug_name_uses_source_name_when_available() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let fn_path = InternedPath::from_single_str("my_helper", &mut string_table);
+    let fn_path = path_fork.try_intern_portable_path("my_helper", &mut string_table).expect("test path fits");
 
     let block = HirBlock {
         id: BlockId(0),
@@ -1554,20 +1524,17 @@ fn debug_name_uses_source_name_when_available() {
         params: vec![],
         return_type: types.int,
     };
-    let module = build_module(
-        &mut string_table,
-        vec![(function, fn_path, HirFunctionOrigin::Normal)],
-        vec![block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(function, fn_path, HirFunctionOrigin::Normal)],
+    vec![block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    )
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("lowering should succeed");
 
     let lir_fn = result
@@ -1594,8 +1561,9 @@ fn debug_name_uses_source_name_when_available() {
 #[test]
 fn io_console_functions_are_unsupported_in_wasm() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let main_path = InternedPath::from_single_str("main", &mut string_table);
+    let main_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
 
     let io_call = statement(
         1,
@@ -1624,20 +1592,17 @@ fn io_console_functions_are_unsupported_in_wasm() {
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        vec![(function, main_path, HirFunctionOrigin::EntryStart)],
-        vec![block],
-        FunctionId(0),
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    vec![(function, main_path, HirFunctionOrigin::EntryStart)],
+    vec![block],
+    FunctionId(0),);
 
-    let result = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-    );
+    let result = lower_hir_to_wasm_lir(&module,
+    &default_borrow_facts(),
+    &WasmBackendRequest::default(),
+    &string_table,
+    &type_environment,
+    &path_fork.snapshot_table());
 
     assert!(
         result.is_err(),

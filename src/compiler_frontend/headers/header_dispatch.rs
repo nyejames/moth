@@ -41,7 +41,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::traits::syntax::{
@@ -78,7 +78,7 @@ type HeaderDispatchResult<T> = Result<T, HeaderParseFailure>;
 //   `This`                       → trait-local keyword outside a trait declaration, error
 //   anything else                → no header created (e.g. start-template body lines)
 pub(super) fn create_header(
-    full_name: InternedPath,
+    full_name: PathId,
     token_stream: &mut FileTokens,
     declaration_token: &Token,
     export_mode: HeaderExportMode,
@@ -87,14 +87,13 @@ pub(super) fn create_header(
 ) -> HeaderDispatchResult<Header> {
     let name_span = SourceSpan::new(token_stream.file_id, declaration_token.span);
     let declaration_order = token_stream.index;
-    let Some(declaration_name) = full_name.name() else {
+    let Some(declaration_name) = context.path_fork.component(full_name) else {
         return Err(internal_header_dispatch_error(
             "Header declaration path is missing its declaration name.",
             Some(name_span),
         )
         .into());
     };
-
     // Conservative local declaration-ordering hints; binding and Stage 3 resolve them.
     let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
     let mut kind: HeaderKind = HeaderKind::StartFunction;
@@ -123,9 +122,14 @@ pub(super) fn create_header(
         let conformance = parse_trait_conformance(token_stream, target, context)?;
         kind = HeaderKind::TraitConformance { conformance };
 
-        let conformance_path = conformance_header_path(&full_name, name_span, context.string_table);
+        let conformance_id = conformance_header_path(
+            full_name,
+            name_span,
+            context.path_fork,
+            context.string_table,
+        )?;
         let header_tokens =
-            FileTokens::new_substream(token_stream, conformance_path, token_stream.file_id, body);
+            FileTokens::new_substream(token_stream, conformance_id, token_stream.file_id, body);
 
         return Ok(Header {
             kind,
@@ -193,7 +197,7 @@ pub(super) fn create_header(
                     collect_type_ordering_hints(
                         &param.type_annotation,
                         &generic_parameters,
-                        &full_name,
+                        full_name,
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
@@ -203,7 +207,7 @@ pub(super) fn create_header(
                     collect_type_ordering_hints(
                         &ret.value.type_annotation,
                         &generic_parameters,
-                        &full_name,
+                        full_name,
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
@@ -229,17 +233,23 @@ pub(super) fn create_header(
             kind = HeaderKind::TraitConformance { conformance };
         }
 
-        let header_path = match kind {
-            HeaderKind::TraitConformance { .. } => {
-                conformance_header_path(&full_name, name_span, context.string_table)
-            }
-            HeaderKind::TraitIncompatibility { .. } => {
-                incompatibility_header_path(&full_name, name_span, context.string_table)
-            }
+        let header_id = match &kind {
+            HeaderKind::TraitConformance { .. } => conformance_header_path(
+                full_name,
+                name_span,
+                context.path_fork,
+                context.string_table,
+            )?,
+            HeaderKind::TraitIncompatibility { .. } => incompatibility_header_path(
+                full_name,
+                name_span,
+                context.path_fork,
+                context.string_table,
+            )?,
             _ => full_name,
         };
         let header_tokens =
-            FileTokens::new_substream(token_stream, header_path, token_stream.file_id, body);
+            FileTokens::new_substream(token_stream, header_id, token_stream.file_id, body);
 
         return Ok(Header {
             kind,
@@ -275,7 +285,8 @@ pub(super) fn create_header(
                 token_stream,
                 context.warnings,
                 context.string_table,
-                &full_name,
+                full_name,
+                context.path_fork,
                 span_builder,
             )?;
 
@@ -284,7 +295,7 @@ pub(super) fn create_header(
                 collect_type_ordering_hints(
                     &param.type_annotation,
                     &generic_parameters,
-                    &full_name,
+                    full_name,
                     context,
                     &mut local_ordering_hints,
                     &mut capacity_references,
@@ -295,7 +306,7 @@ pub(super) fn create_header(
                 collect_type_ordering_hints(
                     &ret.value.type_annotation,
                     &generic_parameters,
-                    &full_name,
+                    full_name,
                     context,
                     &mut local_ordering_hints,
                     &mut capacity_references,
@@ -339,22 +350,21 @@ pub(super) fn create_header(
                 token_stream.advance();
 
                 // Parse field shell directly — avoids reparsing in the AST type-resolution pass.
-                // WHY: the header stage owns top-level shell parsing; AST owns body/executable parsing.
                 let fields = parse_struct_shell(
                     token_stream,
                     context.string_table,
                     context.warnings,
-                    &full_name,
+                    full_name,
+                    context.path_fork,
                     span_builder,
                 )?;
 
                 // Collect strict type edges from field types only (no default-expression edges).
-                // WHY: struct field type refs are the only struct edges that constrain sort order.
                 for field in &fields {
                     collect_type_ordering_hints(
                         &field.type_annotation,
                         &generic_parameters,
-                        &full_name,
+                        full_name,
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
@@ -424,7 +434,8 @@ pub(super) fn create_header(
 
             let choice_header = parse_choice_header_payload(
                 token_stream,
-                &full_name,
+                full_name,
+                context.path_fork,
                 context.string_table,
                 context.warnings,
                 span_builder,
@@ -440,7 +451,7 @@ pub(super) fn create_header(
                         collect_type_ordering_hints(
                             &field.type_annotation,
                             &generic_parameters,
-                            &full_name,
+                            full_name,
                             context,
                             &mut local_ordering_hints,
                             &mut capacity_references,
@@ -497,6 +508,7 @@ pub(super) fn create_header(
                         context.dependency_selections,
                         context.source_file,
                         context.string_table,
+                        context.path_fork,
                         &mut local_ordering_hints,
                     )
                     .err();
@@ -513,9 +525,9 @@ pub(super) fn create_header(
         _ => {}
     }
 
+    let header_id = full_name;
     let header_tokens =
-        FileTokens::new_substream(token_stream, full_name, token_stream.file_id, body);
-
+        FileTokens::new_substream(token_stream, header_id, token_stream.file_id, body);
     Ok(Header {
         kind,
         file_role: context.file_role,
@@ -564,7 +576,7 @@ fn parse_optional_generic_parameters(
 fn collect_type_ordering_hints(
     type_ref: &crate::compiler_frontend::datatypes::parsed::ParsedTypeRef,
     generic_parameters: &GenericParameterList,
-    current_header_path: &InternedPath,
+    current_header_path: PathId,
     context: &mut HeaderBuildContext<'_>,
     local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
@@ -580,7 +592,7 @@ fn collect_type_ordering_hints(
             // when its terminal component happens to share a generic parameter's spelling.
             ParsedNamedTypeReference::Bare(type_name) => {
                 if generic_parameters.contains_name(type_name)
-                    || context.source_file.append(type_name) == *current_header_path
+                    || context.path_fork.component(current_header_path) == Some(type_name)
                 {
                     return;
                 }
@@ -594,6 +606,7 @@ fn collect_type_ordering_hints(
             context.dependency_selections,
             context.source_file,
             context.string_table,
+            context.path_fork,
             local_ordering_hints,
         )
         .err();
@@ -668,14 +681,14 @@ fn capture_function_body_tokens(
 }
 
 fn create_constant_header_payload(
-    full_name: &InternedPath,
+    full_name: &PathId,
     token_stream: &mut FileTokens,
     context: &mut HeaderBuildContext<'_>,
     local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> HeaderDispatchResult<DeclarationSyntax> {
-    let Some(declaration_name) = full_name.name() else {
+    let Some(declaration_name) = context.path_fork.component(*full_name) else {
         return Err(internal_header_dispatch_error(
             "Constant header path is missing its declaration name.",
             Some(token_stream.current_span()),

@@ -66,7 +66,7 @@ impl<'a> HirBuilder<'a> {
 
             let Some(origin) = self
                 .function_origin_lookup
-                .consume_origin_for(function_path)
+                .consume_origin_for(&function_path)
             else {
                 continue;
             };

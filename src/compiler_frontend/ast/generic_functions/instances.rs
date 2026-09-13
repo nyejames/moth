@@ -5,21 +5,22 @@
 //! WHY: call inference and emission deduplicate instances by source function path and canonical
 //! `TypeId` arguments, not by rendered names or local dependency aliases.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct GenericFunctionInstanceKey {
-    pub(crate) function_path: InternedPath,
+    pub(crate) function_path: PathId,
     pub(crate) type_arguments: Box<[TypeId]>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct GenericFunctionInstance {
-    pub(crate) instance_path: InternedPath,
+    pub(crate) instance_path: PathId,
     pub(crate) key: GenericFunctionInstanceKey,
 }
 
@@ -38,20 +39,28 @@ pub(crate) struct GenericFunctionInstantiationRequest {
     /// Ordered local evidence selections, canonicalized when the stable request is installed.
     pub(crate) evidence: Box<[crate::compiler_frontend::traits::ids::TraitEvidenceId]>,
     pub(crate) key: GenericFunctionInstanceKey,
-    pub(crate) instance_path: InternedPath,
+    pub(crate) instance_path: PathId,
     pub(crate) call_span: Option<SourceSpan>,
 }
 
 impl GenericFunctionInstantiationRequest {
     pub(crate) fn generated(
         declaration_identity: &GeneratedDeclarationIdentity,
-        function_path: InternedPath,
+        function_path: PathId,
         type_arguments: Box<[TypeId]>,
+        path_fork: &mut PathInternerFork,
         string_table: &mut StringTable,
         call_span: Option<SourceSpan>,
-    ) -> Self {
-        let instance_path = function_path.join_str("__generated_instance", string_table);
-        Self {
+    ) -> Result<Self, CompilerError> {
+        let instance_component = string_table.intern("__generated_instance");
+        let instance_path = path_fork
+            .try_intern_child(function_path, instance_component)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "path table exhausted while creating generated generic function instance",
+                )
+            })?;
+        Ok(Self {
             declaration_identity: Some(declaration_identity.clone()),
             evidence: Box::new([]),
             key: GenericFunctionInstanceKey {
@@ -60,7 +69,7 @@ impl GenericFunctionInstantiationRequest {
             },
             instance_path,
             call_span,
-        }
+        })
     }
 }
 

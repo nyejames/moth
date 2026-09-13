@@ -11,12 +11,14 @@ use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId, RegionI
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
 fn assertion_failure_message_display_escapes_debug_text() {
     let string_table = StringTable::new();
-    let display = HirDisplayContext::new(&string_table);
+    let path_fork = PathInternerFork::empty();
+    let display = HirDisplayContext::new(&string_table, &path_fork);
 
     let rendered = display.render_terminator(&HirTerminator::AssertFailure {
         message: HirExpression {
@@ -39,8 +41,8 @@ fn assertion_failure_message_display_escapes_debug_text() {
 #[test]
 fn runtime_failure_message_display_escapes_debug_text() {
     let string_table = StringTable::new();
-    let display = HirDisplayContext::new(&string_table);
-
+    let path_fork = PathInternerFork::empty();
+    let display = HirDisplayContext::new(&string_table, &path_fork);
     let rendered = display.render_terminator(&HirTerminator::RuntimeFailure {
         message: "quoted \"message\"\nnext".to_owned(),
     });
@@ -70,8 +72,11 @@ fn float_statement(kind: HirStatementKind) -> HirStatement {
     }
 }
 
-fn terse_display_context(string_table: &StringTable) -> HirDisplayContext<'_> {
-    HirDisplayContext::new(string_table).with_options(HirDisplayOptions {
+fn terse_display_context<'a>(
+    string_table: &'a StringTable,
+    path_fork: &'a PathInternerFork,
+) -> HirDisplayContext<'a> {
+    HirDisplayContext::new(string_table, path_fork).with_options(HirDisplayOptions {
         include_ids: false,
         include_types: false,
         include_value_kinds: false,
@@ -83,7 +88,8 @@ fn terse_display_context(string_table: &StringTable) -> HirDisplayContext<'_> {
 #[test]
 fn hir_display_renders_format_float_trap() {
     let string_table = StringTable::new();
-    let display = terse_display_context(&string_table);
+    let path_fork = PathInternerFork::empty();
+    let display = terse_display_context(&string_table, &path_fork);
 
     let rendered = display.render_statement(&float_statement(HirStatementKind::FormatFloat {
         source: float_expression(1.5),
@@ -97,7 +103,8 @@ fn hir_display_renders_format_float_trap() {
 #[test]
 fn hir_display_renders_format_float_return_error() {
     let string_table = StringTable::new();
-    let display = terse_display_context(&string_table);
+    let path_fork = PathInternerFork::empty();
+    let display = terse_display_context(&string_table, &path_fork);
 
     let rendered = display.render_statement(&float_statement(HirStatementKind::FormatFloat {
         source: float_expression(-0.25),
@@ -111,7 +118,8 @@ fn hir_display_renders_format_float_return_error() {
 #[test]
 fn hir_display_renders_validate_float_trap() {
     let string_table = StringTable::new();
-    let display = terse_display_context(&string_table);
+    let path_fork = PathInternerFork::empty();
+    let display = terse_display_context(&string_table, &path_fork);
 
     let rendered = display.render_statement(&float_statement(HirStatementKind::ValidateFloat {
         source: float_expression(2.5),
@@ -125,7 +133,8 @@ fn hir_display_renders_validate_float_trap() {
 #[test]
 fn hir_display_renders_validate_float_return_error() {
     let string_table = StringTable::new();
-    let display = terse_display_context(&string_table);
+    let path_fork = PathInternerFork::empty();
+    let display = terse_display_context(&string_table, &path_fork);
 
     let rendered = display.render_statement(&float_statement(HirStatementKind::ValidateFloat {
         source: float_expression(0.0),

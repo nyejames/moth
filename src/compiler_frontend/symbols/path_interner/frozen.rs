@@ -1,15 +1,17 @@
 //! Dense path-table storage and lookup-only operations.
 //!
-//! WHAT: resolves parents and components, then renders portable spellings from dense path nodes
-//!       while accepting caller-owned scratch storage for component walks.
+//! WHAT: resolves parents and components, then renders portable and native spellings from dense
+//!       path nodes while accepting caller-owned scratch storage for component walks.
 //! WHY:  the mutable builder and frozen readers share one parent-linked table, while filesystem
 //!       `PathBuf` and source snapshot identity remain separate owners.
 
 use super::builder::PathNode;
 use super::id::PathId;
+use crate::compiler_frontend::instrumentation::record_path_table_copy;
 use crate::compiler_frontend::symbols::string_interning::{
-    FrozenStringTable, StringId, StringTable, StringTableResolver,
+    FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
 };
+use std::path::PathBuf;
 
 /// Immutable path trie storage shared by the mutable builder and frozen readers.
 ///
@@ -21,7 +23,27 @@ pub struct PathTable {
     depths: Vec<u32>,
 }
 
+impl Clone for PathTable {
+    fn clone(&self) -> Self {
+        record_path_table_copy(self.nodes.len(), self.copied_bytes());
+        Self {
+            nodes: self.nodes.clone(),
+            depths: self.depths.clone(),
+        }
+    }
+}
+
 impl PathTable {
+    pub(crate) fn from_parts(nodes: Vec<PathNode>, depths: Vec<u32>) -> Self {
+        Self { nodes, depths }
+    }
+    /// Rewrite component IDs after the owning diagnostic string table merges.
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for node in &mut self.nodes {
+            node.component = remap.get(node.component);
+        }
+    }
+
     pub(super) fn new() -> Self {
         // The root's absent parent is the table terminator. Its component is a valid-shaped
         // placeholder that is never read.
@@ -43,6 +65,13 @@ impl PathTable {
         parent: PathId,
         component: StringId,
     ) -> Option<PathId> {
+        #[cfg(test)]
+        if super::test_exhaustion::forced_exhaustion() {
+            // Test-only: reject the new node so tests reach the exhaustion boundary without
+            // allocating the full compact domain. Callers that reuse an already-interned child
+            // never reach this method and keep succeeding.
+            return None;
+        }
         let child = PathId::try_from_index(self.nodes.len())?;
         let child_depth = self.depth(parent).checked_add(1)?;
 
@@ -54,9 +83,45 @@ impl PathTable {
         Some(child)
     }
 
+    /// Return the number of path nodes in this table, including the root.
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+    /// Return the backing vector storage used by this table, excluding the `Arc` header.
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.nodes
+            .capacity()
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(
+                self.depths
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+    }
+    fn copied_bytes(&self) -> usize {
+        self.nodes
+            .len()
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(self.depths.len().saturating_mul(std::mem::size_of::<u32>()))
+    }
+
+    /// Return whether the numeric index of `path` is addressable by this table.
+    ///
+    /// This proves range only, not provenance: a table from an independent identity domain can
+    /// address the same numeric index with different components. Path identity is meaningful
+    /// only together with the string table that issued the component IDs.
+    pub fn contains(&self, path: PathId) -> bool {
+        path.index() < self.nodes.len()
+    }
+
     /// Return the parent path, or `None` for the root.
     pub fn parent(&self, path: PathId) -> Option<PathId> {
         self.nodes[path.index()].parent
+    }
+
+    /// Return the parent path, or `None` when `path` is the root or was not issued here.
+    pub fn try_parent(&self, path: PathId) -> Option<PathId> {
+        self.nodes.get(path.index())?.parent
     }
 
     /// Return the final component, or `None` for the root path.
@@ -67,9 +132,76 @@ impl PathTable {
         Some(self.nodes[path.index()].component)
     }
 
+    /// Return the final component, or `None` for the root and for foreign IDs.
+    pub fn try_component(&self, path: PathId) -> Option<StringId> {
+        if path == PathId::ROOT {
+            return None;
+        }
+        Some(self.nodes.get(path.index())?.component)
+    }
+
     /// Return the number of components in `path`.
     pub fn depth(&self, path: PathId) -> u32 {
         self.depths[path.index()]
+    }
+
+    /// Return the depth, or `None` when `path` was not issued by this table.
+    pub fn try_depth(&self, path: PathId) -> Option<u32> {
+        self.depths.get(path.index()).copied()
+    }
+
+    /// Return whether `path` descends from `prefix` without allocating.
+    ///
+    /// The check lifts `path` to the prefix depth through parent links, then compares identities.
+    /// Equal paths share the prefix, and the root prefixes every path.
+    pub fn starts_with(&self, path: PathId, prefix: PathId) -> bool {
+        let path_depth = self.depth(path);
+        let prefix_depth = self.depth(prefix);
+
+        if prefix_depth > path_depth {
+            return false;
+        }
+
+        let mut current = path;
+
+        for _ in 0..(path_depth - prefix_depth) {
+            current = self
+                .parent(current)
+                .expect("a non-root path must carry a parent");
+        }
+
+        current == prefix
+    }
+
+    /// Return whether `path` ends with `suffix` without allocating.
+    ///
+    /// Both tips walk towards the root together while their components match. Only a suffix at
+    /// the tip counts; an interior-only match is not a suffix.
+    pub fn ends_with(&self, path: PathId, suffix: PathId) -> bool {
+        let path_depth = self.depth(path);
+        let suffix_depth = self.depth(suffix);
+
+        if suffix_depth > path_depth {
+            return false;
+        }
+
+        let mut path_cursor = path;
+        let mut suffix_cursor = suffix;
+
+        for _ in 0..suffix_depth {
+            if self.component(path_cursor) != self.component(suffix_cursor) {
+                return false;
+            }
+
+            path_cursor = self
+                .parent(path_cursor)
+                .expect("a non-root path must carry a parent");
+            suffix_cursor = self
+                .parent(suffix_cursor)
+                .expect("a non-root path must carry a parent");
+        }
+
+        true
     }
 
     /// Fill `scratch` with `path`'s components in forward order and return that slice.
@@ -139,5 +271,57 @@ impl PathTable {
             rendered.push_str(string_table.resolve(*component));
         }
         rendered
+    }
+
+    /// Render a path as a native `PathBuf` by pushing each resolved component.
+    ///
+    /// The root renders as an empty `PathBuf`. No rendered text is stored on the node.
+    pub fn render_native(
+        &self,
+        path: PathId,
+        string_table: &StringTable,
+        scratch: &mut Vec<StringId>,
+    ) -> PathBuf {
+        self.render_native_with(path, string_table, scratch)
+    }
+
+    /// Render a native path using immutable strings after the freeze boundary.
+    pub fn render_native_frozen(
+        &self,
+        path: PathId,
+        string_table: &FrozenStringTable,
+        scratch: &mut Vec<StringId>,
+    ) -> PathBuf {
+        self.render_native_with(path, string_table, scratch)
+    }
+
+    fn render_native_with<T: StringTableResolver + ?Sized>(
+        &self,
+        path: PathId,
+        string_table: &T,
+        scratch: &mut Vec<StringId>,
+    ) -> PathBuf {
+        let components = self.resolve_components(path, scratch);
+
+        if components.is_empty() {
+            return PathBuf::new();
+        }
+
+        let mut native = PathBuf::new();
+
+        for component in components {
+            native.push(string_table.resolve(*component));
+        }
+
+        native
+    }
+
+    /// Clone the dense node arrays into an immutable fork base.
+    pub(super) fn snapshot(&self) -> (Box<[PathNode]>, Box<[u32]>) {
+        record_path_table_copy(self.nodes.len(), self.copied_bytes());
+        (
+            self.nodes.clone().into_boxed_slice(),
+            self.depths.clone().into_boxed_slice(),
+        )
     }
 }

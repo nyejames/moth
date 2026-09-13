@@ -24,7 +24,7 @@ use crate::compiler_frontend::semantic_identity::{
     OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::FxHashMap;
@@ -53,8 +53,14 @@ pub(crate) fn trait_binding(name: &str) -> ExportBinding {
     )
 }
 
-pub(crate) fn path(name: &str, string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_single_str(name, string_table)
+pub(crate) fn path(
+    name: &str,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> PathId {
+    path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits")
 }
 
 pub(crate) fn this_type(env: &mut TypeEnvironment, string_table: &mut StringTable) -> TypeId {
@@ -66,9 +72,10 @@ pub(crate) fn trait_root(
     this_type: TypeId,
     requirements: Vec<ResolvedTraitRequirementFact>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ResolvedPublicTraitRoot {
     ResolvedPublicTraitRoot {
-        canonical_path: path(name, string_table),
+        canonical_path: path(name, string_table, path_fork),
         this_type,
         requirements,
         incompatible_trait_ids: Vec::new(),
@@ -85,8 +92,11 @@ pub(crate) fn register_struct(
     name: &str,
     fields: Box<[FieldDefinition]>,
     generic_parameters: Option<GenericParameterListId>,
+    path_fork: &mut PathInternerFork,
 ) -> (NominalTypeId, TypeId) {
-    let path = InternedPath::from_single_str(name, string_table);
+    let path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
     env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path,
@@ -99,10 +109,11 @@ pub(crate) fn register_struct(
 pub(crate) fn nominal_origins_map(
     entries: Vec<(&str, OriginTypeId)>,
     string_table: &mut StringTable,
-) -> FxHashMap<InternedPath, OriginTypeId> {
+    path_fork: &mut PathInternerFork,
+) -> FxHashMap<PathId, OriginTypeId> {
     let mut map = FxHashMap::default();
     for (name, origin) in entries {
-        map.insert(path(name, string_table), origin);
+        map.insert(path(name, string_table, path_fork), origin);
     }
     map
 }
@@ -110,10 +121,11 @@ pub(crate) fn nominal_origins_map(
 pub(crate) fn trait_origins_map(
     entries: Vec<(&str, OriginTraitId)>,
     string_table: &mut StringTable,
-) -> FxHashMap<InternedPath, OriginTraitId> {
+    path_fork: &mut PathInternerFork,
+) -> FxHashMap<PathId, OriginTraitId> {
     let mut map = FxHashMap::default();
     for (name, origin) in entries {
-        map.insert(path(name, string_table), origin);
+        map.insert(path(name, string_table, path_fork), origin);
     }
     map
 }
@@ -135,22 +147,23 @@ pub(crate) fn struct_root(
     type_id: TypeId,
     fields: Vec<Declaration>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ResolvedPublicTypeRoot {
     ResolvedPublicTypeRoot {
-        path: path(name, string_table),
+        path: path(name, string_table, path_fork),
         kind: ResolvedPublicTypeRootKind::Struct { type_id, fields },
     }
 }
 
 pub(crate) fn receiver_entry(
-    function_path: InternedPath,
+    function_path: PathId,
     receiver: ReceiverKey,
     signature: FunctionSignature,
 ) -> ReceiverMethodEntry {
     ReceiverMethodEntry {
         function_path,
         receiver,
-        source_file: InternedPath::new(),
+        source_file: PathId::ROOT,
         receiver_mutable: false,
         signature,
     }

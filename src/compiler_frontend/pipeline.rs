@@ -15,9 +15,8 @@
 //! or project code cannot assemble a semantic sequence of its own.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
+    check_borrows as run_borrow_checker, BorrowCheckError, BorrowCheckReport,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::{
@@ -25,23 +24,25 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
-    parse_file_headers_with_table,
+    parse_file_headers_with_table, BoundModuleHeaders, FileFrontendPrepareError,
+    FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
-    PlainMarkdownPrepareInput, prepare_plain_markdown_file,
+    prepare_plain_markdown_file, PlainMarkdownPrepareInput,
 };
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::instrumentation::{add_frontend_counter, FrontendCounter};
 use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::module_dependencies::{
-    ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
+    resolve_module_dependencies, ContentSourceTargets, SortedHeaders,
 };
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
@@ -49,13 +50,14 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId,
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseError, SourceId,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use crate::compiler_frontend::FrontendBuildProfile;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -75,12 +77,15 @@ mod test_support {
     #[inline(always)]
     pub(super) fn record_prepare(_source: &FrontendFilePrepareSource<'_>) {}
 }
-
 pub(crate) struct CompilerFrontend<'a> {
     /// The shared registry handle remains owned by the enclosing compilation boundary.
     pub(crate) external_package_registry: &'a Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) string_table: StringTable,
+    /// Module-local path delta forked from the boundary builder. Semantic stages intern no
+    /// `PathId`s in this slice; the fork travels to the merge tail so string deltas merge
+    /// before path nodes.
+    pub(crate) path_fork: PathInternerFork,
     pub(crate) project_path_resolver: Option<&'a ProjectPathResolver>,
     pub(crate) options: FrontendOptions,
     /// Immutable source identities registered once by the enclosing compilation boundary and
@@ -92,15 +97,28 @@ impl<'a> CompilerFrontend<'a> {
     pub(crate) fn new(
         options: FrontendOptions,
         string_table: StringTable,
+        path_fork: PathInternerFork,
         style_directives: &'a StyleDirectiveRegistry,
         external_package_registry: &'a Arc<ExternalPackageRegistry>,
         project_path_resolver: Option<&'a ProjectPathResolver>,
         source_files: &'a Arc<SourceDatabase>,
     ) -> Self {
+        // Callers must supply a fork minted from this source database: standalone fixtures fork
+        // from an empty table only when `source_files` is empty. A mismatched base would let
+        // tokenizers resolve registered logical paths through the wrong identity table, so this
+        // constructor fails loudly instead of repairing the fork.
+        assert!(
+            path_fork.len() >= source_files.paths().len(),
+            "CompilerFrontend requires a path fork carrying the authoritative source-table \
+             prefix: expected at least {} paths, got {}",
+            source_files.paths().len(),
+            path_fork.len(),
+        );
         Self {
             external_package_registry,
             style_directives,
             string_table,
+            path_fork,
             project_path_resolver,
             options,
             source_files,
@@ -188,18 +206,36 @@ pub(crate) struct AstBuildRequest<'a> {
 fn source_identity_facts(
     source_files: &SourceDatabase,
     source_path: &Path,
-) -> Result<(InternedPath, SourceId, Option<PathBuf>), CompilerError> {
+    path_fork: &mut PathInternerFork,
+) -> Result<(PathId, SourceId, Option<PathBuf>), FileFrontendPrepareFailure> {
     let record = source_files
         .get_by_canonical_path(source_path)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
                 "source {source_path:?} was not registered before frontend preparation"
-            ))
+            )))
+        })?;
+    let source_id = record.id;
+    let logical_path = source_files
+        .logical_path_in_fork(source_id, path_fork)
+        .map_err(|error| match error {
+            // Re-interning the authored source's logical path is an authored allocation: the
+            // project's path table ran out while naming its own source, so the failure reaches
+            // the typed source-capacity diagnostic lane instead of the infrastructure lane.
+            SourceDatabaseError::Capacity(capacity) => {
+                FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                    warnings: Vec::new(),
+                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                })
+            }
+            SourceDatabaseError::Infrastructure(error) => {
+                FileFrontendPrepareFailure::Infrastructure(error)
+            }
         })?;
 
     Ok((
-        source_files.legacy_logical_path(record.id),
-        record.id,
+        logical_path,
+        source_id,
         record
             .canonical_os_path
             .clone()
@@ -224,17 +260,18 @@ impl CompilerFrontend<'static> {
         module_path: &Path,
         tokenizer_entry_mode: TokenizerEntryMode,
         string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
         span_builder: &mut ExtendedSpanBuilder,
     ) -> Result<FileTokens, FileFrontendPrepareFailure> {
         let (logical_path, source_id, canonical_os_path) =
-            source_identity_facts(source_files, module_path)
-                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+            source_identity_facts(source_files, module_path, path_fork)?;
         let mut tokens = tokenize(
             source_code,
-            &logical_path,
+            logical_path,
             tokenizer_entry_mode,
             style_directives,
             string_table,
+            path_fork,
             source_id,
             span_builder,
         )
@@ -253,6 +290,7 @@ impl CompilerFrontend<'static> {
         context: &FrontendFilePrepareContext<'_>,
         input: FrontendFilePrepareInput<'_>,
         local_string_table: &mut StringTable,
+        local_path_fork: &mut PathInternerFork,
     ) -> SourcePreparationDelta {
         add_frontend_counter(FrontendCounter::FilePreparationPassCount, 1);
         test_support::record_prepare(&input.source);
@@ -265,9 +303,8 @@ impl CompilerFrontend<'static> {
                 source_path,
             } => {
                 let (logical_path, source_id, canonical_os_path) =
-                    source_identity_facts(context.source_files, &source_path)
-                        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-                Ok(prepare_plain_markdown_file(
+                    source_identity_facts(context.source_files, &source_path, local_path_fork)?;
+                prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
                         source_code,
                         source_file: logical_path,
@@ -275,7 +312,9 @@ impl CompilerFrontend<'static> {
                         canonical_os_path,
                     },
                     local_string_table,
-                ))
+                    local_path_fork,
+                )
+                .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
             FrontendFilePrepareSource::Moth {
                 source_path,
@@ -285,8 +324,7 @@ impl CompilerFrontend<'static> {
                 // lexical pass. Rebind it to the module source identity and parse headers without
                 // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
                 let (logical_path, source_id, canonical_os_path) =
-                    source_identity_facts(context.source_files, &source_path)
-                        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+                    source_identity_facts(context.source_files, &source_path, local_path_fork)?;
                 tokens
                     .rebind_source_identity(logical_path, source_id, canonical_os_path)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
@@ -295,6 +333,7 @@ impl CompilerFrontend<'static> {
                     context.entry_file_path,
                     context.options,
                     local_string_table,
+                    local_path_fork,
                     input.const_template_offset,
                     input.runtime_fragment_offset,
                     &mut span_builder,
@@ -317,11 +356,17 @@ impl CompilerFrontend<'static> {
                     &source_path,
                     tokenizer_entry_mode,
                     local_string_table,
+                    local_path_fork,
                     &mut span_builder,
                 )?;
 
-                prepare_moth_template_file(tokenization, local_string_table, &mut span_builder)
-                    .map_err(FileFrontendPrepareFailure::Infrastructure)
+                prepare_moth_template_file(
+                    tokenization,
+                    local_string_table,
+                    local_path_fork,
+                    &mut span_builder,
+                )
+                .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
         })();
         SourcePreparationDelta {
@@ -347,9 +392,15 @@ impl<'a> CompilerFrontend<'a> {
             resolved_file_references,
             self.source_files.as_ref(),
             &mut self.string_table,
-        );
+            &mut self.path_fork,
+        )?;
 
-        resolve_module_dependencies(headers, &content_source_targets, &mut self.string_table)
+        resolve_module_dependencies(
+            headers,
+            &content_source_targets,
+            &mut self.string_table,
+            &mut self.path_fork,
+        )
     }
 
     pub(in crate::compiler_frontend) fn headers_to_ast(
@@ -368,8 +419,8 @@ impl<'a> CompilerFrontend<'a> {
             build_config_values,
         } = request;
 
-        let interned_entry_file = match self.source_files.get_by_canonical_path(entry_file_path) {
-            Some(identity) => self.source_files.legacy_logical_path(identity.id),
+        let entry_dir = match self.source_files.get_by_canonical_path(entry_file_path) {
+            Some(identity) => identity.logical_path,
             None => {
                 let error = CompilerError::compiler_error(format!(
                     "entry file {entry_file_path:?} was not registered before AST construction"
@@ -409,8 +460,9 @@ impl<'a> CompilerFrontend<'a> {
                 external_package_registry: Arc::clone(self.external_package_registry),
                 style_directives: self.style_directives,
                 string_table: &mut self.string_table,
-                entry_dir: interned_entry_file,
+                path_fork: &mut self.path_fork,
                 root_role,
+                entry_dir,
                 build_profile,
                 file_value_resolution,
                 config_resolution: None,
@@ -441,13 +493,14 @@ impl<'a> CompilerFrontend<'a> {
         let mut result = lower_module(
             ast,
             &mut self.string_table,
+            &mut self.path_fork,
             function_origin_lookup,
             module_resources,
         )?;
         for (function_path, provenance) in static_if_function_provenance {
             let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {
                 (result.hir_module.side_table.function_name_path(function.id)
-                    == Some(&function_path))
+                    == Some(function_path))
                 .then_some(function.id)
             }) else {
                 return Err(CompilerMessages::from_error_ref(
@@ -485,6 +538,7 @@ impl<'a> CompilerFrontend<'a> {
         match run_borrow_checker(
             hir_module,
             self.external_package_registry.as_ref(),
+            &self.path_fork,
             &self.string_table,
         ) {
             Ok(report) => Ok(report),
@@ -510,6 +564,7 @@ impl<'a> CompilerFrontend<'a> {
         match run_borrow_checker(
             hir_module,
             self.external_package_registry.as_ref(),
+            &self.path_fork,
             &self.string_table,
         ) {
             Ok(report) => Ok(report),

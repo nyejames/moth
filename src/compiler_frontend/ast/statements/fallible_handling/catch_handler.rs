@@ -26,6 +26,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use super::validation::{
     validate_catch_fallible_handler_binding, validate_catch_fallible_handler_conflict,
@@ -62,6 +63,7 @@ pub(crate) fn parse_catch_fallible_handler_typed(
     site: CatchFallibleHandlerSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
     let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
     let warnings = match warnings {
@@ -70,7 +72,7 @@ pub(crate) fn parse_catch_fallible_handler_typed(
     };
 
     let error_binding =
-        parse_catch_error_binding(token_stream, context, &site, warnings, string_table)?;
+        parse_catch_error_binding(token_stream, context, &site, warnings, string_table, path_fork)?;
 
     parse_catch_fallible_handler_body(
         token_stream,
@@ -80,13 +82,11 @@ pub(crate) fn parse_catch_fallible_handler_typed(
         Some(error_binding),
         warnings,
         string_table,
+        path_fork,
     )
 }
 
 /// Parses a `catch:` handler without an error binding.
-///
-/// WHAT: skips error-variable parsing and proceeds directly to the handler body.
-/// WHY: used when the catch handler does not need to reference the error value.
 pub(crate) fn parse_catch_without_error_binding_typed(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -94,6 +94,7 @@ pub(crate) fn parse_catch_without_error_binding_typed(
     site: CatchFallibleHandlerSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
     let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
     let warnings = match warnings {
@@ -109,6 +110,7 @@ pub(crate) fn parse_catch_without_error_binding_typed(
         None,
         warnings,
         string_table,
+        path_fork,
     )
 }
 
@@ -116,14 +118,13 @@ pub(crate) fn parse_catch_without_error_binding_typed(
 ///
 /// WHAT: validates bracket tokens, extracts the handler identifier, runs naming and
 /// scope-conflict checks, and returns a `CatchErrorBinding`.
-/// WHY: both block and inline catch handlers share the same binding shape, but the
-/// token after the closing pipe decides whether the handler body is `:` or `then`.
 fn parse_catch_error_binding(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
     site: &CatchFallibleHandlerSite<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchErrorBinding, ExpressionParseError> {
     if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -184,7 +185,9 @@ fn parse_catch_error_binding(
 
     Ok(ParsedCatchErrorBinding {
         binding: CatchErrorBinding {
-            error_binding: context.scope.append(handler_name),
+            error_binding: path_fork
+                .try_intern_child(context.scope, handler_name)
+                .expect("path table exhausted while creating catch binding"),
         },
         span: handler_name_span,
     })
@@ -203,6 +206,7 @@ fn parse_catch_fallible_handler_body(
     error: Option<ParsedCatchErrorBinding>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
     if token_stream.current_token_kind() != &TokenKind::Colon {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -213,7 +217,7 @@ fn parse_catch_fallible_handler_body(
     }
 
     let mut handler_context =
-        context.new_child_control_flow(ContextKind::CatchHandler, string_table);
+        context.new_child_control_flow(ContextKind::CatchHandler, string_table, path_fork);
     if site.value_required {
         handler_context.active_value_target = Some(ActiveValueProductionTarget::known(
             site.success_result_type_ids.to_vec(),
@@ -227,7 +231,7 @@ fn parse_catch_fallible_handler_body(
         let error_binding_span = error_binding.span;
         handler_context.add_var(
             Declaration {
-                id: error_binding.binding.error_binding.to_owned(),
+                id: error_binding.binding.error_binding,
                 value: Expression::no_value_with_type_id(
                     error_binding_span,
                     error_data_type,
@@ -238,6 +242,7 @@ fn parse_catch_fallible_handler_body(
                 config_qualifier: None,
             },
             error_binding_span,
+            path_fork,
         );
     }
 
@@ -249,6 +254,7 @@ fn parse_catch_fallible_handler_body(
         type_interner,
         warnings,
         string_table,
+        path_fork,
     )?;
 
     validate_catch_fallible_handler_value_requirement(
@@ -275,6 +281,7 @@ pub(super) fn parse_inline_catch_without_error_binding_typed(
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
     parse_inline_catch_handler_body(
         token_stream,
@@ -283,6 +290,7 @@ pub(super) fn parse_inline_catch_without_error_binding_typed(
         site,
         None,
         string_table,
+        path_fork,
     )
 }
 
@@ -298,6 +306,7 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
     site: CatchFallibleHandlerSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
     let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
     let warnings = match warnings {
@@ -305,7 +314,7 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
         None => &mut local_handler_warnings,
     };
     let error_binding =
-        parse_catch_error_binding(token_stream, context, &site, warnings, string_table)?;
+        parse_catch_error_binding(token_stream, context, &site, warnings, string_table, path_fork)?;
 
     parse_inline_catch_handler_body(
         token_stream,
@@ -314,9 +323,9 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
         site,
         Some(error_binding),
         string_table,
+        path_fork,
     )
 }
-
 fn parse_inline_catch_handler_body(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -324,6 +333,7 @@ fn parse_inline_catch_handler_body(
     site: CatchFallibleHandlerSite<'_>,
     error: Option<ParsedCatchErrorBinding>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
     if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -352,8 +362,6 @@ fn parse_inline_catch_handler_body(
     let then_span = Some(token_stream.current_span());
     token_stream.advance();
 
-    // A retained newline proves a multiline form. Other empty boundaries use the
-    // shared missing-value diagnostic before expression evaluation.
     if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
@@ -371,7 +379,7 @@ fn parse_inline_catch_handler_body(
     }
 
     let mut handler_context =
-        context.new_child_control_flow(ContextKind::CatchHandler, string_table);
+        context.new_child_control_flow(ContextKind::CatchHandler, string_table, path_fork);
     let active_target = ActiveValueProductionTarget::known(
         site.success_result_type_ids.to_vec(),
         ValueReceiverKind::CatchHandler,
@@ -384,7 +392,7 @@ fn parse_inline_catch_handler_body(
         let error_binding_span = error_binding.span;
         handler_context.add_var(
             Declaration {
-                id: error_binding.binding.error_binding.to_owned(),
+                id: error_binding.binding.error_binding,
                 value: Expression::no_value_with_type_id(
                     error_binding_span,
                     error_data_type,
@@ -395,6 +403,7 @@ fn parse_inline_catch_handler_body(
                 config_qualifier: None,
             },
             error_binding_span,
+            path_fork,
         );
     }
 
@@ -405,6 +414,7 @@ fn parse_inline_catch_handler_body(
         target: &active_target,
         label: "inline catch fallback values",
         string_table,
+        path_fork,
     })?;
 
     if token_stream.current_token_kind() == &TokenKind::Catch {
@@ -420,7 +430,7 @@ fn parse_inline_catch_handler_body(
             span: then_span,
         }),
         span: then_span,
-        scope: handler_context.scope.clone(),
+        scope: handler_context.scope,
     }];
 
     Ok(CatchFallibleHandler {

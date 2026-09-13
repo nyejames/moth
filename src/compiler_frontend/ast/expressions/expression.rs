@@ -34,7 +34,8 @@ use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -126,7 +127,7 @@ pub enum ReactiveSourceKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReactiveSource {
-    pub path: InternedPath,
+    pub path: PathId,
     pub kind: ReactiveSourceKind,
 }
 
@@ -139,12 +140,12 @@ pub struct ReactiveSource {
 /// dependency solving.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReactiveTemplateParameterDependency {
-    pub parameter: InternedPath,
+    pub parameter: PathId,
     pub span: Option<SourceSpan>,
 }
 
 impl ReactiveTemplateParameterDependency {
-    pub fn new(parameter: InternedPath, span: Option<SourceSpan>) -> Self {
+    pub fn new(parameter: PathId, span: Option<SourceSpan>) -> Self {
         Self { parameter, span }
     }
 }
@@ -171,7 +172,7 @@ impl ReactiveTemplateMetadata {
     }
 
     pub fn from_template_value_parameter(
-        parameter: InternedPath,
+        parameter: PathId,
         span: Option<SourceSpan>,
     ) -> Self {
         let mut metadata = Self::template_backed();
@@ -274,10 +275,8 @@ impl ReactiveTemplateMetadata {
     }
 }
 
-fn parameter_index_by_path(parameters: &[Declaration], path: &InternedPath) -> Option<usize> {
-    parameters
-        .iter()
-        .position(|parameter| &parameter.id == path)
+fn parameter_index_by_path(parameters: &[Declaration], path: &PathId) -> Option<usize> {
+    parameters.iter().position(|parameter| parameter.id == *path)
 }
 
 /// Canonical and diagnostic type data for a collection expression.
@@ -372,7 +371,7 @@ pub(crate) fn type_id_hint_for_diagnostic_type(data_type: &DataType) -> TypeId {
 
 /// Input struct for `Expression::choice_construct` to avoid a long parameter list.
 pub struct ChoiceConstructInput {
-    pub nominal_path: InternedPath,
+    pub nominal_path: PathId,
     pub tag: usize,
     pub fields: Vec<Declaration>,
     pub diagnostic_type: DataType,
@@ -568,7 +567,7 @@ impl Expression {
 
     /// Constructs a reference expression from an interned path.
     pub fn reference_with_type_id(
-        id: InternedPath,
+        id: PathId,
         data_type: DataType,
         type_id: TypeId,
         span: Option<SourceSpan>,
@@ -607,7 +606,7 @@ impl Expression {
 
     /// Constructs a resolved function call expression.
     pub(crate) fn function_call_with_typed_arguments(
-        name: InternedPath,
+        name: PathId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         type_environment: &mut TypeEnvironment,
@@ -630,7 +629,7 @@ impl Expression {
     /// Constructs a resolved receiver method call expression.
     pub(crate) fn method_call_with_typed_arguments(
         receiver: Expression,
-        method_path: InternedPath,
+        method_path: PathId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         type_environment: &mut TypeEnvironment,
@@ -705,7 +704,7 @@ impl Expression {
     }
     /// Constructs a resolved fallible function call with explicit error handling.
     pub(crate) fn handled_fallible_function_call_with_typed_arguments(
-        name: InternedPath,
+        name: PathId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         handling: FallibleExpressionHandling,
@@ -1040,7 +1039,7 @@ impl Expression {
 
     /// Constructs a struct instance expression.
     pub fn struct_instance(
-        nominal_path: InternedPath,
+        nominal_path: PathId,
         args: Vec<Declaration>,
         span: Option<SourceSpan>,
         value_mode: ValueMode,

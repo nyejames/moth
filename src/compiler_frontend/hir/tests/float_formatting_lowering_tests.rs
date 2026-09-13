@@ -38,6 +38,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
 use crate::compiler_frontend::value_mode::ValueMode;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 fn float_expr(
     value: f64,
@@ -153,305 +154,291 @@ fn make_float_to_string_cast(
 }
 
 #[test]
-fn cast_float_to_string_lowers_to_format_float_statement() {
-    let mut string_table = StringTable::new();
-    let loc = None;
-    let source = float_expr(1.5, loc);
+fn cast_float_to_string_lowers_to_format_float_statement() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let loc = None;
+let source = float_expr(1.5, loc);
 
-    let mut builder = setup_builder(&mut string_table);
-    let expr = make_float_to_string_cast(source, loc);
+let mut builder = setup_builder(&mut string_table, &mut path_fork);
+let expr = make_float_to_string_cast(source, loc);
 
-    let lowered = builder
-        .lower_expression(&expr)
-        .expect("Float -> String cast lowering should succeed");
+let lowered = builder
+    .lower_expression(&expr)
+    .expect("Float -> String cast lowering should succeed");
 
-    assert_eq!(lowered.value.ty, builtin_type_ids::STRING);
-    assert!(
-        !has_plain_float_to_string_cast(&builder),
-        "Float -> String cast must not lower to a plain Cast expression or CastOp statement"
-    );
+assert_eq!(lowered.value.ty, builtin_type_ids::STRING);
+assert!(
+    !has_plain_float_to_string_cast(&builder),
+    "Float -> String cast must not lower to a plain Cast expression or CastOp statement"
+);
 
-    let format_floats = find_format_float_statements(&builder);
-    assert_eq!(
-        format_floats.len(),
-        1,
-        "Float -> String cast should emit exactly one FormatFloat statement"
-    );
-    assert!(matches!(format_floats[0].0, NumericFailureMode::Trap));
-}
+let format_floats = find_format_float_statements(&builder);
+assert_eq!(
+    format_floats.len(),
+    1,
+    "Float -> String cast should emit exactly one FormatFloat statement"
+);
+assert!(matches!(format_floats[0].0, NumericFailureMode::Trap)); }
 
 #[test]
-fn cast_float_to_string_flushes_source_prelude_before_formatting() {
-    let mut string_table = StringTable::new();
-    let loc = None;
-    let source_name = symbol("source_float", &mut string_table);
+fn cast_float_to_string_flushes_source_prelude_before_formatting() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let loc = None;
+let source_name = symbol("source_float", &mut path_fork, &mut string_table);
 
-    let mut builder = setup_builder(&mut string_table);
-    builder.test_register_function_name(source_name.clone(), FunctionId(7));
+let mut builder = setup_builder(&mut string_table, &mut path_fork);
+builder.test_register_function_name(source_name.clone(), FunctionId(7));
 
-    let source = Expression::function_call_with_typed_arguments(
-        source_name,
-        vec![],
-        vec![builtin_type_ids::FLOAT],
-        &mut builder.type_environment,
-        loc,
-    );
-    let expr = make_float_to_string_cast(source, loc);
+let source = Expression::function_call_with_typed_arguments(
+    source_name,
+    vec![],
+    vec![builtin_type_ids::FLOAT],
+    &mut builder.type_environment,
+    loc,
+);
+let expr = make_float_to_string_cast(source, loc);
 
-    let lowered = builder
-        .lower_expression(&expr)
-        .expect("Float -> String cast source prelude lowering should succeed");
+let lowered = builder
+    .lower_expression(&expr)
+    .expect("Float -> String cast source prelude lowering should succeed");
 
-    assert!(
-        lowered.prelude.is_empty(),
-        "Float formatting emits into the active block, so the source prelude must be flushed there"
-    );
+assert!(
+    lowered.prelude.is_empty(),
+    "Float formatting emits into the active block, so the source prelude must be flushed there"
+);
 
-    let statements = builder.test_current_block_statements();
-    assert_eq!(
-        statements.len(),
-        2,
-        "function-call source should run before the FormatFloat statement"
-    );
+let statements = builder.test_current_block_statements();
+assert_eq!(
+    statements.len(),
+    2,
+    "function-call source should run before the FormatFloat statement"
+);
 
-    assert!(
-        matches!(
-            &statements[0].kind,
-            HirStatementKind::Call {
-                target: CallTarget::Local(FunctionId(7)),
-                ..
-            }
-        ),
-        "source call should be emitted before formatting"
-    );
-    assert!(
-        matches!(&statements[1].kind, HirStatementKind::FormatFloat { .. }),
-        "FormatFloat should consume the source call result after it exists"
-    );
-}
-
-#[test]
-fn cast_float_to_string_return_error_in_builtin_error_function() {
-    let mut string_table = StringTable::new();
-    let loc = None;
-    let fn_name = symbol("__test_fn_error", &mut string_table);
-    let source = float_expr(1.5, loc);
-
-    let mut builder = setup_builder(&mut string_table);
-    let error_type_id = builder.test_register_builtin_error_type();
-    let return_type = builder
-        .type_environment
-        .intern_fallible_carrier(builtin_type_ids::STRING, error_type_id);
-    builder.test_register_function_with_return_type(fn_name, FunctionId(1), return_type);
-    builder.test_set_current_function(FunctionId(1));
-
-    let expr = make_float_to_string_cast(source, loc);
-    let lowered = builder
-        .lower_expression(&expr)
-        .expect("Float -> String cast lowering in Error! function should succeed");
-
-    let format_floats = find_format_float_statements(&builder);
-    assert_eq!(format_floats.len(), 1);
-    assert!(
-        matches!(format_floats[0].0, NumericFailureMode::ReturnError),
-        "builtin Error! functions should use ReturnError Float formatting failure mode"
-    );
-    assert!(
-        matches!(
-            lowered.value.kind,
-            HirExpressionKind::FallibleUnwrapSuccess { .. }
-        ),
-        "recoverable Float formatting should continue with an unwrapped success value"
-    );
-    assert!(
-        builder
-            .module
-            .blocks
-            .iter()
-            .any(|block| matches!(block.terminator, HirTerminator::FallibleBranch { .. })),
-        "recoverable Float formatting should branch on the internal carrier"
-    );
-    assert!(
-        builder
-            .module
-            .blocks
-            .iter()
-            .any(|block| matches!(block.terminator, HirTerminator::ReturnError(_))),
-        "recoverable Float formatting should emit a builtin Error return edge"
-    );
-}
-
-#[test]
-fn runtime_float_template_interpolation_lowers_to_format_float_statement() {
-    let mut string_table = StringTable::new();
-    let loc = None;
-    let value_name = symbol("value", &mut string_table);
-    let value_ref = reference_expr_with_type_id(
-        value_name.clone(),
-        builtin_type_ids::FLOAT,
-        loc,
-        ValueMode::ImmutableReference,
-    );
-
-    let expr = runtime_template_expression(loc, vec![value_ref], &string_table);
-
-    let mut builder = setup_builder(&mut string_table);
-    register_local(
-        &mut builder,
-        value_name,
-        LocalId(10),
-        builtin_type_ids::FLOAT,
-        loc,
-    );
-
-    let _lowered = builder
-        .lower_expression(&expr)
-        .expect("Float template interpolation lowering should succeed");
-
-    let format_floats = find_format_float_statements(&builder);
-    assert_eq!(
-        format_floats.len(),
-        1,
-        "runtime Float template interpolation should emit exactly one FormatFloat statement"
-    );
-    assert!(matches!(format_floats[0].0, NumericFailureMode::Trap));
-}
-
-#[test]
-fn runtime_string_template_chunk_does_not_emit_format_float() {
-    let mut string_table = StringTable::new();
-    let loc = None;
-    let text = string_expr("hello", &mut string_table, loc);
-
-    let expr = runtime_template_expression(loc, vec![text], &string_table);
-
-    let mut builder = setup_builder(&mut string_table);
-    let _lowered = builder
-        .lower_expression(&expr)
-        .expect("String template chunk lowering should succeed");
-
-    let format_floats = find_format_float_statements(&builder);
-    assert!(
-        format_floats.is_empty(),
-        "String template chunks must not emit FormatFloat statements"
-    );
-}
-
-#[test]
-fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
-    let mut string_table = StringTable::new();
-    let loc = None;
-    let value_path = symbol("value", &mut string_table);
-    let value_local = LocalId(20);
-    let source = ReactiveSource {
-        path: value_path.clone(),
-        kind: ReactiveSourceKind::Declaration,
-    };
-
-    let value_ref = reference_expr_with_type_id(
-        value_path.clone(),
-        builtin_type_ids::FLOAT,
-        loc,
-        ValueMode::ImmutableReference,
-    )
-    .with_reactive_source(source.clone());
-    let subscription = ReactiveSubscription {
-        source,
-        type_id: builtin_type_ids::FLOAT,
-        span: loc,
-    };
-    let handoff = OwnedRuntimeTemplateHandoff {
-        body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
-            children: vec![OwnedRuntimeTemplateNode::DynamicExpression {
-                expression: Box::new(value_ref),
-                reactive_subscription: Some(subscription),
-                span: loc,
-            }],
-            span: loc,
-        }),
-        span: loc,
-    };
-
-    let mut builder = setup_builder(&mut string_table);
-    register_local(
-        &mut builder,
-        value_path.clone(),
-        value_local,
-        builtin_type_ids::FLOAT,
-        loc,
-    );
-    builder.side_table.bind_reactive_source(HirReactiveSource {
-        id: ReactiveSourceId(0),
-        local_id: value_local,
-        path: value_path.clone(),
-        kind: HirReactiveSourceKind::Declaration,
-        type_id: builtin_type_ids::FLOAT,
-        span: loc,
-    });
-
-    let expr = Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned);
-    let lowered = builder
-        .lower_expression(&expr)
-        .expect("reactive Float template subscription lowering should succeed");
-
-    assert!(
-        expression_contains_float_to_string_cast(&lowered.value),
-        "reactive Float subscriptions should format lazily inside the snapshot expression"
-    );
-    assert!(
-        builder.test_current_block_statements().is_empty(),
-        "direct reactive subscriptions must not be materialized into eager FormatFloat statements"
-    );
-}
-
-#[test]
-fn cast_float_to_string_optional_wrap_lowers_to_format_float() {
-    let mut string_table = StringTable::new();
-    let loc = None;
-    let source = float_expr(1.5, loc);
-
-    let mut builder = setup_builder(&mut string_table);
-    let optional_string_type = builder
-        .type_environment
-        .intern_option(builtin_type_ids::STRING);
-
-    let cast = ResolvedCastExpression {
-        source: Box::new(source),
-        source_type_id: builtin_type_ids::FLOAT,
-        target_type_id: builtin_type_ids::STRING,
-        target: BuiltinCastTarget::String,
-        requires_optional_wrap_after_cast: true,
-        evidence: ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::FloatToString,
-        },
-        handling: CastHandling::Infallible,
-        span: loc,
-    };
-
-    let expr = Expression::cast(cast, optional_string_type, &builder.type_environment);
-
-    let lowered = builder
-        .lower_expression(&expr)
-        .expect("optional Float -> String cast lowering should succeed");
-
-    assert_eq!(lowered.value.ty, optional_string_type);
-
-    let is_option_some = matches!(
-        &lowered.value.kind,
-        HirExpressionKind::VariantConstruct {
-            carrier: crate::compiler_frontend::hir::expressions::HirVariantCarrier::Option,
+assert!(
+    matches!(
+        &statements[0].kind,
+        HirStatementKind::Call {
+            target: CallTarget::Local(FunctionId(7)),
             ..
         }
-    );
-    assert!(
-        is_option_some,
-        "optional Float -> String cast should wrap the formatted string in some(...)"
-    );
+    ),
+    "source call should be emitted before formatting"
+);
+assert!(
+    matches!(&statements[1].kind, HirStatementKind::FormatFloat { .. }),
+    "FormatFloat should consume the source call result after it exists"
+); }
 
-    let format_floats = find_format_float_statements(&builder);
-    assert_eq!(
-        format_floats.len(),
-        1,
-        "optional Float -> String cast should still emit exactly one FormatFloat statement"
-    );
-}
+#[test]
+fn cast_float_to_string_return_error_in_builtin_error_function() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let loc = None;
+let fn_name = symbol("__test_fn_error", &mut path_fork, &mut string_table);
+let source = float_expr(1.5, loc);
+
+let mut builder = setup_builder(&mut string_table, &mut path_fork);
+let error_type_id = builder.test_register_builtin_error_type();
+let return_type = builder
+    .type_environment
+    .intern_fallible_carrier(builtin_type_ids::STRING, error_type_id);
+builder.test_register_function_with_return_type(fn_name, FunctionId(1), return_type);
+builder.test_set_current_function(FunctionId(1));
+
+let expr = make_float_to_string_cast(source, loc);
+let lowered = builder
+    .lower_expression(&expr)
+    .expect("Float -> String cast lowering in Error! function should succeed");
+
+let format_floats = find_format_float_statements(&builder);
+assert_eq!(format_floats.len(), 1);
+assert!(
+    matches!(format_floats[0].0, NumericFailureMode::ReturnError),
+    "builtin Error! functions should use ReturnError Float formatting failure mode"
+);
+assert!(
+    matches!(
+        lowered.value.kind,
+        HirExpressionKind::FallibleUnwrapSuccess { .. }
+    ),
+    "recoverable Float formatting should continue with an unwrapped success value"
+);
+assert!(
+    builder
+        .module
+        .blocks
+        .iter()
+        .any(|block| matches!(block.terminator, HirTerminator::FallibleBranch { .. })),
+    "recoverable Float formatting should branch on the internal carrier"
+);
+assert!(
+    builder
+        .module
+        .blocks
+        .iter()
+        .any(|block| matches!(block.terminator, HirTerminator::ReturnError(_))),
+    "recoverable Float formatting should emit a builtin Error return edge"
+); }
+
+#[test]
+fn runtime_float_template_interpolation_lowers_to_format_float_statement() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let loc = None;
+let value_name = symbol("value", &mut path_fork, &mut string_table);
+let value_ref = reference_expr_with_type_id(
+    value_name.clone(),
+    builtin_type_ids::FLOAT,
+    loc,
+    ValueMode::ImmutableReference,
+);
+
+let expr = runtime_template_expression(loc, vec![value_ref], &string_table);
+
+let mut builder = setup_builder(&mut string_table, &mut path_fork);
+register_local(
+    &mut builder,
+    value_name,
+    LocalId(10),
+    builtin_type_ids::FLOAT,
+    loc,
+);
+
+let _lowered = builder
+    .lower_expression(&expr)
+    .expect("Float template interpolation lowering should succeed");
+
+let format_floats = find_format_float_statements(&builder);
+assert_eq!(
+    format_floats.len(),
+    1,
+    "runtime Float template interpolation should emit exactly one FormatFloat statement"
+);
+assert!(matches!(format_floats[0].0, NumericFailureMode::Trap)); }
+
+#[test]
+fn runtime_string_template_chunk_does_not_emit_format_float() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let loc = None;
+let text = string_expr("hello", &mut string_table, loc);
+
+let expr = runtime_template_expression(loc, vec![text], &string_table);
+
+let mut builder = setup_builder(&mut string_table, &mut path_fork);
+let _lowered = builder
+    .lower_expression(&expr)
+    .expect("String template chunk lowering should succeed");
+
+let format_floats = find_format_float_statements(&builder);
+assert!(
+    format_floats.is_empty(),
+    "String template chunks must not emit FormatFloat statements"
+); }
+
+#[test]
+fn reactive_float_template_subscription_keeps_lazy_formatter_expression() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let loc = None;
+let value_path = symbol("value", &mut path_fork, &mut string_table);
+let value_local = LocalId(20);
+let source = ReactiveSource {
+    path: value_path.clone(),
+    kind: ReactiveSourceKind::Declaration,
+};
+
+let value_ref = reference_expr_with_type_id(
+    value_path.clone(),
+    builtin_type_ids::FLOAT,
+    loc,
+    ValueMode::ImmutableReference,
+)
+.with_reactive_source(source.clone());
+let subscription = ReactiveSubscription {
+    source,
+    type_id: builtin_type_ids::FLOAT,
+    span: loc,
+};
+let handoff = OwnedRuntimeTemplateHandoff {
+    body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
+        children: vec![OwnedRuntimeTemplateNode::DynamicExpression {
+            expression: Box::new(value_ref),
+            reactive_subscription: Some(subscription),
+            span: loc,
+        }],
+        span: loc,
+    }),
+    span: loc,
+};
+
+let mut builder = setup_builder(&mut string_table, &mut path_fork);
+register_local(
+    &mut builder,
+    value_path.clone(),
+    value_local,
+    builtin_type_ids::FLOAT,
+    loc,
+);
+builder.side_table.bind_reactive_source(HirReactiveSource {
+    id: ReactiveSourceId(0),
+    local_id: value_local,
+    path: value_path.clone(),
+    kind: HirReactiveSourceKind::Declaration,
+    type_id: builtin_type_ids::FLOAT,
+    span: loc,
+});
+
+let expr = Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned);
+let lowered = builder
+    .lower_expression(&expr)
+    .expect("reactive Float template subscription lowering should succeed");
+
+assert!(
+    expression_contains_float_to_string_cast(&lowered.value),
+    "reactive Float subscriptions should format lazily inside the snapshot expression"
+);
+assert!(
+    builder.test_current_block_statements().is_empty(),
+    "direct reactive subscriptions must not be materialized into eager FormatFloat statements"
+); }
+
+#[test]
+fn cast_float_to_string_optional_wrap_lowers_to_format_float() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let loc = None;
+let source = float_expr(1.5, loc);
+
+let mut builder = setup_builder(&mut string_table, &mut path_fork);
+let optional_string_type = builder
+    .type_environment
+    .intern_option(builtin_type_ids::STRING);
+
+let cast = ResolvedCastExpression {
+    source: Box::new(source),
+    source_type_id: builtin_type_ids::FLOAT,
+    target_type_id: builtin_type_ids::STRING,
+    target: BuiltinCastTarget::String,
+    requires_optional_wrap_after_cast: true,
+    evidence: ResolvedCastEvidence::Builtin {
+        policy: BuiltinCastPolicyId::FloatToString,
+    },
+    handling: CastHandling::Infallible,
+    span: loc,
+};
+
+let expr = Expression::cast(cast, optional_string_type, &builder.type_environment);
+
+let lowered = builder
+    .lower_expression(&expr)
+    .expect("optional Float -> String cast lowering should succeed");
+
+assert_eq!(lowered.value.ty, optional_string_type);
+
+let is_option_some = matches!(
+    &lowered.value.kind,
+    HirExpressionKind::VariantConstruct {
+        carrier: crate::compiler_frontend::hir::expressions::HirVariantCarrier::Option,
+        ..
+    }
+);
+assert!(
+    is_option_some,
+    "optional Float -> String cast should wrap the formatted string in some(...)"
+);
+
+let format_floats = find_format_float_statements(&builder);
+assert_eq!(
+    format_floats.len(),
+    1,
+    "optional Float -> String cast should still emit exactly one FormatFloat statement"
+); }

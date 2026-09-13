@@ -31,7 +31,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -79,13 +79,14 @@ fn validate_owned_handoff_with_orphan_type_id(node: OwnedRuntimeTemplateNode) {
 #[test]
 fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision() {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let selectors = vec![
         TemplateBranchSelector::Bool(orphan_bool_expression()),
         TemplateBranchSelector::OptionPresentCapture {
             scrutinee: Expression::bool(true, None, ValueMode::ImmutableOwned),
             pattern: Box::new(MatchPattern::OptionPresentCapture {
                 name: strings.intern("value"),
-                binding_path: InternedPath::new(),
+                binding_path: PathId::ROOT,
                 inner_type_id: TypeId(9999),
                 span: None,
                 binding_span: None,
@@ -111,7 +112,7 @@ fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision(
 }
 fn orphan_declaration() -> Declaration {
     Declaration {
-        id: InternedPath::new(),
+        id: PathId::ROOT,
         value: orphan_bool_expression(),
         binding_span: None,
         config_qualifier: None,
@@ -235,7 +236,7 @@ fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
             ),
         },
         span: None,
-        scope: InternedPath::new(),
+        scope: PathId::ROOT,
     };
     let type_environment = TypeEnvironment::new();
     let store = TemplateIrStore::new();
@@ -273,7 +274,7 @@ fn static_true_assertion_slot_handoff_is_validated_before_message_elision() {
             ),
         },
         span: None,
-        scope: InternedPath::new(),
+        scope: PathId::ROOT,
     };
     let type_environment = TypeEnvironment::new();
     let store = TemplateIrStore::new();
@@ -373,6 +374,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
 #[test]
 fn static_true_assertion_message_reaches_type_validation_before_elision() {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let structural = Expression::string_slice(
         strings.intern("structural"),
         None,
@@ -405,7 +407,7 @@ fn static_true_assertion_message_reaches_type_validation_before_elision() {
             message,
         },
         span: None,
-        scope: InternedPath::new(),
+        scope: PathId::ROOT,
     };
     let context = TypeValidationContext {
         type_environment: &type_environment,
@@ -463,6 +465,7 @@ fn template_with_dynamic_overlay(
 #[test]
 fn validation_checks_effective_dynamic_expression_overlay() {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let structural = Expression::string_slice(
         strings.intern("structural"),
         None,
@@ -488,6 +491,7 @@ fn validation_checks_effective_dynamic_expression_overlay() {
 #[test]
 fn validation_rejects_non_finalized_template_reference() {
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let structural = Expression::string_slice(
         strings.intern("structural"),
         None,

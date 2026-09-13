@@ -26,7 +26,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::NamespaceValueMember;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
@@ -43,6 +43,7 @@ pub(super) struct LeafDispatchContext<'a, 'env> {
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
     pub(super) string_table: &'a mut StringTable,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Resolve the final value member of a dotted namespace path.
@@ -86,7 +87,7 @@ pub(super) fn resolve_namespace_value_member(
 /// has verified that no further dot follows; this function only handles the leaf.
 fn resolve_source_value_member(
     context: &mut LeafDispatchContext<'_, '_>,
-    symbol_path: &InternedPath,
+    symbol_path: &PathId,
     member_name: StringId,
     member_span: Option<SourceSpan>,
     expected_result_evidence_allowed: bool,
@@ -98,6 +99,7 @@ fn resolve_source_value_member(
         expression,
         allow_boundary_catch,
         string_table,
+        path_fork,
     } = context;
 
     let Some(declaration) = context
@@ -126,6 +128,7 @@ fn resolve_source_value_member(
             allow_boundary_catch: *allow_boundary_catch,
             expected_result_evidence_allowed,
             type_interner,
+            path_fork,
             string_table,
         })
     } else {
@@ -144,6 +147,7 @@ fn resolve_source_value_member(
                 operand: reference_expression,
                 wrapper_span: member_span,
             },
+            path_fork,
         )
     }
 }
@@ -170,6 +174,7 @@ fn resolve_external_value_member(
         expression,
         allow_boundary_catch,
         string_table,
+        path_fork,
     } = context;
 
     match symbol_id {
@@ -184,6 +189,7 @@ fn resolve_external_value_member(
                 expression,
                 allow_boundary_catch: *allow_boundary_catch,
                 string_table,
+                path_fork,
             })
         }
 
@@ -198,6 +204,7 @@ fn resolve_external_value_member(
                 expression,
                 allow_boundary_catch: *allow_boundary_catch,
                 string_table,
+                path_fork,
             })
         }
 

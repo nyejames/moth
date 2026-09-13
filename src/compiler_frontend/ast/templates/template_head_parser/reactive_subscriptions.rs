@@ -21,6 +21,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -37,6 +38,7 @@ pub(super) fn parse_reactive_subscription(
     type_environment: &TypeEnvironment,
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> ReactiveSubscriptionResult<()> {
     let subscription_token_span = token_stream.current_token().span;
     let subscription_span = Some(SourceSpan::new(
@@ -143,6 +145,7 @@ pub(super) fn parse_reactive_subscription(
             context,
             type_environment,
             construction_context,
+            path_fork: &*path_fork,
         },
         subscription_span,
         string_table,

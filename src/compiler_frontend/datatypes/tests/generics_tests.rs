@@ -14,7 +14,7 @@ use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, FunctionTypeKey, GenericParameterId, GenericParameterListId,
     NominalTypeId, TypeConstructor, TypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -43,11 +43,14 @@ fn register_single_parameter_list(
 
 fn register_empty_generic_struct(
     type_environment: &mut TypeEnvironment,
+    path_builder: &mut PathInternerBuilder,
     string_table: &mut StringTable,
     name: &str,
     generic_parameters: GenericParameterListId,
 ) -> NominalTypeId {
-    let path = InternedPath::from_single_str(name, string_table);
+    let path = path_builder
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
     let (nominal_id, _) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path,
@@ -111,8 +114,13 @@ fn generic_scope_accepts_pascal_case_and_single_uppercase_names() {
 #[test]
 fn type_identity_keys_distinguish_nominal_generic_arguments() {
     let mut string_table = StringTable::new();
-    let box_path = InternedPath::from_single_str("Box", &mut string_table);
-    let pair_path = InternedPath::from_single_str("Pair", &mut string_table);
+    let mut path_builder = PathInternerBuilder::new();
+    let box_path = path_builder
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
+    let pair_path = path_builder
+        .try_intern_portable_path("Pair", &mut string_table)
+        .expect("test path fits");
     let int_key = TypeIdentityKey::Builtin(BuiltinTypeKey::Int);
     let string_key = TypeIdentityKey::Builtin(BuiltinTypeKey::String);
 
@@ -433,6 +441,7 @@ fn type_id_bindings_unify_option_arguments() {
 fn type_id_bindings_unify_generic_instances_only_when_base_matches() {
     let mut type_environment = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
@@ -440,12 +449,14 @@ fn type_id_bindings_unify_generic_instances_only_when_base_matches() {
         register_single_parameter_list(&mut type_environment, &mut string_table, "T");
     let box_nominal = register_empty_generic_struct(
         &mut type_environment,
+        &mut path_builder,
         &mut string_table,
         "Box",
         parameter_list,
     );
     let wrapper_nominal = register_empty_generic_struct(
         &mut type_environment,
+        &mut path_builder,
         &mut string_table,
         "Wrapper",
         parameter_list,
@@ -488,6 +499,7 @@ fn type_id_bindings_unify_generic_instances_only_when_base_matches() {
 fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
     let mut type_environment = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
@@ -497,6 +509,7 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
         register_single_parameter_list(&mut type_environment, &mut string_table, "T");
     let box_nominal = register_empty_generic_struct(
         &mut type_environment,
+        &mut path_builder,
         &mut string_table,
         "Box",
         parameter_list,
@@ -932,6 +945,7 @@ fn type_id_bindings_rollback_constructed_mismatch_after_partial_binding() {
 fn type_id_bindings_rollback_generic_instance_mismatch_after_partial_binding() {
     let mut type_environment = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
@@ -941,11 +955,24 @@ fn type_id_bindings_rollback_generic_instance_mismatch_after_partial_binding() {
     let wrapper_list =
         register_single_parameter_list(&mut type_environment, &mut string_table, "Item");
     let pair_nominal =
-        register_empty_generic_struct(&mut type_environment, &mut string_table, "Pair", pair_list);
+        register_empty_generic_struct(
+            &mut type_environment,
+            &mut path_builder,
+            &mut string_table,
+            "Pair",
+            pair_list,
+        );
     let box_nominal =
-        register_empty_generic_struct(&mut type_environment, &mut string_table, "Box", box_list);
+        register_empty_generic_struct(
+            &mut type_environment,
+            &mut path_builder,
+            &mut string_table,
+            "Box",
+            box_list,
+        );
     let wrapper_nominal = register_empty_generic_struct(
         &mut type_environment,
+        &mut path_builder,
         &mut string_table,
         "Wrapper",
         wrapper_list,

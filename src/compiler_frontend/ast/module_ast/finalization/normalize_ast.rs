@@ -85,7 +85,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -327,7 +327,7 @@ impl AstFinalizer<'_, '_> {
 
         // Synchronize the secondary indexes as an exact bidirectional invariant and copy the
         // synchronized signatures from the primary index in place, preserving vector order.
-        synchronize_receiver_secondary_indexes(&mut catalog)?;
+        synchronize_receiver_secondary_indexes(&mut catalog, self.path_fork)?;
 
         // Synchronize every root table receiver method entry by exact path. A missing catalog
         // entry is a CompilerError, not a silent no-op.
@@ -407,8 +407,8 @@ fn normalize_retained_field_defaults(
 /// WHAT: the function-signature and struct-field maps collected from the once-normalized
 /// emitted AST. A named result keeps each map's role explicit at the synchronization join.
 struct EmittedDeclarationDefaults {
-    function_signatures_by_path: FxHashMap<InternedPath, FunctionSignature>,
-    struct_fields_by_path: FxHashMap<InternedPath, Vec<Declaration>>,
+    function_signatures_by_path: FxHashMap<PathId, FunctionSignature>,
+    struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
 }
 
 /// Collect normalized function signatures and struct fields from the once-normalized emitted
@@ -420,9 +420,9 @@ struct EmittedDeclarationDefaults {
 fn collect_emitted_declaration_defaults(
     emitted_ast: &[AstNode],
 ) -> Result<EmittedDeclarationDefaults, CompilerError> {
-    let mut normalized_function_signatures_by_path: FxHashMap<InternedPath, FunctionSignature> =
+    let mut normalized_function_signatures_by_path: FxHashMap<PathId, FunctionSignature> =
         FxHashMap::default();
-    let mut normalized_struct_fields_by_path: FxHashMap<InternedPath, Vec<Declaration>> =
+    let mut normalized_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>> =
         FxHashMap::default();
 
     for node in emitted_ast {
@@ -466,7 +466,7 @@ fn collect_emitted_declaration_defaults(
 fn reject_duplicate_receiver_method_paths(
     receiver_methods: &[ReceiverMethodEntry],
 ) -> Result<(), CompilerError> {
-    let mut seen_paths: FxHashSet<&InternedPath> = FxHashSet::default();
+    let mut seen_paths: FxHashSet<&PathId> = FxHashSet::default();
     for entry in receiver_methods {
         if !seen_paths.insert(&entry.function_path) {
             return Err(CompilerError::compiler_error(format!(
@@ -492,6 +492,7 @@ fn reject_duplicate_receiver_method_paths(
 /// silent skip. Extracting the synchronization makes the bidirectional invariant testable.
 fn synchronize_receiver_secondary_indexes(
     catalog: &mut ReceiverMethodCatalog,
+    path_fork: &PathInternerFork,
 ) -> Result<(), CompilerError> {
     // Validate that every primary joins exactly one secondary entry in each index before
     // copying any signature.
@@ -503,7 +504,7 @@ fn synchronize_receiver_secondary_indexes(
             )));
         }
 
-        let method_name = function_path.name().ok_or_else(|| {
+        let method_name = path_fork.component(*function_path).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "public default synchronization: a receiver catalog by_function_path entry at {:?} has no resolvable method name; every receiver method path must have a final name component",
                 function_path
@@ -576,7 +577,7 @@ fn synchronize_receiver_secondary_indexes(
                     entry.function_path
                 )));
             }
-            if entry.function_path.name() != Some(*key_name) {
+            if path_fork.component(entry.function_path) != Some(*key_name) {
                 return Err(CompilerError::compiler_error(format!(
                     "public default synchronization: a receiver catalog by_receiver_and_name entry at {:?} is stored under the wrong method-name key; the entry name does not match the index key",
                     entry.function_path
@@ -605,7 +606,7 @@ fn synchronize_receiver_secondary_indexes(
     // validating the key and non-signature metadata of each secondary entry in place.
     for (key_name, entries) in &mut catalog.by_method_name {
         for entry in entries.iter_mut() {
-            if entry.function_path.name() != Some(*key_name) {
+            if path_fork.component(entry.function_path) != Some(*key_name) {
                 return Err(CompilerError::compiler_error(format!(
                     "public default synchronization: a receiver catalog by_method_name entry at {:?} is stored under the wrong method-name key; the entry name does not match the index key",
                     entry.function_path

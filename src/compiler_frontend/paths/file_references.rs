@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -64,7 +64,7 @@ impl PreparedFileReferenceTable {
     pub(crate) fn rebind_source_identity(
         &mut self,
         file_id: SourceId,
-        _logical_path: &InternedPath,
+        _logical_path: PathId,
     ) {
         for reference in &mut self.references {
             reference.source_file = file_id;
@@ -83,6 +83,7 @@ pub(crate) fn classify_prepared_file_references(
     path_syntax: &PathSyntaxTable,
     consumed_by_dependency_clauses: impl IntoIterator<Item = PathSyntaxId>,
     source_file: SourceId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> PreparedFileReferenceTable {
     let consumed: FxHashSet<PathSyntaxId> = consumed_by_dependency_clauses
@@ -100,7 +101,7 @@ pub(crate) fn classify_prepared_file_references(
             source_file,
             path_syntax: path_id,
             span: row.span,
-            class: classify_authored_path(&row.root, string_table),
+            class: classify_authored_path(row.root, path_fork, string_table),
         });
     }
 
@@ -108,16 +109,18 @@ pub(crate) fn classify_prepared_file_references(
 }
 
 fn classify_authored_path(
-    root: &InternedPath,
+    root: PathId,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> PreparedFileReferenceClass {
-    if root.is_empty() {
+    if root == PathId::ROOT {
         return PreparedFileReferenceClass::SiteRoot;
     }
 
-    let Some(name) = root.name_str(string_table) else {
+    let Some(component) = path_fork.try_component(root) else {
         return PreparedFileReferenceClass::Extensionless;
     };
+    let name = string_table.resolve(component);
 
     match explicit_extension(name) {
         Some("mtf") | Some("md") => PreparedFileReferenceClass::ContentSource,

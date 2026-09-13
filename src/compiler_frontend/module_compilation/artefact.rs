@@ -24,6 +24,7 @@ use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFr
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 use std::path::PathBuf;
@@ -43,6 +44,11 @@ pub(crate) struct Module {
 }
 
 impl Module {
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.executable.remap_path_ids(remap);
+        self.metadata.remap_path_ids(remap);
+    }
+
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.remap_string_ids_with_type_environment_cache(
             remap,
@@ -88,9 +94,22 @@ pub(crate) struct ModuleExecutable {
     pub(crate) resource_table: ModuleResourceTable,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) borrow_analysis: BorrowCheckReport,
+    /// Immutable path identity table shared by the enclosing project/package compilation boundary.
+    /// It covers every `PathId` retained by this executable after publication.
+    ///
+    /// The semantic compiler owns a module-local fork while producing the executable. The build
+    /// publication tail installs one merged boundary table here and shares that `Arc` across
+    /// completed module and generated-sidecar artefacts before backend consumption.
+    pub(crate) path_table: Arc<PathTable>,
 }
 
 impl ModuleExecutable {
+    /// Remap every path identity retained by the executable lane after publication merge.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.hir.remap_path_ids(remap);
+        self.type_environment.remap_path_ids(remap);
+    }
+
     /// Remap interned string IDs after string-table merging.
     ///
     /// WHY: HIR, type identity, retained resource provenance and borrow-fact source locations
@@ -172,12 +191,23 @@ impl ModuleCompilerMetadata {
         }
     }
 
-    /// WHY: warnings remap exactly once. Const-fragment spans are global and carry no interned
-    ///      identity, values are already owned folded strings, root activity has no interned
-    ///      fields, and the entry path is a `PathBuf`.
+    /// WHY: every retained field remaps exactly once. Const-fragment spans are global and carry
+    ///      no interned identity, values are already owned folded strings, root activity has no
+    ///      interned fields, and the entry path is a `PathBuf`.
     ///
-    /// Materialisation metadata owns self-contained strings and stable semantic identities, so
-    /// this remap covers only executable presentation fields that retain local `StringId` values.
+    /// Warnings may carry `PathId` payloads issued against the module-local path fork, so they
+    /// remap with the materialisation context. Materialisation metadata owns self-contained
+    /// strings and stable semantic identities; this remap covers the fields that retain local
+    /// `PathId` values.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for warning in &mut self.warnings {
+            warning.remap_path_ids(remap);
+        }
+        if let Some(context) = &mut self.materialisation_context {
+            Arc::make_mut(context).remap_path_ids(remap);
+        }
+    }
+
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for warning in &mut self.warnings {
             warning.remap_string_ids(remap);

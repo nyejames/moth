@@ -18,6 +18,7 @@ use crate::compiler_frontend::module_compilation::generated::artefacts::{
 use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
+use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
@@ -276,15 +277,18 @@ impl<'a> GeneratedFunctionTransaction<'a> {
         &mut self,
         first_sidecar: usize,
         module: &mut Module,
-        remap: &StringIdRemap,
+        string_remap: &StringIdRemap,
+        path_remap: &PathIdRemap,
     ) {
         let mut type_environment_cache = TypeEnvironmentRemapCache::default();
         for record in &mut self.completed_records[first_sidecar..] {
             record
                 .sidecar
-                .remap_string_ids_with_type_environment_cache(remap, &mut type_environment_cache);
+                .remap_string_ids_with_type_environment_cache(string_remap, &mut type_environment_cache);
+            record.sidecar.module.remap_path_ids(path_remap);
         }
-        module.remap_string_ids_with_type_environment_cache(remap, &mut type_environment_cache);
+        module.remap_string_ids_with_type_environment_cache(string_remap, &mut type_environment_cache);
+        module.remap_path_ids(path_remap);
     }
 
     /// Close the transaction and hand back everything it completed.

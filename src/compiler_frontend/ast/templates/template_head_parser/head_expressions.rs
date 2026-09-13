@@ -21,22 +21,24 @@ use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_renderability::is_template_renderable_type;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
-use crate::compiler_frontend::value_mode::ValueMode;
 
 pub(super) struct TemplateHeadExpressionContext<'a> {
     pub(super) context: &'a ScopeContext,
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) construction_context: &'a mut TemplateConstructionContext,
+    pub(super) path_fork: &'a PathInternerFork,
 }
 
 /// Typed result shared by head-expression insertion helpers.
@@ -45,12 +47,14 @@ type HeadExpressionResult<T> = Result<T, TemplateError>;
 fn is_unresolved_constant_placeholder_reference(
     expression: &Expression,
     context: &ScopeContext,
+    path_fork: &PathInternerFork,
 ) -> bool {
     let ExpressionKind::Reference(path) = &expression.kind else {
         return false;
     };
 
-    path.name()
+    path_fork
+        .component(*path)
         .and_then(|name| context.get_reference(&name))
         .is_some_and(|declaration| {
             declaration
@@ -191,7 +195,7 @@ pub(super) fn push_template_head_expression(
     }
 
     let defer_inferred_type_validation =
-        is_unresolved_constant_placeholder_reference(&expression, target.context);
+        is_unresolved_constant_placeholder_reference(&expression, target.context, target.path_fork);
 
     if !defer_inferred_type_validation {
         validate_template_head_value_type(&expression, span, target.type_environment)?;
@@ -211,7 +215,11 @@ pub(super) fn push_template_head_expression(
 
     if target.context.kind.is_constant_context()
         && !expression_is_compile_time_constant
-        && !is_unresolved_constant_placeholder_reference(&expression, target.context)
+        && !is_unresolved_constant_placeholder_reference(
+            &expression,
+            target.context,
+            target.path_fork,
+        )
     {
         return Err(with_source_span(
             CompilerDiagnostic::invalid_template_structure(
@@ -305,7 +313,6 @@ pub(super) fn push_template_head_reactive_subscription(
 
     Ok(())
 }
-
 /// Resolves a compile-time file value in template-head context and records its expression.
 ///
 /// Stage 0 owns physical resolution for every authored path occurrence. Reusing the ordinary
@@ -318,6 +325,7 @@ pub(super) fn push_template_head_path_expression(
     type_interner: &AstTypeInterner<'_>,
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> HeadExpressionResult<()> {
     let value_mode = ValueMode::ImmutableOwned;
     let source_span = Some(token_stream.current_span());
@@ -328,6 +336,7 @@ pub(super) fn push_template_head_path_expression(
         type_interner,
         &value_mode,
         string_table,
+        path_fork,
     )
     .map_err(|error| with_source_span_error(source_span, TemplateError::from(error)))?;
 
@@ -337,6 +346,7 @@ pub(super) fn push_template_head_path_expression(
             context,
             type_environment: type_interner.environment(),
             construction_context,
+            path_fork: &*path_fork,
         },
         source_span,
         string_table,

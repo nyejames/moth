@@ -11,11 +11,14 @@
 use super::module_identity::ModuleId;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, StableModuleOriginIdentity,
 };
+use crate::compiler_frontend::symbols::path_interner::PathTable;
+use crate::compiler_frontend::symbols::string_interning::FrozenStringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
@@ -220,6 +223,41 @@ impl ModuleArtifactStore {
             .artifact(module_id)?
             .map(|artifact| &artifact.interface))
     }
+    /// Install one boundary-owned path table into every successful base artefact.
+    ///
+    /// WHAT: overwrites each executable's construction placeholder with the single final
+    ///       `Arc<PathTable>` this boundary froze after all canonical publications.
+    /// WHY: per-module publication used to take one full table snapshot per successful module;
+    ///      the boundary install tail replaces that with one table built once and shared by
+    ///      every base artefact through the same `Arc`.
+    pub(crate) fn install_path_table(&mut self, path_table: Arc<PathTable>) {
+        for artifact in &mut self.artifacts {
+            artifact.module.executable.path_table = Arc::clone(&path_table);
+        }
+    }
+
+    /// Install the boundary identity pair into every retained materialisation context.
+    ///
+    /// WHAT: pairs each successful artefact's generic templates with the one final boundary
+    ///       `Arc<PathTable>` and one frozen requester-domain string table.
+    /// WHY: published templates must keep the complete tables that issued their semantic IDs so
+    ///      a later cross-boundary consumer can rebase by spelling. The caller drops the local
+    ///      provider registry first, so `Arc::make_mut` here proves the retained context is the
+    ///      sole owner and no clone is needed.
+    pub(crate) fn install_identity_tables(
+        &mut self,
+        path_table: Arc<PathTable>,
+        source_string_table: Arc<FrozenStringTable>,
+    ) {
+        for artifact in &mut self.artifacts {
+            if let Some(context) = &mut artifact.module.metadata.materialisation_context {
+                Arc::make_mut(context).install_identity_tables(
+                    Arc::clone(&path_table),
+                    Arc::clone(&source_string_table),
+                );
+            }
+        }
+    }
 
     /// Resolve the successful artefact for one dense module identity.
     ///
@@ -254,6 +292,25 @@ impl ModuleArtifactStore {
             ProviderSlot::Successful(artifact_id) => self.artifacts.get(artifact_id.0),
             ProviderSlot::Unavailable | ProviderSlot::Diagnosed | ProviderSlot::Blocked => None,
         })
+    }
+
+    /// Move successful-artefact warnings in deterministic `ModuleId` order.
+    pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
+        let artifact_ids = self
+            .slots
+            .iter()
+            .filter_map(|slot| match slot {
+                ProviderSlot::Successful(artifact_id) => Some(*artifact_id),
+                ProviderSlot::Unavailable | ProviderSlot::Diagnosed | ProviderSlot::Blocked => None,
+            })
+            .collect::<Vec<_>>();
+        let mut warnings = Vec::new();
+        for artifact_id in artifact_ids {
+            if let Some(artifact) = self.artifacts.get_mut(artifact_id.0) {
+                warnings.append(&mut artifact.module.metadata.warnings);
+            }
+        }
+        warnings
     }
 
     /// Resolve the exact published context for one indexed location.

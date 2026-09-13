@@ -30,7 +30,7 @@ impl ScopeContext {
     ///      in with `with_template_ir_store`.
     pub(crate) fn new_for_tests(
         kind: ContextKind,
-        scope: InternedPath,
+        scope: PathId,
         top_level_declarations: Rc<TopLevelDeclarationTable>,
         external_package_registry: Arc<ExternalPackageRegistry>,
         expected_result_type_ids: Vec<TypeId>,
@@ -95,7 +95,7 @@ impl ScopeContext {
     /// prevent same-file references from bypassing the visibility system.
     pub fn with_visible_declarations(
         mut self,
-        visible: Arc<FxHashSet<InternedPath>>,
+        visible: Arc<FxHashSet<PathId>>,
     ) -> ScopeContext {
         self.visible_declaration_ids = Some(visible);
         self
@@ -128,7 +128,7 @@ impl ScopeContext {
     /// treating an unresolved annotation as the builtin `None` type.
     pub(crate) fn with_resolved_type_aliases(
         mut self,
-        aliases: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
+        aliases: Rc<FxHashMap<PathId, ResolvedTypeAlias>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).resolved_type_aliases = Some(aliases);
         self
@@ -149,7 +149,7 @@ impl ScopeContext {
     /// Used during generic function instantiation and type argument validation.
     pub(crate) fn with_generic_declarations(
         mut self,
-        declarations: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
+        declarations: Rc<FxHashMap<PathId, GenericDeclarationKind>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).generic_declarations_by_path = Some(declarations);
         self
@@ -162,7 +162,7 @@ impl ScopeContext {
     /// struct literal validation.
     pub(crate) fn with_resolved_struct_fields_by_path(
         mut self,
-        fields: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
+        fields: Rc<FxHashMap<PathId, Vec<Declaration>>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).resolved_struct_fields_by_path = Some(fields);
         self
@@ -175,7 +175,7 @@ impl ScopeContext {
     /// pattern validation.
     pub(crate) fn with_choice_variant_shells_by_path(
         mut self,
-        shells: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
+        shells: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).choice_variant_shells_by_path = Some(shells);
         self
@@ -187,7 +187,7 @@ impl ScopeContext {
     /// resolve nominal type references during expression and type parsing.
     pub(crate) fn with_nominal_type_ids_by_path(
         mut self,
-        ids: Rc<FxHashMap<InternedPath, TypeId>>,
+        ids: Rc<FxHashMap<PathId, TypeId>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).nominal_type_ids_by_path = ids;
         self
@@ -218,7 +218,7 @@ impl ScopeContext {
         self
     }
 
-    pub fn with_source_file_scope(mut self, source_file: InternedPath) -> ScopeContext {
+    pub fn with_source_file_scope(mut self, source_file: PathId) -> ScopeContext {
         Rc::make_mut(&mut self.shared).source_file_scope = Some(source_file);
         self
     }

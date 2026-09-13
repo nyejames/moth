@@ -5,9 +5,10 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::render::{
     relative_display_path_from_root, special_file_name_from_path, support_root_import_suggestion,
+    DiagnosticRenderContext,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::{Path, PathBuf};
 
@@ -70,35 +71,33 @@ fn guidance_lines_are_empty_when_metadata_is_missing() {
 #[test]
 fn special_file_renderer_names_support_roots() {
     let mut string_table = StringTable::new();
-    let mut extensionless_path = InternedPath::new();
-    extensionless_path.push_str("input", &mut string_table);
-    extensionless_path.push_str("+pkg", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let extensionless_path = path_fork
+        .try_intern_portable_path("input/+pkg", &mut string_table)
+        .expect("test path fits");
+    let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
 
-    assert_eq!(
-        special_file_name_from_path(&extensionless_path, &string_table),
-        "+pkg.moth"
-    );
+    assert_eq!(special_file_name_from_path(extensionless_path, context), "+pkg.moth");
 
-    let mut explicit_path = InternedPath::new();
-    explicit_path.push_str("input", &mut string_table);
-    explicit_path.push_str("+pkg.moth", &mut string_table);
+    let explicit_path = path_fork
+        .try_intern_portable_path("input/+pkg.moth", &mut string_table)
+        .expect("test path fits");
+    let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
 
-    assert_eq!(
-        special_file_name_from_path(&explicit_path, &string_table),
-        "+pkg.moth"
-    );
+    assert_eq!(special_file_name_from_path(explicit_path, context), "+pkg.moth");
 }
 
 #[test]
 fn support_root_renderer_suggests_containing_package_directory() {
     let mut string_table = StringTable::new();
-    let mut path = InternedPath::new();
-    path.push_str("tools", &mut string_table);
-    path.push_str("helpers", &mut string_table);
-    path.push_str("+package", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("tools/helpers/+package", &mut string_table)
+        .expect("test path fits");
+    let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
 
     assert_eq!(
-        support_root_import_suggestion(&path, &string_table),
+        support_root_import_suggestion(path, context),
         " Bind the support package `@tools/helpers` instead of the root file."
     );
 }

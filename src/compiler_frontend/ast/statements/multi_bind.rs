@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::statements::value_production::try_parse_multi_bind_value_block;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionContextInputs, resolve_diagnostic_type_to_type_id_checked,
@@ -65,6 +66,7 @@ pub(crate) fn parse_multi_bind_statement(
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MultiBindResult<Option<AstNode>> {
     if !has_top_level_comma_before_statement_end(token_stream) {
         return Ok(None);
@@ -75,7 +77,7 @@ pub(crate) fn parse_multi_bind_statement(
     };
 
     validate_unique_target_names(&parsed_targets, string_table)?;
-    validate_multi_bind_target_identifiers(&parsed_targets, context, string_table)?;
+    validate_multi_bind_target_identifiers(&parsed_targets, context, string_table, path_fork)?;
     let first_target = parsed_targets
         .first()
         .expect("a parsed multi-bind must contain at least one target");
@@ -91,6 +93,7 @@ pub(crate) fn parse_multi_bind_statement(
         &mut rhs_context,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     let rhs_expression = if token_stream.current_token_kind() == &TokenKind::If {
@@ -101,6 +104,7 @@ pub(crate) fn parse_multi_bind_statement(
             parsed_targets.len(),
             &known_slot_types,
             string_table,
+            path_fork,
         ) {
             Some(Ok(expr)) => expr,
             Some(Err(diagnostic)) => return Err(diagnostic),
@@ -109,10 +113,17 @@ pub(crate) fn parse_multi_bind_statement(
                 &rhs_context,
                 type_interner,
                 string_table,
+                path_fork,
             )?,
         }
     } else {
-        parse_multi_bind_rhs_expression(token_stream, &rhs_context, type_interner, string_table)?
+        parse_multi_bind_rhs_expression(
+            token_stream,
+            &rhs_context,
+            type_interner,
+            string_table,
+            path_fork,
+        )?
     };
 
     let rhs_slots = extract_rhs_slot_types(&rhs_expression, type_interner.environment())?;
@@ -135,9 +146,10 @@ pub(crate) fn parse_multi_bind_statement(
         &mut *context,
         type_interner,
         string_table,
+        path_fork,
     )?;
 
-    register_new_declarations(context, resolved_targets.new_declarations);
+    register_new_declarations(context, resolved_targets.new_declarations, path_fork);
 
     Ok(Some(AstNode {
         kind: NodeKind::MultiBind {
@@ -155,6 +167,7 @@ fn validate_multi_bind_target_identifiers(
     parsed_targets: &[BindingTargetSyntax],
     context: &ScopeContext,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> MultiBindResult<()> {
     for target in parsed_targets {
         ensure_not_keyword_shadow_identifier(target.name, target.span, string_table)?;
@@ -323,6 +336,7 @@ fn parse_multi_bind_rhs_expression(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MultiBindResult<Expression> {
     if matches!(
         token_stream.current_token_kind(),
@@ -334,7 +348,6 @@ fn parse_multi_bind_rhs_expression(
         )
         .into());
     }
-
     let mut inferred_rhs_type = ExpectedType::Infer;
     let rhs_expression = create_expression(
         token_stream,
@@ -344,6 +357,7 @@ fn parse_multi_bind_rhs_expression(
         &ValueMode::ImmutableOwned,
         false,
         string_table,
+        path_fork,
     )?;
 
     if token_stream.current_token_kind() == &TokenKind::Comma {
@@ -356,18 +370,12 @@ fn parse_multi_bind_rhs_expression(
 
     Ok(rhs_expression)
 }
-
-/// Pre-resolve the types that are already known before parsing the RHS.
-///
-/// WHAT: for each target, returns `Some(TypeId)` if the type is known from an explicit
-/// annotation or from an existing mutable local, otherwise `None`.
-/// WHY: multi-bind value-if parsing needs this to decide whether it can delegate to the
-/// standard receiver helper (all known) or must use the inferred path.
 fn resolve_known_slot_types(
     parsed_targets: &[BindingTargetSyntax],
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> MultiBindResult<Vec<Option<TypeId>>> {
     let mut known = Vec::with_capacity(parsed_targets.len());
 
@@ -453,14 +461,13 @@ fn extract_rhs_slot_types(
 
 // WHAT: resolves each parsed binding target into either a fresh declaration target or an existing
 // mutable assignment target.
-// WHY: multi-bind is intentionally allowed to mix new names with existing mutable locals, and HIR
-// needs that distinction preserved instead of rediscovering it later.
 fn resolve_multi_bind_targets(
     parsed_targets: &[BindingTargetSyntax],
     rhs_slots: &[TypeId],
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> MultiBindResult<ResolvedMultiBindTargets> {
     let mut resolved_bindings = Vec::with_capacity(parsed_targets.len());
     let mut new_declarations = Vec::new();
@@ -468,9 +475,10 @@ fn resolve_multi_bind_targets(
     for (slot_index, (slot_type, target_syntax)) in
         rhs_slots.iter().zip(parsed_targets.iter()).enumerate()
     {
+        let target_ownership = binding_target_ownership(target_syntax);
         let explicit_type = resolve_target_explicit_type(
             target_syntax,
-            &mut *context,
+            context,
             type_interner,
             string_table,
         )?;
@@ -487,8 +495,9 @@ fn resolve_multi_bind_targets(
                 string_table,
                 type_interner.environment(),
             )?;
-            let target_ownership = binding_target_ownership(target_syntax);
-            let target_id = context.scope.append(target_syntax.name);
+            let target_id = path_fork
+                .try_intern_child(context.scope, target_syntax.name)
+                .expect("path table exhausted while creating multi-bind target");
 
             // Build the declaration with the canonical slot TypeId directly.
             // diagnostic_type is display-only; semantic identity comes from type_id.
@@ -538,6 +547,11 @@ fn resolve_multi_bind_targets(
 // --------------------------
 //  Target resolution
 // --------------------------
+
+/// Map the parsed binding mode to the value mode used for the target declaration.
+fn binding_target_ownership(target_syntax: &BindingTargetSyntax) -> ValueMode {
+    target_syntax.binding_mode.value_mode()
+}
 
 /// Validate that an existing mutable local is compatible with the corresponding RHS slot.
 fn resolve_existing_target(
@@ -632,16 +646,14 @@ fn resolve_new_target_data_type(
         .unwrap_or_else(|| diagnostic_type_spelling(slot_type, type_environment)))
 }
 
-/// Map the parsed binding mode to the value mode used for the target declaration.
-fn binding_target_ownership(target_syntax: &BindingTargetSyntax) -> ValueMode {
-    target_syntax.binding_mode.value_mode()
-}
-
-/// Insert freshly resolved declarations into the current scope context.
-fn register_new_declarations(context: &mut ScopeContext, new_declarations: Vec<Declaration>) {
+fn register_new_declarations(
+    context: &mut ScopeContext,
+    new_declarations: Vec<Declaration>,
+    path_fork: &PathInternerFork,
+) {
     for declaration in new_declarations {
         let binding_span = declaration.value.span;
-        context.add_var(declaration, binding_span);
+        context.add_var(declaration, binding_span, path_fork);
     }
 }
 

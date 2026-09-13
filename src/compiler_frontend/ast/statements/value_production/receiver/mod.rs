@@ -34,6 +34,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 mod block_body;
 mod block_if;
@@ -69,6 +70,7 @@ pub(super) struct ValueIfParseInput<'a, 'b> {
     pub(super) string_table: &'a mut StringTable,
     pub(super) condition: Expression,
     pub(super) span: Option<SourceSpan>,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Attempts to parse a value-producing block when the current token is `if` at a
@@ -77,8 +79,6 @@ pub(super) struct ValueIfParseInput<'a, 'b> {
 /// WHAT: returns `None` if the current token is not `If`, otherwise parses the value
 /// block and returns the resulting expression. The error preserves authored diagnostics and
 /// retained-data infrastructure failures until the enclosing AST emission boundary.
-/// WHY: this is the only place where `if` is permitted in expression position;
-/// `create_expression` continues to reject it everywhere else.
 pub fn try_parse_value_block_at_receiver(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -86,6 +86,7 @@ pub fn try_parse_value_block_at_receiver(
     expected_result_type_ids: &[TypeId],
     receiver_kind: ValueReceiverKind,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Option<Result<Expression, ExpressionParseError>> {
     try_parse_value_block_at_receiver_with_target(
         token_stream,
@@ -93,6 +94,7 @@ pub fn try_parse_value_block_at_receiver(
         type_interner,
         ActiveValueProductionTarget::known(expected_result_type_ids.to_vec(), receiver_kind),
         string_table,
+        path_fork,
     )
     .map(|parsed| {
         parsed.map(|value| match value {
@@ -109,14 +111,13 @@ pub fn try_parse_value_block_at_receiver(
 /// Parses a value-producing `if` at a closed receiver using an explicit production target.
 ///
 /// WHAT: the shared structural dispatcher for known and mixed inferred slots.
-/// WHY: multi-bind must not keep a second header/body grammar. Known callers keep
-/// `try_parse_value_block_at_receiver`; mixed slots pass `ActiveValueProductionTarget::mixed`.
 pub fn try_parse_value_block_at_receiver_with_target(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     target: ActiveValueProductionTarget,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
     if token_stream.current_token_kind() != &TokenKind::If {
         return None;
@@ -150,6 +151,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 target,
                 string_table,
                 span,
+                path_fork,
             },
         )),
 
@@ -164,6 +166,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                     header_index,
                     span,
                     classification,
+                    path_fork,
                 },
             ) {
                 return Some(result);
@@ -177,6 +180,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 string_table,
                 header_index,
                 span,
+                path_fork,
             ))
         }
 
@@ -190,6 +194,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                     string_table,
                     span,
                     classification,
+                    path_fork,
                 },
             ) {
                 return Some(result);
@@ -203,6 +208,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 string_table,
                 header_index,
                 span,
+                path_fork,
             ))
         }
 
@@ -214,19 +220,15 @@ pub fn try_parse_value_block_at_receiver_with_target(
             string_table,
             header_index,
             span,
+            path_fork,
         )),
     }
 }
 
 /// The receiver parser is the local join between expression parsing and recursive body parsing.
 /// It therefore carries the shared two-lane error type instead of collapsing an internal frozen
-/// syntax failure into a source diagnostic before the emitter can report it correctly.
+/// The receiver parser preserves infrastructure failures from recursive expression/body parsing.
 type ReceiverResult<T> = Result<T, ExpressionParseError>;
-
-/// Parses a Bool condition value-if after the `if` keyword has been consumed.
-///
-/// WHAT: parses the condition expression, then routes to inline or block form
-/// depending on whether the next token is `then` or `:`.
 fn parse_bool_value_if_after_condition(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -235,6 +237,7 @@ fn parse_bool_value_if_after_condition(
     string_table: &mut StringTable,
     header_index: usize,
     span: Option<SourceSpan>,
+    path_fork: &mut PathInternerFork,
 ) -> ReceiverResult<ParsedReceiverValue> {
     if if_condition_is_missing(token_stream) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
@@ -245,7 +248,8 @@ fn parse_bool_value_if_after_condition(
     }
 
     let mut condition_type = ExpectedType::Infer;
-    let condition_context = context.new_child_control_flow(ContextKind::Condition, string_table);
+    let condition_context =
+        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
     let mut cast_target_context = CastTargetContext::None;
     let input = ExpressionParseInput::until(ExpressionParseResources {
         token_stream,
@@ -255,6 +259,7 @@ fn parse_bool_value_if_after_condition(
         cast_target_context: &mut cast_target_context,
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
+        path_fork,
     });
     let condition = create_expression_until(input, &[TokenKind::Then, TokenKind::Colon])?;
 
@@ -277,6 +282,7 @@ fn parse_bool_value_if_after_condition(
             string_table,
             condition,
             span,
+            path_fork,
         });
     }
 
@@ -289,6 +295,7 @@ fn parse_bool_value_if_after_condition(
             string_table,
             condition,
             span,
+            path_fork,
         });
     }
 

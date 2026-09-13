@@ -10,7 +10,8 @@ use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use std::fmt;
 use std::sync::Arc;
@@ -94,8 +95,8 @@ impl fmt::Debug for GenericFunctionBody {
 
 #[derive(Clone, Debug)]
 pub(crate) struct GenericFunctionTemplate {
-    pub(crate) function_path: InternedPath,
-    pub(crate) source_file: InternedPath,
+    pub(crate) function_path: PathId,
+    pub(crate) source_file: PathId,
     /// Imported contracts already know their stable declaration origin. Local templates receive
     /// it from the public/private identity join after AST construction.
     pub(crate) declaration_identity: Option<GeneratedDeclarationIdentity>,

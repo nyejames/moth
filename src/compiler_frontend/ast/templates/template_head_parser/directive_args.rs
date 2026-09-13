@@ -31,6 +31,7 @@ use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -141,6 +142,7 @@ fn parse_single_expression_in_directive_parens(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> DirectiveArgsResult<Expression> {
     reject_empty_directive_parens(directive_name, token_stream)?;
 
@@ -171,6 +173,7 @@ fn parse_single_expression_in_directive_parens(
         &ValueMode::ImmutableOwned,
         false,
         string_table,
+        path_fork,
     )
     .map_err(TemplateError::from)?;
 
@@ -200,6 +203,7 @@ pub(crate) fn parse_optional_parenthesized_expression(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> DirectiveArgsResult<Option<Expression>> {
     if !directive_has_arguments(token_stream) {
         return Ok(None);
@@ -212,6 +216,7 @@ pub(crate) fn parse_optional_parenthesized_expression(
         context,
         type_interner,
         string_table,
+        path_fork,
     )?;
     Ok(Some(expression))
 }
@@ -225,6 +230,7 @@ pub(crate) fn parse_required_parenthesized_expression(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> DirectiveArgsResult<Expression> {
     if !directive_has_arguments(token_stream) {
         return Err(with_current_token_span(
@@ -245,6 +251,7 @@ pub(crate) fn parse_required_parenthesized_expression(
         context,
         type_interner,
         string_table,
+        path_fork,
     )
 }
 

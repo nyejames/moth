@@ -5,28 +5,34 @@
 //!      cases belong in unit tests rather than integration fixtures.
 
 use super::{DependencyTargetKind, classify_dependency_target, decode_dependency_target};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
-fn interned_components(string_table: &mut StringTable, components: &[&str]) -> InternedPath {
-    InternedPath::from_components(
-        components
-            .iter()
-            .map(|component| string_table.intern(component))
-            .collect(),
-    )
+fn interned_components(
+    string_table: &mut StringTable,
+    components: &[&str],
+    path_fork: &mut PathInternerFork,
+) -> PathId {
+    let component_ids: Vec<_> = components
+        .iter()
+        .map(|component| string_table.intern(component))
+        .collect();
+    path_fork
+        .try_intern_components(&component_ids)
+        .expect("test path fits")
 }
 
 #[test]
 fn decode_rejects_zero_prefix_count() {
     let mut string_table = StringTable::new();
-    let path = interned_components(&mut string_table, &["drawing.js"]);
+    let mut path_fork = PathInternerFork::empty();
+    let path = interned_components(&mut string_table, &["drawing.js"], &mut path_fork);
     let target = DependencyTargetKind::ExternalProvider {
         prefix_component_count: 0,
         extension: string_table.intern("js"),
     };
 
-    let error = decode_dependency_target(&path, &target, &string_table)
+    let error = decode_dependency_target(path, &target, &path_fork, &string_table)
         .expect_err("a zero prefix count is malformed retained state");
     assert!(
         error.msg.contains("zero prefix component count"),
@@ -37,13 +43,14 @@ fn decode_rejects_zero_prefix_count() {
 #[test]
 fn decode_rejects_prefix_count_beyond_the_path() {
     let mut string_table = StringTable::new();
-    let path = interned_components(&mut string_table, &["drawing.js"]);
+    let mut path_fork = PathInternerFork::empty();
+    let path = interned_components(&mut string_table, &["drawing.js"], &mut path_fork);
     let target = DependencyTargetKind::ExternalProvider {
         prefix_component_count: 2,
         extension: string_table.intern("js"),
     };
 
-    let error = decode_dependency_target(&path, &target, &string_table)
+    let error = decode_dependency_target(path, &target, &path_fork, &string_table)
         .expect_err("a prefix count outside the path is malformed retained state");
     assert!(
         error.msg.contains("outside the path"),
@@ -54,13 +61,14 @@ fn decode_rejects_prefix_count_beyond_the_path() {
 #[test]
 fn decode_rejects_retained_extension_mismatch() {
     let mut string_table = StringTable::new();
-    let path = interned_components(&mut string_table, &["drawing.js"]);
+    let mut path_fork = PathInternerFork::empty();
+    let path = interned_components(&mut string_table, &["drawing.js"], &mut path_fork);
     let target = DependencyTargetKind::ExternalProvider {
         prefix_component_count: 1,
         extension: string_table.intern("css"),
     };
 
-    let error = decode_dependency_target(&path, &target, &string_table)
+    let error = decode_dependency_target(path, &target, &path_fork, &string_table)
         .expect_err("a mismatched retained extension is malformed retained state");
     assert!(
         error.msg.contains("does not match the prefix component"),
@@ -71,13 +79,14 @@ fn decode_rejects_retained_extension_mismatch() {
 #[test]
 fn decode_rejects_invalid_retained_extension_id() {
     let mut string_table = StringTable::new();
-    let path = interned_components(&mut string_table, &["drawing.js"]);
+    let mut path_fork = PathInternerFork::empty();
+    let path = interned_components(&mut string_table, &["drawing.js"], &mut path_fork);
     let target = DependencyTargetKind::ExternalProvider {
         prefix_component_count: 1,
         extension: StringId::from_index(string_table.len() as u32 + 16),
     };
 
-    let error = decode_dependency_target(&path, &target, &string_table)
+    let error = decode_dependency_target(path, &target, &path_fork, &string_table)
         .expect_err("an invalid extension id is malformed retained state");
     assert!(
         error.msg.contains("invalid extension string id"),
@@ -88,14 +97,23 @@ fn decode_rejects_invalid_retained_extension_id() {
 #[test]
 fn decode_keeps_remaining_provider_specific_components() {
     let mut string_table = StringTable::new();
-    let path = interned_components(&mut string_table, &["widgets", "draw.js", "extra"]);
-    let target = classify_dependency_target(&path, &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = interned_components(
+        &mut string_table,
+        &["widgets", "draw.js", "extra"],
+        &mut path_fork,
+    );
+    let target = classify_dependency_target(path, &path_fork, &mut string_table);
 
-    let decoded = decode_dependency_target(&path, &target, &string_table)
+    let decoded = decode_dependency_target(path, &target, &path_fork, &string_table)
         .expect("a valid provider prefix should decode")
         .expect("an explicit-extension path should decode as a provider target");
     assert_eq!(
-        decoded.prefix_path().to_portable_string(&string_table),
+        path_fork.render_portable(
+            decoded.prefix_path_id(),
+            &string_table,
+            &mut Vec::new(),
+        ),
         "widgets/draw.js"
     );
     assert_eq!(decoded.remaining_components().len(), 1);

@@ -2,6 +2,7 @@
 
 use super::*;
 use std::cell::RefCell;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
@@ -31,6 +32,7 @@ pub(crate) trait FoldedValueMaterialiser {
         identity: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity,
         string_table: &mut StringTable,
     ) -> Result<TypeId, CompilerError>;
+    fn path_fork(&mut self) -> &mut PathInternerFork;
 
     fn type_environment(&self) -> &TypeEnvironment;
 
@@ -64,6 +66,9 @@ impl<'context, 'services> FoldedValueMaterialiser
             .module_resources
             .borrow_mut()
             .intern_origin(origin.clone(), span))
+    }
+    fn path_fork(&mut self) -> &mut PathInternerFork {
+        self.path_fork
     }
 
     fn type_environment(&self) -> &TypeEnvironment {
@@ -143,14 +148,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &mut self.declaration_table,
                 &mut self.resolved_module_constants,
                 declaration,
+                self.path_fork,
             )?;
         }
         Ok(())
     }
-
     fn project_imported_constant(
         &mut self,
-        local_path: InternedPath,
+        local_path: PathId,
         constant: &PublicConstantSemantics,
         declaration_provenance: &SyntheticInterfaceProvenance,
         origin: &OriginDeclarationId,
@@ -202,9 +207,10 @@ fn append_projected_constant(
     declaration_table: &mut Rc<TopLevelDeclarationTable>,
     resolved_constants: &mut Rc<ResolvedConstantSet>,
     declaration: Declaration,
+    path_fork: &PathInternerFork,
 ) -> Result<DeclarationId, CompilerError> {
     let declaration_id = Rc::make_mut(declaration_table)
-        .append_for_construction(declaration)
+        .append_for_construction(declaration, path_fork)
         .ok_or_else(|| {
             CompilerError::compiler_error(
                 "Imported constant declaration path was registered more than once",
@@ -459,9 +465,10 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
 
     let mut projected = Vec::with_capacity(fields.len());
     for (field, definition) in fields.iter().zip(definitions) {
-        let definition_name = definition
-            .name
-            .name_str(string_table)
+        let definition_name = materialiser
+            .path_fork()
+            .component(definition.name)
+            .map(|name| string_table.resolve(name))
             .ok_or_else(|| CompilerError::compiler_error("Imported field path has no name"))?;
         if definition_name != field.name {
             return Err(CompilerError::compiler_error(format!(
@@ -470,7 +477,7 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
             )));
         }
         projected.push(Declaration {
-            id: definition.name.clone(),
+            id: definition.name,
             value: materialize_public_folded_value(
                 materialiser,
                 &field.value,
@@ -505,8 +512,13 @@ fn materialize_public_anonymous_record_fields<M: FoldedValueMaterialiser>(
         let field_type_id =
             materialiser.intern_canonical_type(&field.type_identity, string_table)?;
 
+        let field_path = materialiser
+            .path_fork()
+            .try_intern_child(PathId::ROOT, string_table.intern(&field.name))
+            .ok_or_else(|| CompilerError::compiler_error("Imported field path table exhausted"))?;
+
         projected.push(Declaration {
-            id: InternedPath::from_single_str(&field.name, string_table),
+            id: field_path,
             value: materialize_public_folded_value(
                 materialiser,
                 &field.value,

@@ -29,6 +29,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Input for the block single-predicate body parser after `if` has been consumed.
 pub(super) struct BlockSinglePredicateParseInput<'a, 'b> {
@@ -39,13 +40,13 @@ pub(super) struct BlockSinglePredicateParseInput<'a, 'b> {
     pub(super) string_table: &'a mut StringTable,
     pub(super) span: Option<SourceSpan>,
     pub(super) classification: IfHeaderClassification,
+    pub(super) path_fork: &'a mut PathInternerFork,
 }
 
 /// Attempts to parse a block single-predicate value match after `if`.
 ///
 /// WHAT: consumes the shared header parser, then requires `:`.
 /// Returns `None` if the header is not a committed option/choice predicate so
-/// the caller can fall back to Bool condition parsing.
 pub(super) fn try_parse_block_single_predicate_value_match(
     input: BlockSinglePredicateParseInput<'_, '_>,
 ) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
@@ -57,6 +58,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         string_table,
         classification,
         span,
+        path_fork,
     } = input;
 
     let header = match try_parse_single_predicate_header(SinglePredicateHeaderInput {
@@ -65,6 +67,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         type_interner,
         string_table,
         classification,
+        path_fork,
     }) {
         Some(Ok(header)) => header,
         Some(Err(error)) => return Some(Err(error)),
@@ -93,6 +96,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         scrutinee: header.scrutinee,
         pattern: header.pattern,
         span,
+        path_fork,
     }))
 }
 
@@ -106,6 +110,7 @@ struct BlockValueMatchParseInput<'a, 'b> {
     scrutinee: Expression,
     pattern: MatchPattern,
     span: Option<SourceSpan>,
+    path_fork: &'a mut PathInternerFork,
 }
 
 type BlockValueMatchResult<T> = Result<T, ExpressionParseError>;
@@ -123,6 +128,7 @@ fn parse_block_value_match(
         scrutinee,
         pattern,
         span,
+        path_fork,
     } = input;
 
     let receiver_kind = target.receiver_kind;
@@ -136,6 +142,7 @@ fn parse_block_value_match(
         type_interner,
         string_table,
         active_target: target,
+        path_fork,
     })?;
 
     let arms = vec![MatchArm {

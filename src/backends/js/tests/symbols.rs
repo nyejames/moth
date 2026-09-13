@@ -10,6 +10,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 // Identifier sanitisation tests [names]
 // ---------------------------------------------------------------------------
@@ -30,6 +31,7 @@ fn unicode_field_spellings_use_exact_utf8_hex_abi_names() {
 #[test]
 fn missing_field_name_metadata_is_an_internal_compiler_error() {
     let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let mut module = HirModule::new();
     module.structs.push(HirStruct {
@@ -42,10 +44,12 @@ fn missing_field_name_metadata_is_an_internal_compiler_error() {
     });
 
     let borrow_analysis = BorrowCheckReport::default();
+    let path_table = path_fork.snapshot_table();
     let mut emitter = JsEmitter::new(
         &module,
         &borrow_analysis,
         &string_table,
+        &path_table,
         default_config(),
         &type_environment,
     );
@@ -91,6 +95,7 @@ fn invalid_identifier_chars_are_replaced_with_underscore() {
 #[test]
 fn exposes_function_name_map_for_runtime_fragments() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let block0 = HirBlock {
@@ -129,20 +134,19 @@ fn exposes_function_name_map_for_runtime_fragments() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        InternedPath::from_single_str("start", &mut string_table),
+        path_fork.try_intern_portable_path("start", &mut string_table).expect("test path fits"),
     );
     module.side_table.bind_function_name(
         FunctionId(1),
-        InternedPath::from_single_str("__moth_frag_0", &mut string_table),
+        path_fork.try_intern_portable_path("__moth_frag_0", &mut string_table).expect("test path fits"),
     );
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let expected_start = expected_dev_function_name("start", 0);
     let expected_fragment = expected_dev_function_name("__moth_frag_0", 1);

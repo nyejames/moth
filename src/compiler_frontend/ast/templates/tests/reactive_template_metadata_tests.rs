@@ -18,16 +18,19 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn reactive_expression(
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     name: &str,
 ) -> (Expression, ReactiveSubscription) {
     let source = ReactiveSource {
-        path: InternedPath::from_single_str(name, string_table),
+        path: path_fork
+            .try_intern_portable_path(name, string_table)
+            .expect("test path fits"),
         kind: ReactiveSourceKind::Declaration,
     };
     let subscription = ReactiveSubscription {
@@ -96,7 +99,8 @@ fn merge(
 #[test]
 fn composed_view_walk_collects_dynamic_subscription_metadata() {
     let mut strings = StringTable::new();
-    let (expression, subscription) = reactive_expression(&mut strings, "value");
+    let mut path_fork = PathInternerFork::empty();
+    let (expression, subscription) = reactive_expression(&mut strings, &mut path_fork, "value");
     let mut store = TemplateIrStore::new();
     let site_id = store.next_expression_site_id();
     let node = store.push_node(TemplateIrNode::new(
@@ -122,7 +126,8 @@ fn composed_view_walk_collects_dynamic_subscription_metadata() {
 #[test]
 fn composed_view_walk_collects_text_side_table_subscription_metadata() {
     let mut strings = StringTable::new();
-    let (_, subscription) = reactive_expression(&mut strings, "text-value");
+    let mut path_fork = PathInternerFork::empty();
+    let (_, subscription) = reactive_expression(&mut strings, &mut path_fork, "text-value");
     let mut store = TemplateIrStore::new();
     let text = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Text {
@@ -149,8 +154,10 @@ fn composed_view_walk_collects_text_side_table_subscription_metadata() {
 #[test]
 fn finalized_view_walk_reads_expression_overlay_metadata() {
     let mut strings = StringTable::new();
-    let (structural, _) = reactive_expression(&mut strings, "structural");
-    let (overlay_expression, subscription) = reactive_expression(&mut strings, "overlay");
+    let mut path_fork = PathInternerFork::empty();
+    let (structural, _) = reactive_expression(&mut strings, &mut path_fork, "structural");
+    let (overlay_expression, subscription) =
+        reactive_expression(&mut strings, &mut path_fork, "overlay");
     let mut store = TemplateIrStore::new();
     let site_id = store.next_expression_site_id();
     let node = store.push_node(TemplateIrNode::new(
@@ -193,7 +200,9 @@ fn finalized_view_walk_reads_expression_overlay_metadata() {
 #[test]
 fn composed_view_walk_enters_parsed_structural_child() {
     let mut strings = StringTable::new();
-    let (expression, subscription) = reactive_expression(&mut strings, "parsed-child");
+    let mut path_fork = PathInternerFork::empty();
+    let (expression, subscription) =
+        reactive_expression(&mut strings, &mut path_fork, "parsed-child");
     let mut store = TemplateIrStore::new();
     let child_site_id = store.next_expression_site_id();
     let child_node = store.push_node(TemplateIrNode::new(
@@ -238,7 +247,9 @@ fn composed_view_walk_enters_parsed_structural_child() {
 #[test]
 fn resolved_slot_source_contributes_metadata_through_exact_view_context() {
     let mut strings = StringTable::new();
-    let (expression, subscription) = reactive_expression(&mut strings, "slot-source");
+    let mut path_fork = PathInternerFork::empty();
+    let (expression, subscription) =
+        reactive_expression(&mut strings, &mut path_fork, "slot-source");
     let mut store = TemplateIrStore::new();
     let source_site_id = store.next_expression_site_id();
     let source_node = store.push_node(TemplateIrNode::new(
@@ -294,8 +305,11 @@ fn resolved_slot_source_contributes_metadata_through_exact_view_context() {
 #[test]
 fn non_template_coercion_is_resolved_at_the_outer_expression_boundary() {
     let mut strings = StringTable::new();
-    let (inner, inner_subscription) = reactive_expression(&mut strings, "coerced-inner");
-    let (_, outer_subscription) = reactive_expression(&mut strings, "coerced-outer");
+    let mut path_fork = PathInternerFork::empty();
+    let (inner, inner_subscription) =
+        reactive_expression(&mut strings, &mut path_fork, "coerced-inner");
+    let (_, outer_subscription) =
+        reactive_expression(&mut strings, &mut path_fork, "coerced-outer");
     let mut coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
     coerced.reactive_template = Some(ReactiveTemplateMetadata {
         template_backed: false,
@@ -328,7 +342,9 @@ fn non_template_coercion_is_resolved_at_the_outer_expression_boundary() {
 #[test]
 fn wrapper_transition_contributes_metadata_through_exact_view() {
     let mut strings = StringTable::new();
-    let (expression, subscription) = reactive_expression(&mut strings, "wrapper");
+    let mut path_fork = PathInternerFork::empty();
+    let (expression, subscription) =
+        reactive_expression(&mut strings, &mut path_fork, "wrapper");
     let mut store = TemplateIrStore::new();
     let wrapper_site_id = store.next_expression_site_id();
     let wrapper_node = store.push_node(TemplateIrNode::new(
@@ -388,7 +404,9 @@ fn wrapper_transition_contributes_metadata_through_exact_view() {
 #[test]
 fn owned_runtime_handoff_metadata_is_traversed() {
     let mut strings = StringTable::new();
-    let (expression, subscription) = reactive_expression(&mut strings, "handoff");
+    let mut path_fork = PathInternerFork::empty();
+    let (expression, subscription) =
+        reactive_expression(&mut strings, &mut path_fork, "handoff");
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(expression),

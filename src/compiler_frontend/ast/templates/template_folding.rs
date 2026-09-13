@@ -26,8 +26,8 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
@@ -121,11 +121,11 @@ impl FoldResolvedExpression<'_> {
 }
 
 impl TirFoldContext<'_> {
-    fn lookup_binding(&self, path: &InternedPath) -> Option<&Expression> {
+    fn lookup_binding(&self, path: &PathId) -> Option<&Expression> {
         self.bindings
             .iter()
             .rev()
-            .find(|binding| &binding.path == path)
+            .find(|binding| binding.path == *path)
             .map(|binding| &binding.value)
     }
 
@@ -235,7 +235,7 @@ fn const_option_presence(
     }
 }
 
-fn option_capture_binding_path(pattern: &MatchPattern) -> Result<InternedPath, TemplateError> {
+fn option_capture_binding_path(pattern: &MatchPattern) -> Result<PathId, TemplateError> {
     let MatchPattern::OptionPresentCapture { binding_path, .. } = pattern else {
         return Err(CompilerError::compiler_error(
             "Template option-capture folding received a non-capture pattern.",
@@ -243,7 +243,7 @@ fn option_capture_binding_path(pattern: &MatchPattern) -> Result<InternedPath, T
         .into());
     };
 
-    Ok(binding_path.clone())
+    Ok(*binding_path)
 }
 
 fn option_capture_const_deferred_error(expression: &Expression) -> CompilerDiagnostic {

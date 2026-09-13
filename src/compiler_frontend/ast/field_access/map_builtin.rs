@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 // --------------------------
@@ -50,6 +51,7 @@ pub(super) fn parse_map_builtin_member_typed(
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Option<AstNode>, ExpressionParseError> {
     let MemberStepContext {
         receiver_node,
@@ -90,6 +92,7 @@ pub(super) fn parse_map_builtin_member_typed(
 
         validate_receiver_access(
             receiver_node,
+            path_fork,
             receiver_access_mode,
             member_span,
             authored_marker_span,
@@ -152,6 +155,7 @@ pub(super) fn parse_map_builtin_member_typed(
 
     validate_receiver_access(
         receiver_node,
+        path_fork,
         receiver_access_mode,
         member_span,
         authored_marker_span,
@@ -177,6 +181,7 @@ pub(super) fn parse_map_builtin_member_typed(
                 type_interner,
                 member_span,
                 string_table,
+                path_fork,
             )?;
             let error_type =
                 resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
@@ -194,6 +199,7 @@ pub(super) fn parse_map_builtin_member_typed(
                 type_interner,
                 member_span,
                 string_table,
+                path_fork,
             )?;
             (args, vec![bool_type_id])
         }
@@ -208,6 +214,7 @@ pub(super) fn parse_map_builtin_member_typed(
                 type_interner,
                 member_span,
                 string_table,
+                path_fork,
             )?;
             let error_type =
                 resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
@@ -225,6 +232,7 @@ pub(super) fn parse_map_builtin_member_typed(
                 type_interner,
                 member_span,
                 string_table,
+                path_fork,
             )?;
             let error_type =
                 resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
@@ -241,6 +249,7 @@ pub(super) fn parse_map_builtin_member_typed(
                 type_interner,
                 member_span,
                 string_table,
+                path_fork,
             )?;
             (args, vec![none_type_id])
         }

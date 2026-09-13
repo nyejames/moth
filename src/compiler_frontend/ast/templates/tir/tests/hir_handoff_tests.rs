@@ -55,7 +55,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
@@ -127,9 +127,13 @@ fn text_template(
 }
 
 /// Builds a bool-typed reference expression for selector/header overrides.
-fn bool_reference_expression(string_table: &mut StringTable, name: &str) -> Expression {
+fn bool_reference_expression(
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+    name: &str,
+) -> Expression {
     Expression::reference_with_type_id(
-        InternedPath::from_single_str(name, string_table),
+        path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
         DataType::Bool,
         builtin_type_ids::BOOL,
         None,
@@ -370,11 +374,16 @@ fn build_child_wrapper_template(
 fn build_expression_wrapper_template(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> (TemplateIrId, ExpressionSiteId) {
     let expression_site_id = store.next_expression_site_id();
     let expression_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(bool_reference_expression(string_table, "original")),
+            expression: Box::new(bool_reference_expression(
+                path_fork,
+                string_table,
+                "original",
+            )),
             origin: TemplateSegmentOrigin::Body,
             reactive_subscription: None,
             site_id: expression_site_id,
@@ -584,6 +593,7 @@ fn build_parent_with_inherited_wrapper_set(
 fn owned_handoff_materializes_text_from_the_shared_store() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let template_id = text_template(&mut store.borrow_mut(), &mut strings, "hello");
     let handoff = {
         let store_ref = store.borrow();
@@ -603,6 +613,7 @@ fn owned_handoff_materializes_text_from_the_shared_store() {
 fn owned_handoff_text_uses_interned_text_without_a_narrowed_byte_len() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let source = "hello owned handoff text";
     let template_id = {
         let mut store_ref = store.borrow_mut();
@@ -630,6 +641,7 @@ fn owned_handoff_text_uses_interned_text_without_a_narrowed_byte_len() {
 fn owned_handoff_preserves_structural_string_pieces() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("site"),
         String::new(),
@@ -703,6 +715,7 @@ fn owned_handoff_preserves_structural_string_pieces() {
 fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, view_context) = {
         let mut store_ref = store.borrow_mut();
         let source_id = text_template(&mut store_ref, &mut strings, "filled");
@@ -807,6 +820,7 @@ fn owned_handoff_missing_slot_resolution_renders_slot_placeholder() {
 fn owned_handoff_preserves_child_boundary() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let parent_id = {
         let mut store_ref = store.borrow_mut();
         let child_id = text_template(&mut store_ref, &mut strings, "child");
@@ -861,11 +875,12 @@ fn owned_handoff_preserves_child_boundary() {
 fn parent_root_expression_overlay_applies_inside_child() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, _child_site_id, context) = {
         let mut store_ref = store.borrow_mut();
         let child_context = TemplateViewContext::default();
         let child_site_id = store_ref.next_expression_site_id();
-        let child_expression = bool_reference_expression(&mut strings, "original");
+        let child_expression = bool_reference_expression(&mut path_fork, &mut strings, "original");
         let child_root = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::DynamicExpression {
                 expression: Box::new(child_expression),
@@ -916,6 +931,7 @@ fn parent_root_expression_overlay_applies_inside_child() {
 fn prepared_handoff_preserves_root_overlay_through_nested_children() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (root_id, _leaf_site_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -998,11 +1014,12 @@ fn prepared_handoff_preserves_root_overlay_through_nested_children() {
 fn runtime_child_reference_uses_structural_handoff() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
         let child_site_id = store_ref.next_expression_site_id();
-        let child_expression = bool_reference_expression(&mut strings, "runtime");
+        let child_expression = bool_reference_expression(&mut path_fork, &mut strings, "runtime");
         let child_root = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::DynamicExpression {
                 expression: Box::new(child_expression),
@@ -1046,8 +1063,9 @@ fn runtime_child_reference_uses_structural_handoff() {
             expression.kind
         );
     };
+    let mut scratch = Vec::new();
     assert_eq!(
-        path.to_path_buf(&strings),
+        path_fork.render_native(*path, &strings, &mut scratch),
         PathBuf::from("runtime"),
         "runtime reference value should survive structural handoff"
     );
@@ -1057,6 +1075,7 @@ fn runtime_child_reference_uses_structural_handoff() {
 fn child_infrastructure_error_propagates_through_hir_handoff() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -1100,6 +1119,7 @@ fn child_infrastructure_error_propagates_through_hir_handoff() {
 fn inherited_wrapper_handoff_injects_through_branch_boundaries() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -1135,6 +1155,7 @@ fn inherited_wrapper_handoff_injects_through_branch_boundaries() {
 fn inherited_wrapper_handoff_injects_through_loop_body_and_aggregate() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -1177,6 +1198,7 @@ fn inherited_wrapper_handoff_injects_through_loop_body_and_aggregate() {
 fn inherited_wrapper_handoff_injects_through_child_template() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -1212,11 +1234,12 @@ fn inherited_wrapper_handoff_injects_through_child_template() {
 fn inherited_wrapper_handoff_applies_wrapper_overlay() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
         let (wrapper_template_id, expression_site_id) =
-            build_expression_wrapper_template(&mut store_ref, &mut strings);
+            build_expression_wrapper_template(&mut store_ref, &mut strings, &mut path_fork);
         let wrapper_context = expression_overlay_context(
             &mut store_ref,
             vec![(
@@ -1269,6 +1292,7 @@ fn inherited_wrapper_handoff_applies_wrapper_set_innermost_to_outermost() {
     // wrapper directly around the child and the outermost wrapper last.
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let inner = build_slot_wrapper_template(
@@ -1321,6 +1345,7 @@ fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outerm
     // `ConditionalWrapper` whose wrapper tree is `outer(inner(AggregateOutput))`.
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let inner = build_slot_wrapper_template(
@@ -1387,6 +1412,7 @@ fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outerm
 fn inherited_slotless_wrapper_handoff_appends_child_after_wrapper_content() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -1415,6 +1441,7 @@ fn inherited_slotless_wrapper_handoff_appends_child_after_wrapper_content() {
 fn inherited_named_only_wrapper_handoff_preserves_named_slot_and_appends_child() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -1447,6 +1474,7 @@ fn inherited_named_only_wrapper_handoff_preserves_named_slot_and_appends_child()
 fn malformed_child_view_context_propagates_view_failure() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, valid_context) = {
         let mut store_ref = store.borrow_mut();
         let valid_context = TemplateViewContext::default();
@@ -1478,6 +1506,7 @@ fn malformed_child_view_context_propagates_view_failure() {
 fn missing_wrapper_tree_node_propagates_layout_error() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -1529,6 +1558,7 @@ fn missing_wrapper_tree_node_propagates_layout_error() {
 fn missing_child_in_wrapper_propagates_layout_error() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
@@ -1594,6 +1624,7 @@ fn runtime_site_template(
 fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let render_root = text_node_id(&mut store, &mut strings, "site");
     let owner_plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
@@ -1645,6 +1676,7 @@ fn handoff_rejects_out_of_range_runtime_slot_site() {
 fn handoff_rejects_mismatched_runtime_slot_site_identity() {
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let render_root = text_node_id(&mut store, &mut strings, "site");
     let plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
@@ -1680,6 +1712,7 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
 fn handoff_rejects_mismatched_loop_header_shape() {
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let body = text_node_id(&mut store, &mut strings, "body");
     let loop_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Loop {

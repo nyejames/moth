@@ -18,9 +18,11 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::hir::hir_builder::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 fn local_by_name<'a>(
     module: &'a HirModule,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
     name: &str,
 ) -> &'a HirLocal {
@@ -28,66 +30,69 @@ fn local_by_name<'a>(
         .blocks
         .iter()
         .flat_map(|block| block.locals.iter())
-        .find(|local| module.side_table.resolve_local_name(local.id, string_table) == Some(name))
+        .find(|local| {
+            module
+                .side_table
+                .resolve_local_name(local.id, path_fork, string_table)
+                == Some(name)
+        })
         .unwrap_or_else(|| panic!("expected local '{name}'"))
 }
 
 #[test]
-fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let inner = super::symbol("inner", &mut string_table);
-    let after = super::symbol("after", &mut string_table);
+fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let inner = super::symbol("inner", &mut path_fork, &mut string_table);
+let after = super::symbol("after", &mut path_fork, &mut string_table);
 
-    let lexical_scope = node(
-        NodeKind::LexicalScope {
-            body: vec![node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    inner,
-                    Expression::int(1, None, ValueMode::ImmutableOwned),
-                )),
-                None,
-            )],
-        },
-        None,
-    );
-    let after_declaration = node(
-        NodeKind::VariableDeclaration(make_test_variable(
-            after,
-            Expression::int(2, None, ValueMode::ImmutableOwned),
-        )),
-        None,
-    );
+let lexical_scope = node(
+    NodeKind::LexicalScope {
+        body: vec![node(
+            NodeKind::VariableDeclaration(make_test_variable(
+                inner,
+                Expression::int(1, None, ValueMode::ImmutableOwned),
+            )),
+            None,
+        )],
+    },
+    None,
+);
+let after_declaration = node(
+    NodeKind::VariableDeclaration(make_test_variable(
+        after,
+        Expression::int(2, None, ValueMode::ImmutableOwned),
+    )),
+    None,
+);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![lexical_scope, after_declaration],
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![lexical_scope, after_declaration],
+    None,
+);
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-    assert_no_placeholder_terminators(&module);
+let ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+let inner_local = local_by_name(&module, &path_fork, &string_table, "inner");
+let after_local = local_by_name(&module, &path_fork, &string_table, "after");
+let start_function = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let parent_region = module.blocks[start_function.entry.0 as usize].region;
+let inner_local = local_by_name(&module, &path_fork, &string_table, "inner");
+let after_local = local_by_name(&module, &path_fork, &string_table, "after");
+let inner_region = module
+    .regions
+    .iter()
+    .find(|region| region.id() == inner_local.region)
+    .expect("inner local region should exist");
 
-    let start_function = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let parent_region = module.blocks[start_function.entry.0 as usize].region;
-    let inner_local = local_by_name(&module, &string_table, "inner");
-    let after_local = local_by_name(&module, &string_table, "after");
-    let inner_region = module
-        .regions
-        .iter()
-        .find(|region| region.id() == inner_local.region)
-        .expect("inner local region should exist");
-
-    assert_ne!(inner_local.region, parent_region);
-    assert_eq!(inner_region.parent(), Some(parent_region));
-    assert_eq!(after_local.region, parent_region);
-}
+assert_ne!(inner_local.region, parent_region);
+assert_eq!(inner_region.parent(), Some(parent_region));
+assert_eq!(after_local.region, parent_region); }

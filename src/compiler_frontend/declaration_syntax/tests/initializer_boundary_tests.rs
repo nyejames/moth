@@ -15,7 +15,7 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_decla
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
@@ -42,18 +42,11 @@ fn label(kind: &TokenKind) -> &'static str {
 /// Parses the initializer token slice for a top-level `value = ...` declaration.
 fn parse_shell(source: &str) -> Vec<&'static str> {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let mut token_stream = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
 
     let name = string_table.intern("value");
@@ -246,17 +239,10 @@ fn tokenize_for_declaration(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> (StringTable, FileTokens, StringId, Option<usize>) {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let token_stream = tokenize(
-        source,
-        &source_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        &mut string_table,
-        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
-        span_builder,
-    )
+    let token_stream = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, span_builder)
     .expect("tokenization should succeed");
 
     let name = string_table.intern("value");

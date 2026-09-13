@@ -13,6 +13,7 @@ use super::ModuleMaterialisationContext;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use rustc_hash::FxHashMap;
 
 impl ModuleMaterialisationContext {
@@ -26,11 +27,11 @@ impl ModuleMaterialisationContext {
                 generic_parameter_owner: None,
                 receiver: None,
                 receiver_nominal_identity: None,
-                function_path: Box::new([]),
-                source_file: Box::new([]),
+                function_path: PathId::ROOT,
+                source_file: PathId::ROOT,
                 declaration_span: None,
                 body: StableBodySyntax {
-                    declaration_path: Box::new([]),
+                    declaration_path: PathId::ROOT,
                     donor_file_id: crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
                     frozen_identity_handle: frozen_identity_handle.clone(),
                     pool: Box::new([]),
@@ -58,6 +59,8 @@ impl ModuleMaterialisationContext {
             artefacts,
             module_origin: None,
             frozen_identity_handle,
+            path_table: None,
+            source_string_table: None,
         }
     }
 

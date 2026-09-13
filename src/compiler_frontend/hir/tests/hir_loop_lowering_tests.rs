@@ -15,116 +15,113 @@ use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
-fn lowers_while_to_header_body_exit_shape() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn lowers_while_to_header_body_exit_shape() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let while_node = node(
-        NodeKind::WhileLoop(
-            Expression::bool(false, None, ValueMode::ImmutableOwned),
-            vec![node(
-                NodeKind::ExpressionStatement(Expression::int(10, None, ValueMode::ImmutableOwned)),
-                None,
-            )],
-        ),
-        None,
-    );
+let while_node = node(
+    NodeKind::WhileLoop(
+        Expression::bool(false, None, ValueMode::ImmutableOwned),
+        vec![node(
+            NodeKind::ExpressionStatement(Expression::int(10, None, ValueMode::ImmutableOwned)),
+            None,
+        )],
+    ),
+    None,
+);
 
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![while_node],
-        None,
-    );
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![while_node],
+    None,
+);
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let entry_block = &module.blocks[start.entry.0 as usize];
+let start = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let entry_block = &module.blocks[start.entry.0 as usize];
 
-    let header_block = match entry_block.terminator {
-        HirTerminator::Jump { target, .. } => target,
-        _ => panic!("expected jump to while header"),
-    };
+let header_block = match entry_block.terminator {
+    HirTerminator::Jump { target, .. } => target,
+    _ => panic!("expected jump to while header"),
+};
 
-    let (body_block, _exit_block) = match module.blocks[header_block.0 as usize].terminator {
-        HirTerminator::If {
-            then_block,
-            else_block,
-            ..
-        } => (then_block, else_block),
-        _ => panic!("expected if in while header"),
-    };
+let (body_block, _exit_block) = match module.blocks[header_block.0 as usize].terminator {
+    HirTerminator::If {
+        then_block,
+        else_block,
+        ..
+    } => (then_block, else_block),
+    _ => panic!("expected if in while header"),
+};
 
-    let backedge_block = match module.blocks[body_block.0 as usize].terminator {
-        HirTerminator::Jump { target, .. } => target,
-        _ => panic!("expected while body to jump to the parent-region backedge"),
-    };
+let backedge_block = match module.blocks[body_block.0 as usize].terminator {
+    HirTerminator::Jump { target, .. } => target,
+    _ => panic!("expected while body to jump to the parent-region backedge"),
+};
 
-    assert!(matches!(
-        module.blocks[backedge_block.0 as usize].terminator,
-        HirTerminator::Jump { target, .. } if target == header_block
-    ));
-}
+assert!(matches!(
+    module.blocks[backedge_block.0 as usize].terminator,
+    HirTerminator::Jump { target, .. } if target == header_block
+)); }
 
 #[test]
-fn break_in_while_targets_loop_exit_block() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+fn break_in_while_targets_loop_exit_block() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let while_node = node(
-        NodeKind::WhileLoop(
-            Expression::bool(true, None, ValueMode::ImmutableOwned),
-            vec![node(NodeKind::Break, None)],
-        ),
-        None,
-    );
+let while_node = node(
+    NodeKind::WhileLoop(
+        Expression::bool(true, None, ValueMode::ImmutableOwned),
+        vec![node(NodeKind::Break, None)],
+    ),
+    None,
+);
 
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![while_node],
-        None,
-    );
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![while_node],
+    None,
+);
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    let start = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let entry_block = &module.blocks[start.entry.0 as usize];
-    let header_block = match entry_block.terminator {
-        HirTerminator::Jump { target, .. } => target,
-        _ => panic!("expected jump to while header"),
-    };
+let start = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let entry_block = &module.blocks[start.entry.0 as usize];
+let header_block = match entry_block.terminator {
+    HirTerminator::Jump { target, .. } => target,
+    _ => panic!("expected jump to while header"),
+};
 
-    let (body_block, exit_block) = match module.blocks[header_block.0 as usize].terminator {
-        HirTerminator::If {
-            then_block,
-            else_block,
-            ..
-        } => (then_block, else_block),
-        _ => panic!("expected while header conditional terminator"),
-    };
+let (body_block, exit_block) = match module.blocks[header_block.0 as usize].terminator {
+    HirTerminator::If {
+        then_block,
+        else_block,
+        ..
+    } => (then_block, else_block),
+    _ => panic!("expected while header conditional terminator"),
+};
 
-    assert!(matches!(
-        module.blocks[body_block.0 as usize].terminator,
-        HirTerminator::Break { target } if target == exit_block
-    ));
-}
+assert!(matches!(
+    module.blocks[body_block.0 as usize].terminator,
+    HirTerminator::Break { target } if target == exit_block
+)); }

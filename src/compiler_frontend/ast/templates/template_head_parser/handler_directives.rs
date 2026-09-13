@@ -25,6 +25,7 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// Typed result shared by handler-directive parsing helpers.
 type HandlerDirectiveResult<T> = Result<T, TemplateError>;
@@ -42,6 +43,7 @@ pub(super) fn apply_handler_style_directive(
     directive_name: &str,
     handler_spec: &StyleDirectiveHandlerSpec,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> HandlerDirectiveResult<()> {
     let parsed_argument = parse_optional_handler_style_argument(
         token_stream,
@@ -50,6 +52,7 @@ pub(super) fn apply_handler_style_directive(
         directive_name,
         handler_spec.argument_type,
         string_table,
+        path_fork,
     )?;
 
     apply_style_directive_effects(build_state, handler_spec.effects);
@@ -102,6 +105,7 @@ fn parse_optional_handler_style_argument(
     directive_name: &str,
     argument_type: Option<StyleDirectiveArgumentType>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> HandlerDirectiveResult<ParsedHandlerDirectiveArgument> {
     let default_span = current_token_source_span(token_stream);
     let directive_name_id = string_table.intern(directive_name);
@@ -112,6 +116,7 @@ fn parse_optional_handler_style_argument(
         context,
         type_interner,
         string_table,
+        path_fork,
     )?
     else {
         return Ok(ParsedHandlerDirectiveArgument {

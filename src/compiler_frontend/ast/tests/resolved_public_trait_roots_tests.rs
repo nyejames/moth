@@ -16,7 +16,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, TraitVisibility};
@@ -32,6 +32,7 @@ fn trait_header(
     file_role: FileRole,
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Header {
     Header {
         kind: HeaderKind::Trait {
@@ -48,11 +49,11 @@ fn trait_header(
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: Some(root_span()),
         tokens: FileTokens::new(
-            InternedPath::from_single_str(name, string_table),
+            path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
             SourceId::COMPILATION_ROOT,
             Vec::new(),
         ),
-        source_file: InternedPath::from_single_str("root.moth", string_table),
+        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
         capacity_references: Vec::new(),
     }
 }
@@ -62,6 +63,7 @@ fn function_header(
     file_role: FileRole,
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Header {
     Header {
         kind: HeaderKind::Function {
@@ -73,11 +75,11 @@ fn function_header(
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: Some(root_span()),
         tokens: FileTokens::new(
-            InternedPath::from_single_str(name, string_table),
+            path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
             SourceId::COMPILATION_ROOT,
             Vec::new(),
         ),
-        source_file: InternedPath::from_single_str("root.moth", string_table),
+        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
         capacity_references: Vec::new(),
     }
 }
@@ -89,6 +91,7 @@ fn this_type(env: &mut TypeEnvironment, string_table: &mut StringTable) -> TypeI
 fn register_source_trait(
     trait_environment: &mut TraitEnvironment,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     trait_name: &str,
     this_type: TypeId,
 ) -> crate::compiler_frontend::traits::ids::TraitId {
@@ -96,8 +99,8 @@ fn register_source_trait(
     let definition = ResolvedTraitDefinition {
         id: trait_id,
         name: string_table.intern(trait_name),
-        canonical_path: InternedPath::from_single_str(trait_name, string_table),
-        source_file: InternedPath::new(),
+        canonical_path: path_fork.try_intern_portable_path(trait_name, string_table).expect("test path fits"),
+        source_file: PathId::ROOT,
         this_type,
         requirements: Vec::new(),
         declaration_span: None,
@@ -110,12 +113,25 @@ fn register_source_trait(
 #[test]
 fn retains_directly_authored_active_root_public_source_traits_in_order() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
     let this_id = this_type(&mut type_environment, &mut string_table);
-    register_source_trait(&mut trait_environment, &mut string_table, "Alpha", this_id);
-    register_source_trait(&mut trait_environment, &mut string_table, "Beta", this_id);
+    register_source_trait(
+        &mut trait_environment,
+        &mut string_table,
+        &mut path_fork,
+        "Alpha",
+        this_id,
+    );
+    register_source_trait(
+        &mut trait_environment,
+        &mut string_table,
+        &mut path_fork,
+        "Beta",
+        this_id,
+    );
 
     let headers = vec![
         trait_header(
@@ -123,12 +139,14 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
         trait_header(
             "Beta",
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
     ];
 
@@ -142,12 +160,12 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
 
     assert_eq!(trait_roots.len(), 2);
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Alpha"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Alpha")
     );
     assert_eq!(
-        trait_roots[1].canonical_path.to_string(&string_table),
-        "Beta"
+        path_fork.component(trait_roots[1].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Beta")
     );
     assert_eq!(trait_roots[0].this_type, this_id);
     assert_eq!(trait_roots[1].this_type, this_id);
@@ -156,14 +174,22 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
 #[test]
 fn excludes_private_traits() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
     let this_id = this_type(&mut type_environment, &mut string_table);
-    register_source_trait(&mut trait_environment, &mut string_table, "Public", this_id);
     register_source_trait(
         &mut trait_environment,
         &mut string_table,
+        &mut path_fork,
+        "Public",
+        this_id,
+    );
+    register_source_trait(
+        &mut trait_environment,
+        &mut string_table,
+        &mut path_fork,
         "Private",
         this_id,
     );
@@ -174,12 +200,14 @@ fn excludes_private_traits() {
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
         trait_header(
             "Private",
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Private,
             &mut string_table,
+            &mut path_fork,
         ),
     ];
 
@@ -193,22 +221,30 @@ fn excludes_private_traits() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Public"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Public")
     );
 }
 
 #[test]
 fn excludes_imported_and_non_active_root_traits() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
     let this_id = this_type(&mut type_environment, &mut string_table);
-    register_source_trait(&mut trait_environment, &mut string_table, "Local", this_id);
     register_source_trait(
         &mut trait_environment,
         &mut string_table,
+        &mut path_fork,
+        "Local",
+        this_id,
+    );
+    register_source_trait(
+        &mut trait_environment,
+        &mut string_table,
+        &mut path_fork,
         "Imported",
         this_id,
     );
@@ -219,12 +255,14 @@ fn excludes_imported_and_non_active_root_traits() {
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
         trait_header(
             "Imported",
             FileRole::ImportedModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
     ];
 
@@ -238,14 +276,15 @@ fn excludes_imported_and_non_active_root_traits() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Local"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Local")
     );
 }
 
 #[test]
 fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -255,12 +294,17 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
 
     // Core traits cannot be authored as source declarations. This synthetic source header
     // deliberately resolves to the registered core definition to exercise that invariant.
-    let headers = vec![trait_header(
+    let mut headers = vec![trait_header(
         "DISPLAYABLE",
         FileRole::ActiveModuleRoot,
         HeaderExportMode::Public,
         &mut string_table,
+        &mut path_fork,
     )];
+    // Core definitions use the root path as their canonical path, so point this synthetic
+    // header at the same production-owned path after constructing its source metadata through
+    // the caller-owned fork.
+    headers[0].tokens.src_path = PathId::ROOT;
 
     let result = build_resolved_public_trait_roots(
         &headers,
@@ -280,11 +324,18 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
 #[test]
 fn excludes_non_trait_declarations() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
     let this_id = this_type(&mut type_environment, &mut string_table);
-    register_source_trait(&mut trait_environment, &mut string_table, "Shape", this_id);
+    register_source_trait(
+        &mut trait_environment,
+        &mut string_table,
+        &mut path_fork,
+        "Shape",
+        this_id,
+    );
 
     let headers = vec![
         function_header(
@@ -292,12 +343,14 @@ fn excludes_non_trait_declarations() {
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
         trait_header(
             "Shape",
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
     ];
 
@@ -311,14 +364,15 @@ fn excludes_non_trait_declarations() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Shape"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Shape")
     );
 }
 
 #[test]
 fn missing_trait_definition_is_compiler_error() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let trait_environment = TraitEnvironment::new();
 
     let headers = vec![trait_header(
@@ -326,6 +380,7 @@ fn missing_trait_definition_is_compiler_error() {
         FileRole::ActiveModuleRoot,
         HeaderExportMode::Public,
         &mut string_table,
+        &mut path_fork,
     )];
 
     let result = build_resolved_public_trait_roots(
@@ -346,13 +401,26 @@ fn missing_trait_definition_is_compiler_error() {
 fn register_two_public_traits(
     trait_environment: &mut TraitEnvironment,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
     this_type: TypeId,
 ) -> (
     crate::compiler_frontend::traits::ids::TraitId,
     crate::compiler_frontend::traits::ids::TraitId,
 ) {
-    let alpha_id = register_source_trait(trait_environment, string_table, "Alpha", this_type);
-    let beta_id = register_source_trait(trait_environment, string_table, "Beta", this_type);
+    let alpha_id = register_source_trait(
+        trait_environment,
+        string_table,
+        path_fork,
+        "Alpha",
+        this_type,
+    );
+    let beta_id = register_source_trait(
+        trait_environment,
+        string_table,
+        path_fork,
+        "Beta",
+        this_type,
+    );
     trait_environment.record_public_incompatible_traits(alpha_id, beta_id);
     (alpha_id, beta_id)
 }
@@ -360,12 +428,13 @@ fn register_two_public_traits(
 #[test]
 fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
     let this_id = this_type(&mut type_environment, &mut string_table);
     let (alpha_id, beta_id) =
-        register_two_public_traits(&mut trait_environment, &mut string_table, this_id);
+        register_two_public_traits(&mut trait_environment, &mut string_table, &mut path_fork, this_id);
 
     let headers = vec![
         trait_header(
@@ -373,12 +442,14 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
         trait_header(
             "Beta",
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
     ];
 
@@ -396,14 +467,14 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     // of which side authored the public relation. The order is the deterministic authored
     // source order recorded by the trait environment.
     assert_eq!(
-        trait_roots[0].canonical_path.to_string(&string_table),
-        "Alpha"
+        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Alpha")
     );
     assert_eq!(trait_roots[0].incompatible_trait_ids, vec![beta_id]);
 
     assert_eq!(
-        trait_roots[1].canonical_path.to_string(&string_table),
-        "Beta"
+        path_fork.component(trait_roots[1].canonical_path).map(|id| string_table.resolve(id)),
+        Some("Beta")
     );
     assert_eq!(trait_roots[1].incompatible_trait_ids, vec![alpha_id]);
 }
@@ -411,13 +482,25 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
 #[test]
 fn private_incompatibility_relation_is_absent_from_trait_roots() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
     let this_id = this_type(&mut type_environment, &mut string_table);
-    let alpha_id =
-        register_source_trait(&mut trait_environment, &mut string_table, "Alpha", this_id);
-    let beta_id = register_source_trait(&mut trait_environment, &mut string_table, "Beta", this_id);
+    let alpha_id = register_source_trait(
+        &mut trait_environment,
+        &mut string_table,
+        &mut path_fork,
+        "Alpha",
+        this_id,
+    );
+    let beta_id = register_source_trait(
+        &mut trait_environment,
+        &mut string_table,
+        &mut path_fork,
+        "Beta",
+        this_id,
+    );
 
     // A private relation is recorded in the conformance-validation store only, never in the
     // public store, so it must not enter the direct public trait records.
@@ -429,12 +512,14 @@ fn private_incompatibility_relation_is_absent_from_trait_roots() {
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
         trait_header(
             "Beta",
             FileRole::ActiveModuleRoot,
             HeaderExportMode::Public,
             &mut string_table,
+            &mut path_fork,
         ),
     ];
 

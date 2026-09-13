@@ -14,14 +14,14 @@ use crate::compiler_frontend::ast::const_values::facts::{
     AstConstFacts, ConstBindingScope, ConstBindingSource, ConstFactValueKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use rustc_hash::FxHashMap;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 /// Collection of HIR advisory const facts for one module.
 #[derive(Clone, Debug, Default)]
 pub struct HirConstFacts {
-    pub declarations: FxHashMap<InternedPath, HirConstDeclarationFact>,
+    pub declarations: FxHashMap<PathId, HirConstDeclarationFact>,
 }
 
 /// A single projected const fact in HIR.
@@ -32,7 +32,7 @@ pub struct HirConstFacts {
 ///      optimization passes.
 #[derive(Clone, Debug)]
 pub struct HirConstDeclarationFact {
-    pub declaration_path: InternedPath,
+    pub declaration_path: PathId,
 
     /// NOTE: currently advisory; only read in tests until optimization passes consume it.
     #[allow(dead_code)]
@@ -51,16 +51,24 @@ pub struct HirConstDeclarationFact {
 }
 
 impl HirConstFacts {
-    /// Remap interned string IDs after a string-table merge.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        let declarations = std::mem::take(&mut self.declarations);
-
-        for (mut path, mut fact) in declarations {
-            path.remap_string_ids(remap);
-            fact.declaration_path.remap_string_ids(remap);
-            self.declarations.insert(path, fact);
+    /// Remap declaration paths after the module-local path fork merges.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if remap.is_identity() {
+            return;
         }
+        let declarations = std::mem::take(&mut self.declarations);
+        self.declarations = declarations
+            .into_iter()
+            .map(|(path, mut fact)| {
+                let path = remap.get(path);
+                fact.declaration_path = remap.get(fact.declaration_path);
+                (path, fact)
+            })
+            .collect();
     }
+
+    /// Path identities are independent of string-table merges.
+    pub fn remap_string_ids(&mut self, _remap: &StringIdRemap) {}
 }
 
 impl From<&AstConstFacts> for HirConstFacts {
@@ -77,13 +85,13 @@ impl From<&AstConstFacts> for HirConstFacts {
                 ) => expression.span,
             };
             let hir_fact = HirConstDeclarationFact {
-                declaration_path: fact.declaration_path.clone(),
+                declaration_path: fact.declaration_path,
                 scope: fact.scope,
                 source: fact.source,
                 value_kind: fact.value_kind,
                 span,
             };
-            declarations.insert(path.clone(), hir_fact);
+            declarations.insert(*path, hir_fact);
         }
 
         Self { declarations }

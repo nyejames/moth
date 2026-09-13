@@ -22,6 +22,7 @@ use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReas
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Shared facts after a committed single-predicate header.
 ///
@@ -46,12 +47,12 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Singl
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub string_table: &'a mut StringTable,
     pub classification: IfHeaderClassification,
+    pub path_fork: &'a mut PathInternerFork,
 }
 
 /// Attempts to parse a type-eligible single-predicate header after `if`.
 ///
 /// Returns `None` only when an authored diagnostic still allows Bool fallback
-/// before the match shape is committed. Infrastructure errors never fall back.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse_single_predicate_header(
     input: SinglePredicateHeaderInput<'_, '_>,
 ) -> Option<Result<ParsedSinglePredicateHeader, ExpressionParseError>> {
@@ -61,15 +62,18 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
         type_interner,
         string_table,
         classification,
+        path_fork,
     } = input;
 
     let start_index = token_stream.index;
-    let scrutinee_context = context.new_child_control_flow(ContextKind::Condition, string_table);
+    let scrutinee_context =
+        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
     let scrutinee = match parse_scrutinee_until_is(
         token_stream,
         &scrutinee_context,
         type_interner,
         string_table,
+        path_fork,
     ) {
         Ok(expression) => expression,
         Err(ExpressionParseError::Diagnostic(_)) => {
@@ -98,13 +102,15 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
 
     // Capture bindings such as `|name|` belong on the matched arm, not the
     // receiving declaration or the else branch.
-    let match_context = context.new_child_control_flow(ContextKind::Branch, string_table);
+    let match_context =
+        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
     let parsed_pattern = match parse_single_predicate_match_pattern(
         &scrutinee,
         token_stream,
         &match_context,
         type_interner,
         string_table,
+        path_fork,
     ) {
         Ok(pattern) => pattern,
         Err(error) => return Some(Err(error)),

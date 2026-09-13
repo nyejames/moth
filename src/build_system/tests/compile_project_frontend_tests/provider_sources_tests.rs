@@ -1488,6 +1488,22 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
         "expected at least one error diagnostic for project-local JS receiver-style signature"
     );
     assert_has_diagnostic_code(&messages, "MOTH-IMPORT-0022");
+
+    // The provider interned the logical JS source path into the caller-owned discovery fork, so
+    // the diagnostic's primary path renders as the JS source, not the importing `@page.moth` (and
+    // without panicking on a foreign PathId).
+    let diagnostic = messages
+        .error_diagnostics()
+        .next()
+        .expect("expected at least one error diagnostic");
+    let rendered = terse::format_terse_diagnostic_with_context(
+        diagnostic,
+        messages.diagnostic_render_context(0),
+    );
+    assert!(
+        rendered.contains("drawing.js"),
+        "provider diagnostic primary path should resolve to the JS source, got: {rendered}"
+    );
 }
 
 #[test]

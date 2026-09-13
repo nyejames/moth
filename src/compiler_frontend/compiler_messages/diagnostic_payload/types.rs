@@ -22,13 +22,17 @@ pub enum NameNamespace {
     TemplateSlot,
     ConfigKey,
 }
-/// Which compact source-span table rejected an authored range.
+/// Which compact source-owned table rejected an authored request.
 ///
-/// The source identity remains on the diagnostic's primary span; this fact records the
-/// exhausted source-owned capacity without allocating another extended row.
+/// Span resources keep the source identity on the diagnostic's primary span; this fact records
+/// the exhausted source-owned capacity without allocating another row. Path/identity resources
+/// name compact identity tables whose exhaustion has no meaningful authored span, so the
+/// diagnostic stays spanless rather than manufacturing source provenance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SourceSpanCapacityResource {
     ExtendedSpanTable,
+    LogicalPathTable,
+    SourceIdentityTable,
 }
 
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.
@@ -79,7 +83,7 @@ pub enum ImportPublicSurfaceType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagnosticPlace {
     Local(StringId),
-    Path(InternedPath),
+    Path(PathId),
     RenderedText(StringId),
     Unknown,
 }
@@ -91,9 +95,19 @@ impl DiagnosticPlace {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPlace::Path(path) => path.remap_string_ids(remap),
+            DiagnosticPlace::Path(_) | DiagnosticPlace::Unknown => {}
+        }
+    }
 
-            DiagnosticPlace::Unknown => {}
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let DiagnosticPlace::Path(path) = self {
+            *path = remap.get(*path);
+        }
+    }
+    /// Push this place's path identity when the place addresses one.
+    pub(crate) fn push_path(&self, paths: &mut Vec<PathId>) {
+        if let DiagnosticPlace::Path(path) = self {
+            paths.push(*path);
         }
     }
 }

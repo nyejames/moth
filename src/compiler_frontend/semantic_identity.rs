@@ -232,7 +232,7 @@ impl ModuleRootRole {
 ///
 /// WHAT: derives a stable module origin from the owning [`StablePackageIdentity`], the canonical
 /// portable logical module path (forward-slash logical spelling, including the empty entry-root
-/// path) and the [`ModuleRootRole`]. It stores no `PathBuf`, `StringId`, `InternedPath`, dense
+/// path) and the [`ModuleRootRole`]. It stores no `PathBuf`, `StringId`, `PathId`, dense
 /// `ModuleId` or absolute filesystem path, so identity is stable across checkout roots,
 /// traversal order, cosmetic root-filename suffixes and the ordinary source file that contains
 /// a declaration.
@@ -368,7 +368,7 @@ pub(crate) fn portable_relative_logical_path_from(
 /// WHAT: derives a stable owned-source identity from the owning module's
 /// [`StableModuleOriginIdentity`] and the module-relative logical source file path (portable
 /// forward-slash spelling, including the root filename). It stores no `PathBuf`, `StringId`,
-/// `InternedPath`, dense `SourceId`, traversal index, `SourceDatabase` or absolute filesystem path,
+/// `PathId`, dense `SourceId`, traversal index, `SourceDatabase` or absolute filesystem path,
 /// so identity is stable across checkout roots and traversal order. The module-relative source
 /// path intentionally includes the actual root filename, so renaming the root file (for example
 /// `@page.moth` to `@pages.moth`) changes the owned-source identity even though the module origin
@@ -455,7 +455,7 @@ pub(crate) enum FunctionOriginKind {
 ///
 /// WHAT: derives a stable type origin from the owning [`StableModuleOriginIdentity`], the exact
 /// defining declaration name and the [`OriginTypeCategory`]. It stores no `StringId`,
-/// `InternedPath`, `SourceId`, source location, ordinary source-file path, declaration order,
+/// `PathId`, `SourceId`, source location, ordinary source-file path, declaration order,
 /// export alias or dense build-local ID, so identity is stable when source moves between files,
 /// reordered or aliased at export time.
 /// WHY: cross-module type references and generated instances key off this origin so changing a
@@ -505,7 +505,7 @@ impl OriginTypeId {
 ///
 /// WHAT: derives a stable function origin from the owning [`StableModuleOriginIdentity`], the
 /// exact defining declaration name and the sole [`FunctionOriginKind`], which embeds the receiver
-/// type identity for a method. It stores no `StringId`, `InternedPath`, `SourceId`, source
+/// type identity for a method. It stores no `StringId`, `PathId`, `SourceId`, source
 /// location, ordinary source-file path, declaration order, export alias or dense build-local ID.
 /// WHY: identifies stable cross-module source call targets so a free function and a method of the
 /// same name are distinct, and renaming a function or moving it between modules alters identity
@@ -582,7 +582,7 @@ impl OriginFunctionId {
 /// Owned, hashable, cross-build origin identity for one exported constant.
 ///
 /// WHAT: derives a stable constant origin from the owning [`StableModuleOriginIdentity`] and the
-/// exact defining declaration name. It stores no `StringId`, `InternedPath`, `SourceId`, source
+/// exact defining declaration name. It stores no `StringId`, `PathId`, `SourceId`, source
 /// location, ordinary source-file path, declaration order, export alias or dense build-local ID.
 /// WHY: cross-module constant references key off this origin so renaming a constant or moving it
 /// between modules alters identity while reordering and aliasing do not.
@@ -618,7 +618,7 @@ impl OriginConstantId {
 /// Owned, hashable, cross-build origin identity for one exported trait.
 ///
 /// WHAT: derives a stable trait origin from the owning [`StableModuleOriginIdentity`] and the
-/// exact defining declaration name. It stores no `StringId`, `InternedPath`, `SourceId`, source
+/// exact defining declaration name. It stores no `StringId`, `PathId`, `SourceId`, source
 /// location, ordinary source-file path, declaration order, export alias or dense build-local ID.
 /// WHY: cross-module conformance evidence and trait references key off this origin so renaming a
 /// trait or moving it between modules alters identity while reordering and aliasing do not.
@@ -699,7 +699,7 @@ impl OriginDeclarationId {
 ///       for a declaration authored directly in the active module root's public surface. The
 ///       exporting module is the stable [`StableModuleOriginIdentity`], never a build-local dense
 ///       `ModuleId`. The public name and the origin's defining name are self-contained owned
-///       strings, never `StringId` or `InternedPath` values that would not survive the graph
+///       strings, never `StringId` or `PathId` values that would not survive the graph
 ///       table. For a directly defined export the public name equals the defining name; re-export
 ///       aliasing is a separate fact owned by the future completed provider interface.
 /// WHY: the compiler design overview's `ExportBinding` contract requires public-interface binding

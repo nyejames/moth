@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 #[test]
 fn typed_call_constructor_sets_expression_and_result_type_ids() {
@@ -15,7 +15,7 @@ fn typed_call_constructor_sets_expression_and_result_type_ids() {
     let int_type_id = type_environment.builtins().int;
 
     let expression = Expression::function_call_with_typed_arguments(
-        InternedPath::new(),
+        PathId::ROOT,
         vec![],
         vec![int_type_id],
         &mut type_environment,

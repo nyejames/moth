@@ -17,7 +17,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 impl Expression {
@@ -53,7 +53,7 @@ impl Expression {
     }
 
     pub fn reference(
-        id: InternedPath,
+        id: PathId,
         data_type: DataType,
         span: Option<SourceSpan>,
         value_mode: ValueMode,
@@ -70,7 +70,7 @@ impl Expression {
     }
 
     pub fn function_call(
-        name: InternedPath,
+        name: PathId,
         args: Vec<Expression>,
         result_type_ids: Vec<TypeId>,
         span: Option<SourceSpan>,
@@ -84,7 +84,7 @@ impl Expression {
     }
 
     pub fn function_call_with_arguments(
-        name: InternedPath,
+        name: PathId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         span: Option<SourceSpan>,
@@ -101,7 +101,7 @@ impl Expression {
     }
 
     pub fn handled_fallible_function_call(
-        name: InternedPath,
+        name: PathId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         handling: FallibleExpressionHandling,

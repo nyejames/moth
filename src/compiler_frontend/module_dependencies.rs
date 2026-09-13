@@ -33,7 +33,7 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::header_log;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -68,7 +68,7 @@ pub(crate) struct SortedHeaders {
 /// targets instead of re-deriving the authored spelling. The index is preparation and Stage 0
 /// owned data; it involves no expression parsing.
 pub(in crate::compiler_frontend) struct ContentSourceTargets {
-    targets: FxHashMap<(SourceId, PathSyntaxId), InternedPath>,
+    targets: FxHashMap<(SourceId, PathSyntaxId), PathId>,
 }
 
 impl ContentSourceTargets {
@@ -83,7 +83,8 @@ impl ContentSourceTargets {
         resolved_references: &ResolvedFileReferenceTable,
         source_files: &SourceDatabase,
         string_table: &mut StringTable,
-    ) -> Self {
+        path_fork: &mut PathInternerFork,
+    ) -> Result<Self, CompilerError> {
         let mut targets = FxHashMap::default();
 
         for reference in resolved_references.iter() {
@@ -96,15 +97,15 @@ impl ContentSourceTargets {
             let Some(identity) = source_files.get(*source) else {
                 continue;
             };
-            let logical_path = source_files.legacy_logical_path(identity.id);
+            let logical_path = identity.logical_path;
 
             targets.insert(
                 (reference.source_file, reference.path_syntax),
-                content_constant_path(&logical_path, string_table),
+                content_constant_path(logical_path, path_fork, string_table)?,
             );
         }
 
-        Self { targets }
+        Ok(Self { targets })
     }
 
     /// The resolved content constant graph key for one content hint occurrence.
@@ -112,20 +113,21 @@ impl ContentSourceTargets {
         &self,
         hint: &LocalDeclarationOrderingHint,
         referencing_file: SourceId,
-    ) -> Option<&InternedPath> {
-        self.targets.get(&(referencing_file, hint.occurrence()?))
+    ) -> Option<PathId> {
+        self.targets
+            .get(&(referencing_file, hint.occurrence()?))
+            .copied()
     }
 }
 
 /// Tracks which modules are temporarily marked (in the current DFS stack)
 /// and which have been permanently visited.
 struct DependencyTracker {
-    temp_mark: FxHashSet<InternedPath>,
-    visited: FxHashSet<InternedPath>,
-    stack: Vec<InternedPath>,
+    temp_mark: FxHashSet<PathId>,
+    visited: FxHashSet<PathId>,
+    stack: Vec<PathId>,
     visit_count: usize,
 }
-
 impl DependencyTracker {
     fn new(capacity: usize) -> Self {
         DependencyTracker {
@@ -136,16 +138,16 @@ impl DependencyTracker {
         }
     }
 
-    fn enter(&mut self, path: InternedPath) {
-        self.temp_mark.insert(path.to_owned());
+    fn enter(&mut self, path: PathId) {
+        self.temp_mark.insert(path);
         self.stack.push(path);
     }
 
-    fn is_in_current_stack(&self, path: &InternedPath) -> bool {
+    fn is_in_current_stack(&self, path: &PathId) -> bool {
         self.temp_mark.contains(path)
     }
 
-    fn abandon(&mut self, path: &InternedPath) {
+    fn abandon(&mut self, path: &PathId) {
         self.temp_mark.remove(path);
 
         if self.stack.last() == Some(path) {
@@ -155,9 +157,9 @@ impl DependencyTracker {
         }
     }
 
-    fn finish(&mut self, path: &InternedPath) {
+    fn finish(&mut self, path: &PathId) {
         self.abandon(path);
-        self.visited.insert(path.to_owned());
+        self.visited.insert(*path);
     }
 }
 
@@ -167,11 +169,11 @@ impl DependencyTracker {
 /// WHY: dependency sorting needs one place where exact header membership, source-backed package public
 /// fallback, same-file hint deferral, and stable edge ordering are applied consistently.
 struct DependencyGraph<'a> {
-    headers_by_path: FxHashMap<InternedPath, Header>,
-    source_order_by_path: FxHashMap<InternedPath, usize>,
-    ordered_paths: Vec<InternedPath>,
+    headers_by_path: FxHashMap<PathId, Header>,
+    source_order_by_path: FxHashMap<PathId, usize>,
+    ordered_paths: Vec<PathId>,
     source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
-    provider_interface_paths: &'a FxHashMap<InternedPath, OriginDeclarationId>,
+    provider_interface_paths: &'a FxHashMap<PathId, OriginDeclarationId>,
     content_source_targets: &'a ContentSourceTargets,
 }
 
@@ -179,22 +181,21 @@ impl<'a> DependencyGraph<'a> {
     fn from_headers(
         headers: Vec<Header>,
         source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
-        provider_interface_paths: &'a FxHashMap<InternedPath, OriginDeclarationId>,
+        provider_interface_paths: &'a FxHashMap<PathId, OriginDeclarationId>,
         content_source_targets: &'a ContentSourceTargets,
-        _string_table: &StringTable,
     ) -> Self {
-        let mut headers_by_path: FxHashMap<InternedPath, Header> =
+        let mut headers_by_path: FxHashMap<PathId, Header> =
             FxHashMap::with_capacity_and_hasher(headers.len(), Default::default());
-        let mut source_order_by_path: FxHashMap<InternedPath, usize> =
+        let mut source_order_by_path: FxHashMap<PathId, usize> =
             FxHashMap::with_capacity_and_hasher(headers.len(), Default::default());
-        let mut ordered_paths: Vec<InternedPath> = Vec::with_capacity(headers.len());
+        let mut ordered_paths: Vec<PathId> = Vec::with_capacity(headers.len());
 
         for header in headers {
             header_log!(header);
 
-            let path = header.tokens.src_path.to_owned();
-            source_order_by_path.insert(path.to_owned(), ordered_paths.len());
-            ordered_paths.push(path.to_owned());
+            let path = header.tokens.src_path;
+            source_order_by_path.insert(path, ordered_paths.len());
+            ordered_paths.push(path);
             headers_by_path.insert(path, header);
         }
 
@@ -212,34 +213,33 @@ impl<'a> DependencyGraph<'a> {
         self.headers_by_path.len()
     }
 
-    fn ordered_paths(&self) -> &[InternedPath] {
+    fn ordered_paths(&self) -> &[PathId] {
         &self.ordered_paths
     }
 
-    fn header_for_path(&self, path: &InternedPath) -> Option<&Header> {
+    fn header_for_path(&self, path: &PathId) -> Option<&Header> {
         self.headers_by_path.get(path)
     }
 
     fn resolve_requested_path(
         &self,
-        requested_path: &InternedPath,
+        requested_path: PathId,
         string_table: &StringTable,
+        path_fork: &PathInternerFork,
     ) -> Option<ResolvedGraphPath> {
-        if self.headers_by_path.contains_key(requested_path) {
-            return Some(ResolvedGraphPath::Header(requested_path.to_owned()));
+        if self.headers_by_path.contains_key(&requested_path) {
+            return Some(ResolvedGraphPath::Header(requested_path));
         }
-        if self.provider_interface_paths.contains_key(requested_path) {
-            return Some(ResolvedGraphPath::ProviderInterface(
-                requested_path.to_owned(),
-            ));
+        if self.provider_interface_paths.contains_key(&requested_path) {
+            return Some(ResolvedGraphPath::ProviderInterface(requested_path));
         }
 
         // Source-backed package public dependencies can use a public prefix path that differs from the
         // concrete root-file header path. Accept those public edges without treating them as
         // graph nodes.
-        if self.is_source_package_public_export_path(requested_path, string_table) {
+        if self.is_source_package_public_export_path(requested_path, string_table, path_fork) {
             return Some(ResolvedGraphPath::SourcePackagePublicExport(
-                requested_path.to_owned(),
+                requested_path,
             ));
         }
 
@@ -248,10 +248,11 @@ impl<'a> DependencyGraph<'a> {
 
     fn source_order_for_requested_path(
         &self,
-        requested_path: &InternedPath,
+        requested_path: PathId,
         string_table: &StringTable,
+        path_fork: &PathInternerFork,
     ) -> Option<usize> {
-        let resolved_path = match self.resolve_requested_path(requested_path, string_table)? {
+        let resolved_path = match self.resolve_requested_path(requested_path, string_table, path_fork)? {
             ResolvedGraphPath::Header(path) => path,
             ResolvedGraphPath::ProviderInterface(_)
             | ResolvedGraphPath::SourcePackagePublicExport(_) => return None,
@@ -264,6 +265,7 @@ impl<'a> DependencyGraph<'a> {
         &self,
         header: &Header,
         string_table: &StringTable,
+        path_fork: &PathInternerFork,
     ) -> Result<Vec<ResolvedDependencyEdge>, CompilerError> {
         let source = header.tokens.file_id;
 
@@ -273,36 +275,39 @@ impl<'a> DependencyGraph<'a> {
         let mut seen_targets = FxHashSet::default();
         let mut edges = Vec::with_capacity(header.local_ordering_hints.len());
         for hint in &header.local_ordering_hints {
-            let edge = self.resolve_dependency_edge(header, source, hint, string_table);
+            let edge = self.resolve_dependency_edge(header, source, hint, string_table, path_fork);
             let keep = edge
                 .resolved_path
                 .as_ref()
-                .is_none_or(|resolved_path| seen_targets.insert(resolved_path.clone()));
+                .is_none_or(|resolved_path| seen_targets.insert(*resolved_path));
             if keep {
                 edges.push(edge);
             }
         }
 
+        let mut scratch = Vec::new();
         edges.sort_by(|left, right| {
             let left_order = self.source_order_for_edge(left);
             let right_order = self.source_order_for_edge(right);
 
             left_order.cmp(&right_order).then_with(|| {
-                left.requested_path
-                    .to_portable_string(string_table)
-                    .cmp(&right.requested_path.to_portable_string(string_table))
+                let left_text =
+                    path_fork.render_portable(left.requested_path, string_table, &mut scratch);
+                let right_text =
+                    path_fork.render_portable(right.requested_path, string_table, &mut scratch);
+                left_text.cmp(&right_text)
             })
         });
 
         Ok(edges)
     }
-
     fn resolve_dependency_edge(
         &self,
         header: &Header,
         source: SourceId,
         hint: &LocalDeclarationOrderingHint,
         string_table: &StringTable,
+        path_fork: &PathInternerFork,
     ) -> ResolvedDependencyEdge {
         // Stage 3 turns a retained local declaration-ordering hint into a sortable graph edge.
         // It consumes the typed hint rather than reconstructing the requested path from
@@ -324,7 +329,7 @@ impl<'a> DependencyGraph<'a> {
                 .content_header_path(hint, source)
             else {
                 return ResolvedDependencyEdge {
-                    requested_path: hint.path().to_owned(),
+                    requested_path: hint.path(),
                     resolved_path: None,
                     span,
                     source_order: None,
@@ -337,11 +342,12 @@ impl<'a> DependencyGraph<'a> {
             hint.path()
         };
 
-        let source_order = self.source_order_for_requested_path(requested_path, string_table);
+        let source_order =
+            self.source_order_for_requested_path(requested_path, string_table, path_fork);
 
-        match self.resolve_requested_path(requested_path, string_table) {
+        match self.resolve_requested_path(requested_path, string_table, path_fork) {
             Some(ResolvedGraphPath::Header(resolved_path)) => ResolvedDependencyEdge {
-                requested_path: requested_path.to_owned(),
+                requested_path,
                 resolved_path: Some(resolved_path),
                 span,
                 source_order,
@@ -349,7 +355,7 @@ impl<'a> DependencyGraph<'a> {
             },
             Some(ResolvedGraphPath::SourcePackagePublicExport(resolved_path)) => {
                 ResolvedDependencyEdge {
-                    requested_path: requested_path.to_owned(),
+                    requested_path,
                     resolved_path: Some(resolved_path),
                     span,
                     source_order,
@@ -357,15 +363,15 @@ impl<'a> DependencyGraph<'a> {
                 }
             }
             Some(ResolvedGraphPath::ProviderInterface(resolved_path)) => ResolvedDependencyEdge {
-                requested_path: requested_path.to_owned(),
+                requested_path,
                 resolved_path: Some(resolved_path),
                 span,
                 source_order,
                 kind: DependencyEdgeKind::ProviderInterface,
             },
-            None if self.is_same_file_symbol_hint(requested_path, &header.source_file) => {
+            None if self.is_same_file_symbol_hint(requested_path, header.source_file, path_fork) => {
                 ResolvedDependencyEdge {
-                    requested_path: requested_path.to_owned(),
+                    requested_path,
                     resolved_path: None,
                     span,
                     source_order,
@@ -374,7 +380,7 @@ impl<'a> DependencyGraph<'a> {
             }
             None if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource => {
                 ResolvedDependencyEdge {
-                    requested_path: requested_path.to_owned(),
+                    requested_path,
                     resolved_path: None,
                     span,
                     source_order,
@@ -382,7 +388,7 @@ impl<'a> DependencyGraph<'a> {
                 }
             }
             None => ResolvedDependencyEdge {
-                requested_path: requested_path.to_owned(),
+                requested_path,
                 resolved_path: None,
                 span,
                 source_order,
@@ -397,16 +403,18 @@ impl<'a> DependencyGraph<'a> {
 
     fn is_source_package_public_export_path(
         &self,
-        path: &InternedPath,
+        path: PathId,
         string_table: &StringTable,
+        path_fork: &PathInternerFork,
     ) -> bool {
-        let components = path.as_components();
+        let mut scratch = Vec::new();
+        let components = path_fork.resolve_components(path, &mut scratch);
         if components.is_empty() {
             return false;
         }
 
         let first_component = string_table.resolve(components[0]);
-        let Some(export_name) = path.name() else {
+        let Some(export_name) = path_fork.component(path) else {
             return false;
         };
 
@@ -421,19 +429,29 @@ impl<'a> DependencyGraph<'a> {
         false
     }
 
-    fn is_same_file_symbol_hint(&self, path: &InternedPath, source_file: &InternedPath) -> bool {
-        path.parent().as_ref() == Some(source_file)
+    fn is_same_file_symbol_hint(
+        &self,
+        path: PathId,
+        source_file: PathId,
+        path_fork: &PathInternerFork,
+    ) -> bool {
+        path_fork.parent(path) == Some(source_file)
     }
 }
 
 struct ResolvedDependencyEdge {
-    requested_path: InternedPath,
-    resolved_path: Option<InternedPath>,
+    requested_path: PathId,
+    resolved_path: Option<PathId>,
     span: Option<SourceSpan>,
     source_order: Option<usize>,
     kind: DependencyEdgeKind,
 }
 
+enum ResolvedGraphPath {
+    Header(PathId),
+    ProviderInterface(PathId),
+    SourcePackagePublicExport(PathId),
+}
 enum DependencyEdgeKind {
     GraphHeader,
     ProviderInterface,
@@ -445,12 +463,6 @@ enum DependencyEdgeKind {
     /// content target; ordering must defer to that lane instead of raising a second error.
     MissingContentSource,
     Missing,
-}
-
-enum ResolvedGraphPath {
-    Header(InternedPath),
-    ProviderInterface(InternedPath),
-    SourcePackagePublicExport(InternedPath),
 }
 
 /// Failure lanes shared by the DFS visit and edge-recursion boundaries.
@@ -479,6 +491,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     parsed: BoundModuleHeaders,
     content_source_targets: &ContentSourceTargets,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<SortedHeaders, PremergeFailure> {
     let BoundModuleHeaders {
         headers,
@@ -520,7 +533,6 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
             &module_symbols.source_package_public_exports,
             &binding_environment.imported_declarations_by_local_path,
             content_source_targets,
-            string_table,
         );
         let mut diagnostic_bag = DiagnosticBag::new();
 
@@ -535,11 +547,12 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                     .and_then(|header| header.name_span);
 
                 match visit_node(
-                    path,
+                    *path,
                     &graph,
                     &mut tracker,
                     &mut sorted,
                     string_table,
+                    path_fork,
                     diagnostic_span,
                 ) {
                     Ok(()) => {}
@@ -576,7 +589,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     // Build the complete sorted declaration placeholder list from the topologically
     // ordered headers and append builtins.
     // WHY: declarations must be in sorted order so AST passes see dependencies before dependents.
-    module_symbols.build_sorted_declarations(&sorted, string_table);
+    module_symbols.build_sorted_declarations(&sorted, string_table, path_fork);
 
     add_frontend_counter(
         FrontendCounter::DependencyHeaderCount,
@@ -602,18 +615,21 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
 
 /// DFS visit for one module node, pushing clones into `sorted`.
 fn visit_node(
-    node_path: &InternedPath,
+    node_path: PathId,
     graph: &DependencyGraph<'_>,
     tracker: &mut DependencyTracker,
     sorted: &mut Vec<Header>,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
     diagnostic_span: Option<SourceSpan>,
 ) -> VisitResult {
     tracker.visit_count += 1;
 
-    let Some(resolved_graph_path) = graph.resolve_requested_path(node_path, string_table) else {
+    let Some(resolved_graph_path) =
+        graph.resolve_requested_path(node_path, string_table, path_fork)
+    else {
         return Err(VisitFailure::Diagnostic(
-            CompilerDiagnostic::missing_import_target(node_path.to_owned(), diagnostic_span),
+            CompilerDiagnostic::missing_import_target(node_path, diagnostic_span),
         ));
     };
 
@@ -634,10 +650,11 @@ fn visit_node(
 
     if !tracker.visited.contains(&resolved_path) {
         let Some(header) = graph.header_for_path(&resolved_path) else {
+            let mut scratch = Vec::new();
             return Err(VisitFailure::Infrastructure(CompilerError::new(
                 format!(
                     "Dependency ordering resolved '{}' but it was missing from the graph.",
-                    resolved_path.to_portable_string(string_table)
+                    path_fork.render_portable(resolved_path, string_table, &mut scratch)
                 ),
                 None,
                 crate::compiler_frontend::compiler_errors::ErrorType::Compiler,
@@ -648,11 +665,13 @@ fn visit_node(
         // WHY: edges include type surfaces and constant initializer references.
         // Executable body references are excluded.
         let dependency_edges = graph
-            .sorted_dependency_edges_for_header(header, string_table)
+            .sorted_dependency_edges_for_header(header, string_table, path_fork)
             .map_err(VisitFailure::Infrastructure)?;
-        tracker.enter(resolved_path.to_owned());
+        tracker.enter(resolved_path);
         for edge in dependency_edges {
-            if let Err(error) = visit_dependency_edge(edge, graph, tracker, sorted, string_table) {
+            if let Err(error) =
+                visit_dependency_edge(edge, graph, tracker, sorted, string_table, path_fork)
+            {
                 tracker.abandon(&resolved_path);
                 return Err(error);
             }
@@ -671,6 +690,7 @@ fn visit_dependency_edge(
     tracker: &mut DependencyTracker,
     sorted: &mut Vec<Header>,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> VisitResult {
     match edge.kind {
         DependencyEdgeKind::GraphHeader => {
@@ -683,11 +703,12 @@ fn visit_dependency_edge(
             };
 
             visit_node(
-                &resolved_path,
+                resolved_path,
                 graph,
                 tracker,
                 sorted,
                 string_table,
+                path_fork,
                 edge.span,
             )
         }

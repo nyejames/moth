@@ -22,7 +22,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
@@ -41,9 +41,9 @@ pub(crate) struct ValidateTraitEvidenceInput<'a> {
     pub(crate) receiver_methods: &'a ReceiverMethodCatalog,
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) binding_environment: &'a HeaderBindingEnvironment,
-    pub(crate) nominal_type_ids_by_path: &'a FxHashMap<InternedPath, TypeId>,
-    pub(crate) struct_source_by_path: &'a FxHashMap<InternedPath, InternedPath>,
-    pub(crate) choice_source_by_path: &'a FxHashMap<InternedPath, InternedPath>,
+    pub(crate) nominal_type_ids_by_path: &'a FxHashMap<PathId, TypeId>,
+    pub(crate) struct_source_by_path: &'a FxHashMap<PathId, PathId>,
+    pub(crate) choice_source_by_path: &'a FxHashMap<PathId, PathId>,
     pub(crate) string_table: &'a mut StringTable,
 }
 
@@ -52,7 +52,7 @@ struct PendingConformanceEvidence {
     target_name: StringId,
     trait_id: TraitId,
     trait_name: StringId,
-    source_file: InternedPath,
+    source_file: PathId,
     declaration_span: Option<SourceSpan>,
     trait_span: Option<SourceSpan>,
 }
@@ -106,7 +106,7 @@ pub(crate) fn validate_trait_evidence(
                     Vec::new(),
                 )
             })?;
-        let conformance_source_file = header.source_file.clone();
+        let conformance_source_file = header.source_file;
 
         let target_context = ResolveConformanceTargetContext {
             conformance_source_file: &conformance_source_file,
@@ -188,7 +188,7 @@ pub(crate) fn validate_trait_evidence(
                 target_name: conformance.target.name,
                 trait_id,
                 trait_name: trait_ref.name,
-                source_file: conformance_source_file.clone(),
+                source_file: conformance_source_file,
                 declaration_span: Some(conformance.target.span),
                 trait_span: Some(trait_ref.span),
             });

@@ -36,17 +36,17 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 };
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use rustc_hash::FxHashMap;
@@ -63,6 +63,7 @@ pub(crate) struct GenericFunctionCallParseInput<'a, 'b> {
     pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 /// Expected-result evidence available to generic free-function inference.
@@ -88,6 +89,7 @@ struct GenericFunctionCallFinishInput<'a, 'b> {
     warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     type_interner: &'a mut AstTypeInterner<'b>,
     string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
 }
 
 fn parse_generic_function_call(
@@ -104,16 +106,19 @@ fn parse_generic_function_call(
         warnings,
         type_interner,
         string_table,
+        path_fork,
     } = input;
 
-    let parameter_expectations = expectations_from_user_parameters(&template.signature.parameters);
+    let parameter_expectations =
+        expectations_from_user_parameters(&template.signature.parameters, path_fork);
     let raw_arguments = parse_generic_call_arguments_typed(
         token_stream,
         context,
         type_interner,
         string_table,
-        template.function_path.name(),
+        path_fork.component(template.function_path),
         &parameter_expectations,
+        path_fork,
     )?;
     let inference = infer_generic_function_call(GenericFunctionInferenceInput {
         template,
@@ -122,29 +127,29 @@ fn parse_generic_function_call(
         call_span,
         type_environment: type_interner.environment_mut_for_derived_types(),
         string_table,
+        path_fork,
     })?;
     let selected_evidence = validate_generic_function_bound_evidence(
         template,
         inference.key.type_arguments.as_ref(),
         context,
         type_interner.environment(),
+        path_fork,
         call_span,
     )?;
 
     if context.is_generic_function_instantiation_active(&inference.key) {
         return Err(recursive_generic_function_instantiation(
-            template.function_path.name(),
+            path_fork.component(template.function_path),
             call_span,
         )
         .into());
     }
-
-    let callee_name = template
-        .function_path
-        .name_str(string_table)
-        .map(|name| name.to_owned())
+    let callee_name = path_fork
+        .component(template.function_path)
+        .map(|name| string_table.resolve(name).to_owned())
         .unwrap_or_else(|| String::from("<generic function>"));
-    let expectations = expectations_from_user_parameters(&inference.signature.parameters);
+    let expectations = expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let type_check_context = type_interner.type_check_context();
     let arguments = resolve_call_arguments(
         CallDiagnosticContext::function(&callee_name),
@@ -155,12 +160,13 @@ fn parse_generic_function_call(
             string_table,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
+            path_fork,
         },
     )
     .map_err(ExpressionParseError::from)?;
 
     let call = HandledFallibleCall {
-        name: inference.instance_path.clone(),
+        name: inference.instance_path,
         args: arguments,
         result_type_ids: inference.signature.success_return_type_ids(),
         call_span,
@@ -176,13 +182,14 @@ fn parse_generic_function_call(
         warnings,
         type_interner,
         string_table,
+        path_fork,
     })?;
 
     context.record_generic_function_instantiation_request(GenericFunctionInstantiationRequest {
         declaration_identity: template.declaration_identity.clone(),
         evidence: selected_evidence,
         key: inference.key,
-        instance_path: inference.instance_path.clone(),
+        instance_path: inference.instance_path,
         call_span,
     });
 
@@ -209,16 +216,19 @@ fn validate_generic_function_template_call(
         warnings,
         type_interner,
         string_table,
+        path_fork,
     } = input;
 
-    let parameter_expectations = expectations_from_user_parameters(&template.signature.parameters);
+    let parameter_expectations =
+        expectations_from_user_parameters(&template.signature.parameters, path_fork);
     let raw_arguments = parse_generic_call_arguments_typed(
         token_stream,
         context,
         type_interner,
         string_table,
-        template.function_path.name(),
+        path_fork.component(template.function_path),
         &parameter_expectations,
+        path_fork,
     )?;
     let inference = infer_generic_function_call(GenericFunctionInferenceInput {
         template,
@@ -227,21 +237,22 @@ fn validate_generic_function_template_call(
         call_span,
         type_environment: type_interner.environment_mut_for_derived_types(),
         string_table,
+        path_fork,
     })?;
     validate_generic_function_bound_evidence(
         template,
         inference.key.type_arguments.as_ref(),
         context,
         type_interner.environment(),
+        path_fork,
         call_span,
     )?;
 
-    let callee_name = template
-        .function_path
-        .name_str(string_table)
-        .map(|name| name.to_owned())
+    let callee_name = path_fork
+        .component(template.function_path)
+        .map(|name| string_table.resolve(name).to_owned())
         .unwrap_or_else(|| String::from("<generic function>"));
-    let expectations = expectations_from_user_parameters(&inference.signature.parameters);
+    let expectations = expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let arguments = resolve_call_arguments_shape_and_access(
         CallDiagnosticContext::function(&callee_name),
         &raw_arguments,
@@ -249,11 +260,12 @@ fn validate_generic_function_template_call(
         call_span,
         string_table,
         type_interner.environment(),
+        path_fork,
     )
     .map_err(ExpressionParseError::from)?;
 
     let call = HandledFallibleCall {
-        name: template.function_path.clone(),
+        name: template.function_path,
         args: arguments,
         result_type_ids: inference.signature.success_return_type_ids(),
         call_span,
@@ -269,6 +281,7 @@ fn validate_generic_function_template_call(
         warnings,
         type_interner,
         string_table,
+        path_fork,
     })
 }
 
@@ -291,6 +304,7 @@ fn finish_generic_function_call(
         warnings,
         type_interner,
         string_table,
+        path_fork,
     } = input;
 
     let Some(error_return_type_id) = error_return_type_id else {
@@ -329,6 +343,7 @@ fn finish_generic_function_call(
             warnings,
             type_interner,
             string_table,
+            path_fork,
         );
     }
 
@@ -346,11 +361,12 @@ pub(crate) struct GenericFunctionInferenceInput<'a> {
     pub(crate) call_span: Option<SourceSpan>,
     pub(crate) type_environment: &'a mut TypeEnvironment,
     pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 pub(crate) struct GenericFunctionInference {
     pub(crate) key: GenericFunctionInstanceKey,
-    pub(crate) instance_path: InternedPath,
+    pub(crate) instance_path: PathId,
     pub(crate) signature: FunctionSignature,
 }
 
@@ -369,6 +385,7 @@ struct GenericBindingEvidenceContext<'a> {
     evidence_locations: &'a mut GenericBindingEvidenceLocations,
     type_environment: &'a TypeEnvironment,
     string_table: &'a mut StringTable,
+    path_fork: &'a PathInternerFork,
 }
 
 impl GenericBindingEvidenceLocations {
@@ -415,12 +432,12 @@ pub(crate) fn infer_generic_function_call(
         call_span,
         type_environment,
         string_table,
+        path_fork,
     } = input;
 
-    let expectations = expectations_from_user_parameters(&template.signature.parameters);
+    let expectations = expectations_from_user_parameters(&template.signature.parameters, path_fork);
     let routed_arguments =
         order_call_arguments_by_retained_slot(raw_arguments, expectations.len())?;
-
     let mut bindings = GenericTypeBindings::new();
     let mut evidence_locations = GenericBindingEvidenceLocations::new();
     collect_call_argument_bindings(
@@ -431,6 +448,7 @@ pub(crate) fn infer_generic_function_call(
         &mut evidence_locations,
         type_environment,
         string_table,
+        path_fork,
     )?;
 
     if !bindings.is_complete_for(template.generic_parameter_list_id, type_environment)
@@ -444,6 +462,7 @@ pub(crate) fn infer_generic_function_call(
             &mut evidence_locations,
             type_environment,
             string_table,
+            path_fork,
             call_span,
         )?;
     }
@@ -454,7 +473,7 @@ pub(crate) fn infer_generic_function_call(
         let missing_parameters =
             missing_generic_parameter_names(template, &bindings, type_environment);
         return Err(cannot_infer_generic_function_arguments(
-            template.function_path.name(),
+            path_fork.component(template.function_path),
             missing_parameters,
             call_span,
         )
@@ -468,17 +487,18 @@ pub(crate) fn infer_generic_function_call(
     )
     .ok_or_else(|| {
         cannot_infer_generic_function_arguments(
-            template.function_path.name(),
+            path_fork.component(template.function_path),
             missing_generic_parameter_names(template, &bindings, type_environment),
             call_span,
         )
     })?;
     let signature = substitute_function_signature(&template.signature, &mapping, type_environment);
     let instance_path = generic_function_instance_path(
-        &template.function_path,
+        template.function_path,
         type_arguments.as_ref(),
+        path_fork,
         string_table,
-    );
+    )?;
 
     Ok(GenericFunctionInference {
         key: GenericFunctionInstanceKey {
@@ -495,6 +515,7 @@ pub(crate) fn validate_generic_function_bound_evidence(
     type_arguments: &[TypeId],
     context: &ScopeContext,
     type_environment: &TypeEnvironment,
+    path_fork: &PathInternerFork,
     call_span: Option<SourceSpan>,
 ) -> Result<Box<[crate::compiler_frontend::traits::ids::TraitEvidenceId]>, ExpressionParseError> {
     let Some(parameter_list) =
@@ -564,10 +585,14 @@ pub(crate) fn validate_generic_function_bound_evidence(
             let trait_name = trait_environment
                 .get(*trait_id)
                 .map(|definition| definition.name)
-                .unwrap_or(template.function_path.name().unwrap_or(parameter.name));
+                .unwrap_or(
+                    path_fork
+                        .component(template.function_path)
+                        .unwrap_or(parameter.name),
+                );
 
             return Err(missing_generic_function_trait_evidence(
-                template.function_path.name(),
+                path_fork.component(template.function_path),
                 parameter.name,
                 trait_name,
                 *concrete_type_id,
@@ -604,6 +629,7 @@ fn collect_call_argument_bindings(
     evidence_locations: &mut GenericBindingEvidenceLocations,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let mut evidence_context = GenericBindingEvidenceContext {
         template,
@@ -611,6 +637,7 @@ fn collect_call_argument_bindings(
         evidence_locations,
         type_environment,
         string_table,
+        path_fork,
     };
 
     for (slot, argument) in routed_arguments.iter().enumerate() {
@@ -640,6 +667,7 @@ fn collect_expected_result_bindings(
     evidence_locations: &mut GenericBindingEvidenceLocations,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     let mut evidence_context = GenericBindingEvidenceContext {
@@ -648,6 +676,7 @@ fn collect_expected_result_bindings(
         evidence_locations,
         type_environment,
         string_table,
+        path_fork,
     };
 
     for (template_return_type, expected_type) in template
@@ -695,24 +724,28 @@ fn collect_binding_evidence(
             // mismatch, not a repeated-parameter conflict.
             Ok(())
         }
-        Err(conflict) => Err(binding_conflict_diagnostic(
-            context.template,
-            conflict,
-            &*context.evidence_locations,
-            context.type_environment,
-            &mut *context.string_table,
-            span,
-        )
-        .into()),
+        Err(conflict) => Err(
+            binding_conflict_diagnostic(
+                context.template,
+                conflict,
+                &*context.evidence_locations,
+                context.type_environment,
+                &mut *context.string_table,
+                context.path_fork,
+                span,
+            )
+            .into(),
+        ),
     }
-}
 
+}
 fn binding_conflict_diagnostic(
     template: &GenericFunctionTemplate,
     conflict: BindingConflict,
     evidence_locations: &GenericBindingEvidenceLocations,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
     span: Option<SourceSpan>,
 ) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
     let parameter_name = type_environment
@@ -727,7 +760,7 @@ fn binding_conflict_diagnostic(
 
     let previous = evidence_locations.previous(conflict.parameter_id);
     conflicting_generic_function_argument(
-        template.function_path.name(),
+        path_fork.component(template.function_path),
         conflict,
         parameter_name,
         span,
@@ -825,30 +858,21 @@ fn missing_generic_parameter_names(
 }
 
 pub(crate) fn generic_function_instance_path(
-    function_path: &InternedPath,
+    function_path: PathId,
     type_arguments: &[TypeId],
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> InternedPath {
+) -> Result<PathId, CompilerError> {
     // WHAT: builds an internal-only path for a concrete generic function instance.
     // WHY: instances are emitted into the consuming module's AST/HIR and are not
     //      user-visible, dependency-bindable, or namespace-exposed.
-    //
-    // The suffix uses module-local numeric TypeId values. This is safe because:
-    // - instances are scoped to one module and never shared across modules;
-    // - TypeIds are deterministic within a module;
-    // - diagnostics and namespace records always use the authored template name,
-    //   not this synthetic path.
-    //
-    // If backend output or debug symbols ever need stable cross-module names,
-    // this suffix can be replaced with a deterministic hash over canonical
-    // declaration identity plus TypeEnvironment::type_id_to_type_identity_key.
     let argument_suffix = type_arguments
         .iter()
         .map(|type_id| type_id.0.to_string())
         .collect::<Vec<_>>()
         .join("_");
-    function_path.join_str(
-        &format!("__generic_instance_{argument_suffix}"),
-        string_table,
-    )
+    let component = string_table.intern(&format!("__generic_instance_{argument_suffix}"));
+    path_fork.try_intern_child(function_path, component).ok_or_else(|| {
+        CompilerError::compiler_error("path table exhausted while creating generic function instance")
+    })
 }

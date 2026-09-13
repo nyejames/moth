@@ -351,144 +351,132 @@ fn collection_length_is_infallible_runtime_helper() {
 
 /// Verifies that emitted `__moth_collection_remove` calls are not implicitly propagated. [collection]
 #[test]
-fn collection_remove_call_is_not_wrapped_with_result_propagate() {
-    let mut string_table = StringTable::new();
-    let (type_environment, types) = build_type_environment();
+fn collection_remove_call_is_not_wrapped_with_result_propagate() {  let mut path_fork = PathInternerFork::empty(); let mut string_table = StringTable::new(); let (type_environment, types) = build_type_environment();
 
-    let remove_id =
-        crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionRemove;
+let remove_id =
+    crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionRemove;
 
-    let call_statement = statement(
-        1,
-        HirStatementKind::Call {
-            target: CallTarget::External(remove_id),
-            args: vec![
-                expression(
-                    1,
-                    HirExpressionKind::Collection(vec![]),
-                    types.collection_int,
-                    RegionId(0),
-                    ValueKind::RValue,
-                ),
-                int_expression(2, 0, types.int, RegionId(0)),
-            ],
-            result: Some(LocalId(0)),
-        },
-    );
-
-    let block = HirBlock {
-        id: BlockId(0),
-        region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
-        statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
-    };
-
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
-
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "removed")],
-    );
-
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
-    .expect("JS lowering should succeed");
-
-    let removed_name = expected_dev_local_name("removed", 0);
-
-    assert!(
-        output.source.contains(&format!(
-            "__moth_assign_value({removed_name}, __moth_collection_remove("
-        )),
-        "external fallible call result carriers must be assigned as fresh values"
-    );
-    assert!(
-        output.source.contains("__moth_collection_remove(")
-            && !output
-                .source
-                .contains("__moth_result_propagate(__moth_collection_remove("),
-        "__moth_collection_remove host call must not be auto-propagated by JS statement lowering"
-    );
-}
-
-/// Verifies that emitted `__moth_collection_length` calls are plain value calls. [collection]
-#[test]
-fn collection_length_call_is_not_wrapped_with_result_propagate() {
-    let mut string_table = StringTable::new();
-    let (type_environment, types) = build_type_environment();
-
-    let length_id =
-        crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionLength;
-
-    let call_statement = statement(
-        1,
-        HirStatementKind::Call {
-            target: CallTarget::External(length_id),
-            args: vec![expression(
+let call_statement = statement(
+    1,
+    HirStatementKind::Call {
+        target: CallTarget::External(remove_id),
+        args: vec![
+            expression(
                 1,
                 HirExpressionKind::Collection(vec![]),
                 types.collection_int,
                 RegionId(0),
                 ValueKind::RValue,
-            )],
-            result: Some(LocalId(0)),
-        },
-    );
+            ),
+            int_expression(2, 0, types.int, RegionId(0)),
+        ],
+        result: Some(LocalId(0)),
+    },
+);
 
-    let block = HirBlock {
-        id: BlockId(0),
-        region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
-        statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
-    };
+let block = HirBlock {
+    id: BlockId(0),
+    region: RegionId(0),
+    locals: vec![local(0, types.int, RegionId(0))],
+    statements: vec![call_statement],
+    terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
+};
 
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
+let function = HirFunction {
+    id: FunctionId(0),
+    entry: BlockId(0),
+    params: vec![],
+    return_type: types.unit,
+};
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "len")],
-    );
+let module = build_module(&mut path_fork, &mut string_table,
+"main",
+vec![block],
+function,
+&[(LocalId(0), "removed")],);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
-    .expect("JS lowering should succeed");
+let output = lower_hir_to_js(&module,
+&BorrowCheckReport::default(),
+&string_table,
+default_config(),
+&type_environment,
+&path_fork.snapshot_table())
+.expect("JS lowering should succeed");
 
-    assert!(
-        output.source.contains("__moth_collection_length(")
-            && !output
-                .source
-                .contains("__moth_result_propagate(__moth_collection_length("),
-        "__moth_collection_length host call must stay plain"
-    );
-}
+let removed_name = expected_dev_local_name("removed", 0);
+
+assert!(
+    output.source.contains(&format!(
+        "__moth_assign_value({removed_name}, __moth_collection_remove("
+    )),
+    "external fallible call result carriers must be assigned as fresh values"
+);
+assert!(
+    output.source.contains("__moth_collection_remove(")
+        && !output
+            .source
+            .contains("__moth_result_propagate(__moth_collection_remove("),
+    "__moth_collection_remove host call must not be auto-propagated by JS statement lowering"
+); }
+
+/// Verifies that emitted `__moth_collection_length` calls are plain value calls. [collection]
+#[test]
+fn collection_length_call_is_not_wrapped_with_result_propagate() {  let mut path_fork = PathInternerFork::empty(); let mut string_table = StringTable::new(); let (type_environment, types) = build_type_environment();
+
+let length_id =
+    crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionLength;
+
+let call_statement = statement(
+    1,
+    HirStatementKind::Call {
+        target: CallTarget::External(length_id),
+        args: vec![expression(
+            1,
+            HirExpressionKind::Collection(vec![]),
+            types.collection_int,
+            RegionId(0),
+            ValueKind::RValue,
+        )],
+        result: Some(LocalId(0)),
+    },
+);
+
+let block = HirBlock {
+    id: BlockId(0),
+    region: RegionId(0),
+    locals: vec![local(0, types.int, RegionId(0))],
+    statements: vec![call_statement],
+    terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+};
+
+let function = HirFunction {
+    id: FunctionId(0),
+    entry: BlockId(0),
+    params: vec![],
+    return_type: types.unit,
+};
+
+let module = build_module(&mut path_fork, &mut string_table,
+"main",
+vec![block],
+function,
+&[(LocalId(0), "len")],);
+
+let output = lower_hir_to_js(&module,
+&BorrowCheckReport::default(),
+&string_table,
+default_config(),
+&type_environment,
+&path_fork.snapshot_table())
+.expect("JS lowering should succeed");
+
+assert!(
+    output.source.contains("__moth_collection_length(")
+        && !output
+            .source
+            .contains("__moth_result_propagate(__moth_collection_length("),
+    "__moth_collection_length host call must stay plain"
+); }
 
 /// Verifies that `__moth_cast_int` rejects non-numeric strings with a Parse error. [cast]
 #[test]
@@ -550,67 +538,61 @@ fn cast_int_uses_i32_range_helpers() {
 
 /// Verifies that `__moth_cast_float_to_int` uses the shared i32 range helper. [cast]
 #[test]
-fn cast_float_to_int_uses_i32_range_helper() {
-    let mut string_table = StringTable::new();
-    let (type_environment, types) = build_type_environment();
-    let region = RegionId(0);
+fn cast_float_to_int_uses_i32_range_helper() {  let mut path_fork = PathInternerFork::empty(); let mut string_table = StringTable::new(); let (type_environment, types) = build_type_environment();
+let region = RegionId(0);
 
-    let source_expr = expression(
-        1,
-        HirExpressionKind::Float((i32::MAX as f64) + 1.0),
-        type_environment.builtins().float,
-        region,
-        ValueKind::Const,
-    );
+let source_expr = expression(
+    1,
+    HirExpressionKind::Float((i32::MAX as f64) + 1.0),
+    type_environment.builtins().float,
+    region,
+    ValueKind::Const,
+);
 
-    let cast_statement = statement(
-        2,
-        HirStatementKind::CastOp {
-            policy:
-                crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::FloatToInt,
-            source: source_expr,
-            result: Some(LocalId(0)),
-        },
-    );
+let cast_statement = statement(
+    2,
+    HirStatementKind::CastOp {
+        policy:
+            crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::FloatToInt,
+        source: source_expr,
+        result: Some(LocalId(0)),
+    },
+);
 
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![local(0, types.int, region)],
-        statements: vec![cast_statement],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
-    };
+let block = HirBlock {
+    id: BlockId(0),
+    region,
+    locals: vec![local(0, types.int, region)],
+    statements: vec![cast_statement],
+    terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+};
 
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
+let function = HirFunction {
+    id: FunctionId(0),
+    entry: BlockId(0),
+    params: vec![],
+    return_type: types.unit,
+};
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
+let module = build_module(&mut path_fork, &mut string_table,
+"main",
+vec![block],
+function,
+&[(LocalId(0), "result")],);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
-    .expect("JS lowering should succeed");
+let output = lower_hir_to_js(&module,
+&BorrowCheckReport::default(),
+&string_table,
+default_config(),
+&type_environment,
+&path_fork.snapshot_table())
+.expect("JS lowering should succeed");
 
-    let cast = helper_source(&output.source, "__moth_cast_float_to_int");
-    assert!(
-        cast.contains("!__moth_cast_int_in_range(truncated)"),
-        "__moth_cast_float_to_int must reject truncated values outside the i32 range"
-    );
-}
+let cast = helper_source(&output.source, "__moth_cast_float_to_int");
+assert!(
+    cast.contains("!__moth_cast_int_in_range(truncated)"),
+    "__moth_cast_float_to_int must reject truncated values outside the i32 range"
+); }
 
 /// Verifies that `__moth_cast_float` rejects invalid strings with a Parse error. [cast]
 #[test]
@@ -1013,6 +995,7 @@ fn lower_minimal_module_with_float_helper(
     helper: FloatHelperEmission,
 ) -> String {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -1053,21 +1036,18 @@ fn lower_minimal_module_with_float_helper(
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        function_name,
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    function_name,
+    vec![block],
+    function,
+    &[(LocalId(0), "result")],);
 
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        JsLoweringConfig::direct_js(false),
-        &type_environment,
-    )
+    lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    JsLoweringConfig::direct_js(false),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed")
     .source
 }

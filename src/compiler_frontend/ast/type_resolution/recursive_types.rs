@@ -8,7 +8,7 @@ use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     GenericBaseType, GenericInstantiationKey, TypeIdentityKey,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -17,7 +17,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 // --------------------------
 
 pub(crate) fn validate_no_recursive_generic_type(
-    declaration_path: &InternedPath,
+    declaration_path: &PathId,
     data_type: &DataType,
     span: Option<SourceSpan>,
     _string_table: &StringTable,
@@ -26,16 +26,16 @@ pub(crate) fn validate_no_recursive_generic_type(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::invalid_declaration(
+    return Err(CompilerDiagnostic::invalid_declaration(
         InvalidDeclarationReason::RecursiveGenericType,
-        declaration_path.name(),
+        None,
         span,
-    ))
+    ));
 }
 
 fn generic_type_references_nominal_path(
     data_type: &DataType,
-    declaration_path: &InternedPath,
+    declaration_path: &PathId,
 ) -> bool {
     match data_type {
         DataType::GenericInstance { base, arguments } => {
@@ -103,7 +103,7 @@ fn generic_type_references_nominal_path(
 
 fn generic_instance_key_references_nominal_path(
     key: &GenericInstantiationKey,
-    declaration_path: &InternedPath,
+    declaration_path: &PathId,
 ) -> bool {
     &key.base_path == declaration_path
         || key
@@ -114,7 +114,7 @@ fn generic_instance_key_references_nominal_path(
 
 fn type_identity_key_references_nominal_path(
     key: &TypeIdentityKey,
-    declaration_path: &InternedPath,
+    declaration_path: &PathId,
 ) -> bool {
     match key {
         TypeIdentityKey::Nominal(path) => path == declaration_path,
@@ -142,7 +142,7 @@ fn type_identity_key_references_nominal_path(
 
 fn collect_runtime_struct_dependencies(
     data_type: &DataType,
-    dependencies: &mut FxHashSet<InternedPath>,
+    dependencies: &mut FxHashSet<PathId>,
 ) {
     // WHY: Cycle validation only cares about runtime struct-to-struct edges,
     // not scalar or constant data.
@@ -180,17 +180,17 @@ fn collect_runtime_struct_dependencies(
 
 /// Reject runtime struct cycles that would make concrete layout impossible to lower.
 pub(crate) fn validate_no_recursive_runtime_structs(
-    struct_fields_by_path: &FxHashMap<InternedPath, Vec<Declaration>>,
+    struct_fields_by_path: &FxHashMap<PathId, Vec<Declaration>>,
     string_table: &StringTable,
 ) -> TypeResolutionResult<()> {
     // WHY: V1 runtime structs do not support recursive layout semantics yet.
     // These cycles must fail in AST construction with a targeted rule error.
     fn visit(
-        current: &InternedPath,
-        struct_fields_by_path: &FxHashMap<InternedPath, Vec<Declaration>>,
+        current: &PathId,
+        struct_fields_by_path: &FxHashMap<PathId, Vec<Declaration>>,
         string_table: &StringTable,
-        visiting: &mut Vec<InternedPath>,
-        visited: &mut FxHashSet<InternedPath>,
+        visiting: &mut Vec<PathId>,
+        visited: &mut FxHashSet<PathId>,
     ) -> TypeResolutionResult<()> {
         if visited.contains(current) {
             return Ok(());
@@ -199,7 +199,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
         if let Some(index) = visiting.iter().position(|path| path == current) {
             let cycle = visiting[index..]
                 .iter()
-                .map(|path| path.to_string(string_table))
+                .map(|path| format!("{path:?}"))
                 .collect::<Vec<_>>()
                 .join(" -> ");
             let cycle_span = struct_fields_by_path

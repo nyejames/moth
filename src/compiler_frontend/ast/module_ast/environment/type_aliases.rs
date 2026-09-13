@@ -30,7 +30,7 @@ use crate::compiler_frontend::headers::{
     VisibleNamedTypeResolution, resolve_visible_named_type_path,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashSet;
 use std::rc::Rc;
@@ -54,7 +54,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
-    ) -> Result<FxHashSet<InternedPath>, CompilerMessages> {
+    ) -> Result<FxHashSet<PathId>, CompilerMessages> {
         let mut waiting = FxHashSet::default();
         for &declaration_id in &declaration_lanes.aliases {
             let header = declaration_lanes
@@ -95,7 +95,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
-        waiting_for_constants: &FxHashSet<InternedPath>,
+        waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         for &declaration_id in &declaration_lanes.aliases {
@@ -140,7 +140,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let error = CompilerError::new(
                 format!(
                     "Type alias '{}' was never published with a completed target type.",
-                    header.tokens.src_path.to_string(string_table),
+                    self.path_fork.render_portable(
+                        header.tokens.src_path,
+                        string_table,
+                        &mut Vec::new(),
+                    ),
                 ),
                 header.name_span,
                 ErrorType::Compiler,
@@ -252,7 +256,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     InvalidDeclarationReason::ExternalTypeAlias {
                         type_name: string_table.intern(&type_name),
                     },
-                    header.tokens.src_path.name(),
+                    self.path_fork.component(header.tokens.src_path),
                     header.name_span,
                 ),
                 string_table,

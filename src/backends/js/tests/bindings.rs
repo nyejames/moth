@@ -11,6 +11,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 // Local binding and assignment tests [binding] [alias]
 // ---------------------------------------------------------------------------
@@ -19,6 +20,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 #[test]
 fn local_slot_assignment_emits_assign_value() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign = statement(
@@ -44,21 +46,18 @@ fn local_slot_assignment_emits_assign_value() {
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "count")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "count")],);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let count_name = expected_dev_local_name("count", 0);
 
@@ -77,6 +76,7 @@ fn local_slot_assignment_emits_assign_value() {
 #[test]
 fn function_parameters_emit_param_binding() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let block = HirBlock {
@@ -94,21 +94,18 @@ fn function_parameters_emit_param_binding() {
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        "takes_arg",
-        vec![block],
-        function,
-        &[(LocalId(0), "arg")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    "takes_arg",
+    vec![block],
+    function,
+    &[(LocalId(0), "arg")],);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let arg_name = expected_dev_local_name("arg", 0);
 
@@ -128,6 +125,7 @@ fn function_parameters_emit_param_binding() {
 #[test]
 fn borrow_assignment_emits_assign_borrow() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign_source = statement(
@@ -170,21 +168,18 @@ fn borrow_assignment_emits_assign_borrow() {
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "source"), (LocalId(1), "alias")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "source"), (LocalId(1), "alias")],);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let alias_name = expected_dev_local_name("alias", 1);
     let source_name = expected_dev_local_name("source", 0);
@@ -201,6 +196,7 @@ fn borrow_assignment_emits_assign_borrow() {
 #[test]
 fn alias_local_read_emits_bs_read() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let io_id = crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine;
@@ -260,21 +256,18 @@ fn alias_local_read_emits_bs_read() {
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "source"), (LocalId(1), "alias")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "source"), (LocalId(1), "alias")],);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let alias_name = expected_dev_local_name("alias", 1);
 
@@ -290,6 +283,7 @@ fn alias_local_read_emits_bs_read() {
 #[test]
 fn alias_only_local_assignment_emits_write() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign = statement(
@@ -315,13 +309,11 @@ fn alias_only_local_assignment_emits_write() {
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "target")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "target")],);
 
     // Mark the local as alias-only at the assignment statement so the emitter takes the
     // __moth_write path instead of __moth_assign_value.
@@ -337,13 +329,12 @@ fn alias_only_local_assignment_emits_write() {
         },
     );
 
-    let output = lower_hir_to_js(
-        &module,
-        &report,
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &report,
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let target_name = expected_dev_local_name("target", 0);
 
@@ -369,6 +360,7 @@ fn alias_only_local_assignment_emits_write() {
 #[test]
 fn field_place_emits_bs_field() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign_to_field = statement(
@@ -397,13 +389,11 @@ fn field_place_emits_bs_field() {
         return_type: types.unit,
     };
 
-    let mut module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "my_struct")],
-    );
+    let mut module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "my_struct")],);
 
     // Register the struct and field so the field symbol map is populated.
     module.structs = vec![HirStruct {
@@ -416,16 +406,15 @@ fn field_place_emits_bs_field() {
     }];
     module.side_table.bind_field_name(
         FieldId(0),
-        InternedPath::from_single_str("x", &mut string_table),
+        path_fork.try_intern_portable_path("x", &mut string_table).expect("test path fits"),
     );
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let struct_name = expected_dev_local_name("my_struct", 0);
     let field_name = expected_dev_field_name("x", 0);
@@ -442,6 +431,7 @@ fn field_place_emits_bs_field() {
 #[test]
 fn index_place_emits_bs_index() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign_to_index = statement(
@@ -470,21 +460,18 @@ fn index_place_emits_bs_index() {
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "arr")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "arr")],);
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let array_name = expected_dev_local_name("arr", 0);
 
@@ -500,6 +487,7 @@ fn index_place_emits_bs_index() {
 #[test]
 fn computed_place_read_composes_with_bs_read() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let io_id = crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine;
@@ -537,13 +525,11 @@ fn computed_place_read_composes_with_bs_read() {
         return_type: types.unit,
     };
 
-    let mut module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "my_struct")],
-    );
+    let mut module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "my_struct")],);
 
     module.structs = vec![HirStruct {
         id: StructId(0),
@@ -555,16 +541,15 @@ fn computed_place_read_composes_with_bs_read() {
     }];
     module.side_table.bind_field_name(
         FieldId(0),
-        InternedPath::from_single_str("x", &mut string_table),
+        path_fork.try_intern_portable_path("x", &mut string_table).expect("test path fits"),
     );
 
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    let output = lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed");
     let struct_name = expected_dev_local_name("my_struct", 0);
     let field_name = expected_dev_field_name("x", 0);

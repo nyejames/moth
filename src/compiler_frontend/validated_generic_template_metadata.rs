@@ -15,8 +15,7 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, OriginDeclarationId, OriginFunctionId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 const _: () = {
@@ -32,7 +31,7 @@ const _: () = {
 pub(in crate::compiler_frontend) fn validate_materialisation_context_templates(
     draft: &PublicInterfaceDraft,
     callable_seeds: &[CallableSeed],
-    templates: &mut FxHashMap<InternedPath, GenericFunctionTemplate>,
+    templates: &mut FxHashMap<PathId, GenericFunctionTemplate>,
 ) -> Result<(), CompilerError> {
     let expected_callables = collect_public_callable_origins(draft)?;
     validate_callable_seeds(&expected_callables, callable_seeds)?;
@@ -174,7 +173,7 @@ fn validate_callable_seeds(
     expected_callables: &FxHashMap<OriginFunctionId, bool>,
     seeds: &[CallableSeed],
 ) -> Result<(), CompilerError> {
-    let mut seen_paths: FxHashMap<InternedPath, bool> = FxHashMap::default();
+    let mut seen_paths: FxHashMap<PathId, bool> = FxHashMap::default();
     let mut seen_origins = FxHashSet::default();
 
     for seed in seeds {

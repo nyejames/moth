@@ -19,7 +19,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -27,13 +27,12 @@ use crate::compiler_frontend::value_mode::ValueMode;
 #[test]
 fn updates_existing_declaration_slot_without_reordering() {
     let mut string_table = StringTable::new();
-    let first_path = InternedPath::from_single_str("first", &mut string_table);
-    let second_path = InternedPath::from_single_str("second", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let first_path = path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits");
+    let second_path = path_fork.try_intern_portable_path("second", &mut string_table).expect("test path fits");
 
-    let mut table = TopLevelDeclarationTable::new(vec![
-        declaration(&first_path, DataType::Inferred),
-        declaration(&second_path, DataType::Bool),
-    ]);
+    let mut table = TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Inferred),
+    declaration(&second_path, DataType::Bool),], &path_fork);
 
     let first_id = table
         .declaration_id_by_path(&first_path)
@@ -46,7 +45,7 @@ fn updates_existing_declaration_slot_without_reordering() {
     assert_eq!(declarations[1].id, second_path);
     assert_eq!(declarations[1].value.diagnostic_type, DataType::Bool);
 
-    let first_name = first_path.name().expect("test path should have a name");
+    let first_name = path_fork.component(first_path).expect("test path should have a name");
     let by_name = table
         .get_visible_resolved_by_name(first_name, None)
         .expect("name lookup should see updated declaration");
@@ -56,10 +55,11 @@ fn updates_existing_declaration_slot_without_reordering() {
 #[test]
 fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
     let mut string_table = StringTable::new();
-    let alias_path = InternedPath::from_single_str("Alias", &mut string_table);
-    let constant_path = InternedPath::from_single_str("constant", &mut string_table);
-    let trait_path = InternedPath::from_single_str("Trait", &mut string_table);
-    let function_path = InternedPath::from_single_str("function", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
+    let constant_path = path_fork.try_intern_portable_path("constant", &mut string_table).expect("test path fits");
+    let trait_path = path_fork.try_intern_portable_path("Trait", &mut string_table).expect("test path fits");
+    let function_path = path_fork.try_intern_portable_path("function", &mut string_table).expect("test path fits");
 
     let table = TopLevelDeclarationTable::from_stage3_order(
         vec![
@@ -96,6 +96,7 @@ fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
             ),
         ],
         Vec::new(),
+        &path_fork,
     )
     .expect("distinct Stage 3 paths should build a declaration table");
 
@@ -130,7 +131,8 @@ fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
 #[test]
 fn stage3_order_rejects_duplicate_semantic_paths() {
     let mut string_table = StringTable::new();
-    let duplicate_path = InternedPath::from_single_str("Duplicate", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let duplicate_path = path_fork.try_intern_portable_path("Duplicate", &mut string_table).expect("test path fits");
 
     let result = TopLevelDeclarationTable::from_stage3_order(
         vec![
@@ -150,6 +152,7 @@ fn stage3_order_rejects_duplicate_semantic_paths() {
             ),
         ],
         Vec::new(),
+        &path_fork,
     );
 
     assert!(
@@ -161,8 +164,9 @@ fn stage3_order_rejects_duplicate_semantic_paths() {
 #[test]
 fn stage3_order_rejects_missing_and_unexpected_value_rows() {
     let mut string_table = StringTable::new();
-    let constant_path = InternedPath::from_single_str("constant", &mut string_table);
-    let alias_path = InternedPath::from_single_str("Alias", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let constant_path = path_fork.try_intern_portable_path("constant", &mut string_table).expect("test path fits");
+    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
 
     let missing_value = TopLevelDeclarationTable::from_stage3_order(
         vec![ordered_declaration(
@@ -173,6 +177,7 @@ fn stage3_order_rejects_missing_and_unexpected_value_rows() {
             None,
         )],
         Vec::new(),
+        &path_fork,
     );
     assert!(
         missing_value.is_err(),
@@ -188,6 +193,7 @@ fn stage3_order_rejects_missing_and_unexpected_value_rows() {
             Some(declaration(&alias_path, DataType::Bool)),
         )],
         Vec::new(),
+        &path_fork,
     );
     assert!(
         unexpected_value.is_err(),
@@ -198,8 +204,9 @@ fn stage3_order_rejects_missing_and_unexpected_value_rows() {
 #[test]
 fn stage3_order_rejects_non_dense_ids_and_mismatched_value_paths() {
     let mut string_table = StringTable::new();
-    let record_path = InternedPath::from_single_str("record", &mut string_table);
-    let value_path = InternedPath::from_single_str("value", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let record_path = path_fork.try_intern_portable_path("record", &mut string_table).expect("test path fits");
+    let value_path = path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits");
 
     let non_dense = TopLevelDeclarationTable::from_stage3_order(
         vec![ordered_declaration(
@@ -210,6 +217,7 @@ fn stage3_order_rejects_non_dense_ids_and_mismatched_value_paths() {
             None,
         )],
         Vec::new(),
+        &path_fork,
     );
     assert!(
         non_dense.is_err(),
@@ -225,6 +233,7 @@ fn stage3_order_rejects_non_dense_ids_and_mismatched_value_paths() {
             Some(declaration(&value_path, DataType::Bool)),
         )],
         Vec::new(),
+        &path_fork,
     );
     assert!(
         mismatched_path.is_err(),
@@ -235,7 +244,8 @@ fn stage3_order_rejects_non_dense_ids_and_mismatched_value_paths() {
 #[test]
 fn compiler_owned_rows_reject_semantic_path_collisions() {
     let mut string_table = StringTable::new();
-    let path = InternedPath::from_single_str("collision", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork.try_intern_portable_path("collision", &mut string_table).expect("test path fits");
 
     let result = TopLevelDeclarationTable::from_stage3_order(
         vec![ordered_declaration(
@@ -246,6 +256,7 @@ fn compiler_owned_rows_reject_semantic_path_collisions() {
             None,
         )],
         vec![declaration(&path, DataType::Bool)],
+        &path_fork,
     );
 
     assert!(
@@ -257,7 +268,8 @@ fn compiler_owned_rows_reject_semantic_path_collisions() {
 #[test]
 fn implicit_start_rejects_authored_start_collision() {
     let mut string_table = StringTable::new();
-    let start_path = InternedPath::from_single_str("start", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let start_path = path_fork.try_intern_portable_path("start", &mut string_table).expect("test path fits");
     let authored = declaration(
         &start_path,
         DataType::Function(Box::new(None), Default::default()),
@@ -273,6 +285,7 @@ fn implicit_start_rejects_authored_start_collision() {
             Some(authored),
         )],
         vec![implicit],
+        &path_fork,
     );
     assert!(
         authored_collision.is_err(),
@@ -291,6 +304,7 @@ fn implicit_start_rejects_authored_start_collision() {
                 DataType::Function(Box::new(None), Default::default()),
             ),
         ],
+        &path_fork,
     );
     assert!(
         repeated_start.is_err(),
@@ -301,6 +315,7 @@ fn implicit_start_rejects_authored_start_collision() {
 #[test]
 fn declaration_lanes_reject_missing_semantic_records() {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let semantic_kinds = [
         HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -323,7 +338,7 @@ fn declaration_lanes_reject_missing_semantic_records() {
     ];
 
     for (index, kind) in semantic_kinds.into_iter().enumerate() {
-        let path = InternedPath::from_single_str(&format!("missing_{index}"), &mut string_table);
+        let path = path_fork.try_intern_portable_path(&format!("missing_{index}"), &mut string_table).expect("test path fits");
         let header = semantic_header(kind, path, &mut string_table);
 
         assert!(
@@ -336,8 +351,9 @@ fn declaration_lanes_reject_missing_semantic_records() {
 #[test]
 fn declaration_lanes_reject_mismatched_and_duplicate_header_associations() {
     let mut string_table = StringTable::new();
-    let function_path = InternedPath::from_single_str("function", &mut string_table);
-    let other_path = InternedPath::from_single_str("other", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let function_path = path_fork.try_intern_portable_path("function", &mut string_table).expect("test path fits");
+    let other_path = path_fork.try_intern_portable_path("other", &mut string_table).expect("test path fits");
     let header = semantic_header(
         HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -407,7 +423,8 @@ fn declaration_lanes_reject_mismatched_and_duplicate_header_associations() {
 #[test]
 fn declaration_lanes_reject_non_dense_ids_and_out_of_range_headers() {
     let mut string_table = StringTable::new();
-    let function_path = InternedPath::from_single_str("function", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let function_path = path_fork.try_intern_portable_path("function", &mut string_table).expect("test path fits");
     let header = semantic_header(
         HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -451,11 +468,12 @@ fn declaration_lanes_reject_non_dense_ids_and_out_of_range_headers() {
 #[test]
 fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
     let mut string_table = StringTable::new();
-    let alias_path = InternedPath::from_single_str("Alias", &mut string_table);
-    let trait_path = InternedPath::from_single_str("Trait", &mut string_table);
-    let start_path = InternedPath::from_single_str("start", &mut string_table);
-    let builtin_path = InternedPath::from_single_str("Builtin", &mut string_table);
-    let imported_path = InternedPath::from_single_str("imported", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
+    let trait_path = path_fork.try_intern_portable_path("Trait", &mut string_table).expect("test path fits");
+    let start_path = path_fork.try_intern_portable_path("start", &mut string_table).expect("test path fits");
+    let builtin_path = path_fork.try_intern_portable_path("Builtin", &mut string_table).expect("test path fits");
+    let imported_path = path_fork.try_intern_portable_path("imported", &mut string_table).expect("test path fits");
 
     let mut table = TopLevelDeclarationTable::from_stage3_order(
         vec![
@@ -481,6 +499,7 @@ fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
             ),
             declaration(&builtin_path, DataType::Inferred),
         ],
+        &path_fork,
     )
     .expect("compiler-owned rows should follow the semantic range");
 
@@ -499,7 +518,7 @@ fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
         3
     );
     let imported_id = table
-        .append_for_construction(declaration(&imported_path, DataType::Bool))
+        .append_for_construction(declaration(&imported_path, DataType::Bool), &path_fork)
         .expect("import projection should append through the table owner");
     assert_eq!(imported_id.index(), 4);
 }
@@ -507,14 +526,15 @@ fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
 #[test]
 fn appending_declaration_updates_path_and_name_indexes() {
     let mut string_table = StringTable::new();
-    let first_path = InternedPath::from_single_str("first", &mut string_table);
-    let appended_path = InternedPath::from_single_str("appended", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let first_path = path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits");
+    let appended_path = path_fork.try_intern_portable_path("appended", &mut string_table).expect("test path fits");
 
-    let mut table = TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Bool)]);
+    let mut table = TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Bool)], &path_fork);
     let appended = declaration(&appended_path, DataType::StringSlice);
 
     table
-        .append_for_construction(appended)
+        .append_for_construction(appended, &path_fork)
         .expect("new declaration path should append during construction");
 
     assert_eq!(table.iter().count(), 2);
@@ -529,8 +549,8 @@ fn appending_declaration_updates_path_and_name_indexes() {
     assert_eq!(
         table
             .get_visible_resolved_by_name(
-                appended_path
-                    .name()
+                path_fork
+                    .component(appended_path)
                     .expect("appended test path should have a name"),
                 None,
             )
@@ -540,7 +560,7 @@ fn appending_declaration_updates_path_and_name_indexes() {
     );
     assert!(
         table
-            .append_for_construction(declaration(&appended_path, DataType::Bool))
+        .append_for_construction(declaration(&appended_path, DataType::Bool), &path_fork)
             .is_none()
     );
 }
@@ -548,13 +568,14 @@ fn appending_declaration_updates_path_and_name_indexes() {
 #[test]
 fn generated_layer_keeps_replacements_and_appends_local() {
     let mut string_table = StringTable::new();
-    let shared_path = InternedPath::from_single_str("shared", &mut string_table);
-    let appended_path = InternedPath::from_single_str("appended", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let shared_path = path_fork.try_intern_portable_path("shared", &mut string_table).expect("test path fits");
+    let appended_path = path_fork.try_intern_portable_path("appended", &mut string_table).expect("test path fits");
 
     let original = std::rc::Rc::new(TopLevelDeclarationTable::new(vec![declaration(
         &shared_path,
         DataType::Bool,
-    )]));
+    )], &path_fork));
     let mut generated = TopLevelDeclarationTable::fork_for_generated(std::rc::Rc::clone(&original));
 
     let shared_id = generated
@@ -562,7 +583,7 @@ fn generated_layer_keeps_replacements_and_appends_local() {
         .expect("inherited declaration should have an ID");
     assert!(generated.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
     generated
-        .append_for_construction(declaration(&appended_path, DataType::Bool))
+        .append_for_construction(declaration(&appended_path, DataType::Bool), &path_fork)
         .expect("generated copy should append a local declaration");
 
     assert_eq!(
@@ -588,11 +609,12 @@ fn generated_layer_keeps_replacements_and_appends_local() {
 #[test]
 fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
     let mut string_table = StringTable::new();
-    let alias_path = InternedPath::from_single_str("Alias", &mut string_table);
-    let shared_path = InternedPath::from_single_str("shared", &mut string_table);
-    let trait_path = InternedPath::from_single_str("Trait", &mut string_table);
-    let first_path = InternedPath::from_single_str("first_local", &mut string_table);
-    let nested_path = InternedPath::from_single_str("nested_local", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
+    let shared_path = path_fork.try_intern_portable_path("shared", &mut string_table).expect("test path fits");
+    let trait_path = path_fork.try_intern_portable_path("Trait", &mut string_table).expect("test path fits");
+    let first_path = path_fork.try_intern_portable_path("first_local", &mut string_table).expect("test path fits");
+    let nested_path = path_fork.try_intern_portable_path("nested_local", &mut string_table).expect("test path fits");
 
     let root = std::rc::Rc::new(
         TopLevelDeclarationTable::from_stage3_order(
@@ -620,6 +642,7 @@ fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
                 ),
             ],
             Vec::new(),
+            &path_fork,
         )
         .expect("metadata holes should coexist with one value declaration"),
     );
@@ -631,7 +654,7 @@ fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
         .expect("inherited declaration should have an ID");
     assert!(first.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
     let first_id = first
-        .append_for_construction(declaration(&first_path, DataType::Bool))
+        .append_for_construction(declaration(&first_path, DataType::Bool), &path_fork)
         .expect("first layer should append one local declaration");
     assert_eq!(first_id.index(), 3);
 
@@ -639,7 +662,7 @@ fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
     let mut nested = TopLevelDeclarationTable::fork_for_generated(std::rc::Rc::clone(&first));
     assert!(nested.replace_by_id(shared_id, declaration(&shared_path, DataType::Inferred),));
     let nested_id = nested
-        .append_for_construction(declaration(&nested_path, DataType::Bool))
+        .append_for_construction(declaration(&nested_path, DataType::Bool), &path_fork)
         .expect("nested layer should append one local declaration");
     assert_eq!(nested_id.index(), 4);
 
@@ -689,12 +712,11 @@ fn declaration_copy_counter_detects_flat_row_clones() {
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     let mut string_table = StringTable::new();
-    let first_path = InternedPath::from_single_str("first", &mut string_table);
-    let second_path = InternedPath::from_single_str("second", &mut string_table);
-    let root = TopLevelDeclarationTable::new(vec![
-        declaration(&first_path, DataType::Bool),
-        declaration(&second_path, DataType::StringSlice),
-    ]);
+    let mut path_fork = PathInternerFork::empty();
+    let first_path = path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits");
+    let second_path = path_fork.try_intern_portable_path("second", &mut string_table).expect("test path fits");
+    let root = TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Bool),
+    declaration(&second_path, DataType::StringSlice),], &path_fork);
 
     let _prohibited_flat_copy = root.clone();
     log_frontend_counters();
@@ -722,19 +744,20 @@ fn generated_layer_clones_do_not_copy_inherited_rows() {
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     let mut string_table = StringTable::new();
-    let shared_path = InternedPath::from_single_str("shared", &mut string_table);
-    let local_path = InternedPath::from_single_str("local", &mut string_table);
+    let mut path_fork = PathInternerFork::empty();
+    let shared_path = path_fork.try_intern_portable_path("shared", &mut string_table).expect("test path fits");
+    let local_path = path_fork.try_intern_portable_path("local", &mut string_table).expect("test path fits");
     let root = std::rc::Rc::new(TopLevelDeclarationTable::new(vec![declaration(
         &shared_path,
         DataType::Bool,
-    )]));
+    )], &path_fork));
     let mut generated = TopLevelDeclarationTable::fork_for_generated(root);
     let shared_id = generated
         .declaration_id_by_path(&shared_path)
         .expect("inherited declaration should have an ID");
     assert!(generated.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
     generated
-        .append_for_construction(declaration(&local_path, DataType::Bool))
+        .append_for_construction(declaration(&local_path, DataType::Bool), &path_fork)
         .expect("generated layer should append a local row");
 
     let generated_copy = generated.clone();
@@ -763,7 +786,7 @@ fn assert_counter(
     assert_eq!(actual, Some(expected), "unexpected value for {name}");
 }
 
-fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
+fn declaration(path: &PathId, data_type: DataType) -> Declaration {
     Declaration {
         id: path.to_owned(),
         value: Expression::no_value(None, data_type, ValueMode::ImmutableOwned),
@@ -775,7 +798,7 @@ fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
 fn ordered_declaration(
     declaration_index: usize,
     header_index: usize,
-    path: &InternedPath,
+    path: &PathId,
     kind: OrderedSemanticDeclarationKind,
     declaration: Option<Declaration>,
 ) -> OrderedSemanticDeclaration {
@@ -788,7 +811,8 @@ fn ordered_declaration(
     }
 }
 
-fn semantic_header(kind: HeaderKind, path: InternedPath, string_table: &mut StringTable) -> Header {
+fn semantic_header(kind: HeaderKind, path: PathId, string_table: &mut StringTable) -> Header {
+    let mut path_fork = PathInternerFork::empty();
     Header {
         kind,
         file_role: FileRole::Normal,
@@ -796,7 +820,7 @@ fn semantic_header(kind: HeaderKind, path: InternedPath, string_table: &mut Stri
         local_ordering_hints: Default::default(),
         name_span: None,
         tokens: FileTokens::new(path, SourceId::COMPILATION_ROOT, Vec::new()),
-        source_file: InternedPath::from_single_str("root.moth", string_table),
+        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
         capacity_references: Vec::new(),
     }
 }

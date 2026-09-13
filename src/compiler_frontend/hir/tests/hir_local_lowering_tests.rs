@@ -24,6 +24,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// The authored (non-generated) local names a block owns, in declaration order.
 ///
@@ -34,421 +35,414 @@ use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types
 fn authored_local_names(
     module: &crate::compiler_frontend::hir::module::HirModule,
     block: &crate::compiler_frontend::hir::blocks::HirBlock,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> Vec<String> {
     block
         .locals
         .iter()
-        .filter_map(|local| module.side_table.resolve_local_name(local.id, string_table))
+        .filter_map(|local| {
+            module
+                .side_table
+                .resolve_local_name(local.id, path_fork, string_table)
+        })
         .filter(|name| !name.starts_with("__hir_tmp_"))
         .map(str::to_string)
         .collect()
 }
 
 #[test]
-fn allocates_parameter_locals_and_binds_names() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let x = super::symbol("x", &mut string_table);
+fn allocates_parameter_locals_and_binds_names() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let x = super::symbol("x", &mut path_fork, &mut string_table);
 
-    let body = vec![node(
-        NodeKind::Return(vec![reference_expr_with_type_id(
-            x.clone(),
-            builtin_type_ids::INT,
-            None,
-            ValueMode::ImmutableReference,
-        )]),
+let body = vec![node(
+    NodeKind::Return(vec![reference_expr_with_type_id(
+        x.clone(),
+        builtin_type_ids::INT,
         None,
-    )];
+        ValueMode::ImmutableReference,
+    )]),
+    None,
+)];
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
-        },
-        body,
-        None,
-    );
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+        returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+    },
+    body,
+    None,
+);
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    let start_fn = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    assert_eq!(start_fn.params.len(), 1);
+let start_fn = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+assert_eq!(start_fn.params.len(), 1);
 
-    // The function declares exactly one parameter and no other bindings, so the entry block
-    // owns exactly one local. A non-empty check would also pass if lowering invented extras.
-    let entry_block = &module.blocks[start_fn.entry.0 as usize];
-    assert_eq!(
-        authored_local_names(&module, entry_block, &string_table),
-        vec!["x".to_string()],
-        "the entry block should own exactly the declared parameter besides lowering temporaries"
-    );
-    assert_eq!(
-        entry_block
-            .locals
-            .iter()
-            .filter(|local| local.id == start_fn.params[0])
-            .count(),
-        1,
-        "the parameter should be declared once in the entry block"
-    );
-    assert_eq!(
-        module
-            .side_table
-            .resolve_local_name(start_fn.params[0], &string_table),
-        Some("x")
-    );
-}
-
-#[test]
-fn variable_declaration_emits_local_and_assign_statement() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let x = super::symbol("x", &mut string_table);
-
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(42, None, ValueMode::ImmutableOwned),
-            )),
-            None,
-        )],
-        None,
-    );
-
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-
-    let start_fn = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let entry_block = &module.blocks[start_fn.entry.0 as usize];
-
-    // One declaration lowers to exactly one local and exactly one assignment. `any` would also
-    // pass for a lowering that emitted the assignment twice.
-    assert_eq!(
-        authored_local_names(&module, entry_block, &string_table),
-        vec!["x".to_string()],
-        "one declaration should lower to exactly one authored local"
-    );
-    // Lowering also assigns through a temporary, so the contract is exactly one assignment
-    // whose target is the authored local — not "some assignment exists".
-    let declared_local = entry_block
+// The function declares exactly one parameter and no other bindings, so the entry block
+// owns exactly one local. A non-empty check would also pass if lowering invented extras.
+let entry_block = &module.blocks[start_fn.entry.0 as usize];
+assert_eq!(
+    authored_local_names(&module, entry_block, &path_fork, &string_table),
+    vec!["x".to_string()],
+    "the entry block should own exactly the declared parameter besides lowering temporaries"
+);
+assert_eq!(
+    entry_block
         .locals
         .iter()
-        .find(|local| {
-            module
-                .side_table
-                .resolve_local_name(local.id, &string_table)
-                == Some("x")
-        })
-        .expect("the authored local should be declared");
-    let assignments_to_x = entry_block
-        .statements
-        .iter()
-        .filter(|statement| {
-            matches!(
-                statement.kind,
-                HirStatementKind::Assign {
-                    target: crate::compiler_frontend::hir::places::HirPlace::Local(local),
-                    ..
-                } if local == declared_local.id
-            )
-        })
-        .count();
-    assert_eq!(
-        assignments_to_x, 1,
-        "one initialised declaration should lower to one assignment to that local"
-    );
-}
+        .filter(|local| local.id == start_fn.params[0])
+        .count(),
+    1,
+    "the parameter should be declared once in the entry block"
+);
+assert_eq!(
+    module
+        .side_table
+        .resolve_local_name(start_fn.params[0], &path_fork, &string_table),
+    Some("x")
+); }
 
 #[test]
-fn duplicate_local_declarations_in_same_scope_fail() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let var_name = super::symbol("my_var", &mut string_table);
+fn variable_declaration_emits_local_and_assign_statement() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let x = super::symbol("x", &mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    var_name.clone(),
-                    Expression::int(1, None, ValueMode::ImmutableOwned),
-                )),
-                None,
-            ),
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    var_name.clone(),
-                    Expression::int(2, None, ValueMode::ImmutableOwned),
-                )),
-                None,
-            ),
-        ],
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![node(
+        NodeKind::VariableDeclaration(make_test_variable(
+            x,
+            Expression::int(42, None, ValueMode::ImmutableOwned),
+        )),
         None,
-    );
+    )],
+    None,
+);
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let error = lower_ast(ast, &mut string_table).expect_err("duplicate symbol should fail");
-    let error = error
-        .infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert!(
-        error
-            .msg
-            .contains("Local 'my_var' is already declared in this function scope")
-    );
-}
+let ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+
+let start_fn = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let entry_block = &module.blocks[start_fn.entry.0 as usize];
+
+// One declaration lowers to exactly one local and exactly one assignment. `any` would also
+// pass for a lowering that emitted the assignment twice.
+assert_eq!(
+    authored_local_names(&module, entry_block, &path_fork, &string_table),
+    vec!["x".to_string()],
+    "one declaration should lower to exactly one authored local"
+);
+// Lowering also assigns through a temporary, so the contract is exactly one assignment
+// whose target is the authored local — not "some assignment exists".
+let declared_local = entry_block
+    .locals
+    .iter()
+    .find(|local| {
+        module
+            .side_table
+            .resolve_local_name(local.id, &path_fork, &string_table)
+            == Some("x")
+    })
+    .expect("the authored local should be declared");
+let assignments_to_x = entry_block
+    .statements
+    .iter()
+    .filter(|statement| {
+        matches!(
+            statement.kind,
+            HirStatementKind::Assign {
+                target: crate::compiler_frontend::hir::places::HirPlace::Local(local),
+                ..
+            } if local == declared_local.id
+        )
+    })
+    .count();
+assert_eq!(
+    assignments_to_x, 1,
+    "one initialised declaration should lower to one assignment to that local"
+); }
 
 #[test]
-fn assignment_lowers_value_prelude_before_assign() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let x = super::symbol("x", &mut string_table);
-    let helper = super::symbol("helper", &mut string_table);
+fn duplicate_local_declarations_in_same_scope_fail() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let var_name = super::symbol("my_var", &mut path_fork, &mut string_table);
 
-    let helper_fn = function_node(
-        helper.clone(),
-        FunctionSignature {
-            parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
-        },
-        vec![node(
-            NodeKind::Return(vec![Expression::int(1, None, ValueMode::ImmutableOwned)]),
-            None,
-        )],
-        None,
-    );
-
-    let assignment = node(
-        NodeKind::Assignment {
-            target: assignment_target(x.clone(), DataType::Int, builtin_type_ids::INT, None),
-            value: Expression::function_call(helper, vec![], vec![builtin_type_ids::INT], None),
-        },
-        None,
-    );
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, true, None)],
-            returns: vec![],
-        },
-        vec![assignment],
-        None,
-    );
-
-    let ast = build_ast_with_registered_types(vec![helper_fn, start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-
-    let start = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let block = &module.blocks[start.entry.0 as usize];
-
-    let call_pos = block
-        .statements
-        .iter()
-        .position(|statement| {
-            matches!(
-                &statement.kind,
-                HirStatementKind::Call {
-                    result: Some(_),
-                    ..
-                }
-            )
-        })
-        .expect("entry block should contain a Call statement with a result");
-    let assign_pos = block
-        .statements
-        .iter()
-        .rposition(|statement| matches!(&statement.kind, HirStatementKind::Assign { .. }))
-        .expect("entry block should contain an Assign statement");
-    assert!(
-        call_pos < assign_pos,
-        "Call prelude must precede the final Assign"
-    );
-}
-
-#[test]
-fn call_expression_statements_materialize_result_values() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let callee = super::symbol("callee", &mut string_table);
-    let alloc_id = ExternalFunctionId::Synthetic(0);
-
-    let callee_fn = function_node(
-        callee.clone(),
-        FunctionSignature {
-            parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
-        },
-        vec![node(
-            NodeKind::Return(vec![Expression::int(9, None, ValueMode::ImmutableOwned)]),
-            None,
-        )],
-        None,
-    );
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![
-            node(
-                NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
-                    callee,
-                    vec![],
-                    vec![builtin_type_ids::INT],
-                    None,
-                )),
-                None,
-            ),
-            node(
-                NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
-                    alloc_id,
-                    vec![CallArgument::positional(
-                        Expression::int(1, None, ValueMode::ImmutableOwned),
-                        CallAccessMode::Shared,
-                        None,
-                    )],
-                    vec![builtin_type_ids::INT],
-                    None,
-                )),
-                None,
-            ),
-        ],
-        None,
-    );
-
-    let ast = build_ast_with_registered_types(vec![callee_fn, start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
-
-    let start = &module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let block = &module.blocks[start.entry.0 as usize];
-
-    let call_results = block
-        .statements
-        .iter()
-        .filter_map(|statement| match statement.kind {
-            HirStatementKind::Call { result, .. } => Some(result),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(call_results.len(), 2);
-    assert!(
-        call_results.iter().all(Option::is_some),
-        "non-unit call expression statements should materialize their result before it is discarded"
-    );
-}
-
-#[test]
-fn return_lowering_handles_zero_one_and_many_values() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let one_name = super::symbol("one", &mut string_table);
-    let many_name = super::symbol("many", &mut string_table);
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(NodeKind::Return(vec![]), None)],
-        None,
-    );
-
-    let one_fn = function_node(
-        one_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
-        },
-        vec![node(
-            NodeKind::Return(vec![Expression::int(8, None, ValueMode::ImmutableOwned)]),
-            None,
-        )],
-        None,
-    );
-
-    let many_fn = function_node(
-        many_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::BOOL]),
-        },
-        vec![node(
-            NodeKind::Return(vec![
+let start_function = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![
+        node(
+            NodeKind::VariableDeclaration(make_test_variable(
+                var_name.clone(),
                 Expression::int(1, None, ValueMode::ImmutableOwned),
-                Expression::bool(true, None, ValueMode::ImmutableOwned),
-            ]),
+            )),
             None,
-        )],
+        ),
+        node(
+            NodeKind::VariableDeclaration(make_test_variable(
+                var_name.clone(),
+                Expression::int(2, None, ValueMode::ImmutableOwned),
+            )),
+            None,
+        ),
+    ],
+    None,
+);
+
+let ast = build_ast_with_registered_types(vec![start_function], entry_path);
+let error = lower_ast(ast, &mut string_table, &mut path_fork).expect_err("duplicate symbol should fail");
+let error = error
+    .infrastructure_error()
+    .expect("HIR lowering failure should be wrapped for rendering");
+assert!(
+    error
+        .msg
+        .contains("Local 'my_var' is already declared in this function scope")
+); }
+
+#[test]
+fn assignment_lowers_value_prelude_before_assign() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let x = super::symbol("x", &mut path_fork, &mut string_table);
+let helper = super::symbol("helper", &mut path_fork, &mut string_table);
+
+let helper_fn = function_node(
+    helper.clone(),
+    FunctionSignature {
+        parameters: vec![],
+        returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+    },
+    vec![node(
+        NodeKind::Return(vec![Expression::int(1, None, ValueMode::ImmutableOwned)]),
         None,
-    );
+    )],
+    None,
+);
 
-    let ast = build_ast_with_registered_types(vec![start_fn, one_fn, many_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
+let assignment = node(
+    NodeKind::Assignment {
+        target: assignment_target(x.clone(), DataType::Int, builtin_type_ids::INT, None),
+        value: Expression::function_call(helper, vec![], vec![builtin_type_ids::INT], None),
+    },
+    None,
+);
 
-    let start_block = &module.blocks[module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize]
-        .entry
-        .0 as usize];
-    assert!(matches!(
-        &start_block.terminator,
-        HirTerminator::Return(value)
-            if matches!(
-                &value.kind,
-                HirExpressionKind::TupleConstruct { elements } if elements.is_empty()
-            )
-    ));
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![param_with_type_id(x, builtin_type_ids::INT, true, None)],
+        returns: vec![],
+    },
+    vec![assignment],
+    None,
+);
 
-    let one_block = &module.blocks[module.functions[1].entry.0 as usize];
-    assert!(matches!(
-        &one_block.terminator,
-        HirTerminator::Return(value)
-            if matches!(&value.kind, HirExpressionKind::Int(8))
-    ));
+let ast = build_ast_with_registered_types(vec![helper_fn, start_fn], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
 
-    let many_block = &module.blocks[module.functions[2].entry.0 as usize];
-    assert!(matches!(
-        &many_block.terminator,
-        HirTerminator::Return(value)
-            if matches!(
-                &value.kind,
-                HirExpressionKind::TupleConstruct { elements } if elements.len() == 2
-            )
-    ));
-}
+let start = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let block = &module.blocks[start.entry.0 as usize];
+
+let call_pos = block
+    .statements
+    .iter()
+    .position(|statement| {
+        matches!(
+            &statement.kind,
+            HirStatementKind::Call {
+                result: Some(_),
+                ..
+            }
+        )
+    })
+    .expect("entry block should contain a Call statement with a result");
+let assign_pos = block
+    .statements
+    .iter()
+    .rposition(|statement| matches!(&statement.kind, HirStatementKind::Assign { .. }))
+    .expect("entry block should contain an Assign statement");
+assert!(
+    call_pos < assign_pos,
+    "Call prelude must precede the final Assign"
+); }
+
+#[test]
+fn call_expression_statements_materialize_result_values() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let callee = super::symbol("callee", &mut path_fork, &mut string_table);
+let alloc_id = ExternalFunctionId::Synthetic(0);
+
+let callee_fn = function_node(
+    callee.clone(),
+    FunctionSignature {
+        parameters: vec![],
+        returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+    },
+    vec![node(
+        NodeKind::Return(vec![Expression::int(9, None, ValueMode::ImmutableOwned)]),
+        None,
+    )],
+    None,
+);
+
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![
+        node(
+            NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
+                callee,
+                vec![],
+                vec![builtin_type_ids::INT],
+                None,
+            )),
+            None,
+        ),
+        node(
+            NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
+                alloc_id,
+                vec![CallArgument::positional(
+                    Expression::int(1, None, ValueMode::ImmutableOwned),
+                    CallAccessMode::Shared,
+                    None,
+                )],
+                vec![builtin_type_ids::INT],
+                None,
+            )),
+            None,
+        ),
+    ],
+    None,
+);
+
+let ast = build_ast_with_registered_types(vec![callee_fn, start_fn], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+
+let start = &module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize];
+let block = &module.blocks[start.entry.0 as usize];
+
+let call_results = block
+    .statements
+    .iter()
+    .filter_map(|statement| match statement.kind {
+        HirStatementKind::Call { result, .. } => Some(result),
+        _ => None,
+    })
+    .collect::<Vec<_>>();
+
+assert_eq!(call_results.len(), 2);
+assert!(
+    call_results.iter().all(Option::is_some),
+    "non-unit call expression statements should materialize their result before it is discarded"
+); }
+
+#[test]
+fn return_lowering_handles_zero_one_and_many_values() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+let one_name = super::symbol("one", &mut path_fork, &mut string_table);
+let many_name = super::symbol("many", &mut path_fork, &mut string_table);
+
+let start_fn = function_node(
+    start_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    },
+    vec![node(NodeKind::Return(vec![]), None)],
+    None,
+);
+
+let one_fn = function_node(
+    one_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+    },
+    vec![node(
+        NodeKind::Return(vec![Expression::int(8, None, ValueMode::ImmutableOwned)]),
+        None,
+    )],
+    None,
+);
+
+let many_fn = function_node(
+    many_name,
+    FunctionSignature {
+        parameters: vec![],
+        returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::BOOL]),
+    },
+    vec![node(
+        NodeKind::Return(vec![
+            Expression::int(1, None, ValueMode::ImmutableOwned),
+            Expression::bool(true, None, ValueMode::ImmutableOwned),
+        ]),
+        None,
+    )],
+    None,
+);
+
+let ast = build_ast_with_registered_types(vec![start_fn, one_fn, many_fn], entry_path);
+let (module, _type_environment) =
+    lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+
+let start_block = &module.blocks[module.functions[module
+    .start_function
+    .expect("normal test module should have start")
+    .0 as usize]
+    .entry
+    .0 as usize];
+assert!(matches!(
+    &start_block.terminator,
+    HirTerminator::Return(value)
+        if matches!(
+            &value.kind,
+            HirExpressionKind::TupleConstruct { elements } if elements.is_empty()
+        )
+));
+
+let one_block = &module.blocks[module.functions[1].entry.0 as usize];
+assert!(matches!(
+    &one_block.terminator,
+    HirTerminator::Return(value)
+        if matches!(&value.kind, HirExpressionKind::Int(8))
+));
+
+let many_block = &module.blocks[module.functions[2].entry.0 as usize];
+assert!(matches!(
+    &many_block.terminator,
+    HirTerminator::Return(value)
+        if matches!(
+            &value.kind,
+            HirExpressionKind::TupleConstruct { elements } if elements.len() == 2
+        )
+)); }

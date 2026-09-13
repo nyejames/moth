@@ -21,15 +21,18 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, NominalTypeId, TypeConstructor, TypeId,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
 fn diagnostic_render_context_renders_builtin_type_names() {
     let type_environment = TypeEnvironment::new();
     let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
+    let path_table = path_fork.snapshot_table();
     let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
 
     assert_eq!(
         diagnostic_type_name(type_environment.builtins().int, context),
@@ -45,8 +48,11 @@ fn diagnostic_render_context_renders_builtin_type_names() {
 fn rule_diagnostics_render_receiver_type_names() {
     let type_environment = TypeEnvironment::new();
     let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
+    let path_table = path_fork.snapshot_table();
     let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
     let int_type = type_environment.builtins().int;
 
     let field_access = CompilerDiagnostic::invalid_field_access(
@@ -80,8 +86,9 @@ fn rule_diagnostics_render_receiver_type_names() {
 fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
     let mut type_environment = TypeEnvironment::new();
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
 
-    let point_path = InternedPath::from_single_str("Point", &mut string_table);
+    let point_path = path_fork.try_intern_portable_path("Point", &mut string_table).expect("test path fits");
     let (_, point_type) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: point_path,
@@ -90,7 +97,7 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
         const_record: false,
     });
 
-    let status_path = InternedPath::from_single_str("Status", &mut string_table);
+    let status_path = path_fork.try_intern_portable_path("Status", &mut string_table).expect("test path fits");
     let ready = string_table.get_or_intern("Ready".to_owned());
     let failed = string_table.get_or_intern("Failed".to_owned());
     let (_, status_type) = type_environment.register_nominal_choice(ChoiceTypeDefinition {
@@ -116,8 +123,10 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
         generic_parameters: None,
     });
 
+    let path_table = path_fork.snapshot_table();
     let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
 
     assert_eq!(diagnostic_type_name(point_type, context), "Point");
     assert_eq!(
@@ -130,8 +139,8 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
 fn diagnostic_render_context_renders_constructed_type_names() {
     let mut type_environment = TypeEnvironment::new();
     let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
     let builtins = *type_environment.builtins();
-
     let collection = type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
             fixed_capacity: None,
@@ -147,8 +156,10 @@ fn diagnostic_render_context_renders_constructed_type_names() {
         Box::new([builtins.int, builtins.string]),
     );
 
+    let path_table = path_fork.snapshot_table();
     let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
 
     assert_eq!(diagnostic_type_name(collection, context), "{Int}");
     assert_eq!(diagnostic_type_name(option, context), "String?");
@@ -179,6 +190,7 @@ fn diagnostic_render_context_falls_back_to_type_id_without_matching_environment(
 fn terse_type_mismatch_uses_type_environment_names_when_available() {
     let type_environment = TypeEnvironment::new();
     let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
     let diagnostic = CompilerDiagnostic::type_mismatch(
         type_environment.builtins().int,
         type_environment.builtins().string,
@@ -186,8 +198,10 @@ fn terse_type_mismatch_uses_type_environment_names_when_available() {
         None,
     );
 
+    let path_table = path_fork.snapshot_table();
     let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
     let lines = format_terse_diagnostics_with_context(&[diagnostic], context);
 
     assert_eq!(lines.len(), 1);

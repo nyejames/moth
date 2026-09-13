@@ -16,6 +16,7 @@ use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::{HirTypeClass, classify_hir_type};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
@@ -28,6 +29,8 @@ pub(crate) struct WasmLirLoweringContext<'a> {
     pub request: &'a WasmBackendRequest,
     /// String table for resolving interned paths (e.g. host function names).
     pub string_table: &'a StringTable,
+    /// Path table for resolving semantic `PathId` names.
+    pub path_table: &'a PathTable,
     /// Semantic type environment for type fact queries during lowering.
     pub type_environment: &'a TypeEnvironment,
 
@@ -50,6 +53,7 @@ impl<'a> WasmLirLoweringContext<'a> {
         borrow_facts: &'a BorrowFacts,
         request: &'a WasmBackendRequest,
         string_table: &'a StringTable,
+        path_table: &'a PathTable,
         type_environment: &'a TypeEnvironment,
     ) -> Self {
         Self {
@@ -57,6 +61,7 @@ impl<'a> WasmLirLoweringContext<'a> {
             borrow_facts,
             request,
             string_table,
+            path_table,
             type_environment,
             lir_module: WasmLirModule::default(),
             function_map: FxHashMap::default(),

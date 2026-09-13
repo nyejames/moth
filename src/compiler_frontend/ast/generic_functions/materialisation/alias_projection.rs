@@ -13,22 +13,22 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
 impl ModuleMaterialisationPreparation {
     pub(super) fn stable_alias_target_identity(
         &self,
-        path: &InternedPath,
+        path: &PathId,
         alias: &ResolvedTypeAlias,
     ) -> Result<CanonicalTypeIdentity, CompilerError> {
         self.stable_type_identity(alias.target_type_id)
             .map_err(|error| {
                 CompilerError::new(
                     format!(
-                        "Retained local type alias '{}' violated the completed-target invariant: {}",
-                        path.to_string(&self.string_table),
+                        "Retained local type alias at path {:?} violated the completed-target invariant: {}",
+                        path,
                         error.msg,
                     ),
                     alias.declaration_span,
@@ -41,16 +41,17 @@ pub(super) fn restore_generated_local_alias(
     nominal_source: &GenericTemplateArtefact,
     context: &ModuleMaterialisationContext,
     environment: &mut AstModuleEnvironment,
-    local_path: InternedPath,
-    local_path_components: &[String],
+    local_path: PathId,
+    local_path_components: PathId,
     external_package_registry: &ExternalPackageRegistry,
+    path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<bool, CompilerError> {
     let Some(alias) = context
         .semantic_closure
         .aliases
         .iter()
-        .find(|alias| alias.local_path.as_ref() == local_path_components)
+        .find(|alias| alias.local_path == local_path_components)
     else {
         return Ok(false);
     };
@@ -60,6 +61,7 @@ pub(super) fn restore_generated_local_alias(
         external_package_registry,
         nominal_source,
         string_table,
+        path_fork,
     )?;
     let declaration = Declaration {
         id: local_path.clone(),
@@ -75,7 +77,7 @@ pub(super) fn restore_generated_local_alias(
     };
     let lookups = Rc::make_mut(&mut environment.lookups);
     if lookups.declaration_table.get_by_path(&local_path).is_none() {
-        append_materialised_declaration(lookups, declaration)?;
+        append_materialised_declaration(lookups, declaration, path_fork)?;
     }
     Rc::make_mut(&mut lookups.resolved_type_aliases_by_path).insert(
         local_path.clone(),

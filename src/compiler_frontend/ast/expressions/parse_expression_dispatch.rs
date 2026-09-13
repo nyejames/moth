@@ -19,6 +19,8 @@ use super::parse_expression_places::{
     parse_copy_place_expression, parse_mutable_receiver_expression,
 };
 use super::parse_expression_templates::parse_template_expression;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 use crate::ast_log;
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::field_access::{
@@ -123,6 +125,7 @@ fn reject_second_operand_after_value_template(
     consume_closing_parenthesis: bool,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     while token_stream.current_token_kind() == &TokenKind::TemplateHead {
         let next_template_start = Some(token_stream.current_span());
@@ -133,6 +136,7 @@ fn reject_second_operand_after_value_template(
             consume_closing_parenthesis,
             value_mode,
             string_table,
+            path_fork,
         )?;
 
         if next_template.is_some() {
@@ -163,6 +167,7 @@ fn push_expression_after_suffixes(
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     expression_after_postfix: Expression,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     // ----------------------------
     //  Common mistake: `!=`
@@ -204,6 +209,7 @@ fn push_expression_after_suffixes(
                 && expression.is_empty()
                 && fallible_catch_allowed_in_context(context),
             string_table,
+            path_fork,
         )?
     } else {
         expression_after_postfix
@@ -236,7 +242,7 @@ fn push_expression_after_suffixes(
         && expression_after_option_propagation.is_const_record_value()
     {
         let record_name =
-            const_record_expression_name(&expression_after_option_propagation, string_table);
+            const_record_expression_name(&expression_after_option_propagation, string_table, path_fork);
         return Err(CompilerDiagnostic::const_record_used_as_value(
             record_name,
             expression_after_option_propagation.span,
@@ -258,6 +264,7 @@ pub(super) fn push_expression_operand(
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     operand: Expression,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let wrapper_span = operand.span;
     push_expression_operand_with_span(
@@ -271,6 +278,7 @@ pub(super) fn push_expression_operand(
             operand,
             wrapper_span,
         },
+        path_fork,
     )
 }
 /// Push an expression operand while preserving a distinct wrapper span for suffix parsing.
@@ -287,6 +295,7 @@ pub(super) fn push_expression_operand_with_span(
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     operand_input: ExpressionOperandInput,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let expression_after_postfix = if token_stream.index < token_stream.length
         && token_stream.current_token_kind() == &TokenKind::Dot
@@ -299,6 +308,7 @@ pub(super) fn push_expression_operand_with_span(
             context,
             type_interner,
             string_table,
+            path_fork,
         )?
     } else {
         operand_input.operand
@@ -312,6 +322,7 @@ pub(super) fn push_expression_operand_with_span(
         expression,
         allow_boundary_catch,
         expression_after_postfix,
+        path_fork,
     )
 }
 
@@ -322,15 +333,16 @@ pub(super) fn push_expression_operand_with_span(
 fn const_record_expression_name(
     expression: &Expression,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> StringId {
     match &expression.kind {
         ExpressionKind::FieldAccess { base, .. } => {
-            const_record_expression_name(base, string_table)
+            const_record_expression_name(base, string_table, path_fork)
         }
 
-        ExpressionKind::Reference(path) => {
-            path.name().unwrap_or_else(|| string_table.intern("record"))
-        }
+        ExpressionKind::Reference(path) => path_fork
+            .component(*path)
+            .unwrap_or_else(|| string_table.intern("record")),
 
         _ => string_table.intern("record"),
     }
@@ -409,6 +421,7 @@ pub(super) fn dispatch_expression_token(
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut ExpressionDispatchState<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     // A following `name =` starts the next const-record parameter, not a second operand.
     if context.inside_anonymous_const_record
@@ -468,6 +481,7 @@ pub(super) fn dispatch_expression_token(
                     expected_type: &mut grouped_expected_type,
                     cast_target_context: &mut grouped_cast_target_context,
                     value_mode: state.value_mode,
+                    path_fork,
                     string_table,
                 });
             let value = create_expression_with_trailing_newline_policy(grouped_input)?;
@@ -483,6 +497,7 @@ pub(super) fn dispatch_expression_token(
                     operand: value,
                     wrapper_span: group_span,
                 },
+                path_fork,
             )?;
 
             Ok(ExpressionTokenStep::Continue)
@@ -531,6 +546,7 @@ pub(super) fn dispatch_expression_token(
                 state.value_mode,
                 state.expression,
                 string_table,
+                path_fork,
             )?;
             Ok(ExpressionTokenStep::Advance)
         }
@@ -549,6 +565,7 @@ pub(super) fn dispatch_expression_token(
                 state.allow_boundary_catch,
                 state.allow_expected_result_evidence,
                 string_table,
+                path_fork,
             )?;
             Ok(ExpressionTokenStep::Continue)
         }
@@ -561,6 +578,7 @@ pub(super) fn dispatch_expression_token(
                 state.expression,
                 state.allow_boundary_catch,
                 string_table,
+                path_fork,
             )?;
             Ok(ExpressionTokenStep::Continue)
         }
@@ -583,9 +601,11 @@ pub(super) fn dispatch_expression_token(
                 type_interner,
                 &mut literal_state,
                 string_table,
+                path_fork,
             )?;
             Ok(ExpressionTokenStep::Continue)
         }
+
         TokenKind::Path(path_syntax) => {
             let path_span = Some(SourceSpan::new(
                 token_stream.file_id,
@@ -598,6 +618,7 @@ pub(super) fn dispatch_expression_token(
                 type_interner,
                 state.value_mode,
                 string_table,
+                path_fork,
             )?;
             token_stream.advance();
             push_expression_operand_with_span(
@@ -611,6 +632,7 @@ pub(super) fn dispatch_expression_token(
                     operand,
                     wrapper_span: path_span,
                 },
+                path_fork,
             )?;
             Ok(ExpressionTokenStep::Continue)
         }
@@ -623,6 +645,7 @@ pub(super) fn dispatch_expression_token(
                 state.consume_closing_parenthesis,
                 state.value_mode,
                 string_table,
+                path_fork,
             )?;
 
             let Some(template_expression) = template_expression else {
@@ -638,6 +661,7 @@ pub(super) fn dispatch_expression_token(
                 state.consume_closing_parenthesis,
                 state.value_mode,
                 string_table,
+                path_fork,
             )?;
 
             Ok(ExpressionTokenStep::Return(Box::new(template_expression)))
@@ -647,8 +671,13 @@ pub(super) fn dispatch_expression_token(
             let copy_span = Some(token_stream.current_span());
             token_stream.advance();
 
-            let copied_place =
-                parse_copy_place_expression(token_stream, context, type_interner, string_table)?;
+            let copied_place = parse_copy_place_expression(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                path_fork,
+            )?;
 
             let copy_expression = Expression::copy_with_type_id(
                 copied_place.place,
@@ -715,7 +744,14 @@ pub(super) fn dispatch_expression_token(
         }
 
         TokenKind::Cast | TokenKind::CastBang => {
-            parse_cast_expression(token_stream, context, type_interner, state, string_table)
+            parse_cast_expression(
+                token_stream,
+                context,
+                type_interner,
+                state,
+                string_table,
+                path_fork,
+            )
         }
 
         TokenKind::Negative | TokenKind::Not => {
@@ -757,7 +793,14 @@ pub(super) fn dispatch_expression_token(
         //  Comparison operators
         // -------------------------------
         TokenKind::Is => {
-            dispatch_is_token(token_stream, context, type_interner, state, string_table)
+            dispatch_is_token(
+                token_stream,
+                context,
+                type_interner,
+                state,
+                string_table,
+                path_fork,
+            )
         }
 
         TokenKind::LessThan => {
@@ -823,24 +866,26 @@ pub(super) fn dispatch_expression_token(
             }
 
             if context.kind.is_constant_context() {
-                let record = parse_anonymous_const_record_expression(
-                    token_stream,
-                    context,
-                    type_interner,
-                    string_table,
-                )?;
+            let record = parse_anonymous_const_record_expression(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                path_fork,
+            )?;
 
-                push_expression_operand(
-                    token_stream,
-                    context,
-                    type_interner,
-                    string_table,
-                    state.expression,
-                    state.allow_boundary_catch,
-                    record,
-                )?;
+            push_expression_operand(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                state.expression,
+                state.allow_boundary_catch,
+                record,
+                path_fork,
+            )?;
 
-                Ok(ExpressionTokenStep::Continue)
+            Ok(ExpressionTokenStep::Continue)
             } else {
                 Err(CompilerDiagnostic::deferred_feature_reason(
                     DeferredFeatureReason::RuntimeAnonymousRecord,
@@ -995,6 +1040,7 @@ fn dispatch_is_token(
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut ExpressionDispatchState<'_>,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     match token_stream.peek_next_token() {
         // `is not` → inequality operator.
@@ -1020,6 +1066,7 @@ fn dispatch_is_token(
                 state.expected_type,
                 state.value_mode,
                 string_table,
+                path_fork,
             )?;
             Ok(ExpressionTokenStep::Return(Box::new(value)))
         }
@@ -1042,6 +1089,7 @@ fn parse_cast_expression(
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut ExpressionDispatchState<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     // `cast` is only valid as the leading token of an expression at an explicit boundary.
     if !state.expression.is_empty() {
@@ -1117,6 +1165,7 @@ fn parse_cast_expression(
         state.value_mode,
         state.consume_closing_parenthesis,
         string_table,
+        path_fork,
     )?;
 
     // `cast!` and `cast ... catch:` are mutually exclusive.
@@ -1149,6 +1198,7 @@ fn parse_cast_expression(
                 allow_boundary_catch: state.allow_boundary_catch,
             },
             string_table,
+            path_fork,
         )?);
         CastHandling::Recover
     } else {
@@ -1194,6 +1244,7 @@ fn parse_cast_expression(
         trait_evidence_environment: context.trait_evidence_environment(),
         type_environment: type_interner.environment_mut_for_derived_types(),
         string_table,
+        path_fork: &*path_fork,
         active_generic_type_context: context.active_generic_type_context(),
         span: cast_span,
     })?;
@@ -1217,6 +1268,7 @@ fn parse_cast_operand_expression(
     value_mode: &ValueMode,
     consume_closing_parenthesis: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let catch_index = find_expression_end_index(
         &token_stream.tokens,
@@ -1238,6 +1290,7 @@ fn parse_cast_operand_expression(
                 cast_target_context: &mut cast_target_context,
                 value_mode,
                 string_table,
+                path_fork,
             },
             false,
         );
@@ -1253,6 +1306,7 @@ fn parse_cast_operand_expression(
             cast_target_context: &mut cast_target_context,
             value_mode,
             string_table,
+            path_fork,
         },
         consume_closing_parenthesis,
     );

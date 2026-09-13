@@ -190,10 +190,13 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
             .path_syntax
             .paths()
             .iter()
-            .any(|path| path
-                .root
-                .to_portable_string(&module.prepared.semantic.string_table)
-                == "leaf"),
+            .any(|path| {
+                module.prepared.semantic.path_fork.render_portable(
+                    path.root,
+                    &module.prepared.semantic.string_table,
+                    &mut Vec::new(),
+                ) == "leaf"
+            }),
         "reachable dependency path should survive the non-identity string remap"
     );
 }
@@ -552,6 +555,8 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
         resolution_table: &mut resolution_table,
     };
     let mut string_table = StringTable::new();
+    let mut path_fork =
+        crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
 
     super::source_discovery::collect_reachable_input_files(
         &nested_entry,
@@ -560,6 +565,7 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
         &mut external_imports,
         &crate::builder_surface::SourceFileKindRegistry::default(),
         &mut ResourceInputRegistry::new(),
+        &mut path_fork,
         &mut string_table,
     )
     .expect("synthetic nested provider should resolve");
@@ -624,6 +630,8 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
             resolution_table: &mut resolution_table,
         };
         let mut string_table = StringTable::new();
+        let mut path_fork =
+            crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
 
         super::source_discovery::collect_reachable_input_files(
             &nested_entry,
@@ -632,6 +640,7 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
             &mut external_imports,
             &crate::builder_surface::SourceFileKindRegistry::default(),
             &mut ResourceInputRegistry::new(),
+            &mut path_fork,
             &mut string_table,
         )
         .expect("both nested provider clauses should resolve");
@@ -935,7 +944,7 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
     );
     if let DiagnosticPayload::UnsupportedExternalExtension { path, extension } = &diagnostic.payload
     {
-        let path_text = path.to_portable_string(&messages.string_table);
+        let path_text = messages.diagnostic_render_context(0).render_path(*path);
         assert_eq!(path_text, "drawing.js", "unexpected path in diagnostic");
         assert_eq!(
             messages.string_table.resolve(*extension),

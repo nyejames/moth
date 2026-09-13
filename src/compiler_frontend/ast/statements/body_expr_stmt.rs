@@ -16,11 +16,11 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
-use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
-
+use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 /// Returns `true` if the given expression is valid in statement position.
 ///
 /// Direct calls and handled fallible calls are always valid statements.
@@ -101,6 +101,7 @@ fn parse_and_validate_statement_expression(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
     let mut inferred = ExpectedType::Infer;
     let expression = create_expression(
@@ -111,8 +112,8 @@ fn parse_and_validate_statement_expression(
         &ValueMode::ImmutableOwned,
         false,
         string_table,
+        path_fork,
     )?;
-
     if let Some(diagnostic) = rejects_discarded_fallible_success(&expression) {
         return Err(diagnostic.into());
     }
@@ -133,16 +134,23 @@ pub(crate) fn parse_expression_statement_candidate(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    parse_and_validate_statement_expression(token_stream, context, type_interner, string_table)
+    parse_and_validate_statement_expression(token_stream, context, type_interner, string_table, path_fork)
 }
-
 pub(crate) fn parse_symbol_expression_statement_candidate(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
     _symbol_id: StringId,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    parse_and_validate_statement_expression(token_stream, context, type_interner, string_table)
+    parse_and_validate_statement_expression(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )
 }

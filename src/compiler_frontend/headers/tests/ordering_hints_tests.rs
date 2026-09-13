@@ -15,7 +15,7 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -28,46 +28,33 @@ fn prepare_source(
     crate::compiler_frontend::headers::types::FileFrontendPrepareOutput,
     StringTable,
     ExtendedSpanBuilder,
+    PathInternerFork,
 ) {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let file_path = Path::new("@page.moth");
-    let interned_path = InternedPath::try_from_filesystem_path(file_path, &mut string_table)
+    let interned_path = path_fork.try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        &interned_path,
-        TokenizerEntryMode::SourceFile,
-        &StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
+    let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
-    let output = prepare_file_from_tokens(
-        file_tokens,
-        file_path,
-        &HeaderParseOptions::default(),
-        &mut string_table,
-        0,
-        0,
-        &mut span_builder,
-    )
+    let output = prepare_file_from_tokens(file_tokens, file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
     .expect("preparation should succeed");
-    (output, string_table, span_builder)
+    (output, string_table, span_builder, path_fork)
 }
 
 fn content_hint(
     path_text: &str,
     occurrence: PathSyntaxId,
     strings: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> LocalDeclarationOrderingHint {
     let components = path_text
         .split('/')
         .map(|component| strings.intern(component))
         .collect::<Vec<_>>();
     LocalDeclarationOrderingHint::content_source(
-        InternedPath::from_components(components),
+        path_fork.try_intern_components(&components).expect("test path fits"),
         occurrence,
     )
 }
@@ -120,7 +107,7 @@ fn assert_hints(header: &Header, expected: &HashSet<LocalDeclarationOrderingHint
 
 #[test]
 fn constant_initializer_content_value_records_content_hint() {
-    let (output, mut strings, _span_builder) = prepare_source("intro #= @docs/intro.mtf\n");
+    let (output, mut strings, _span_builder, mut path_fork) = prepare_source("intro #= @docs/intro.mtf\n");
 
     let header = header_of_kind(&output.headers, "constant", |kind| {
         matches!(kind, HeaderKind::Constant { .. })
@@ -133,13 +120,14 @@ fn constant_initializer_content_value_records_content_hint() {
         "docs/intro.mtf/content",
         occurrences[0],
         &mut strings,
+        &mut path_fork,
     ));
     assert_hints(header, &expected);
 }
 
 #[test]
 fn repeated_content_values_in_one_shell_retain_each_occurrence_hint() {
-    let (output, mut strings, _span_builder) =
+    let (output, mut strings, _span_builder, mut path_fork) =
         prepare_source("#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n");
 
     let fragment_header = header_of_kind(&output.headers, "const-template", |kind| {
@@ -154,6 +142,7 @@ fn repeated_content_values_in_one_shell_retain_each_occurrence_hint() {
             "docs/intro.mtf/content",
             occurrence,
             &mut strings,
+            &mut path_fork,
         ));
     }
     assert_hints(fragment_header, &expected);
@@ -161,7 +150,7 @@ fn repeated_content_values_in_one_shell_retain_each_occurrence_hint() {
 
 #[test]
 fn function_parameter_default_records_content_hint_and_body_stays_unhinted() {
-    let (output, mut strings, _span_builder) = prepare_source(
+    let (output, mut strings, _span_builder, mut path_fork) = prepare_source(
         "label |prefix String = [: [@docs/intro.md] ]| -> String:\n\
      \x20   io.line([: [@docs/body.md]])\n\
      ;\n",
@@ -178,13 +167,14 @@ fn function_parameter_default_records_content_hint_and_body_stays_unhinted() {
         "docs/intro.md/content",
         occurrences[0],
         &mut strings,
+        &mut path_fork,
     ));
     assert_hints(function_header, &expected);
 }
 
 #[test]
 fn struct_field_default_records_content_hint() {
-    let (output, mut strings, _span_builder) =
+    let (output, mut strings, _span_builder, mut path_fork) =
         prepare_source("Options = |\n    path String = [: [@docs/intro.md] ],\n|\n");
 
     let struct_header = header_of_kind(&output.headers, "struct", |kind| {
@@ -198,13 +188,14 @@ fn struct_field_default_records_content_hint() {
         "docs/intro.md/content",
         occurrences[0],
         &mut strings,
+        &mut path_fork,
     ));
     assert_hints(struct_header, &expected);
 }
 
 #[test]
 fn top_level_const_fragment_records_content_hint() {
-    let (output, mut strings, _span_builder) = prepare_source("#[: [@docs/intro.md]]\n");
+    let (output, mut strings, _span_builder, mut path_fork) = prepare_source("#[: [@docs/intro.md]]\n");
 
     let fragment_header = header_of_kind(&output.headers, "const-template", |kind| {
         matches!(kind, HeaderKind::ConstTemplate { .. })
@@ -217,13 +208,14 @@ fn top_level_const_fragment_records_content_hint() {
         "docs/intro.md/content",
         occurrences[0],
         &mut strings,
+        &mut path_fork,
     ));
     assert_hints(fragment_header, &expected);
 }
 
 #[test]
 fn runtime_start_body_content_value_records_no_content_hint() {
-    let (output, _, _span_builder) = prepare_source("io.line([: [@docs/intro.mtf]])\n");
+    let (output, _, _span_builder, _path_fork) = prepare_source("io.line([: [@docs/intro.mtf]])\n");
 
     let start_header = header_of_kind(&output.headers, "start", |kind| {
         matches!(kind, HeaderKind::StartFunction)
@@ -244,7 +236,7 @@ fn runtime_start_body_content_value_records_no_content_hint() {
 
 #[test]
 fn resource_file_value_records_no_content_hint() {
-    let (output, _, _span_builder) = prepare_source("icon #= @assets/logo.svg\n");
+    let (output, _, _span_builder, _path_fork) = prepare_source("icon #= @assets/logo.svg\n");
 
     let header = header_of_kind(&output.headers, "constant", |kind| {
         matches!(kind, HeaderKind::Constant { .. })
@@ -258,7 +250,7 @@ fn resource_file_value_records_no_content_hint() {
 
 #[test]
 fn struct_field_resource_default_records_no_content_hint() {
-    let (output, strings, _span_builder) =
+    let (output, strings, _span_builder, _path_fork) =
         prepare_source("Options = |\n    icon_url String = @assets/logo.svg,\n|\n");
 
     let struct_header = header_of_kind(&output.headers, "struct", |kind| {
@@ -274,15 +266,15 @@ fn struct_field_resource_default_records_no_content_hint() {
     );
     assert!(
         struct_header.local_ordering_hints.is_empty(),
-        "a resource-only field default needs no content ordering edge, got {:?} in {}",
+        "a resource-only field default needs no content ordering edge, got {:?} in {:?}",
         struct_header.local_ordering_hints,
-        struct_header.tokens.src_path.to_portable_string(&strings)
+        struct_header.tokens.src_path
     );
 }
 
 #[test]
 fn dependency_clause_rows_record_no_content_hint() {
-    let (output, strings, _span_builder) = prepare_source(
+    let (output, strings, _span_builder, _path_fork) = prepare_source(
         "@core/math sin\n\
      unused #= @assets/logo.svg\n",
     );
@@ -290,9 +282,9 @@ fn dependency_clause_rows_record_no_content_hint() {
     for header in &output.headers {
         assert!(
             header.local_ordering_hints.is_empty(),
-            "clause-consumed and resource rows must record no hints, got {:?} on {}",
+            "clause-consumed and resource rows must record no hints, got {:?} on {:?}",
             header.local_ordering_hints,
-            header.tokens.src_path.to_portable_string(&strings)
+            header.tokens.src_path
         );
     }
 }
@@ -301,7 +293,7 @@ fn dependency_clause_rows_record_no_content_hint() {
 fn recollecting_content_hints_deduplicates_into_the_hint_set() {
     // Re-running the collector over the same shells and rows must be a no-op, so no ordering or
     // diagnostic difference can depend on worklist insertion order.
-    let (mut output, mut strings, _span_builder) = prepare_source(
+    let (mut output, mut strings, _span_builder, mut path_fork) = prepare_source(
         "intro #= @docs/intro.mtf\n\
      other #= @docs/other.mtf\n",
     );
@@ -316,6 +308,7 @@ fn recollecting_content_hints_deduplicates_into_the_hint_set() {
         &output.structural_file_references,
         output.path_syntax.table(),
         &mut strings,
+        &mut path_fork,
     )
     .expect("re-collecting valid path rows should succeed");
     let after: Vec<usize> = output

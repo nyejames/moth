@@ -28,6 +28,7 @@ fn lower_minimal_module_with_float_statement(
     result_type: TypeId,
 ) -> String {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -61,21 +62,18 @@ fn lower_minimal_module_with_float_statement(
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "result")],);
 
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed")
     .source
 }
@@ -258,6 +256,7 @@ fn lower_minimal_module_with_numeric_op(
     result_type: TypeId,
 ) -> String {
     let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
@@ -286,21 +285,18 @@ fn lower_minimal_module_with_numeric_op(
         return_type: types.unit,
     };
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
+    let module = build_module(&mut path_fork, &mut string_table,
+    "main",
+    vec![block],
+    function,
+    &[(LocalId(0), "result")],);
 
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
+    lower_hir_to_js(&module,
+    &BorrowCheckReport::default(),
+    &string_table,
+    default_config(),
+    &type_environment,
+    &path_fork.snapshot_table())
     .expect("JS lowering should succeed")
     .source
 }
@@ -669,57 +665,51 @@ fn float_helpers_contain_non_finite_error() {
 
 /// Verifies that malformed HIR arity produces a compiler error rather than invalid JS.
 #[test]
-fn numeric_op_arity_mismatch_returns_error() {
-    let mut string_table = StringTable::new();
-    let (type_environment, types) = build_type_environment();
-    let region = RegionId(0);
+fn numeric_op_arity_mismatch_returns_error() {  let mut path_fork = PathInternerFork::empty(); let mut string_table = StringTable::new(); let (type_environment, types) = build_type_environment();
+let region = RegionId(0);
 
-    // IntAdd is binary but we supply unary operands.
-    let numeric_statement = statement(
-        1,
-        HirStatementKind::NumericOp {
-            op: HirNumericOp::IntAdd,
-            failure_mode: NumericFailureMode::Trap,
-            operands: HirNumericOperands::Unary {
-                operand: int_expression(1, 1, types.int, region),
-            },
-            result: LocalId(0),
+// IntAdd is binary but we supply unary operands.
+let numeric_statement = statement(
+    1,
+    HirStatementKind::NumericOp {
+        op: HirNumericOp::IntAdd,
+        failure_mode: NumericFailureMode::Trap,
+        operands: HirNumericOperands::Unary {
+            operand: int_expression(1, 1, types.int, region),
         },
-    );
+        result: LocalId(0),
+    },
+);
 
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![local(0, types.int, region)],
-        statements: vec![numeric_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
-    };
+let block = HirBlock {
+    id: BlockId(0),
+    region,
+    locals: vec![local(0, types.int, region)],
+    statements: vec![numeric_statement],
+    terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
+};
 
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
+let function = HirFunction {
+    id: FunctionId(0),
+    entry: BlockId(0),
+    params: vec![],
+    return_type: types.unit,
+};
 
-    let module = build_module(
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
+let module = build_module(&mut path_fork, &mut string_table,
+"main",
+vec![block],
+function,
+&[(LocalId(0), "result")],);
 
-    let result = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    );
+let result = lower_hir_to_js(&module,
+&BorrowCheckReport::default(),
+&string_table,
+default_config(),
+&type_environment,
+&path_fork.snapshot_table());
 
-    assert!(
-        result.is_err(),
-        "NumericOp arity mismatch must fail lowering with a compiler error"
-    );
-}
+assert!(
+    result.is_err(),
+    "NumericOp arity mismatch must fail lowering with a compiler error"
+); }

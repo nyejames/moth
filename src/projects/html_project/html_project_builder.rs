@@ -176,6 +176,7 @@ impl BackendBuilder for HtmlProjectBuilder {
             let page_metadata_plan = match extract_html_page_metadata(
                 &module.executable.hir,
                 start_function,
+                &module.executable.path_table,
                 &module.executable.resource_table,
                 string_table,
             ) {
@@ -591,6 +592,7 @@ impl HtmlProjectBuilder {
 
         let compile_input = HtmlModuleCompileInput {
             hir_module: &module.executable.hir,
+            path_table: &module.executable.path_table,
             resource_table: &module.executable.resource_table,
             reachability,
             type_environment: &module.executable.type_environment,

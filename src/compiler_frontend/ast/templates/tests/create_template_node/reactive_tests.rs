@@ -5,12 +5,13 @@ fn reactive_head_unknown_source_retains_exact_multibyte_span() {
     let source = "[$(π)]";
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
-        template_tokens_from_source(source, &mut string_table, &mut span_builder);
-    let context = new_constant_context(token_stream.src_path.to_owned());
+        template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
+    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("an unknown reactive source should fail"),
     );
     assert!(matches!(

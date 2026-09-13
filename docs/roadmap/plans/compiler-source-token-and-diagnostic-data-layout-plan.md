@@ -7,11 +7,9 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Phase 1 final review-correction pass is complete and committed in `3c9c776a8` after the
-> external-review correction checkpoint below. Related-site ownership, generic re-anchoring,
-> direct premerge failure ownership, structured renderer facts, and source/test-owner cleanup are
-> resolved here.
-> Phase 1 is delivered on main. The next implementation slice is Phase 2 on the rebased continuation branch, with package work proceeding in parallel. The roadmap retains the separate checkpoint before Phase 4.
+> Phase 1 is delivered on main. Phase 2 complete-path interning is delivered on
+> `diagnostic-data-layout-changes`. Next is Phase 3 token-store work. Package work proceeds in
+> parallel. The roadmap retains the separate checkpoint before Phase 4.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -68,37 +66,43 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 1 is complete and delivered on main. Next: Phase 2 after refreshing the continuation branch and baseline. Package work proceeds in parallel under the roadmap checkpoints.
-- Goal: retain the compact plain diagnostic boundary, final `SourceId`/`SourceSpan` ownership and
-  deterministic publication while preserving exact authored spans and typed infrastructure failures.
-- Current code evidence: project and linked-module backend diagnostics carry explicit boundary ownership;
-  domain-less handles stay with the project default range while domained package handles resolve only
-  through exact package rows. Generic re-anchoring preserves a spanless body's primary owner;
-  materialisation invariant failures use direct premerge infrastructure/diagnostic lanes; terminal and
-  HTML renderers consume structured label facts with scalar/UTF-16/display-width separation; source
-  discovery and frontend tests use focused real modules without obsolete test loaders.
-- Validation evidence: focused ownership, capacity, merge, renderer, loading and retention regressions pass.
-  The clean final full gate passed on 2026-09-10 for the candidate committed as `3c9c776a8`: native
-  featured all-target Clippy, 5,105 workspace tests, 17 CLI tests, 825 xtask tests, integration
-  1,951/1,951, source audit 1,336 files, docs check, 82 benchmark preflights, three scaling series
-  and timer erasure.
-  The five-run retained-layout/allocator probe is recorded in
-  `benchmarks/frontend-optimization-results.md`.
-- Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
-  cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
-  stale diagnostic-boxing comment cleanup `eb6416312`; external-review correction checkpoints
-  `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and `3c9c776a8`.
-- Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
+- Phase: Phase 2 is complete on `diagnostic-data-layout-changes`; final review corrections are
+  committed in `aed38042f`, covering generated path/string pairing and report-owner path retention.
+  Next: Phase 3 Slice 3A token array layout selection.
+- Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
+  diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
+- Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
+  `PathInternerFork`, merge tails merge strings then paths, publication remaps retained `PathId`s,
+  diagnosed lanes retain issuing path tables, imported nominals intern defining names, provider
+  materialisation keeps the live string/path pair through nested requests, and final report metrics
+  count only path tables reachable from diagnostic owners.
+- Validation evidence: targeted capacity, ownership, materialisation and invariant suites pass;
+  `cargo test --workspace --quiet -- --format terse` passes 5,983 tests; the exact all-feature
+  workspace check compiles with warnings; the clean and warning-heavy retention probes complete
+  successfully with 0 and 1 retained path tables respectively; feature-lane-check reports 0
+  findings; source audit reports 1,389 files audited with 0 findings; docs check reports no errors
+  or warnings; bench-ci covers 82 preflight cases and frontend timing averages -3 ms;
+  timers-erasure-check passes.
+  The recorded `just validate` attempt reaches native clippy but fails on the repository's
+  warning-denied set. validate-common integration reports 31/1,959 baseline-equivalent failures,
+  and bench-scaling's generic-instantiation budget remains over target in both current (n^1.82)
+  and pre-cleanup baseline (n^1.77). These full-gate limitations are recorded in this capsule;
+  the benchmark evidence records the separate workload probes.
+- Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
+  `aed38042f`, `72f30dcfb`.
+- Non-goals: Phase 3 token-store work; diagnostic compact-record work.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
 `eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and
-`3c9c776a8`; the plan sequence is committed through the final review-correction checkpoint.
+`3c9c776a8`; Slice 2A is `15fe3049f`; Slice 2B is `2bac27b34`; Slice 2C is `d040f08de`; Slice 2D is
+`379c77fb0`.
 
 CURRENT_WORKSPACE_STATE:
-- Phase 1 source, token, diagnostic, renderer and ownership corrections are complete and validated.
-- The exact correction checkpoint, feature-matrix result and full-gate result are recorded in the
-  correction evidence below.
-- Phase 2 is the next slice on the rebased continuation branch. Establish its actual workspace state and validation baseline when work starts.
+- Phase 1 remains complete. Phase 2 PathId cutover, generated identity pairing and report-owner
+  retention metrics are implemented and committed; refreshed probe evidence is recorded. The final
+  integration audit approved the complete change with no required findings.
+- Next work is Phase 3 fixed tokens and source-owned retained syntax.
+
 HISTORICAL_ACCEPTED_SLICES:
 Phase 0 and Phase 1 are complete on main. Per-slice delivery, review and validation logs live in
 Git. The compact Phase 0/1 summary below keeps standing contracts, later-phase prerequisites and
@@ -580,9 +584,9 @@ source in the boundary database. File/chunk merges place prepared results in pre
 reject duplicate, missing and out-of-range outputs.
 
 `SourceDatabaseBuilder` separates live span ownership from immutable lookup services. Private AST
-handles share the same allocation only during producer calls; finalization regains exclusive access
-and returns that same `Arc` after installing the tables. Package lookup publication waits for
-check-only producers.
+handles share the same allocation only during producer calls; `finish` consumes the builder,
+unwraps exclusive ownership, and returns an owned `SourceDatabase` after installing the tables.
+Package lookup publication waits for check-only producers.
 
 `SourceDatabase` owns the existing path interner as its one source identity base. The source
 `PathId`/legacy-path bridge ends at 2D and reconstructs transient components from table nodes,
@@ -615,8 +619,9 @@ final terminator resolves to the preceding visible line end. Unicode scalar colu
 and UTF-16 columns serve tooling; both are derived lazily from exact byte offsets. Empty spans
 overlap nothing; containment is the operation for insertion points.
 
-The tokenizer's line-break set is LF, CRLF and bare CR. `TokenStream::next` is the single owner of
-the authored line counter. Unreadable-source failure stays at the slot layer; loaded records own
+The tokenizer's line-break set is LF, CRLF and bare CR. `TokenStream::next` advances the UTF-8
+byte-offset cursor; line indexes are derived from retained snapshots rather than an authored line
+counter in the tokenizer. Unreadable-source failure stays at the slot layer; loaded records own
 text, line starts and extended spans unconditionally.
 
 Cross-source joins are rejected. Named source-order, overlap and containment operations replace
@@ -758,9 +763,10 @@ columns, UTF-16 columns and tab stops remain distinct.
 
 #### Deferred representation work
 
-Parent-linked path tables, compact span encoding, token-store consolidation and declarative
-token/diagnostic schemas remain deferred to their planned migration slices. This Phase 1 work adds
-no second interner, scheduler, observer API or ubiquitous per-node owner.
+Token-store consolidation and declarative token/diagnostic schemas remain deferred to their planned
+migration slices. Parent-linked path tables and compact span encoding are Phase 1 current state, not
+future work. This Phase 1 work adds no second interner, scheduler, observer API or ubiquitous
+per-node owner.
 
 The private discovery-finalization barrier, parent-linked path trie, ambiguity-failing legacy path
 lookup and local `_unspanned` wrappers remain accepted migration choices until their owning cleanup
@@ -790,63 +796,63 @@ adding a contended global interner or another scheduling system.
 
 ### Slice 2A — Extend the final path-table foundation beyond source registration
 
-- [ ] keep the exact dense parent/component representation introduced in Phase 1; do not replace it with a second interner
-- [ ] add module-local delta, remap and consuming frozen-table support needed by later compiler stages
-- [ ] make parent/append/join identity operations allocation-free after interning
-- [ ] add a consuming freeze operation that drops reverse lookup state when no further interning occurs
-- [ ] define portable and native rendering through `PathTable` plus string lookup
-- [ ] classify path domains before migration: compiler logical/semantic component paths may share the table, filesystem paths remain cold `Path` values and rendered free text is never interned as a path
-- [ ] add layout, depth, prefix/suffix, equality, domain-wrapper and invalid-context tests
+- [x] keep the exact dense parent/component representation introduced in Phase 1; do not replace it with a second interner
+- [x] add module-local delta, remap and consuming frozen-table support needed by later compiler stages
+- [x] make parent/append/join identity operations allocation-free after interning
+- [x] add a consuming freeze operation that drops reverse lookup state when no further interning occurs
+- [x] define portable and native rendering through `PathTable` plus string lookup
+- [x] classify path domains before migration: compiler logical/semantic component paths may share the table, filesystem paths remain cold `Path` values and rendered free text is never interned as a path
+- [x] add layout, depth, prefix/suffix, equality, domain-wrapper and invalid-context tests
 
 ### Slice 2B — Reuse existing deterministic identity merges
 
-- [ ] mirror the existing string-table immutable-base fork at module scope only where PathIds must exist during module compilation
-- [ ] merge string IDs before path nodes because path records contain `StringId`
-- [ ] merge path deltas in the same file/chunk and module order already used by frontend orchestration
-- [ ] remap PathIds exactly once at each existing merge boundary
-- [ ] keep source logical paths in the immutable build base so they never remap
-- [ ] do not add a new scheduler, global lock, atomic ID allocator or generic interner framework
-- [ ] extend existing counters for path nodes, unique complete paths, depth, merges and remaps
+- [x] mirror the existing string-table immutable-base fork at module scope only where PathIds must exist during module compilation
+- [x] merge string IDs before path nodes because path records contain `StringId`
+- [x] merge path deltas in the same file/chunk and module order already used by frontend orchestration
+- [x] remap PathIds exactly once at each existing merge boundary
+- [x] keep source logical paths in the immutable build base so they never remap
+- [x] do not add a new scheduler, global lock, atomic ID allocator or generic interner framework
+- [x] extend existing counters for path nodes, unique complete paths, depth, merges and remaps
 
 ### Slice group 2C — Migrate compiler path owners
 
 Each checked batch is an independent accepted slice. Delete old fields and conversion helpers in the
 same batch.
 
-- [ ] **2C1 — tokenizer and dependencies:** tokenized path rows, clause-owned dependency aliases,
+- [x] **2C1 — tokenizer and dependencies:** tokenized path rows, clause-owned dependency aliases,
   dependency-shell provider paths and path diagnostics
-- [ ] **2C2 — headers and graph facts:** header identities, dependency collections, exports, module symbols, path resolution and source/package identities
-- [ ] **2C3 — semantic types and interfaces:** parsed type paths, nominal/type lookup maps, traits, generic identities and public-surface facts; keep stable semantic origin IDs as the cross-package authority and remap or context-own every display `PathId` at interface binding
-- [ ] **2C4 — AST/TIR/HIR metadata:** declarations, scopes, constants, template metadata, HIR/link facts and build metadata
-- [ ] **2C5 — diagnostics and support:** diagnostic places/path facts, renderers, test support, snapshots and debug output
-- [ ] replace retained per-header `HashSet<InternedPath>` dependency storage with deterministic sorted/deduplicated `PathId` slices or typed arena ranges; temporary sets may exist only while collecting
+- [x] **2C2 — headers and graph facts:** header identities, dependency collections, exports, module symbols, path resolution and source/package identities
+- [x] **2C3 — semantic types and interfaces:** parsed type paths, nominal/type lookup maps, traits, generic identities and public-surface facts; keep stable semantic origin IDs as the cross-package authority and remap or context-own every display `PathId` at interface binding
+- [x] **2C4 — AST/TIR/HIR metadata:** declarations, scopes, constants, template metadata, HIR/link facts and build metadata
+- [x] **2C5 — diagnostics and support:** diagnostic places/path facts, renderers, test support, snapshots and debug output
+- [x] replace retained per-header `HashSet<InternedPath>` dependency storage with deterministic sorted/deduplicated `PathId` slices or typed arena ranges; temporary sets may exist only while collecting
 
 ### Slice 2D — Delete vector-backed canonical paths
 
-- [ ] delete `InternedPath`, its vector constructors and string-ID remap implementation
-- [ ] delete repeated path clones and allocation-based parent/append/join helpers
-- [ ] remove `HashMap<InternedPath, ...>`/`HashSet<InternedPath>` owners in favour of PathId keys
-- [ ] keep `PathBuf` only at filesystem boundaries and source cold data
-- [ ] update codebase index and module docs
+- [x] delete `InternedPath`, its vector constructors and string-ID remap implementation
+- [x] delete repeated path clones and allocation-based parent/append/join helpers
+- [x] remove `HashMap<InternedPath, ...>`/`HashSet<InternedPath>` owners in favour of PathId keys
+- [x] keep `PathBuf` only at filesystem boundaries and source cold data
+- [x] update codebase index and module docs
 
 ### Phase 2 — Audit / style-guide review / validation
 
 Complete the common phase close, plus:
 
-- [ ] audit one path identity domain per compilation context and no detached raw path ID crosses a project/package boundary
-- [ ] audit source paths stay stable while worker-created paths remap deterministically
-- [ ] audit no path identity is reconstructed from rendered text
-- [ ] audit no lock or `Arc` exists per path
-- [ ] review path APIs for explicit context and no hidden allocation
-- [ ] run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests
-- [ ] record path bytes, allocation/remap counts and timing
+- [x] audit one path identity domain per compilation context and no detached raw path ID crosses a project/package boundary
+- [x] audit source paths stay stable while worker-created paths remap deterministically
+- [x] audit no path identity is reconstructed from rendered text
+- [x] audit no lock or `Arc` exists per path
+- [x] review path APIs for explicit context and no hidden allocation
+- [x] run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests
+- [x] record path bytes, allocation/remap counts and timing (see `benchmarks/frontend-optimization-results.md` > `Data Layout Migration - Phase 2 Path Identity Retention Probe`)
 
 ### Phase 2 exit criteria
 
-- [ ] `PathId` is the only complete logical path identity
-- [ ] `InternedPath` is deleted
-- [ ] common compiler records carry IDs rather than owned component vectors
-- [ ] path construction and merge order are deterministic
+- [x] `PathId` is the only complete logical path identity
+- [x] `InternedPath` is deleted
+- [x] common compiler records carry IDs rather than owned component vectors
+- [x] path construction and merge order are deterministic
 
 ---
 

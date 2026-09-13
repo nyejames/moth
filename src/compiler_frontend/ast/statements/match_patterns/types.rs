@@ -8,7 +8,8 @@ use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// One arm of a match expression, pairing a pattern with an optional guard and body.
@@ -43,7 +44,7 @@ pub struct ParsedChoicePayloadCapture {
 pub struct ChoicePayloadCapture {
     pub field_index: usize,
     pub type_id: TypeId,
-    pub binding_path: InternedPath,
+    pub binding_path: PathId,
     /// Exact span of the declared payload field name in the pattern.
     pub span: Option<SourceSpan>,
     /// Exact span of the actual local binding (`as` alias or field name).
@@ -82,7 +83,7 @@ pub enum MatchPattern {
     /// guard-substitution model as choice payload captures.
     OptionPresentCapture {
         name: StringId,
-        binding_path: InternedPath,
+        binding_path: PathId,
         inner_type_id: TypeId,
         span: Option<SourceSpan>,
         binding_span: Option<SourceSpan>,
@@ -95,7 +96,7 @@ pub enum MatchPattern {
     },
 
     ChoiceVariant {
-        nominal_path: InternedPath,
+        nominal_path: PathId,
         tag: usize,
         captures: Vec<ChoicePayloadCapture>,
         span: Option<SourceSpan>,
@@ -117,7 +118,7 @@ impl MatchPattern {
 }
 
 pub struct ParsedChoicePattern {
-    pub nominal_path: InternedPath,
+    pub nominal_path: PathId,
     pub variant: StringId,
     pub tag: usize,
     pub captures: Vec<ParsedChoicePayloadCapture>,

@@ -15,7 +15,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -40,21 +40,23 @@ type ChoicePatternResult<T> = Result<T, ExpressionParseError>;
 pub fn parse_choice_variant_pattern(
     token_stream: &mut FileTokens,
     match_context: &ScopeContext,
-    choice_nominal_path: &InternedPath,
+    choice_nominal_path: &PathId,
     variants: &[ChoiceVariant],
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> ChoicePatternResult<ParsedChoicePattern> {
     // Choice patterns support exact variant names plus constructor-like payload captures.
     if let Some(diagnostic) = reject_deferred_pattern_lead_token(token_stream) {
         return Err(diagnostic.into());
     }
 
-    let choice_name_display = choice_display_name(choice_nominal_path, string_table);
+    let choice_name_display = choice_display_name(choice_nominal_path, path_fork, string_table);
     let (variant_name, variant_span) = parse_variant_name(
         token_stream,
         match_context,
         choice_nominal_path,
         &choice_name_display,
+        path_fork,
         string_table,
     )?;
 
@@ -71,16 +73,21 @@ pub fn parse_choice_variant_pattern(
         variant_name,
         &choice_name_display,
         variant_span,
-        string_table,
+        path_fork,
         choice_nominal_path,
     )?;
 
     let variant = &variants[variant_index];
-    let captures =
-        parse_choice_pattern_captures(token_stream, variant, &choice_name_display, string_table)?;
+    let captures = parse_choice_pattern_captures(
+        token_stream,
+        variant,
+        &choice_name_display,
+        string_table,
+        path_fork,
+    )?;
 
     Ok(ParsedChoicePattern {
-        nominal_path: choice_nominal_path.to_owned(),
+        nominal_path: *choice_nominal_path,
         variant: variant_name,
         tag: variant_index,
         captures,
@@ -88,17 +95,12 @@ pub fn parse_choice_variant_pattern(
     })
 }
 
-/// Parse optional payload captures after a choice-variant name.
-///
-/// WHAT: handles `Err(message) =>` and `Success =>` forms, validating that
-/// captures match the variant's payload metadata exactly.
-/// WHY: separating capture parsing from name resolution keeps each function focused
-/// and makes error messages specific to the payload layer.
 fn parse_choice_pattern_captures(
     token_stream: &mut FileTokens,
     variant: &ChoiceVariant,
     _choice_name_display: &str,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> ChoicePatternResult<Vec<ParsedChoicePayloadCapture>> {
     match &variant.payload {
         ChoiceVariantPayload::Unit => {
@@ -235,7 +237,8 @@ fn parse_choice_pattern_captures(
                     .into());
                 };
 
-                let expected_field_name = choice_payload_field_name(field_decl, string_table)?;
+                let expected_field_name =
+                    choice_payload_field_name(field_decl, path_fork, string_table)?;
                 if field_name != expected_field_name {
                     return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::CaptureBindingNameMismatch,
@@ -302,17 +305,15 @@ fn parse_choice_pattern_captures(
 /// Resolve the leaf name of a choice payload field declaration.
 ///
 /// WHAT: extracts the terminal identifier from a payload field's interned path.
-/// WHY: payload fields are declarations with interned paths; during match-pattern
-///      parsing we need the leaf string ID for capture-name validation.
-///      This is an internal invariant: every payload field must have a leaf name.
 fn choice_payload_field_name(
     field: &Declaration,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> ChoicePatternResult<StringId> {
-    field.id.name().ok_or_else(|| {
+    path_fork.component(field.id).ok_or_else(|| {
         ExpressionParseError::Infrastructure(Box::new(CompilerError::compiler_error(format!(
             "Choice payload field '{}' has no leaf name during match-pattern parsing",
-            field.id.to_string(string_table)
+            path_fork.render_portable(field.id, string_table, &mut Vec::new())
         ))))
     })
 }
@@ -324,8 +325,9 @@ fn choice_payload_field_name(
 fn parse_variant_name(
     token_stream: &mut FileTokens,
     match_context: &ScopeContext,
-    choice_nominal_path: &InternedPath,
+    choice_nominal_path: &PathId,
     _choice_name_display: &str,
+    path_fork: &PathInternerFork,
     _string_table: &StringTable,
 ) -> ChoicePatternResult<(StringId, Option<SourceSpan>)> {
     let leading_token = token_stream.current_token_kind().to_owned();
@@ -336,14 +338,18 @@ fn parse_variant_name(
             token_stream.advance();
 
             if token_stream.current_token_kind() == &TokenKind::DoubleColon {
-                if let Some(expected_choice_name) = choice_nominal_path.name()
-                    && first_name != expected_choice_name
-                    && !qualifier_resolves_to_choice(match_context, first_name, choice_nominal_path)
+                let expected_choice_name = path_fork.component(*choice_nominal_path);
+                if expected_choice_name.is_some_and(|expected| first_name != expected)
+                    && !qualifier_resolves_to_choice(
+                        match_context,
+                        first_name,
+                        choice_nominal_path,
+                    )
                 {
                     return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::QualifierDoesNotMatchScrutinee,
                         None,
-                        choice_nominal_path.name(),
+                        expected_choice_name,
                         first_span,
                     )
                     .into());
@@ -395,19 +401,14 @@ fn parse_variant_name(
 }
 
 /// Check whether a leading qualifier symbol resolves to the scrutinee choice type.
-///
-/// WHAT: when the user writes `Status::Ready`, `Status` may be a module dependency namespace or
-/// a local alias that points to the same choice declaration as the scrutinee.
-/// WHY: this allows qualified variant names even when the qualifier name differs
-/// from the choice's declared leaf name, as long as the symbol refers to the same type.
 fn qualifier_resolves_to_choice(
     match_context: &ScopeContext,
     qualifier: StringId,
-    choice_nominal_path: &InternedPath,
+    choice_nominal_path: &PathId,
 ) -> bool {
     match_context
         .get_reference(&qualifier)
-        .is_some_and(|declaration| &declaration.id == choice_nominal_path)
+        .is_some_and(|declaration| declaration.id == *choice_nominal_path)
 }
 
 /// Look up a variant name in the declared choice variant list and return its positional tag.
@@ -419,8 +420,8 @@ fn resolve_variant_to_tag(
     variant_name: StringId,
     _choice_name_display: &str,
     variant_span: Option<SourceSpan>,
-    _string_table: &StringTable,
-    choice_nominal_path: &InternedPath,
+    path_fork: &PathInternerFork,
+    choice_nominal_path: &PathId,
 ) -> ChoicePatternResult<usize> {
     let Some(variant_index) = variants
         .iter()
@@ -429,7 +430,7 @@ fn resolve_variant_to_tag(
         return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::UnknownVariant,
             Some(variant_name),
-            choice_nominal_path.name(),
+            path_fork.component(*choice_nominal_path),
             variant_span,
         )
         .into());
@@ -437,22 +438,19 @@ fn resolve_variant_to_tag(
 
     Ok(variant_index)
 }
-
 fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
     Some(SourceSpan::new(
         token_stream.file_id,
         token_stream.current_token().span,
     ))
 }
-/// Build a human-readable display name for a choice type from its nominal path.
-///
-/// WHAT: returns the leaf name of the choice (e.g. `"Result"` for `core::Result`),
-/// falling back to `"<choice>"` if the path has no leaf segment.
-/// WHY: diagnostic messages need a stable display string even when the nominal path
-/// is synthetic or partially resolved.
-fn choice_display_name(choice_nominal_path: &InternedPath, string_table: &StringTable) -> String {
-    choice_nominal_path
-        .name()
+fn choice_display_name(
+    choice_nominal_path: &PathId,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> String {
+    path_fork
+        .component(*choice_nominal_path)
         .map(|name| string_table.resolve(name).to_owned())
         .unwrap_or_else(|| String::from("<choice>"))
 }

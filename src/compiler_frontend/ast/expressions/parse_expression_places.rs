@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -47,6 +48,7 @@ pub(super) fn parse_mutable_receiver_expression(
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let marker_span = Some(SourceSpan::new(
         token_stream.file_id,
@@ -115,6 +117,7 @@ pub(super) fn parse_mutable_receiver_expression(
         PostfixChainAccess::mutable_marker(marker_span),
         type_interner,
         string_table,
+        path_fork,
     )?;
 
     push_expression_operand(
@@ -125,6 +128,7 @@ pub(super) fn parse_mutable_receiver_expression(
         expression,
         allow_boundary_catch,
         receiver_expression,
+        path_fork,
     )
 }
 
@@ -136,8 +140,9 @@ pub(super) fn parse_copy_place_expression(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCopyPlace, ExpressionParseError> {
-    parse_copy_place_payload(token_stream, context, type_interner, string_table)
+    parse_copy_place_payload(token_stream, context, type_interner, string_table, path_fork)
 }
 
 fn parse_copy_place_payload(
@@ -145,6 +150,7 @@ fn parse_copy_place_payload(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCopyPlace, ExpressionParseError> {
     match token_stream.current_token_kind() {
         // Parenthesized places are allowed for grouping; the outer `(` span is preserved
@@ -153,8 +159,13 @@ fn parse_copy_place_payload(
             let open_span = current_span(token_stream);
             token_stream.advance();
 
-            let mut parsed_place =
-                parse_copy_place_payload(token_stream, context, type_interner, string_table)?;
+            let mut parsed_place = parse_copy_place_payload(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                path_fork,
+            )?;
 
             if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
                 return Err(CompilerDiagnostic::expected_token(
@@ -227,6 +238,7 @@ fn parse_copy_place_payload(
                         context,
                         type_interner,
                         string_table,
+                        path_fork,
                     )?
                 } else {
                     reference_expression
@@ -269,7 +281,13 @@ fn parse_copy_place_payload(
             let marker_span = current_span(token_stream);
             token_stream.advance();
 
-            match parse_copy_place_payload(token_stream, context, type_interner, string_table) {
+            match parse_copy_place_payload(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                path_fork,
+            ) {
                 Ok(_) => Err(CompilerDiagnostic::invalid_copy_target(
                     InvalidCopyTargetReason::MutableMarkerNotAllowed,
                     marker_span,
@@ -339,10 +357,13 @@ pub(crate) fn place_expression_is_mutable(place: &PlaceExpression) -> bool {
 ///
 /// WHAT: follows field-projection bases down to the underlying local, then returns its name.
 /// WHY: immutable field-write diagnostics name the root binding that must be made mutable.
-pub(crate) fn root_binding_name_of_place(place: &PlaceExpression) -> Option<StringId> {
+pub(crate) fn root_binding_name_of_place(
+    place: &PlaceExpression,
+    path_fork: &PathInternerFork,
+) -> Option<StringId> {
     match &place.kind {
-        PlaceExpressionKind::Local(path) => path.name(),
-        PlaceExpressionKind::Field { base, .. } => root_binding_name_of_place(base),
+        PlaceExpressionKind::Local(path) => path_fork.component(*path),
+        PlaceExpressionKind::Field { base, .. } => root_binding_name_of_place(base, path_fork),
     }
 }
 

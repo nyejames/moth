@@ -19,12 +19,12 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnChannel};
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use rustc_hash::FxHashMap;
 
 pub(super) fn initialize_function_template_flows(
     ast: &[AstNode],
-) -> FxHashMap<InternedPath, FunctionTemplateFlow> {
+) -> FxHashMap<PathId, FunctionTemplateFlow> {
     let mut flows = FxHashMap::default();
     collect_initial_function_flows_from_nodes(ast, &mut flows);
     flows
@@ -32,8 +32,8 @@ pub(super) fn initialize_function_template_flows(
 
 pub(super) fn refresh_function_template_flows(
     ast: &[AstNode],
-    current_flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
-    next_flows: &mut FxHashMap<InternedPath, FunctionTemplateFlow>,
+    current_flows: &FxHashMap<PathId, FunctionTemplateFlow>,
+    next_flows: &mut FxHashMap<PathId, FunctionTemplateFlow>,
     store: &TemplateIrStore,
 ) -> Result<(), CompilerError> {
     for node in ast {
@@ -45,7 +45,7 @@ pub(super) fn refresh_function_template_flows(
 
 fn collect_initial_function_flows_from_nodes(
     nodes: &[AstNode],
-    flows: &mut FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &mut FxHashMap<PathId, FunctionTemplateFlow>,
 ) {
     for node in nodes {
         collect_initial_function_flows_from_node(node, flows);
@@ -54,7 +54,7 @@ fn collect_initial_function_flows_from_nodes(
 
 fn collect_initial_function_flows_from_node(
     node: &AstNode,
-    flows: &mut FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &mut FxHashMap<PathId, FunctionTemplateFlow>,
 ) {
     match &node.kind {
         NodeKind::Function(path, signature, body) => {
@@ -105,7 +105,7 @@ fn collect_initial_function_flows_from_node(
 
 fn collect_initial_function_flows_from_declaration(
     declaration: &Declaration,
-    flows: &mut FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &mut FxHashMap<PathId, FunctionTemplateFlow>,
 ) {
     if let ExpressionKind::Function(signature) = &declaration.value.kind {
         flows.insert(declaration.id.clone(), empty_flow_for_signature(signature));
@@ -126,8 +126,8 @@ fn empty_flow_for_signature(signature: &FunctionSignature) -> FunctionTemplateFl
 
 fn refresh_function_template_flows_from_node(
     node: &AstNode,
-    current_flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
-    next_flows: &mut FxHashMap<InternedPath, FunctionTemplateFlow>,
+    current_flows: &FxHashMap<PathId, FunctionTemplateFlow>,
+    next_flows: &mut FxHashMap<PathId, FunctionTemplateFlow>,
     store: &TemplateIrStore,
 ) -> Result<(), CompilerError> {
     match &node.kind {
@@ -179,7 +179,7 @@ fn refresh_function_template_flows_from_node(
 fn collect_return_metadata(
     body: &[AstNode],
     signature: &FunctionSignature,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     store: &TemplateIrStore,
 ) -> Result<Vec<Option<ReactiveTemplateMetadata>>, CompilerError> {
     let mut returns: Vec<Option<ReactiveTemplateMetadata>> = signature
@@ -197,7 +197,7 @@ fn collect_return_metadata(
 
 fn collect_return_metadata_from_nodes(
     nodes: &[AstNode],
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     returns: &mut [Option<ReactiveTemplateMetadata>],
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &TemplateIrStore,
@@ -211,7 +211,7 @@ fn collect_return_metadata_from_nodes(
 
 fn collect_return_metadata_from_node(
     node: &AstNode,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
+    flows: &FxHashMap<PathId, FunctionTemplateFlow>,
     returns: &mut [Option<ReactiveTemplateMetadata>],
     value_environment: &mut ReactiveTemplateValueEnvironment,
     store: &TemplateIrStore,

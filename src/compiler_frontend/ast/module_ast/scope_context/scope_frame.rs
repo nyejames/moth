@@ -132,8 +132,8 @@ impl ScopeArena {
         frame_id: ScopeFrameId,
         name: &StringId,
     ) -> Option<(Rc<Declaration>, Option<SourceSpan>)> {
-        let mut current_id = Some(frame_id);
         let mut steps: usize = 0;
+        let mut current_id = Some(frame_id);
 
         while let Some(id) = current_id {
             let frame = self.frame(id);
@@ -255,8 +255,7 @@ pub(crate) struct ScopeFrame {
     ///       local declarations, and participate in parent-chain lookup. `None` means the
     ///       frame declares none, which is the common case for control-flow frames.
     /// Module constants live in the top-level `ResolvedConstantSet`; this path-keyed set owns only
-    /// lexical declarations, which do not have top-level declaration IDs.
-    pub(crate) explicit_compile_time_constant_declarations: Option<Rc<FxHashSet<InternedPath>>>,
+    pub(crate) explicit_compile_time_constant_declarations: Option<Rc<FxHashSet<PathId>>>,
 
     /// Parent frame holding visible ancestor declarations.
     parent: Option<ScopeFrameId>,
@@ -321,8 +320,13 @@ impl ScopeFrame {
     ///       records insertion for instrumentation.
     /// WHY: callers must ensure they are mutating the correct frame; this method does
     ///      not walk the parent chain because additions always belong to the current scope.
-    pub(crate) fn add_var(&mut self, declaration: Declaration, binding_span: Option<SourceSpan>) {
-        if let Some(name) = declaration.id.name() {
+    pub(crate) fn add_var(
+        &mut self,
+        declaration: Declaration,
+        binding_span: Option<SourceSpan>,
+        path_fork: &PathInternerFork,
+    ) {
+        if let Some(name) = path_fork.component(declaration.id) {
             let index = self.local_declarations.len() as u32;
             self.local_declarations_by_name
                 .entry(name)
@@ -343,21 +347,27 @@ impl ScopeFrame {
         &mut self,
         declaration: Declaration,
         binding_span: Option<SourceSpan>,
+        path_fork: &PathInternerFork,
     ) {
         let declarations = self
             .explicit_compile_time_constant_declarations
             .get_or_insert_with(Default::default);
-        Rc::make_mut(declarations).insert(declaration.id.clone());
+        Rc::make_mut(declarations).insert(declaration.id);
 
-        self.add_var(declaration, binding_span);
+        self.add_var(declaration, binding_span, path_fork);
     }
 
     /// Replace the declarations in this frame.
     ///
     /// WHAT: rebuilds the name index and the declaration vec in one step. Used when a
     ///       function or start body frame is initialised with parameter declarations.
-    pub(crate) fn set_local_declarations(&mut self, declarations: Vec<Declaration>) {
-        self.local_declarations_by_name = build_local_declarations_index(&declarations);
+    pub(crate) fn set_local_declarations(
+        &mut self,
+        declarations: Vec<Declaration>,
+        path_fork: &PathInternerFork,
+    ) {
+        self.local_declarations_by_name =
+            build_local_declarations_index(&declarations, path_fork);
         self.local_declarations = declarations
             .into_iter()
             .map(|declaration| LocalDeclaration {
@@ -367,16 +377,13 @@ impl ScopeFrame {
             .collect();
     }
 }
-
-/// Build an index mapping local declaration names to their positions in `declarations`.
-///
-/// WHAT: enables O(1) lookup of all locals with a given name within a single frame.
-///       The last registered index represents the currently visible binding in that frame.
-/// WHY: avoids reverse-scanning the full declaration vec on every name resolution.
-fn build_local_declarations_index(declarations: &[Declaration]) -> FxHashMap<StringId, Vec<u32>> {
+fn build_local_declarations_index(
+    declarations: &[Declaration],
+    path_fork: &PathInternerFork,
+) -> FxHashMap<StringId, Vec<u32>> {
     let mut index: FxHashMap<StringId, Vec<u32>> = FxHashMap::default();
     for (i, declaration) in declarations.iter().enumerate() {
-        if let Some(name) = declaration.id.name() {
+        if let Some(name) = path_fork.component(declaration.id) {
             index.entry(name).or_default().push(i as u32);
         }
     }

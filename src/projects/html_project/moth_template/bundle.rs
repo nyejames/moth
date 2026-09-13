@@ -22,8 +22,8 @@ use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderParseOptions,
-    SourcePreparationDelta,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
+    HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -36,12 +36,13 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
-    SourceRegistrationIndex, SourceSpan,
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError, SourceId,
+    SourceKind, SourceRegistrationIndex, SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -122,6 +123,7 @@ pub(super) fn prepare_file_value_bundle(
     let mut discovery_files = SourceDatabase::empty();
     let mut resolver =
         SingleFileReferenceResolver::new(module_root.clone(), &source_file_kinds, resource_inputs);
+    let mut path_fork = PathInternerFork::empty();
 
     // The entry is registered before the walk so header preparation can name the entry file by
     // identity. Its first BFS visit re-registers the same path and kind, returning this same ID.
@@ -133,7 +135,17 @@ pub(super) fn prepare_file_value_bundle(
             Some(&path_resolver),
             string_table,
         )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        .map_err(|error| match error {
+            SourceDatabaseError::Capacity(capacity) => {
+                CompilerMessages::from_diagnostic(
+                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    string_table.clone(),
+                )
+            }
+            SourceDatabaseError::Infrastructure(error) => {
+                CompilerMessages::from_error_ref(error, string_table)
+            }
+        })?;
     let discovery_options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
         project_path_resolver: Some(&path_resolver),
@@ -174,6 +186,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
             None => {
@@ -187,6 +200,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -202,14 +216,30 @@ pub(super) fn prepare_file_value_bundle(
         ) {
             Ok(source_id) => source_id,
             Err(error) => {
+                let failure = match error {
+                    // Discovery registers the authored template closure, so its compact-table
+                    // exhaustion is a typed source-capacity rejection, not infrastructure.
+                    SourceDatabaseError::Capacity(capacity) => {
+                        FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                            warnings: Vec::new(),
+                            diagnostic: CompilerDiagnostic::source_table_capacity(
+                                capacity.resource(),
+                            ),
+                        })
+                    }
+                    SourceDatabaseError::Infrastructure(error) => {
+                        FileFrontendPrepareFailure::Infrastructure(error)
+                    }
+                };
                 return Err(finalize_discovery_failure(
                     path,
-                    FileFrontendPrepareFailure::Infrastructure(error),
+                    failure,
                     None,
                     sources,
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -227,6 +257,7 @@ pub(super) fn prepare_file_value_bundle(
             },
             source_id,
             kind,
+            &mut path_fork,
             source_code,
             string_table,
         ) {
@@ -240,6 +271,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -254,6 +286,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -265,7 +298,7 @@ pub(super) fn prepare_file_value_bundle(
 
             for reference in structural_references {
                 let resolved =
-                    match resolver.resolve(&path, path_syntax_table, reference, string_table) {
+                    match resolver.resolve(&path, path_syntax_table, reference, string_table, &path_fork) {
                         Ok(resolved) => resolved,
                         Err(error) => {
                             failure = Some(error);
@@ -305,6 +338,7 @@ pub(super) fn prepare_file_value_bundle(
                     &unit.source_path,
                     &path_resolver,
                     string_table,
+                    &mut path_fork,
                 ));
             }
         };
@@ -325,6 +359,7 @@ pub(super) fn prepare_file_value_bundle(
         &unit.source_path,
         &path_resolver,
         string_table,
+        &mut path_fork,
     )?;
     let Some(prepared_entry) = prepared_entry else {
         let messages = CompilerMessages::from_error_ref(
@@ -429,6 +464,7 @@ fn finalize_known_sources(
     entry_file_path: &Path,
     path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> Result<FinalizedTemplateSources, CompilerMessages> {
     let DiscoveredTemplateSources {
         candidates,
@@ -440,14 +476,27 @@ fn finalize_known_sources(
             .iter()
             .map(|(path, kind)| (path.as_path(), SourceKind::Compiler(*kind))),
     );
-    let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
-        &registration_index,
-        entry_file_path,
-        Some(path_resolver),
-        string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let source_files =
+        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
+            &registration_index,
+            entry_file_path,
+            Some(path_resolver),
+            string_table,
+            path_fork.clone_path_builder(),
+        )
+        .map_err(|error| match error {
+            // Final registration publishes the authored template closure, so its compact-table
+            // exhaustion is a typed source-capacity rejection, not infrastructure.
+            SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
+                CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                string_table.clone(),
+            ),
+            SourceDatabaseError::Infrastructure(error) => {
+                CompilerMessages::from_error_ref(error, string_table)
+            }
+        })?;
     let mut source_builder = SourceDatabaseBuilder::new(source_files);
+
     let mut transfer_error = None;
 
     // Move every known snapshot into final ownership before touching any prepared output. A
@@ -543,6 +592,39 @@ fn finalize_known_sources(
         let messages = CompilerMessages::from_error_ref(error, string_table);
         return Err(finish_source_owner(messages, source_builder, string_table));
     }
+
+    // Registration may append logical paths for candidates queued before an aborted discovery
+    // walk reaches them. Reseed those source paths into the original fork in final source-slot
+    // order, and reject any unexpected identity remap before rebinding retained outputs.
+    let reseed_error: Option<CompilerMessages> = {
+        let source_files = source_builder.sources();
+        source_files.iter().find_map(|source| {
+            let expected_path = source.logical_path;
+            match source_files.logical_path_in_fork(source.id, path_fork) {
+                Ok(path) if path == expected_path => None,
+                Ok(_) => Some(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "final source registration changed an existing logical PathId",
+                    ),
+                    string_table,
+                )),
+                // The fork re-interns the authored source paths, so its exhaustion is a typed
+                // source-capacity rejection, not infrastructure.
+                Err(SourceDatabaseError::Capacity(capacity)) => Some(CompilerMessages::from_diagnostic(
+                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    string_table.clone(),
+                )),
+                Err(SourceDatabaseError::Infrastructure(error)) => {
+                    Some(CompilerMessages::from_error_ref(error, string_table))
+                }
+            }
+        })
+    };
+
+    if let Some(messages) = reseed_error {
+        return Err(finish_source_owner(messages, source_builder, string_table));
+    }
+
     let rebound: Result<_, CompilerError> = (|| {
         let mut prepared_entry = None;
         let mut prepared_content_sources = Vec::new();
@@ -555,10 +637,14 @@ fn finalize_known_sources(
             let is_entry = path == entry_file_path;
             prepared.rebind_source_identity(
                 source_id,
-                source_builder.sources().legacy_logical_path(source_id),
+                source_builder
+                    .sources()
+                    .source_logical_path(source_id)
+                    .expect("transferred source must retain logical path"),
                 path,
+                path_fork,
             )?;
-            prepared.freeze_path_syntax(string_table)?;
+            prepared.freeze_path_syntax(string_table, path_fork)?;
             if is_entry {
                 prepared_entry = Some(prepared);
             } else {
@@ -567,6 +653,9 @@ fn finalize_known_sources(
         }
         Ok((prepared_entry, prepared_content_sources))
     })();
+    source_builder
+        .sources_mut()
+        .adopt_path_builder(path_fork.clone_path_builder());
     match rebound {
         Ok((prepared_entry, prepared_content_sources)) => Ok(FinalizedTemplateSources {
             source_builder,
@@ -615,6 +704,7 @@ fn finalize_discovery_failure(
     entry_file_path: &Path,
     path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CompilerMessages {
     let finalized = match finalize_known_sources(
         sources,
@@ -622,6 +712,7 @@ fn finalize_discovery_failure(
         entry_file_path,
         path_resolver,
         string_table,
+        path_fork,
     ) {
         Ok(finalized) => finalized,
         Err(messages) => return messages,
@@ -824,6 +915,7 @@ fn prepare_one_source(
     context: &FrontendFilePrepareContext<'_>,
     source_id: SourceId,
     kind: SourceFileKind,
+    path_fork: &mut PathInternerFork,
     source_code: &str,
     string_table: &mut StringTable,
 ) -> Result<SourcePreparationDelta, FileFrontendPrepareFailure> {
@@ -857,6 +949,7 @@ fn prepare_one_source(
         context,
         input,
         string_table,
+        path_fork,
     ))
 }
 

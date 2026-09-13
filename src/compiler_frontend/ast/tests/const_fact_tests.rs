@@ -10,41 +10,58 @@ use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::const_values::facts::{
     AstConstDeclarationFact, ConstBindingScope, ConstBindingSource,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 
-fn assert_has_fact(ast: &Ast, string_table: &StringTable, name: &str) {
+fn assert_has_fact(
+    ast: &Ast,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    name: &str,
+) {
     assert!(
-        find_fact_by_name(ast, string_table, name).is_some(),
+        find_fact_by_name(ast, path_fork, string_table, name).is_some(),
         "expected const fact for '{name}'"
     );
 }
 
-fn assert_no_fact(ast: &Ast, string_table: &StringTable, name: &str) {
+fn assert_no_fact(
+    ast: &Ast,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    name: &str,
+) {
     assert!(
-        find_fact_by_name(ast, string_table, name).is_none(),
+        find_fact_by_name(ast, path_fork, string_table, name).is_none(),
         "expected no const fact for '{name}'"
     );
 }
 
 fn fact_for<'a>(
     ast: &'a Ast,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
     name: &str,
 ) -> &'a AstConstDeclarationFact {
-    find_fact_by_name(ast, string_table, name)
+    find_fact_by_name(ast, path_fork, string_table, name)
         .unwrap_or_else(|| panic!("expected const fact for '{name}'"))
 }
 
 fn find_fact_by_name<'a>(
     ast: &'a Ast,
+    path_fork: &PathInternerFork,
     string_table: &StringTable,
     name: &str,
 ) -> Option<&'a AstConstDeclarationFact> {
     ast.const_facts
         .declarations
         .values()
-        .find(|fact| fact.declaration_path.name_str(string_table) == Some(name))
+        .find(|fact| {
+            path_fork
+                .component(fact.declaration_path)
+                .is_some_and(|component| string_table.resolve(component) == name)
+        })
 }
 
 // ------------------------------
@@ -54,9 +71,9 @@ fn find_fact_by_name<'a>(
 #[test]
 fn explicit_module_constant_is_collected_as_fact() {
     let source = r#"site_name #= "Moth""#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    let fact = fact_for(&ast, &string_table, "site_name");
+    let fact = fact_for(&ast, &path_fork, &string_table, "site_name");
     assert_eq!(fact.scope, ConstBindingScope::ExplicitTopLevel);
     assert_eq!(fact.source, ConstBindingSource::ExplicitHash);
 }
@@ -68,9 +85,9 @@ fn explicit_module_constant_is_collected_as_fact() {
 #[test]
 fn private_top_level_literal_is_collected_as_fact() {
     let source = r#"entry_root = "src""#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    let fact = fact_for(&ast, &string_table, "entry_root");
+    let fact = fact_for(&ast, &path_fork, &string_table, "entry_root");
     assert_eq!(fact.scope, ConstBindingScope::PrivateTopLevel);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
 }
@@ -85,10 +102,10 @@ fn private_top_level_reference_to_earlier_private_fact_is_collected() {
 output_folder = "release"
 dev_folder = output_folder
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    assert_has_fact(&ast, &string_table, "output_folder");
-    let fact = fact_for(&ast, &string_table, "dev_folder");
+    assert_has_fact(&ast, &path_fork, &string_table, "output_folder");
+    let fact = fact_for(&ast, &path_fork, &string_table, "dev_folder");
     assert_eq!(fact.scope, ConstBindingScope::PrivateTopLevel);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
 }
@@ -115,9 +132,9 @@ greet || -> String:
     return message
 ;
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    let fact = fact_for(&ast, &string_table, "message");
+    let fact = fact_for(&ast, &path_fork, &string_table, "message");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
 }
@@ -135,10 +152,10 @@ greet || -> String:
     return message
 ;
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    assert_has_fact(&ast, &string_table, "prefix");
-    let fact = fact_for(&ast, &string_table, "message");
+    assert_has_fact(&ast, &path_fork, &string_table, "prefix");
+    let fact = fact_for(&ast, &path_fork, &string_table, "message");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
 }
@@ -159,10 +176,10 @@ greet || -> String:
     return message
 ;
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    assert_has_fact(&ast, &string_table, "site_name");
-    let fact = fact_for(&ast, &string_table, "message");
+    assert_has_fact(&ast, &path_fork, &string_table, "site_name");
+    let fact = fact_for(&ast, &path_fork, &string_table, "message");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
 }
@@ -180,10 +197,10 @@ layout || -> Int:
     return padded
 ;
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    assert_has_fact(&ast, &string_table, "base_width");
-    let fact = fact_for(&ast, &string_table, "padded");
+    assert_has_fact(&ast, &path_fork, &string_table, "base_width");
+    let fact = fact_for(&ast, &path_fork, &string_table, "padded");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
 }
@@ -203,9 +220,9 @@ recover || -> String:
     return output
 ;
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    let fact = fact_for(&ast, &string_table, "fallback");
+    let fact = fact_for(&ast, &path_fork, &string_table, "fallback");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
 }
@@ -217,9 +234,9 @@ recover || -> String:
 #[test]
 fn mutable_declaration_is_not_a_fact() {
     let source = r#"value ~= 1"#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    assert_no_fact(&ast, &string_table, "value");
+    assert_no_fact(&ast, &path_fork, &string_table, "value");
 }
 
 #[test]
@@ -230,7 +247,7 @@ greet || -> Int:
     return value
 ;
 "#;
-    let (ast, string_table) = parse_single_file_ast(source);
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
 
-    assert_no_fact(&ast, &string_table, "value");
+    assert_no_fact(&ast, &path_fork, &string_table, "value");
 }

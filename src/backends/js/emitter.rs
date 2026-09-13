@@ -20,6 +20,7 @@ use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::{HashMap, HashSet};
 
@@ -30,8 +31,16 @@ pub fn lower_hir_to_js(
     string_table: &StringTable,
     config: JsLoweringConfig,
     type_environment: &TypeEnvironment,
+    path_table: &PathTable,
 ) -> Result<JsModule, CompilerError> {
-    let mut emitter = JsEmitter::new(hir, borrow_analysis, string_table, config, type_environment);
+    let mut emitter = JsEmitter::new(
+        hir,
+        borrow_analysis,
+        string_table,
+        path_table,
+        config,
+        type_environment,
+    );
     emitter.lower_module()
 }
 
@@ -39,6 +48,7 @@ pub(crate) struct JsEmitter<'hir> {
     pub(crate) hir: &'hir HirModule,
     pub(crate) borrow_analysis: &'hir BorrowCheckReport,
     pub(crate) string_table: &'hir StringTable,
+    pub(crate) path_table: &'hir PathTable,
     pub(crate) config: JsLoweringConfig,
     pub(crate) type_environment: &'hir TypeEnvironment,
     pub(crate) out: String,
@@ -72,6 +82,7 @@ impl<'hir> JsEmitter<'hir> {
         hir: &'hir HirModule,
         borrow_analysis: &'hir BorrowCheckReport,
         string_table: &'hir StringTable,
+        path_table: &'hir PathTable,
         config: JsLoweringConfig,
         type_environment: &'hir TypeEnvironment,
     ) -> Self {
@@ -82,12 +93,13 @@ impl<'hir> JsEmitter<'hir> {
             .collect::<HashMap<_, _>>();
 
         Self {
+            out: String::new(),
             hir,
             borrow_analysis,
             string_table,
+            path_table,
             config,
             type_environment,
-            out: String::new(),
             indent: 0,
             blocks_by_id,
             function_name_by_id: HashMap::new(),
