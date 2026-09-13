@@ -8,7 +8,6 @@ use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, Preme
 use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
 use super::super::module_artifact_store::ModuleArtifactStore;
