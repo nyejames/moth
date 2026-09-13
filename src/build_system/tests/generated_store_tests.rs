@@ -73,6 +73,44 @@ fn equal_generated_identities_publish_across_independent_boundaries() {
 }
 
 #[test]
+fn installed_path_table_is_shared_by_every_completed_sidecar() {
+    let first = generated_identity("first");
+    let second = generated_identity("second");
+    let mut store = BoundaryGeneratedFunctionStore::default();
+    store.push_completed_for_test(CompletedGeneratedFunction {
+        identity: first.clone(),
+        summary: summary(),
+        sidecar: test_sidecar(first, summary()),
+    });
+    store.push_completed_for_test(CompletedGeneratedFunction {
+        identity: second.clone(),
+        summary: summary(),
+        sidecar: test_sidecar(second, summary()),
+    });
+
+    let path_table = std::sync::Arc::new(
+        crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty()
+            .snapshot_table(),
+    );
+    store.install_path_table(std::sync::Arc::clone(&path_table));
+
+    let sidecars: Vec<_> = store.sidecars().collect();
+    assert_eq!(sidecars.len(), 2);
+    assert!(std::sync::Arc::ptr_eq(
+        &sidecars[0].module.executable.path_table,
+        &path_table
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &sidecars[1].module.executable.path_table,
+        &path_table
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &sidecars[0].module.executable.path_table,
+        &sidecars[1].module.executable.path_table
+    ));
+}
+
+#[test]
 fn boundary_rejects_publishing_the_same_generated_identity_twice() {
     let identity = generated_identity("duplicate");
     let mut boundary = BoundaryGeneratedFunctionStore::default();

@@ -163,6 +163,9 @@ pub(crate) enum FrontendCounter {
     // Path-table fork/merge volume (Phase 2 Slice 2B). Node count totals interned nodes
     // including ROOT; max depth is a gauge updated on intern via fetch_max.
     PathNodeCount,
+    PathTableCopyCount,
+    PathTableCopyNodeRows,
+    PathTableCopyBytes,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     PathMaxDepth,
     PathDeltaMergeCalls,
@@ -338,6 +341,9 @@ mod detailed {
     static STRING_TABLE_DELTA_NON_IDENTITY_REMAPS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_NON_IDENTITY_ENTRIES: AtomicUsize = AtomicUsize::new(0);
     static PATH_NODE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static PATH_TABLE_COPY_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static PATH_TABLE_COPY_NODE_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static PATH_TABLE_COPY_BYTES: AtomicUsize = AtomicUsize::new(0);
     static PATH_MAX_DEPTH: AtomicUsize = AtomicUsize::new(0);
     static PATH_DELTA_MERGE_CALLS: AtomicUsize = AtomicUsize::new(0);
     static PATH_DELTA_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0);
@@ -406,6 +412,11 @@ mod detailed {
         }
 
         atomic_counter(counter).fetch_add(amount, Ordering::Relaxed);
+    }
+    pub(crate) fn record_path_table_copy(node_rows: usize, bytes: usize) {
+        increment_frontend_counter(FrontendCounter::PathTableCopyCount);
+        add_frontend_counter(FrontendCounter::PathTableCopyNodeRows, node_rows);
+        add_frontend_counter(FrontendCounter::PathTableCopyBytes, bytes);
     }
 
     /// Read a batch of counters directly, for focused merge-rejection counter tests.
@@ -553,6 +564,9 @@ mod detailed {
             FrontendCounter::StringTableDeltaNonIdentityRemaps,
             FrontendCounter::StringTableDeltaNonIdentityEntries,
             FrontendCounter::PathNodeCount,
+            FrontendCounter::PathTableCopyCount,
+            FrontendCounter::PathTableCopyNodeRows,
+            FrontendCounter::PathTableCopyBytes,
             FrontendCounter::PathMaxDepth,
             FrontendCounter::PathDeltaMergeCalls,
             FrontendCounter::PathDeltaEntriesScanned,
@@ -876,6 +890,9 @@ mod detailed {
                 &STRING_TABLE_DELTA_NON_IDENTITY_ENTRIES
             }
             FrontendCounter::PathNodeCount => &PATH_NODE_COUNT,
+            FrontendCounter::PathTableCopyCount => &PATH_TABLE_COPY_COUNT,
+            FrontendCounter::PathTableCopyNodeRows => &PATH_TABLE_COPY_NODE_ROWS,
+            FrontendCounter::PathTableCopyBytes => &PATH_TABLE_COPY_BYTES,
             FrontendCounter::PathMaxDepth => &PATH_MAX_DEPTH,
             FrontendCounter::PathDeltaMergeCalls => &PATH_DELTA_MERGE_CALLS,
             FrontendCounter::PathDeltaEntriesScanned => &PATH_DELTA_ENTRIES_SCANNED,
@@ -1231,6 +1248,9 @@ mod detailed {
                 "string_table_delta_non_identity_entries"
             }
             FrontendCounter::PathNodeCount => "path_node_count",
+            FrontendCounter::PathTableCopyCount => "path_table_copy_count",
+            FrontendCounter::PathTableCopyNodeRows => "path_table_copy_node_rows",
+            FrontendCounter::PathTableCopyBytes => "path_table_copy_bytes",
             FrontendCounter::PathMaxDepth => "path_max_depth",
             FrontendCounter::PathDeltaMergeCalls => "path_delta_merge_calls",
             FrontendCounter::PathDeltaEntriesScanned => "path_delta_entries_scanned",
@@ -1327,14 +1347,12 @@ mod detailed {
 
 #[cfg(feature = "benchmark_counters")]
 pub(crate) use detailed::{
-    add_frontend_counter, increment_frontend_counter, log_frontend_counters,
-    record_path_max_depth, reset_frontend_counters,
+    add_frontend_counter, increment_frontend_counter, log_frontend_counters, record_path_max_depth,
+    record_path_table_copy, reset_frontend_counters,
 };
 
 #[cfg(all(test, feature = "benchmark_counters", feature = "timers"))]
-pub(crate) use detailed::{
-    capture_frontend_counters_for_test, frontend_counter_test_values,
-};
+pub(crate) use detailed::{capture_frontend_counters_for_test, frontend_counter_test_values};
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn reset_frontend_counters() {}
@@ -1344,6 +1362,8 @@ pub(crate) fn increment_frontend_counter(_counter: FrontendCounter) {}
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn add_frontend_counter(_counter: FrontendCounter, _amount: usize) {}
+#[cfg(not(feature = "benchmark_counters"))]
+pub(crate) fn record_path_table_copy(_node_rows: usize, _bytes: usize) {}
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn log_frontend_counters() {}

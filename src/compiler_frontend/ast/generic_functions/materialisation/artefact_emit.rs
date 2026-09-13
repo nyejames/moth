@@ -57,7 +57,9 @@ use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHand
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathIdRemap, PathInternerFork, PathTable,
 };
-use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{
+    FrozenStringTable, StringTable, StringTableResolver,
+};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -162,25 +164,49 @@ impl ModuleMaterialisationContext {
         self.source_string_table = Some(source_string_table);
     }
 
-    /// Rebase a published provider context into the requester's path/string identity domain.
-    ///
-    /// Provider contexts are published after their local path delta merges, but a source package
-    /// (and a later project module) may own a different numeric path domain. Re-interning the
-    /// issuing table through the requester's fork preserves path structure without introducing a
-    /// second interner, then the cloned retained context can be used for this request only.
+    /// Return the retained issuing identity pair, when this context owns one.
+    pub(crate) fn retained_identity_tables(
+        &self,
+    ) -> Result<Option<(&PathTable, &FrozenStringTable)>, CompilerError> {
+        match (
+            self.path_table.as_deref(),
+            self.source_string_table.as_deref(),
+        ) {
+            (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
+            (None, None) => Ok(None),
+            _ => Err(CompilerError::compiler_error(
+                "published materialisation context has an incomplete identity table pair",
+            )),
+        }
+    }
+
+    /// Rebase a published provider context into the requester's path/string identity domain using
+    /// the tables that issued the retained provider paths.
     pub(crate) fn rebased_for_requester(
         &self,
         path_fork: &mut PathInternerFork,
         destination_strings: &mut StringTable,
     ) -> Result<Self, CompilerError> {
-        let Some(path_table) = self.path_table.as_deref() else {
-            return Ok(self.clone());
+        let Some((path_table, source_strings)) = self.retained_identity_tables()? else {
+            return Err(CompilerError::compiler_error(
+                "published materialisation context cannot rebase without an issuing identity table pair",
+            ));
         };
-        let source_strings = self.source_string_table.as_deref().ok_or_else(|| {
-            CompilerError::compiler_error(
-                "published materialisation context has no source string table",
-            )
-        })?;
+        self.rebased_for_requester_with(path_table, source_strings, path_fork, destination_strings)
+    }
+
+    /// Rebase a published context with an explicitly supplied source identity pair.
+    ///
+    /// Same-boundary providers are published before later requester forks are compiled, so their
+    /// context has no retained snapshot. The build boundary supplies its current path/string pair
+    /// for that transient rebase instead of making every provider retain a growing table clone.
+    pub(crate) fn rebased_for_requester_with(
+        &self,
+        path_table: &PathTable,
+        source_strings: &impl StringTableResolver,
+        path_fork: &mut PathInternerFork,
+        destination_strings: &mut StringTable,
+    ) -> Result<Self, CompilerError> {
         let path_remap = path_fork
             .remap_table_from_strings(path_table, source_strings, destination_strings)
             .ok_or_else(|| {
@@ -190,7 +216,6 @@ impl ModuleMaterialisationContext {
             })?;
         let mut rebased = self.clone();
         rebased.remap_path_ids(&path_remap);
-        rebased.path_table = Some(Arc::new(path_fork.snapshot_table()));
         Ok(rebased)
     }
 }
@@ -299,14 +324,15 @@ impl GenericTemplateArtefact {
         module_symbols
             .struct_source_by_path
             .extend(builtin_manifest.struct_source_by_path);
-        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context, path_fork_ref).build(
-            &[],
-            AstEnvironmentInput {
-                module_symbols,
-                binding_environment,
-            },
-            string_table_ref,
-        )?;
+        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context, path_fork_ref)
+            .build(
+                &[],
+                AstEnvironmentInput {
+                    module_symbols,
+                    binding_environment,
+                },
+                string_table_ref,
+            )?;
         let value_services = GeneratedValueMaterialisationServices {
             external_registry: external_package_registry,
             template_ir_store: &phase_context.template_ir_store,
@@ -354,10 +380,11 @@ impl GenericTemplateArtefact {
         let mut environment = HeaderBindingEnvironment::default();
         environment.file_visibility_by_source.insert(
             source_file.clone(),
-            Arc::new(
-                self.visibility
-                    .materialise(external_package_registry, path_fork, string_table)?,
-            ),
+            Arc::new(self.visibility.materialise(
+                external_package_registry,
+                path_fork,
+                string_table,
+            )?),
         );
         for binding in &self.declarations {
             let local_path = binding.local_path;
@@ -601,11 +628,9 @@ impl GenericTemplateArtefact {
                     .declaration_id_by_path(&local_path)
                 {
                     Some(declaration_id) => declaration_id,
-                    None => append_materialised_declaration(
-                        lookups,
-                        declaration.clone(),
-                        path_fork,
-                    )?,
+                    None => {
+                        append_materialised_declaration(lookups, declaration.clone(), path_fork)?
+                    }
                 };
                 Rc::make_mut(&mut lookups.resolved_module_constants).insert(declaration_id);
                 Rc::make_mut(&mut lookups.declaration_semantics)

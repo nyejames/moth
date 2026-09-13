@@ -18,6 +18,7 @@ use crate::compiler_frontend::module_compilation::options::FrontendOptions;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::sync::Arc;
@@ -39,6 +40,9 @@ pub(crate) struct ModuleCompilationContext<'a> {
     /// Optional build-wide string resolver for imported provider path tables. Local/direct
     /// callers leave this absent because their retained paths already share the requester's table.
     pub(crate) global_string_table: Option<&'a StringTable>,
+    /// Optional current boundary path table used to rebase a same-boundary published provider
+    /// whose requester fork was prepared before that provider extended the boundary.
+    pub(crate) global_path_table: Option<&'a PathTable>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) external_packages: Arc<ExternalPackageRegistry>,
     /// Boundary-local resolved `#Config` values, collected before semantic AST construction.

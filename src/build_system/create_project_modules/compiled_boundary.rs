@@ -25,8 +25,8 @@ use crate::compiler_frontend::semantic_identity::{
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::source::SourceDatabaseRetentionMetrics;
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-
+use crate::compiler_frontend::symbols::path_interner::PathTable;
+use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
@@ -312,6 +312,31 @@ impl CompiledGraphBoundary {
         let mut warnings = self.modules.take_successful_warnings();
         warnings.extend(self.generated.take_sidecar_warnings());
         warnings
+    }
+
+    /// Install the single boundary-owned identity pair after all canonical publications.
+    ///
+    /// WHAT: overwrites every base artefact and generated sidecar placeholder with one final
+    ///       `Arc<PathTable>` and pairs the retained materialisation contexts with that table
+    ///       plus one frozen requester-domain string table.
+    /// WHY: per-module publication used to take one full table snapshot per successful module
+    ///      and one frozen table clone per context. The boundary tail builds each once and
+    ///      shares it across every retained row; the local registry must already be dropped so
+    ///      `Arc::make_mut` proves the retained contexts are the sole owners.
+    ///
+    /// Both tables are required together because every retained `PathId` resolves through the
+    /// component IDs issued by the paired string table. A boundary with no materialisation
+    /// contexts still installs the pair on its executable rows; the string table is a single
+    /// bounded per-boundary owner, never a per-module snapshot.
+    pub(crate) fn install_boundary_identity(
+        &mut self,
+        path_table: Arc<PathTable>,
+        source_string_table: Arc<FrozenStringTable>,
+    ) {
+        self.modules.install_path_table(Arc::clone(&path_table));
+        self.generated.install_path_table(Arc::clone(&path_table));
+        self.modules
+            .install_identity_tables(path_table, source_string_table);
     }
 
     pub(crate) fn install_frozen_identity(
@@ -952,6 +977,12 @@ pub(crate) struct FrozenRenderRetentionMetrics {
     pub(crate) diagnostic_records: usize,
     pub(crate) diagnostic_label_slots: usize,
     pub(crate) retained_identity_contexts: usize,
+    /// Distinct final path-table allocations reachable from successful module and sidecar views.
+    pub(crate) path_table_count: usize,
+    /// Actual retained `PathNode` rows across those deduplicated path tables.
+    pub(crate) path_table_node_rows: usize,
+    /// Backing vector capacity bytes for those deduplicated path tables.
+    pub(crate) path_table_storage_bytes: usize,
 }
 
 #[cfg(feature = "data_layout_memory_probe")]
@@ -960,6 +991,18 @@ impl FrozenRenderRetentionMetrics {
         self.source_snapshot_bytes += metrics.source_snapshot_bytes;
         self.extended_span_rows += metrics.extended_span_rows;
         self.source_identity_slots += metrics.source_identity_slots;
+    }
+
+    fn add_path_tables(&mut self, boundary: &CompiledGraphBoundary, seen: &mut FxHashSet<usize>) {
+        for module in boundary.successful_module_views() {
+            let path_table = &module.executable.path_table;
+            let address = Arc::as_ptr(path_table) as usize;
+            if seen.insert(address) {
+                self.path_table_count += 1;
+                self.path_table_node_rows += path_table.len();
+                self.path_table_storage_bytes += path_table.storage_bytes();
+            }
+        }
     }
 }
 
@@ -1216,6 +1259,14 @@ impl ProjectFrontendCompilation {
                 .sum(),
             ..FrozenRenderRetentionMetrics::default()
         };
+        #[cfg(feature = "data_layout_memory_probe")]
+        {
+            let mut path_table_addresses = FxHashSet::default();
+            retention.add_path_tables(&project, &mut path_table_addresses);
+            for package in &source_packages {
+                retention.add_path_tables(&package.boundary, &mut path_table_addresses);
+            }
+        }
         #[cfg(not(feature = "data_layout_memory_probe"))]
         let retention = ();
 

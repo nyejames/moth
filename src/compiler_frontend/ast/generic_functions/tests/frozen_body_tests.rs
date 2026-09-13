@@ -1991,8 +1991,9 @@ fn provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_request
     );
 
     // Both spellings must render correctly in their own domains, and the requester's
-    // retained paths must resolve through the requester's fork table, not the provider's.
-    let requester_table = rebased.path_table.as_ref().expect("rebased context table");
+    // remapped paths must resolve through the requester's live fork table. The returned
+    // context does not retain another complete requester snapshot.
+    let requester_table = requester_fork.snapshot_table();
     let requester_frozen_strings = Arc::new(requester_strings.clone().freeze());
     let mut scratch = Vec::new();
     assert_eq!(
@@ -2029,5 +2030,38 @@ fn provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_request
         ),
         requester_table.render_portable_frozen(requester_shared, &requester_frozen_strings, &mut scratch),
         "the same numeric prefix must not collapse distinct domains"
+    );
+}
+
+#[test]
+fn incomplete_or_missing_retained_identity_pair_rejects_rebase() {
+    let mut incomplete =
+        ModuleMaterialisationContext::from_identities_for_test(vec![generated_identity(
+            "incomplete",
+        )
+        .declaration()
+        .clone()]);
+    incomplete.path_table = Some(Arc::new(PathInternerFork::empty().snapshot_table()));
+    let mut requester_fork = PathInternerFork::empty();
+    let mut requester_strings = StringTable::new();
+    let error = incomplete
+        .rebased_for_requester(&mut requester_fork, &mut requester_strings)
+        .err()
+        .expect("an incomplete retained identity pair must reject rebasing");
+    assert!(
+        error.msg.contains("incomplete identity table pair"),
+        "unexpected incomplete-pair error: {error:?}"
+    );
+
+    let missing = ModuleMaterialisationContext::from_identities_for_test(vec![
+        generated_identity("missing").declaration().clone(),
+    ]);
+    let error = missing
+        .rebased_for_requester(&mut requester_fork, &mut requester_strings)
+        .err()
+        .expect("a rebase without an issuing identity pair must reject");
+    assert!(
+        error.msg.contains("cannot rebase without an issuing identity table pair"),
+        "unexpected missing-pair error: {error:?}"
     );
 }

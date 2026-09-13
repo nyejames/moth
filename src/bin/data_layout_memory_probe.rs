@@ -156,6 +156,21 @@ fn print_report(
         "retained.identity_contexts={}",
         report.retention.retained_identity_contexts
     );
+    println!(
+        "retained.path_table_count={}",
+        report.retention.path_table_count
+    );
+    println!(
+        "retained.path_table_node_rows={}",
+        report.retention.path_table_node_rows
+    );
+    println!(
+        "retained.path_table_storage_bytes={}",
+        report.retention.path_table_storage_bytes
+    );
+    for stage in &report.stages {
+        println!("stage.{}={:.6}", stage.name, stage.duration_ms);
+    }
     for counter in &report.counters {
         println!("counter.{}={}", counter.name, counter.value);
     }

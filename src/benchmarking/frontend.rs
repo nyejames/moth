@@ -96,6 +96,12 @@ pub struct FrontendBenchmarkRetention {
     pub diagnostic_label_slots: usize,
     /// Distinct frozen identity contexts reachable from range rows or donor-only handles.
     pub retained_identity_contexts: usize,
+    /// Distinct final path-table allocations reachable from retained module views.
+    pub path_table_count: usize,
+    /// Actual retained `PathNode` rows across the deduplicated path tables.
+    pub path_table_node_rows: usize,
+    /// Backing vector capacity bytes for the deduplicated path tables.
+    pub path_table_storage_bytes: usize,
 }
 
 #[cfg(feature = "data_layout_memory_probe")]
@@ -108,6 +114,9 @@ impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
             diagnostic_records: metrics.diagnostic_records,
             diagnostic_label_slots: metrics.diagnostic_label_slots,
             retained_identity_contexts: metrics.retained_identity_contexts,
+            path_table_count: metrics.path_table_count,
+            path_table_node_rows: metrics.path_table_node_rows,
+            path_table_storage_bytes: metrics.path_table_storage_bytes,
         }
     }
 }

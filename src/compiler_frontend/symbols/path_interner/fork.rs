@@ -5,16 +5,16 @@
 //! WHY:  parallel workers must share inherited source paths by numeric identity while keeping
 //!       their own append-only suffix, mirroring the string-table fork pattern.
 
-use super::builder::{PathInternerBuilder, PathInternError, PathNode};
+use super::NonUtf8PathComponent;
+use super::builder::{PathInternError, PathInternerBuilder, PathNode};
 use super::frozen::PathTable;
 use super::id::PathId;
 use super::remap::PathIdRemap;
-use super::NonUtf8PathComponent;
+use crate::compiler_frontend::instrumentation::{
+    FrontendCounter, add_frontend_counter, increment_frontend_counter, record_path_table_copy,
+};
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
-};
-use crate::compiler_frontend::instrumentation::{
-    FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
@@ -144,7 +144,6 @@ impl PathInternerFork {
     pub(super) fn local_node(&self, offset: usize) -> PathNode {
         self.nodes[offset]
     }
-
 
     /// Build a fork carrying an explicit local node list, for merge-ordering tests only.
     ///
@@ -430,7 +429,6 @@ impl PathInternerFork {
             return None;
         }
 
-
         let parent_depth = self.depth(parent);
         let child_depth = parent_depth.checked_add(1)?;
         let child = PathId::try_from_index(self.base_len + self.nodes.len())?;
@@ -490,7 +488,6 @@ impl PathInternerFork {
         path: &Path,
         string_table: &mut StringTable,
     ) -> Result<PathId, PathInternError> {
-
         let mut logical_path = PathId::ROOT;
 
         for component in path.components() {
@@ -514,7 +511,6 @@ impl PathInternerFork {
         spelling: &str,
         string_table: &mut StringTable,
     ) -> Result<PathId, PathInternError> {
-
         if spelling.is_empty() {
             return Ok(PathId::ROOT);
         }
@@ -533,6 +529,14 @@ impl PathInternerFork {
     /// Snapshot this fork's full table (inherited prefix plus local delta) into a reusable
     /// source for sub-forks, such as file-preparation chunks forked from one module-local fork.
     pub fn fork_source(&self) -> PathInternerForkSource {
+        let node_rows = self.base.nodes.len() + self.nodes.len();
+        let copied_bytes = node_rows
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(
+                (self.base.depths.len() + self.depths.len())
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            );
+        record_path_table_copy(node_rows, copied_bytes);
         let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
         nodes.extend_from_slice(&self.base.nodes);
         nodes.extend_from_slice(&self.nodes);
@@ -541,11 +545,7 @@ impl PathInternerFork {
         depths.extend_from_slice(&self.depths);
         let mut lookup = self.base.lookup.clone();
         lookup.extend(self.lookup.iter().map(|(key, value)| (*key, *value)));
-        PathInternerForkSource::new(
-            nodes.into_boxed_slice(),
-            depths.into_boxed_slice(),
-            lookup,
-        )
+        PathInternerForkSource::new(nodes.into_boxed_slice(), depths.into_boxed_slice(), lookup)
     }
     /// Snapshot this fork's complete path table for standalone consumers.
     ///
@@ -553,11 +553,18 @@ impl PathInternerFork {
     /// direct backend callers have no boundary builder, so they can snapshot the same inherited
     /// and local nodes without reconstructing a path component vector.
     pub fn snapshot_table(&self) -> PathTable {
-
+        let node_rows = self.base.nodes.len() + self.nodes.len();
+        let copied_bytes = node_rows
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(
+                (self.base.depths.len() + self.depths.len())
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            );
+        record_path_table_copy(node_rows, copied_bytes);
         let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
         nodes.extend_from_slice(&self.base.nodes);
         nodes.extend_from_slice(&self.nodes);
-        let mut depths = Vec::with_capacity(self.base.depths.len() + self.nodes.len());
+        let mut depths = Vec::with_capacity(self.base.depths.len() + self.depths.len());
         depths.extend_from_slice(&self.base.depths);
         depths.extend_from_slice(&self.depths);
         PathTable::from_parts(nodes, depths)
@@ -570,15 +577,22 @@ impl PathInternerFork {
         let source = self.fork_source();
         let mut lookup = source.base.lookup.clone();
         lookup.extend(self.lookup.iter().map(|(key, value)| (*key, *value)));
+        let node_rows = source.base.nodes.len();
+        let copied_bytes = node_rows
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(
+                source
+                    .base
+                    .depths
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            );
+        record_path_table_copy(node_rows, copied_bytes);
         PathInternerBuilder::from_parts(
-            PathTable::from_parts(
-                source.base.nodes.to_vec(),
-                source.base.depths.to_vec(),
-            ),
+            PathTable::from_parts(source.base.nodes.to_vec(), source.base.depths.to_vec()),
             lookup,
         )
     }
-
 
     /// Merge one sub-fork delta (forked from this fork's snapshot) into this fork.
     ///
@@ -734,5 +748,4 @@ impl PathInternerFork {
         }
         Some(PathIdRemap::from_full(mapped))
     }
-
 }

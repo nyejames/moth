@@ -233,10 +233,24 @@ fn frontend_benchmark_retains_source_package_warning() {
     assert_eq!(report.outcome, FrontendBenchmarkOutcome::Success);
     assert_eq!(report.error_count, 0);
     #[cfg(feature = "data_layout_memory_probe")]
-    assert_eq!(
-        report.retention.retained_identity_contexts, 1,
-        "a diagnostic-free package database must not count as a retained frozen identity context"
-    );
+    {
+        assert_eq!(
+            report.retention.retained_identity_contexts, 1,
+            "a diagnostic-free package database must not count as a retained frozen identity context"
+        );
+        assert!(
+            report.retention.path_table_count > 0,
+            "a warning-bearing multi-boundary benchmark must retain a final path table"
+        );
+        assert!(
+            report.retention.path_table_node_rows >= report.retention.path_table_count,
+            "every retained path table must include its root row"
+        );
+        assert!(
+            report.retention.path_table_storage_bytes > 0,
+            "retained path-table storage must report backing allocation bytes"
+        );
+    }
 }
 
 #[test]

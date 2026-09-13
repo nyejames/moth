@@ -7,6 +7,7 @@
 
 use super::builder::PathNode;
 use super::id::PathId;
+use crate::compiler_frontend::instrumentation::record_path_table_copy;
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
 };
@@ -16,10 +17,20 @@ use std::path::PathBuf;
 ///
 /// The table owns only parent links, component IDs and depths. The builder owns the reverse
 /// lookup while paths are being interned, then moves this table out when it freezes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PathTable {
     nodes: Vec<PathNode>,
     depths: Vec<u32>,
+}
+
+impl Clone for PathTable {
+    fn clone(&self) -> Self {
+        record_path_table_copy(self.nodes.len(), self.copied_bytes());
+        Self {
+            nodes: self.nodes.clone(),
+            depths: self.depths.clone(),
+        }
+    }
 }
 
 impl PathTable {
@@ -75,6 +86,23 @@ impl PathTable {
     /// Return the number of path nodes in this table, including the root.
     pub fn len(&self) -> usize {
         self.nodes.len()
+    }
+    /// Return the backing vector storage used by this table, excluding the `Arc` header.
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.nodes
+            .capacity()
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(
+                self.depths
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+    }
+    fn copied_bytes(&self) -> usize {
+        self.nodes
+            .len()
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(self.depths.len().saturating_mul(std::mem::size_of::<u32>()))
     }
 
     /// Return whether the numeric index of `path` is addressable by this table.
@@ -290,6 +318,7 @@ impl PathTable {
 
     /// Clone the dense node arrays into an immutable fork base.
     pub(super) fn snapshot(&self) -> (Box<[PathNode]>, Box<[u32]>) {
+        record_path_table_copy(self.nodes.len(), self.copied_bytes());
         (
             self.nodes.clone().into_boxed_slice(),
             self.depths.clone().into_boxed_slice(),
