@@ -145,7 +145,9 @@ RELEVANT_CODE:
 - `src/build_system/create_project_modules/source_loading.rs`: current source IO and byte-loading owner
 - `src/build_system/create_project_modules/compilation.rs`: canonical module ordering, local identity forks and module-result merging
 - `src/build_system/create_project_modules/module_preparation.rs`: current source attachment and deterministic file-preparation merge. Stage 0 stops at prepared syntax; it owns no frontend stage.
-- `src/build_system/create_project_modules/prepared_source.rs::PreparedSourceInput`: the five current source-text/path carriers. There is no `InputFile` type; `src/build_system/build.rs` owns the mutable backend string-table handoff
+- `src/build_system/create_project_modules/prepared_source.rs::PreparedSourceInput`: the five
+  current source-kind/work-product variants keyed by final `SourceId`; paths and snapshots remain
+  `SourceDatabase`-owned
 - `src/compiler_frontend/module_compilation/service.rs::compile_module`: the one production owner of the local semantic sequence, and the consumer of whatever source identity representation this plan lands on
 - `src/compiler_frontend/pipeline.rs::CompilerFrontend`: stage facade with remaining immutable-service copies
 - `src/compiler_frontend/source/`: build registration, loaded snapshots, exact spans and line indexes

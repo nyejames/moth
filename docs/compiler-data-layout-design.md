@@ -153,7 +153,7 @@ integers must also retain their stated logical size on supported 32-bit targets.
 | `Option<SourceSpan>` | 8 bytes | niche-encoded absence |
 | `PathId` | 4 bytes | non-zero path-table identity, `Copy` |
 | `Option<PathId>` | 4 bytes | niche-encoded absence |
-| `PathSyntaxId` | 4 bytes | dense file-local path-syntax handle; zero means no path row |
+| `PathSyntaxId` | 4 bytes | dense source-local path-syntax handle; zero means no path row |
 | `TokenShape` | 8 bytes | fixed tag, flags and one `u32` payload |
 | `DiagnosticToken` | 8 bytes | compact diagnostic projection of a token |
 | `DiagnosticCode` | 2 bytes | explicit non-zero internal code |
@@ -857,7 +857,7 @@ Rules:
   `PathSyntaxId` in its shape data; that tag-plus-handle vocabulary is the only path-token
   vocabulary, there is no second stable path-token shape, and there is no inline path fast path
 - token-driven consumers look up rows with a token-aware ownership check so a same-index handle
-  from another file-owned table cannot be treated as valid
+  from another source's table cannot be treated as valid
 - dependency clause shape, selected-name order, aliases and source-versus-provider target
   classification are retained separately by the header dependency-clause owner
 - the table is owned by the source-owned token store and freezes with it
