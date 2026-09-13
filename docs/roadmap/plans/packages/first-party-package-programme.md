@@ -18,9 +18,9 @@ plans under this directory.
 
 ```text
 STATUS: paused by the user after the `@core/math` and `@core/time` batch
-CURRENT_SLICE: none - `@core/math` and `@core/time` are both delivered, each with its accepted contract published in the canonical reference before implementation
-BLOCKERS: package development waits for accepted data-layout Phase 3 completion; package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout base still fails the all-targets lint build and two feature lanes, so no package slice can produce a green gate until its owner repairs that build
-NEXT_ACTION: integrate at the accepted data-layout Phase 2 checkpoint, which is ahead of the merge already in this branch, validate the combined tree and remain paused
+CURRENT_SLICE: none - `@core/math` and `@core/time` are delivered, each with its accepted contract published in the canonical reference before implementation
+BLOCKERS: package development remains paused until accepted data-layout Phase 3 completes. The merged tree passes workspace tests and all eight feature lanes, but the inherited warning-denied Clippy lane, 22 baseline-equivalent integration failures and the generic-instantiation scaling budget remain open.
+NEXT_ACTION: remain paused; begin the next package slice only from a main branch containing the accepted data-layout Phase 3 checkpoint, then rerun the complete package gate
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -632,44 +632,26 @@ runtime glue is emitted from those owned sources, and both routes reach the repo
 review. A green guard result therefore proves lexical module-loading cleanliness, and host-driven
 loading is a named manual review boundary.
 
-Phase 0's mandatory `just validate` gate still fails, but the failure shrank when this branch merged
-the published data-layout work (`diagnostic-data-layout-changes`, `1e39f7678`) to stay in sync.
-Measured on the merged package tip: `cargo test -p moth --lib` passes 5003 tests with no failures,
-`just test-feature-matrix` passes six of eight lanes, and `ci-clippy-native` still cannot finish.
-Everything that remains red sits in files this branch never touches:
+Phase 0's mandatory `just validate` gate remains open on the warning-denied native Clippy lane. On
+the current merged tree, `cargo test --workspace --quiet -- --format terse` passes 5,986 tests;
+`just test-feature-matrix` passes all 8/8 standard lanes; `just feature-lane-check` reports zero
+findings; `just source-audit` audits 1,389 files with zero findings; `just first-party-deps`
+visits 21 files and 80 JavaScript sources with zero findings; the documentation and timer-erasure
+checks pass; and `bench-ci` passes all 82 benchmark preflight cases.
 
-- `ci-clippy-native` denies 18 lib and 893 lib-test findings, nearly all of them unused `path_fork`
-  variables and unused `PathId`/`PathInternerFork` imports left by the in-flight path-table fork
-  work, plus one `empty_line_after_doc_comments`.
-- the `timers-counters` lane fails to compile on two `E0061` arity errors in
-  `create_project_modules_benchmark_tests.rs` and a missing `path_table` field in
-  `generated/tests/convergence_tests.rs`.
-- the `dev-output` lane fails to compile on `E0599` in `ast/expressions/mutation.rs`, where a
-  `show_eval` path calls `to_string` on a `PathId` that implements no `Display`.
+The integration suite reports 1,937/1,959 correct with 22 failures. Running the same suite on
+`main` reports the same 22 failing cases, so the diagnostics refactor introduces no additional
+integration failures. The package-owned focused cases remain green: `--tag math` is 14/14,
+`--tag time` is 29/29 and `--tag core-packages` is 42/42. `bench-scaling` passes its constant and
+nominal series but the inherited generic-instantiation series fits n^1.82 against its n^1.70
+budget.
 
-The breakage is therefore owned by `compiler-source-token-and-diagnostic-data-layout-plan.md`, not
-by package work. Two earlier records are superseded: the 851 library failures and seven failing
-lanes measured before this merge, and the 102 denied lints before that. `clippy::result_large_err`
-no longer appears anywhere in the lint output, so the specific lint that plan owed the package
-programme is resolved upstream. Package work must not box shared diagnostic payloads, mass-format
-in-flight sources or narrow the gate to make it green.
-
-That red gate is a recorded external blocker, not a waiver. A code-bearing package phase cannot
-finish its mandatory gate while it is red, so Phase 0 stays open on validation alone: its
-implementation, audits and every other gate lane are complete and merged, and the phase closes when
-`just validate` runs green. The roadmap owner accepted that isolated package work on the existing
-external ABI could proceed during data-layout Phases 2 and 3 rather than waiting, which is how the
-delivered slices reported the inherited failure with their own focused evidence instead of claiming
-a closed gate. That permission is now spent: the user has paused package development until accepted
-data-layout Phase 3 completes, so the next package slice needs a fresh baseline measured after the
-shared representation work lands. The remaining breakage above is escalated to that plan's owner,
-whose Phase 2 audit checklist still records "run path/dependency/module/type/diagnostic tests and
-serial/parallel determinism tests" as ticked for a checkpoint whose own feature lanes do not build.
-That entry is the record the measurement contradicts; only that plan may correct it.
-
-The `compile_prepared` argument-order repair this branch carried is no longer outstanding: the
-merged data-layout work contains the identical swap in `compile_check_only_job`, so the two sides
-converged and nothing remains to upstream.
+The remaining Clippy findings are warning-denied unused imports, variables and mutability in the
+merged compiler/test tree, and the broad formatter check reports inherited unformatted files.
+These are upstream shared-tree validation blockers rather than package API or runtime failures.
+The package implementation does not alter diagnostic payloads, source/path ownership, HIR call
+representation or build-graph construction. The package work is therefore synchronized and
+validated, but the programme stays paused and Phase 0 remains open on the gate alone.
 
 ### Phase 1 - activate the living package workflow
 
