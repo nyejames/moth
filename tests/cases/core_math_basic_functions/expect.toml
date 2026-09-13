@@ -3,21 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "Math.sin(",
-    "Math.cos(",
-    "Math.pow(2, 3)",
-    "Math.sqrt(16)",
-    "Math.min(Math.max(5, 0), 10)",
-]
-must_not_contain = [
-    "function __moth_math_sin(",
-    "function __moth_math_cos(",
-    "function __moth_math_pow(",
-    "function __moth_math_sqrt(",
-    "function __moth_math_clamp(",
-]
+rendered_output_exact = "core_math_basic_functions exact_abs=3.5 floor=3 floor_negative=-4 ceil=4 ceil_negative=-3 round=3 round_up=4 trunc=-3 trunc_positive=3 min=4 max=9 clamp=5 clamp_low=0 clamp_high=10 sqrt=4 pow=8 log2=3 log10=2 exp0=1 log1=0 approximate_sin=true approximate_cos=true approximate_tan=true approximate_atan2=true approximate_log=true control adjusted=4 bounded=4"

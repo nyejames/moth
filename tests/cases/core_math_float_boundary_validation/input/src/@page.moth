@@ -1,4 +1,4 @@
-@core/math sqrt, exp as exponential
+@core/math sqrt, exp as exponential, log
 @core/math
 
 finite_direct = sqrt(16.0)
@@ -17,6 +17,14 @@ invalid_alias_exp || -> Float, Error!:
     return exponential(10000.0)
 ;
 
+invalid_log_zero || -> Float, Error!:
+    return log(0.0)
+;
+
+invalid_log_negative || -> Float, Error!:
+    return math.log(-1.0)
+;
+
 sqrt_code = invalid_sqrt() catch |sqrt_err|:
     then sqrt_err.code
 ;
@@ -26,5 +34,11 @@ exp_code = invalid_exp() catch |exp_err|:
 alias_exp_code = invalid_alias_exp() catch |alias_err|:
     then alias_err.code
 ;
+log_zero_code = invalid_log_zero() catch |log_zero_err|:
+    then log_zero_err.code
+;
+log_negative_code = invalid_log_negative() catch |log_negative_err|:
+    then log_negative_err.code
+;
 
-[:core_math_float_boundary_validation finite=[finite_direct] namespace=[finite_namespace] alias=[finite_alias] errors=[sqrt_code]/[exp_code]/[alias_exp_code]]
+[:core_math_float_boundary_validation finite=[finite_direct] namespace=[finite_namespace] alias=[finite_alias] errors=[sqrt_code]/[exp_code]/[alias_exp_code]/[log_zero_code]/[log_negative_code]]
