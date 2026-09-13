@@ -184,9 +184,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Core math package]
             [: Partial]
-            [: Targeted direct, aliased, namespace, const, arity, type, missing-symbol, unbound access, finite-result boundary and HTML-Wasm unsupported-path coverage.]
+            [: Exact-output and error-bounded runtime coverage of every registered function, plus direct, aliased, namespace, const, arity, type, missing-symbol, unbound access, finite-result boundary and HTML-Wasm unsupported-path coverage.]
             [: JS / HTML-Wasm validation]
-            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It requires an explicit dependency clause. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. Common mathematical gaps should be filled before expanding into specialised APIs.]
+            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It requires an explicit dependency clause. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. The existing surface is hardened and behaviourally covered. Common mathematical gaps should be filled before expanding into specialised APIs.]
         ]
 
         [data:

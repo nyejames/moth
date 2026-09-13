@@ -18,9 +18,9 @@ plans under this directory.
 
 ```text
 STATUS: active programme; isolated existing-ABI package work runs alongside data-layout Phases 2 and 3
-CURRENT_SLICE: none - the `@core/text` hardening correction pass is delivered, and `@core/math` is not activated yet
-BLOCKERS: package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout Phase 2 base `34bd000d5` fails `just validate`, `cargo test -p moth --lib` and seven of eight feature lanes, so no package slice can produce a green gate until its owner repairs that build
-NEXT_ACTION: activate `@core/math` with its living plan, tracker row and out-of-order reason, then run its existing-ABI inventory, coverage and registration slice
+CURRENT_SLICE: none - `@core/math` is activated and its existing-surface coverage and registration cleanup are delivered
+BLOCKERS: the Math expansion waits for a user scope decision and for the open numerical semantics in `core-math.md`; package slices that need native result slots or Core const evaluation wait for that compiler checkpoint; the inherited data-layout Phase 2 base `34bd000d5` fails `just validate`, `cargo test -p moth --lib` and seven of eight feature lanes, so no package slice can produce a green gate until its owner repairs that build
+NEXT_ACTION: settle the Math expansion scope and its open semantics with the user, or activate the next isolated existing-ABI package slice
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -428,7 +428,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 0 | Package foundations | this plan | Implementation merged; open on the red `just validate` clippy lane | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
 | 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
-| 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
+| 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage and registration cleanup delivered, expansion waiting on a user scope decision | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
 | 4 | `@core/time` | `core-time.md` | TODO: create when activated | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
 | 5 | `@web/canvas` | `web-canvas.md` | TODO: create when activated | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
@@ -700,7 +700,11 @@ Do not use flaky distribution thresholds as the only correctness evidence.
 
 ### Phase 4 - `@core/math` current v1 slice
 
-Create and accept `core-math.md`, then fill only the high-value gaps found by its audit.
+`core-math.md` exists and Math was activated out of order, because hardening its already-registered
+surface needs no new compiler capability. Its existing-behaviour coverage and registration cleanup
+are delivered on the package branch. The remaining work is the proposed scalar expansion, which is
+not accepted yet: it needs a user scope decision and the open numerical semantics settled in that
+plan.
 
 Mandatory closeout: full phase gate plus finite-result, domain edge and integration coverage.
 
