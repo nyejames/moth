@@ -78,9 +78,7 @@
 //! CompilerMessages (ordered diagnostics + frozen identity rows + transitional StringTable)
 //! ```
 
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, DiagnosticSeverity,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -151,8 +149,9 @@ pub struct CompilerMessages {
     pub(crate) render_type_contexts: Vec<RenderTypeContext>,
     /// Per-diagnostic path-table snapshots used by transitional diagnostic renderers.
     ///
-    /// Each row retains the path identity domain that issued the diagnostics in its range. The
-    /// table is separate from source/frozen contexts because diagnosed lanes may finish before a
+    /// A row is retained only when a direct path payload or type-render context consumes paths.
+    /// Path-free diagnostics without type contexts retain no caller-supplied table. Retained rows
+    /// remain separate from source/frozen contexts because diagnosed lanes may finish before a
     /// source database or boundary path builder exists.
     pub(crate) render_path_contexts: Option<Box<Vec<RenderPathContext>>>,
 }
@@ -214,19 +213,21 @@ impl CompilerMessages {
 
     /// Retain the path table that issued diagnostics before the local compiler owner is dropped.
     ///
-    /// The snapshot is range-bound to the diagnostics it serves. Empty diagnostic streams carry
-    /// only infrastructure failures and intentionally keep no path context.
+    /// The snapshot is range-bound to the diagnostics it serves. A caller-supplied table is
+    /// retained only when a renderer consumes path identities: a diagnostic payload renders a
+    /// `PathId`, or a retained type context needs the table for nominal type names. Path-free
+    /// diagnostics without type contexts have no path consumer, so their supplied table is
+    /// discarded rather than retained merely as incidental context.
     ///
-    /// A path table is pairable only with the string table that issued its component IDs:
-    /// `PathTable::contains` proves numeric addressability only, so pairing is validated
-    /// against exactly the path identities this boundary's diagnostics still render — each
-    /// payload path plus every table ancestor its resolver walks. A diagnostic with no
-    /// `PathId` payload never dereferences the table and rejects nothing. A rendered path the
-    /// candidate table cannot address at all, or whose referenced nodes carry components this
-    /// string table cannot resolve, would render the wrong spelling and returns a typed error
-    /// instead of silently dropping the context. Same-index ownership across foreign domains is
-    /// not detectable from bare tables; the provider/materialisation boundary solves it by
-    /// retaining each table with its source `FrozenStringTable` and rebasing by spelling.
+    /// When retention is required, pairing validates both the path identities the payloads
+    /// render (each payload path and every ancestor its resolver walks) and every non-root node
+    /// in the table. The latter is required because later aggregation remaps the complete
+    /// retained table, including nodes no current payload dereferences. A missing required path
+    /// or a component the paired string table cannot resolve returns a typed `CompilerError`
+    /// instead of silently dropping or corrupting the context. Same-index ownership across
+    /// foreign domains is not detectable from bare tables; the provider/materialisation boundary
+    /// solves it by retaining each table with its source `FrozenStringTable` and rebasing by
+    /// spelling.
     pub(crate) fn attach_path_table_if_missing(
         &mut self,
         path_table: Arc<PathTable>,
@@ -240,15 +241,25 @@ impl CompilerMessages {
             return Ok(());
         }
 
+        let mut required_paths = Vec::new();
+        for diagnostic in &self.diagnostics {
+            diagnostic
+                .payload
+                .required_path_payload_paths(&mut required_paths);
+        }
+        if required_paths.is_empty() && self.render_type_contexts.is_empty() {
+            return Ok(());
+        }
+
         if let Some(index) = unpaired_path_table_component_index(
             &path_table,
             &self.string_table,
-            self.diagnostics.iter().map(|diagnostic| &diagnostic.payload),
+            &required_paths,
         ) {
             return Err(CompilerError::compiler_error(format!(
-                "diagnostic path table is not pairable with this string table: rendered path \
-                 node {index} is unaddressable or carries a component StringId the string \
-                 table cannot resolve"
+                "diagnostic path table is not pairable with this string table: path node \
+                 {index} is unaddressable or carries a component StringId the string table \
+                 cannot resolve"
             )));
         }
 
@@ -1062,42 +1073,51 @@ fn diagnostic_is_frozen(diagnostic_index: usize, frozen_contexts: &[RenderFrozen
         .any(|context| context.diagnostic_range.contains(&diagnostic_index))
 }
 
-/// Find the first unpairable rendered diagnostic path against the candidate tables.
+/// Find the first defect that makes retaining a path table unsafe.
 ///
 /// WHAT: one pairing check shared by the diagnosed batch and message-set attach boundaries.
-/// WHY: `PathTable::contains` only proves numeric addressability, and a whole-table scan
-///      rejects valid tables from foreign string domains that no retained diagnostic ever
-///      dereferences. This walks exactly the paths the supplied payloads render — each payload
-///      path plus every ancestor its component walk touches — and reports the first defect:
-///      a rendered `PathId` the candidate table cannot address at all (a retained payload
-///      that lost its issuing table), or a referenced node whose component the candidate
-///      string table cannot resolve (a foreign string domain behind a rendered path).
+/// WHY: `PathTable::contains` only proves numeric addressability, while later aggregation
+///      remaps every component in a retained table. This checks each payload path and every
+///      ancestor its renderer walks for addressability and string resolution, then checks every
+///      non-root table node so unused components are also safe for that complete remap.
 ///      Same-index ownership across foreign domains is not detectable from bare
 ///      `PathTable`+`StringTable` pairs and is intentionally not attempted here: the
 ///      provider/materialisation boundary retains each path table with its source
 ///      `FrozenStringTable` and re-interns by spelling through
 ///      [`ModuleMaterialisationContext::rebased_for_requester`]. Payloads without path
-///      identities contribute nothing, so a table behind them is pairable by definition.
-///      The root node's component is deliberately uninterpreted and is skipped.
-pub(crate) fn unpaired_path_table_component_index<'a>(
+///      identities contribute no required chains; callers skip retention entirely when they
+///      have no path payloads and no type-render contexts. The root node's component is
+///      deliberately uninterpreted and is skipped.
+pub(crate) fn unpaired_path_table_component_index(
     path_table: &PathTable,
     string_table: &StringTable,
-    payloads: impl Iterator<Item = &'a DiagnosticPayload>,
+    required_paths: &[PathId],
 ) -> Option<usize> {
-    let mut paths = Vec::new();
-    for payload in payloads {
-        payload.required_path_payload_paths(&mut paths);
-    }
-    paths
+    let unpaired_path = required_paths
         .iter()
-        .flat_map(|&path| std::iter::successors(Some(path), |&current| path_table.try_parent(current)))
+        .copied()
+        .flat_map(|path| std::iter::successors(Some(path), |&current| {
+            path_table.try_parent(current)
+        }))
         .find(|&path| {
             path != PathId::ROOT
                 && path_table
                     .try_component(path)
                     .is_none_or(|component| string_table.try_resolve(component).is_none())
         })
-        .map(PathId::index)
+        .map(PathId::index);
+    if unpaired_path.is_some() {
+        return unpaired_path;
+    }
+
+    (1..path_table.len()).find_map(|index| {
+        let path = PathId::try_from_index(index)?;
+        let component = path_table.try_component(path)?;
+        string_table
+            .try_resolve(component)
+            .is_none()
+            .then_some(index)
+    })
 }
 
 fn remap_diagnostics_preserving_frozen_context(

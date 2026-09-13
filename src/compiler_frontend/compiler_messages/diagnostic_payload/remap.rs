@@ -79,9 +79,14 @@ impl DiagnosticPayload {
             | DiagnosticPayload::BareFileImport { .. }
             | DiagnosticPayload::DirectSpecialFileImport { .. }
             | DiagnosticPayload::NotExportedBySourceFile { .. }
-            | DiagnosticPayload::NotExportedByPublicSurface { .. }
             | DiagnosticPayload::MissingModuleRootPublicSurface { .. }
             | DiagnosticPayload::CrossModuleImportNotExported { .. } => {}
+            DiagnosticPayload::NotExportedByPublicSurface {
+                public_surface_name,
+                ..
+            } => {
+                *public_surface_name = remap.get(*public_surface_name);
+            }
             DiagnosticPayload::ImportNameCollision { name } => {
                 *name = remap.get(*name);
             }
@@ -356,20 +361,15 @@ impl DiagnosticPayload {
             _ => {}
         }
     }
-
-}
-
-impl DiagnosticPayload {
     /// Push every path identity this payload's renderers resolve through a path table.
     ///
     /// WHAT: collects the exact `PathId`s a render boundary must spell out for this payload,
     ///       including every table ancestor each one requires.
-    /// WHY: path-table pairing only matters where a rendered spelling would be wrong. Scanning
-    ///      whole table ranges rejects valid foreign-domain tables that no retained diagnostic
-    ///      ever dereferences; scanning only leaf IDs misses ancestors the resolver walks
-    ///      before reaching the final component. Collecting each required chain here keeps the
-    ///      pairing check exact: a payload with no paths rejects nothing, and one with paths
-    ///      rejects a table whose referenced nodes carry unresolvable components.
+    /// WHY: retained-table pairing validates payload addressability and component resolution,
+    ///      while a separate full-table pass protects every node touched by later complete-table
+    ///      string remapping. Collecting each required chain here keeps the payload-side check
+    ///      exact: a payload with no paths contributes no required chain, and a rendered path
+    ///      whose table is missing or whose ancestor component is unavailable is rejected.
     pub(crate) fn required_path_payload_paths(&self, paths: &mut Vec<PathId>) {
         match self {
             DiagnosticPayload::MissingImportTarget { path }

@@ -178,9 +178,11 @@ impl PremergeFailure {
             }
         }
     }
-    /// Retain the path table that issued diagnostics before the local compiler owner is dropped.
+    /// Attach a path table when a diagnosed batch still has a render-time path consumer.
     ///
-    /// Infrastructure failures carry no path payloads, so attaching is a harmless no-op.
+    /// Infrastructure failures have no diagnostics or type contexts, so attaching remains a
+    /// harmless no-op. Diagnosed batches with no rendered path payload and no type context also
+    /// discard a supplied table rather than retaining incidental foreign-domain state.
     pub(crate) fn attach_path_table_if_missing(
         &mut self,
         path_table: Arc<PathTable>,
@@ -310,19 +312,17 @@ impl PremergeDiagnosticBatch {
             diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
         }
     }
-
-    /// Attach one complete path identity snapshot to every diagnostic in this batch.
+    /// Attach one complete path identity snapshot to this batch when a renderer consumes paths.
     ///
-    /// A path table is pairable only with the string table that issued its component IDs:
-    /// `PathTable::contains` proves numeric addressability only, so pairing is validated
-    /// against exactly the path identities this batch's diagnostics still render — each
-    /// payload path plus every table ancestor its resolver walks. A diagnostic with no
-    /// `PathId` payload never dereferences the table and rejects nothing. A rendered path the
-    /// candidate table cannot address at all, or whose referenced nodes carry components this
-    /// string table cannot resolve, would render the wrong spelling and returns a typed error
-    /// instead of silently dropping the context. Same-index ownership across foreign domains is
-    /// not detectable from bare tables; the provider/materialisation boundary solves it by
-    /// retaining each table with its source `FrozenStringTable` and rebasing by spelling.
+    /// A caller-supplied table is retained only for diagnostics with direct rendered path
+    /// payloads or for a type-render context whose nominal names resolve through the table.
+    /// Path-free diagnostics without type contexts retain nothing. When retention is required,
+    /// pairing validates every payload path and ancestor it renders and every non-root node in
+    /// the table, because later aggregation remaps the complete retained table. Missing required
+    /// paths or components outside the batch's string domain return a typed `CompilerError`.
+    /// Same-index ownership across foreign domains is not detectable from bare tables; the
+    /// provider/materialisation boundary retains each table with its source `FrozenStringTable`
+    /// and rebases by spelling.
     pub(crate) fn attach_path_table_if_missing(
         &mut self,
         path_table: Arc<PathTable>,
@@ -331,18 +331,25 @@ impl PremergeDiagnosticBatch {
             return Ok(());
         }
 
+        let mut required_paths = Vec::new();
+        for diagnostic in &self.bag.diagnostics {
+            diagnostic
+                .payload
+                .required_path_payload_paths(&mut required_paths);
+        }
+        if required_paths.is_empty() && self.render_type_contexts.is_empty() {
+            return Ok(());
+        }
+
         if let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
             &path_table,
             &self.string_table,
-            self.bag
-                .diagnostics
-                .iter()
-                .map(|diagnostic| &diagnostic.payload),
+            &required_paths,
         ) {
             return Err(CompilerError::compiler_error(format!(
-                "diagnostic path table is not pairable with this batch's string table: \
-                 rendered path node {index} is unaddressable or carries a component StringId \
-                 the batch cannot resolve"
+                "diagnostic path table is not pairable with this batch's string table: path node \
+                 {index} is unaddressable or carries a component StringId the batch cannot \
+                 resolve"
             )));
         }
 

@@ -5,7 +5,7 @@ use super::{
     DependencyClauseKind, DiagnosticBag, DiagnosticCategory, DiagnosticKind, DiagnosticLabel,
     DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload, DiagnosticPlace,
     DiagnosticSeverity, GenericApplicationErrorReason, ImportDiagnosticKind,
-    IncompatibleChoiceComparisonReason, InfrastructureDiagnosticKind,
+    ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InfrastructureDiagnosticKind,
     InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
@@ -20,9 +20,9 @@ use super::{
     UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, ErrorType, RenderFrozenContext,
+    CompilerError, CompilerMessages, ErrorType, RenderFrozenContext, RenderTypeContext,
 };
-use crate::compiler_frontend::compiler_messages::PremergeDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{ModuleDiagnostics, PremergeDiagnosticBatch};
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
 };
@@ -607,11 +607,14 @@ fn attach_rejects_rendered_path_beyond_the_candidate_table() {
 
 #[test]
 fn attach_ignores_foreign_domain_table_for_diagnostics_without_path_payloads() {
-    // A diagnostic with no PathId payload never dereferences the attached table, so an
-    // inherited table from a foreign string domain must attach as harmless render context
-    // instead of reporting infrastructure failure (the recursive materialisation lane).
+    // A diagnostic with no PathId payload never dereferences the attached table, so a table
+    // issued by a foreign string domain must not be retained merely because a caller supplies
+    // one. Retaining it would expose foreign component IDs to the complete-table rewrite at the
+    // next aggregation. The path-free diagnostic must still render its own name after a
+    // non-identity string merge.
     let mut batch_table = StringTable::new();
-    let diagnostic = CompilerDiagnostic::unknown_value_name(batch_table.intern("local"), None);
+    let name = batch_table.intern("local");
+    let diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
     let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
 
     let mut foreign_strings = StringTable::new();
@@ -623,7 +626,302 @@ fn attach_ignores_foreign_domain_table_for_diagnostics_without_path_payloads() {
 
     batch
         .attach_path_table_if_missing(foreign_table)
-        .expect("a table no diagnostic dereferences must attach without a pairing error");
+        .expect("a path-free diagnostic must ignore a foreign table");
+
+    let mut aggregate_table = StringTable::new();
+    aggregate_table.intern("aggregate-padding");
+    let mut messages = CompilerMessages::empty(aggregate_table);
+    messages.append_messages_preserving_context(batch.into_messages());
+
+    assert!(
+        messages
+            .render_path_contexts
+            .as_ref()
+            .is_none_or(|contexts| contexts.is_empty()),
+        "a path-free diagnostic must not retain a caller-supplied path table"
+    );
+    let DiagnosticPayload::UnknownName { name, .. } = &messages.diagnostic_slice()[0].payload
+    else {
+        panic!("expected unknown-name diagnostic");
+    };
+    assert_eq!(
+        messages.string_table.resolve(*name),
+        "local",
+        "the incoming name must follow the non-identity string merge"
+    );
+    let rendered =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &messages,
+        )
+        .join("\n");
+    assert!(
+        rendered.contains("local"),
+        "path-free rendering lost its authored name after aggregation: {rendered}"
+    );
+}
+
+#[test]
+fn attach_rejects_unresolvable_unused_path_table_node() {
+    // The required path is valid in the batch string domain, but the retained table also carries
+    // an unused node whose component ID is outside that domain. Retained tables are remapped in
+    // full during aggregation, so this must fail at attachment rather than panic later.
+    let mut batch_table = StringTable::new();
+    batch_table.intern("local");
+    batch_table.intern("leaf");
+    let mut batch_fork = PathInternerFork::empty();
+    let required_path = batch_fork
+        .try_intern_portable_path("local/leaf", &mut batch_table)
+        .expect("required path fits");
+    let diagnostic = CompilerDiagnostic::missing_import_target(required_path, None);
+    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
+
+    let mut candidate_strings = StringTable::new();
+    candidate_strings.intern("local");
+    candidate_strings.intern("leaf");
+    candidate_strings.intern("unused");
+    candidate_strings.intern("extra");
+    let mut candidate_fork = PathInternerFork::empty();
+    let candidate_path = candidate_fork
+        .try_intern_portable_path("local/leaf", &mut candidate_strings)
+        .expect("candidate required path fits");
+    candidate_fork
+        .try_intern_portable_path("unused/extra", &mut candidate_strings)
+        .expect("candidate unused path fits");
+    assert_eq!(
+        candidate_path, required_path,
+        "the valid required path must exercise the same node identity"
+    );
+
+    let error = batch
+        .attach_path_table_if_missing(Arc::new(candidate_fork.snapshot_table()))
+        .expect_err("an unresolvable unused node must reject a retained table");
+    assert!(
+        error.msg.contains("path node"),
+        "the producer boundary should identify the invalid retained node: {}",
+        error.msg
+    );
+}
+
+#[test]
+fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation() {
+    // The destination already owns a string at the source surface-name index. The diagnostic's
+    // requested path and public surface name must both survive the non-identity aggregation and
+    // the final frozen render boundary: the source context freezes into a FrozenIdentityContext
+    // that consumes the aggregate table, so the exact user-facing names must be asserted through
+    // the frozen owner rather than the mutable aggregate table after it is moved.
+    let mut local_table = StringTable::new();
+    let surface_name = local_table.intern("surface-name");
+    let mut local_fork = PathInternerFork::empty();
+    let requested_path = local_fork
+        .try_intern_portable_path("module/root", &mut local_table)
+        .expect("requested path fits");
+    let diagnostic = CompilerDiagnostic::not_exported_by_public_surface(
+        requested_path,
+        surface_name,
+        ImportPublicSurfaceType::ModuleRoot,
+        None,
+    );
+    let mut local_messages = CompilerMessages::from_diagnostic(diagnostic, local_table);
+    local_messages
+        .attach_path_table_if_missing(Arc::new(local_fork.snapshot_table()))
+        .expect("requested path table must pair with the local string table");
+
+    // The aggregate table already owns the string at the source surface-name index, so the merge
+    // into it is a genuinely shifting remap. Building the frozen source domain from the aggregate
+    // table keeps the frozen path trie inside the frozen string domain.
+    let mut aggregate_table = StringTable::new();
+    aggregate_table.intern("collision-padding");
+    let mut messages = CompilerMessages::empty(aggregate_table);
+    messages.append_messages_preserving_context(local_messages);
+
+    let project_path = Path::new("/project/main.moth");
+    let registration = SourceRegistrationIndex::from_rows(std::iter::once((
+        project_path,
+        SourceKind::Compiler(SourceFileKind::Moth),
+    )));
+    let source_database = {
+        let mut frozen_table = messages.string_table.as_ref().clone();
+        let mut path_fork = PathInternerFork::empty();
+        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
+            &registration,
+            project_path,
+            None,
+            &mut frozen_table,
+            path_fork.clone_path_builder(),
+        )
+        .expect("frozen source identity should build")
+    };
+    messages.set_source_database(Arc::new(source_database));
+    let messages = messages
+        .freeze_source_contexts()
+        .expect("aggregation should freeze the attached source context");
+    assert!(
+        messages.frozen_identity_context_for_diagnostic(0).is_some(),
+        "a real source context must freeze into an immutable identity owner"
+    );
+
+    let DiagnosticPayload::NotExportedByPublicSurface {
+        requested_path,
+        public_surface_name,
+        ..
+    } = &messages.diagnostic_slice()[0].payload
+    else {
+        panic!("expected public-surface diagnostic");
+    };
+    // The frozen context consumed the aggregate table during freezing; the surface name must
+    // resolve through that immutable owner under the destination-colliding remapped ID.
+    let frozen_identity = messages
+        .frozen_identity_context_for_diagnostic(0)
+        .expect("the frozen render boundary owns this diagnostic's strings");
+    assert_eq!(
+        frozen_identity.try_resolve_string(*public_surface_name),
+        Some("surface-name"),
+        "the surface name must follow the colliding destination string remap"
+    );
+    // Freezing consumes only string/source ownership; the remapped premerge path table remains
+    // the renderer's path owner, now resolving components through the frozen strings.
+    assert!(
+        messages.path_table_for_diagnostic(0).is_some(),
+        "the retained premerge path table must survive freezing to serve the rendered path"
+    );
+    assert_eq!(
+        messages
+            .diagnostic_render_context(0)
+            .render_path(*requested_path),
+        "module/root",
+        "the requested path must render exactly through the frozen identity owner"
+    );
+    let rendered =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &messages,
+        )
+        .join("\n");
+    assert!(
+        rendered.contains("Cannot bind 'module/root' from module 'surface-name'"),
+        "public-surface path/name remapping rendered incorrectly: {rendered}"
+    );
+}
+
+
+#[test]
+fn attach_retains_table_for_nominal_type_render_context_without_path_payloads() {
+    // TypeMismatch stores TypeIds rather than PathIds, but its nominal type name is rendered by
+    // walking the attached path table. Type-render contexts therefore remain legitimate path
+    // consumers even when payload-only classification sees no path identity.
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let nominal_path = path_fork
+        .try_intern_portable_path("NominalType", &mut string_table)
+        .expect("nominal path fits");
+    let mut type_environment = TypeEnvironment::new();
+    let (_, nominal_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: nominal_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let diagnostic = CompilerDiagnostic::type_mismatch(
+        nominal_type,
+        type_environment.builtins().int,
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table)
+        .with_type_context_for_all_diagnostics(type_environment);
+    messages
+        .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
+        .expect("type rendering must retain its paired path table");
+    assert!(
+        messages.path_table_for_diagnostic(0).is_some(),
+        "type-render context must retain a path table even without a path payload"
+    );
+
+    let mut aggregate_table = StringTable::new();
+    aggregate_table.intern("aggregate-padding");
+    let mut aggregate = CompilerMessages::empty(aggregate_table);
+    aggregate.append_messages_preserving_context(messages);
+    let rendered =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &aggregate,
+        )
+        .join("\n");
+    assert!(
+        rendered.contains("expected NominalType, found Int"),
+        "nominal type rendering lost its path context after aggregation: {rendered}"
+    );
+}
+
+#[test]
+fn batch_attaches_table_for_nominal_type_context_and_survives_canonical_round_trip() {
+    // The batch-level attach gate duplicates the message-set retention rule: a table is retained
+    // only when a payload renders a path or a type context resolves nominal names. A nominal
+    // TypeMismatch payload stores TypeIds, so without the type-context arm the batch would drop
+    // the table the renderer needs. The batch must retain it, survive the canonical
+    // batch/diagnosed round trip, and still render the exact nominal name after a non-identity
+    // append.
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let nominal_path = path_fork
+        .try_intern_portable_path("NominalType", &mut string_table)
+        .expect("nominal path fits");
+    let mut type_environment = TypeEnvironment::new();
+    let (_, nominal_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: nominal_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let diagnostic = CompilerDiagnostic::type_mismatch(
+        nominal_type,
+        type_environment.builtins().int,
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let batch = PremergeDiagnosticBatch::from_parts(
+        vec![diagnostic],
+        string_table,
+        vec![RenderTypeContext {
+            diagnostic_range: 0..1,
+            type_environment,
+        }],
+        Vec::new(),
+    );
+    let mut batch = batch;
+    batch
+        .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
+        .expect("type rendering must retain its paired path table at the batch boundary");
+
+    let diagnosed = ModuleDiagnostics::from_batch(batch)
+        .expect("a nominal type-context batch must classify as a diagnosed module");
+    assert!(
+        diagnosed.render_type_contexts().len() == 1,
+        "the canonical round trip must keep the nominal type context"
+    );
+    let batch = diagnosed
+        .into_batch()
+        .expect("a diagnosed module without source contexts must return to the batch lane");
+    let messages = batch.into_messages();
+    assert!(
+        messages.path_table_for_diagnostic(0).is_some(),
+        "the batch's retained path table must move into the final vessel"
+    );
+
+    let mut aggregate_table = StringTable::new();
+    aggregate_table.intern("aggregate-padding");
+    let mut aggregate = CompilerMessages::empty(aggregate_table);
+    aggregate.append_messages_preserving_context(messages);
+    let rendered =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &aggregate,
+        )
+        .join("\n");
+    assert!(
+        rendered.contains("Type mismatch in assignment: expected NominalType, found Int"),
+        "batch-level nominal type rendering lost its path context through the canonical \
+         round trip and append: {rendered}"
+    );
 }
 
 #[test]
