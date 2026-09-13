@@ -8,8 +8,8 @@
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use super::{
     AstCounter, FrontendCounter, add_ast_counter, add_frontend_counter,
-    capture_frontend_counters_for_test, log_ast_counters, log_frontend_counters,
-    reset_ast_counters, reset_frontend_counters,
+    capture_frontend_counters_for_test, frontend_counter_test_values, log_ast_counters,
+    log_frontend_counters, reset_ast_counters, reset_frontend_counters,
 };
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
@@ -426,6 +426,49 @@ fn ast_body_root_and_scope_counters_record_stable_metrics() {
         3.0,
     );
     assert_counter_value(&observations.counters, "ast_root_scope_arena_count", 9.0);
+}
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+#[test]
+fn reset_and_log_ignore_threads_without_counter_capture() {
+    let _guard = super::lock_counter_test();
+    let _counter_capture = capture_frontend_counters_for_test();
+
+    reset_frontend_counters();
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    add_frontend_counter(FrontendCounter::ModuleCount, 3);
+
+    // An unrelated compile test resets and logs on its own thread without
+    // opting into capture. It must not wipe the guarded counters or prepend
+    // zero rows into this active collection session.
+    std::thread::spawn(|| {
+        reset_frontend_counters();
+        log_frontend_counters();
+    })
+    .join()
+    .expect("unopted thread should not panic");
+
+    let values = frontend_counter_test_values(&[FrontendCounter::ModuleCount]);
+    assert_eq!(
+        values,
+        vec![3],
+        "unopted reset must not clobber counters a guarded test owns"
+    );
+
+    log_frontend_counters();
+
+    let observations = timing_session.finish();
+    let module_rows: Vec<f64> = observations
+        .counters
+        .iter()
+        .filter(|counter| counter.name == "module_count")
+        .map(|counter| counter.value)
+        .collect();
+    assert_eq!(
+        module_rows,
+        vec![3.0],
+        "unopted log must not prepend zero counter rows into the guarded session"
+    );
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]

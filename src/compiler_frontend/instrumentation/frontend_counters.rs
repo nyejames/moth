@@ -396,6 +396,13 @@ mod detailed {
     }
 
     pub(crate) fn reset_frontend_counters() {
+        // Under test, ignore callers whose thread has not opted into capture so an
+        // unrelated compile test cannot wipe counters a guarded test owns.
+        #[cfg(test)]
+        if !test_counter_capture_active() {
+            return;
+        }
+
         for &counter in all_counters() {
             atomic_counter(counter).store(0, Ordering::Relaxed);
         }
@@ -437,6 +444,14 @@ mod detailed {
     }
 
     pub(crate) fn log_frontend_counters() {
+        // Under test, ignore callers whose thread has not opted into capture so an
+        // unrelated compile test cannot prepend zero counter rows into a guarded
+        // test's active collection session.
+        #[cfg(test)]
+        if !test_counter_capture_active() {
+            return;
+        }
+
         // With timers, counter call sites record only — stable MOTH_BENCH counter
         // lines and any human counter summary are emitted from the drained
         // snapshot after the command total. Without timers, log_benchmark_counter
