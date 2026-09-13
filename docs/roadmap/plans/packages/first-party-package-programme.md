@@ -633,13 +633,15 @@ review. A green guard result therefore proves lexical module-loading cleanliness
 loading is a named manual review boundary.
 
 Phase 0's mandatory `just validate` gate fails, and the failure grew when this branch was rebased
-onto the data-layout Phase 2 checkpoint `34bd000d5`. Measured on that base and on the current
-package tip alike: `ci-clippy-native` cannot finish because its all-targets lint build reports four
+onto the data-layout Phase 2 checkpoint `34bd000d5`. Measured on the current package tip:
+`ci-clippy-native` cannot finish because its all-targets lint build reports four
 compile errors beside 1326 denied lint findings, `cargo test -p moth --lib` reports 851 failures
 concentrated in path interning, public-interface projection and path resolution, and seven of eight
-`just test-feature-matrix` lanes fail. An identical run inside a clean worktree at `34bd000d5`
-reproduces the same 851 failures, and the four compile errors sit in files this branch never
-touches, so the breakage is the in-flight path-table fork work owned by
+`just test-feature-matrix` lanes fail. The pristine base cannot run the feature matrix at all: its
+own timers lane fails to compile on the argument-order defect recorded below. A worktree at
+`34bd000d5` carrying only that one-line repair reproduces the failures exactly - 8 lanes run, 1
+passed, 7 failed, and the same 851 library failures - and the four lint compile errors sit in files
+this branch never touches, so the breakage is the in-flight path-table fork work owned by
 `compiler-source-token-and-diagnostic-data-layout-plan.md`, not package work. It supersedes the
 earlier record of 102 denied lints, 96 of them `clippy::result_large_err`, whose root cause that
 plan still owns. Package work must not box shared diagnostic payloads, mass-format in-flight
