@@ -398,7 +398,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 type_environment: &type_environment,
                 public_trait_roots: &resolved_public_trait_roots,
                 default_const_templates_by_path: projected_const_templates.by_path,
-                entry_dir: self.context.entry_dir.clone(),
+                entry_dir: self.context.entry_dir,
                 module_origin: self
                     .context
                     .file_value_resolution

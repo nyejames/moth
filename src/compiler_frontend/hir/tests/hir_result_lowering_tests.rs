@@ -33,7 +33,7 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 #[test]
 fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
@@ -42,7 +42,7 @@ let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table)
 let location = None;
 
 let can_fail_function = function_node(
-    can_fail_name.clone(),
+    can_fail_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![error_return_slot(builtin_type_ids::STRING)],
@@ -59,7 +59,7 @@ let can_fail_function = function_node(
 );
 
 let start_function = function_node(
-    start_name.clone(),
+    start_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![error_return_slot(builtin_type_ids::STRING)],
@@ -118,7 +118,7 @@ let forward_name = super::symbol("forward", &mut path_fork, &mut string_table);
 let location = None;
 
 let can_fail_function = function_node(
-    can_fail_name.clone(),
+    can_fail_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -148,7 +148,7 @@ let propagated_call = Expression::handled_fallible_function_call_with_typed_argu
 );
 
 let forward_function = function_node(
-    forward_name.clone(),
+    forward_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -243,10 +243,10 @@ let forward_input = super::symbol("input", &mut path_fork, &mut string_table);
 let location = None;
 
 let source_function = function_node(
-    source_name.clone(),
+    source_name,
     FunctionSignature {
         parameters: vec![param_with_type_id(
-            source_input.clone(),
+            source_input,
             builtin_type_ids::STRING,
             false,
             location,
@@ -273,7 +273,7 @@ let propagated_call = Expression::handled_fallible_function_call_with_typed_argu
     source_name,
     vec![CallArgument::positional(
         reference_expr_with_type_id(
-            forward_input.clone(),
+            forward_input,
             builtin_type_ids::STRING,
             location,
             ValueMode::ImmutableReference,
@@ -288,7 +288,7 @@ let propagated_call = Expression::handled_fallible_function_call_with_typed_argu
 );
 
 let forward_function = function_node(
-    forward_name.clone(),
+    forward_name,
     FunctionSignature {
         parameters: vec![param_with_type_id(
             forward_input,
@@ -366,7 +366,7 @@ let value_name = path_fork.try_intern_child(forward_name, string_table.intern("v
 let location = None;
 
 let can_fail_function = function_node(
-    can_fail_name.clone(),
+    can_fail_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -396,7 +396,7 @@ let propagated_call = Expression::handled_fallible_function_call_with_typed_argu
 );
 
 let forward_function = function_node(
-    forward_name.clone(),
+    forward_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -407,7 +407,7 @@ let forward_function = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                value_name.clone(),
+                value_name,
                 propagated_call,
             )),
             location,
@@ -505,7 +505,7 @@ let count_id = path_fork.try_intern_child(forward_name, string_table.intern("cou
 let location = None;
 
 let pair_function = function_node(
-    pair_name.clone(),
+    pair_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -539,7 +539,7 @@ let propagated_call = Expression::handled_fallible_function_call_with_typed_argu
 );
 
 let forward_function = function_node(
-    forward_name.clone(),
+    forward_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -553,14 +553,14 @@ let forward_function = function_node(
             NodeKind::MultiBind {
                 targets: vec![
                     multi_bind_target(
-                        first_id.clone(),
+                        first_id,
                         builtin_type_ids::STRING,
                         ValueMode::ImmutableOwned,
                         MultiBindTargetKind::Declaration,
                         location,
                     ),
                     multi_bind_target(
-                        count_id.clone(),
+                        count_id,
                         builtin_type_ids::INT,
                         ValueMode::ImmutableOwned,
                         MultiBindTargetKind::Declaration,
@@ -679,7 +679,7 @@ let value_name = path_fork.try_intern_child(forward_name, string_table.intern("v
 let location = None;
 
 let can_fail_function = function_node(
-    can_fail_name.clone(),
+    can_fail_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -699,10 +699,10 @@ let can_fail_function = function_node(
 );
 
 let consume_function = function_node(
-    consume_name.clone(),
+    consume_name,
     FunctionSignature {
         parameters: vec![param_with_type_id(
-            consume_input.clone(),
+            consume_input,
             builtin_type_ids::STRING,
             false,
             location,
@@ -731,7 +731,7 @@ let propagated_call = Expression::handled_fallible_function_call_with_typed_argu
     location,
 );
 let outer_call = Expression::function_call_with_typed_arguments(
-    consume_name.clone(),
+    consume_name,
     vec![CallArgument::positional(
         propagated_call,
         CallAccessMode::Shared,
@@ -743,7 +743,7 @@ let outer_call = Expression::function_call_with_typed_arguments(
 );
 
 let forward_function = function_node(
-    forward_name.clone(),
+    forward_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -753,7 +753,7 @@ let forward_function = function_node(
     },
     vec![
         node(
-            NodeKind::VariableDeclaration(make_test_variable(value_name.clone(), outer_call)),
+            NodeKind::VariableDeclaration(make_test_variable(value_name, outer_call)),
             location,
         ),
         node(
@@ -857,7 +857,7 @@ let value_name = path_fork.try_intern_child(forward_name, string_table.intern("v
 let location = None;
 
 let can_fail_function = function_node(
-    can_fail_name.clone(),
+    can_fail_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -893,7 +893,7 @@ let runtime_value = runtime_expr(
 );
 
 let forward_function = function_node(
-    forward_name.clone(),
+    forward_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -904,7 +904,7 @@ let forward_function = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                value_name.clone(),
+                value_name,
                 runtime_value,
             )),
             location,
@@ -988,7 +988,7 @@ let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table)
 let location = None;
 
 let can_fail_function = function_node(
-    can_fail_name.clone(),
+    can_fail_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![error_return_slot(builtin_type_ids::STRING)],
@@ -1040,7 +1040,7 @@ let can_succeed_name = super::symbol("can_succeed", &mut path_fork, &mut string_
 let location = None;
 
 let can_succeed_function = function_node(
-    can_succeed_name.clone(),
+    can_succeed_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -1099,7 +1099,7 @@ let location = None;
 let error_binding = path_fork.try_intern_child(start_name, string_table.intern("err")).expect("test path fits");
 
 let can_fail_function = function_node(
-    can_fail_name.clone(),
+    can_fail_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -1182,7 +1182,7 @@ let pair_name = super::symbol("pair", &mut path_fork, &mut string_table);
 let location = None;
 
 let pair_function = function_node(
-    pair_name.clone(),
+    pair_name,
     FunctionSignature {
         parameters: vec![],
         returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::STRING]),

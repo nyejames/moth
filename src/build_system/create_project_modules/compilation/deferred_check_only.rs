@@ -46,6 +46,10 @@ fn seed_boundary_materialisations(
 /// WHAT: stays in the premerge lane and calls the typed canonical batch helper directly.
 /// WHY: the deferred lane never constructs the final vessel; the source-owner tail converts
 ///      each batch exactly once with its finalized snapshot.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "deferred check-only compilation keeps boundary context, provider and generated stores, jobs, provider and package edges, and mutable string/path tables as separate borrows"
+)]
 pub(super) fn compile_check_only_jobs_after_canonical(
     context: BoundaryCompilationContext<'_>,
     provider_store: &ModuleArtifactStore,

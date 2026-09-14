@@ -225,7 +225,7 @@ pub(super) fn build_module(
     let function_path = path_fork.try_intern_portable_path(function_name, string_table).expect("test path fits");
     module
         .side_table
-        .bind_function_name(function_id, function_path.clone());
+        .bind_function_name(function_id, function_path);
 
     for (local_id, local_name) in local_names {
         let local_path = path_fork.try_intern_portable_path(local_name, string_table).expect("test path fits");

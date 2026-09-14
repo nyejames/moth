@@ -37,6 +37,10 @@ impl ModuleMaterialisationPreparation {
             })
     }
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "alias restoration keeps the nominal artefact, materialisation context, module environment, local path pair, registry, and mutable path/string forks as separate borrows"
+)]
 pub(super) fn restore_generated_local_alias(
     nominal_source: &GenericTemplateArtefact,
     context: &ModuleMaterialisationContext,
@@ -64,7 +68,7 @@ pub(super) fn restore_generated_local_alias(
         path_fork,
     )?;
     let declaration = Declaration {
-        id: local_path.clone(),
+        id: local_path,
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
@@ -80,7 +84,7 @@ pub(super) fn restore_generated_local_alias(
         append_materialised_declaration(lookups, declaration, path_fork)?;
     }
     Rc::make_mut(&mut lookups.resolved_type_aliases_by_path).insert(
-        local_path.clone(),
+        local_path,
         ResolvedTypeAlias {
             diagnostic_type: diagnostic_type_spelling(type_id, &environment.type_environment),
             target_type_id: type_id,

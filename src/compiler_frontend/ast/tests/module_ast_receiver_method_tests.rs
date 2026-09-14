@@ -251,7 +251,7 @@ fn recursive_runtime_struct_cycles_are_rejected() {
         }],
     );
 
-    let diagnostic = validate_no_recursive_runtime_structs(&struct_fields, &string_table)
+    let diagnostic = validate_no_recursive_runtime_structs(&struct_fields)
         .expect_err("recursive runtime struct cycle should be rejected");
     assert!(matches!(
         &diagnostic.payload,
@@ -294,6 +294,6 @@ fn non_recursive_runtime_structs_are_allowed() {
         }],
     );
 
-    validate_no_recursive_runtime_structs(&struct_fields, &string_table)
+    validate_no_recursive_runtime_structs(&struct_fields)
         .expect("non-recursive runtime structs should pass validation");
 }

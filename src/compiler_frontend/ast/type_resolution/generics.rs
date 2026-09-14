@@ -31,8 +31,10 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use super::resolve_type::resolve_diagnostic_type_to_type_id;
+
 
 /// Resolves a generic struct or choice annotation with concrete type arguments.
 ///
@@ -46,6 +48,7 @@ pub(super) fn instantiate_generic_nominal(
     base_path: &PathId,
     kind: &GenericDeclarationKind,
     arguments: &[DataType],
+    instance_name: Option<StringId>,
     span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<Option<DataType>> {
@@ -75,8 +78,12 @@ pub(super) fn instantiate_generic_nominal(
             }
 
             let type_id = intern_generic_instance_type_id(base_path, arguments, context);
-            validate_nominal_bound_evidence_for_instantiation(type_id, span, context)?;
-
+            validate_nominal_bound_evidence_for_instantiation(
+                type_id,
+                instance_name,
+                span,
+                context,
+            )?;
             DataType::Struct {
                 nominal_path: base_path.to_owned(),
                 type_id,
@@ -86,7 +93,12 @@ pub(super) fn instantiate_generic_nominal(
         }
         GenericDeclarationKind::Choice => {
             let type_id = intern_generic_instance_type_id(base_path, arguments, context);
-            validate_nominal_bound_evidence_for_instantiation(type_id, span, context)?;
+            validate_nominal_bound_evidence_for_instantiation(
+                type_id,
+                instance_name,
+                span,
+                context,
+            )?;
 
             DataType::Choices {
                 nominal_path: base_path.to_owned(),
@@ -136,6 +148,7 @@ fn intern_generic_instance_type_id(
 ///      validator can inspect `TypeEnvironment` definitions and recursively check arguments.
 fn validate_nominal_bound_evidence_for_instantiation(
     type_id: TypeId,
+    instance_name: Option<StringId>,
     span: Option<SourceSpan>,
     context: &TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<()> {
@@ -151,5 +164,5 @@ fn validate_nominal_bound_evidence_for_instantiation(
         resolved_type_aliases: context.resolved_type_aliases,
     };
 
-    validate_nominal_generic_bound_evidence(type_id, span, &evidence_context)
+    validate_nominal_generic_bound_evidence(type_id, instance_name, span, &evidence_context)
 }

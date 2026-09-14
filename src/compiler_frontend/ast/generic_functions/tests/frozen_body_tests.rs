@@ -260,7 +260,7 @@ fn direct_content_body_fixture() -> (
     );
     let tokens = vec![Token::new(TokenKind::Path(path_id), path_span)];
     let body =
-        FileTokens::new_with_identity(source_file.clone(), body_file_id, None, tokens, path_syntax);
+        FileTokens::new_with_identity(source_file, body_file_id, None, tokens, path_syntax);
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
@@ -446,7 +446,7 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
         path_syntax.clone(),
     );
 
-    let source_file = original.src_path.clone();
+    let source_file = original.src_path;
     let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
     let (mut generated_path_fork, mut generated_table) =
         generated_materialisation_domain(&path_fork, &source_table);
@@ -583,7 +583,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     );
     let source_file = path_fork.try_intern_portable_path("src/@mod.moth", &mut source_table).expect("test path fits");
     let original = FileTokens::new_with_identity(
-        source_file.clone(),
+        source_file,
         SourceId::COMPILATION_ROOT,
         None,
         vec![
@@ -736,7 +736,7 @@ fn repeated_spellings_share_one_frozen_string_entry() {
         path_syntax,
     );
 
-    let source_file = original.src_path.clone();
+    let source_file = original.src_path;
     let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
     assert_eq!(
         frozen
@@ -873,8 +873,8 @@ fn retained_template(
     has_body: bool,
 ) -> GenericFunctionTemplate {
     GenericFunctionTemplate {
-        function_path: path.clone(),
-        source_file: path.clone(),
+        function_path: path,
+        source_file: path,
         declaration_identity: Some(declaration_identity),
         generic_parameter_owner: None,
         generic_parameter_list_id: GenericParameterListId(0),
@@ -1074,7 +1074,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         assert!(replaced, "the placeholder body literal should be present");
         let body_file_id = body.file_id;
         let body = FileTokens::new_with_identity(
-            body.src_path.clone(),
+            body.src_path,
             body_file_id,
             body.canonical_os_path.clone(),
             tokens,
@@ -1289,7 +1289,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             SourceSpan::new(SourceId::COMPILATION_ROOT, path_span),
         );
         let body = FileTokens::new_with_identity(
-            source_file.clone(),
+            source_file,
             SourceId::COMPILATION_ROOT,
             None,
             vec![Token::new(TokenKind::Path(path_id), path_span)],
@@ -1764,11 +1764,11 @@ fn requester_template_identity_index_is_exact_and_rejects_duplicate_bodies() {
     let imported_path = path_fork.try_intern_portable_path("src/imported.moth", &mut string_table).expect("test path fits");
     let mut templates = FxHashMap::default();
     templates.insert(
-        body_path.clone(),
-        retained_template(body_path.clone(), identity.clone(), true),
+        body_path,
+        retained_template(body_path, identity.clone(), true),
     );
     templates.insert(
-        imported_path.clone(),
+        imported_path,
         retained_template(imported_path, identity.clone(), false),
     );
 
@@ -1778,7 +1778,7 @@ fn requester_template_identity_index_is_exact_and_rejects_duplicate_bodies() {
 
     let duplicate_path = path_fork.try_intern_portable_path("src/duplicate.moth", &mut string_table).expect("test path fits");
     templates.insert(
-        duplicate_path.clone(),
+        duplicate_path,
         retained_template(duplicate_path, identity, true),
     );
     assert!(
@@ -1882,7 +1882,7 @@ fn frozen_generic_rejects_duplicate_compact_path_handle() {
 #[test]
 fn invalid_frozen_token_index_returns_compiler_error() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let path_fork = PathInternerFork::empty();
     let frozen = StableBodySyntax {
         declaration_path: PathId::ROOT,
         donor_file_id: SourceId::COMPILATION_ROOT,
@@ -1918,7 +1918,7 @@ fn invalid_frozen_path_handle_returns_compiler_error() {
         tokens,
         path_syntax,
     );
-    let source_file = original.src_path.clone();
+    let source_file = original.src_path;
     let mut frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
     let TokenKind::Path(path_id) = &mut frozen
         .tokens
@@ -2045,7 +2045,7 @@ fn provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_request
     assert_eq!(
         provider_path_table.render_portable_frozen(
             provider_source_file,
-            &context.source_string_table.as_ref().expect("source strings"),
+            context.source_string_table.as_ref().expect("source strings"),
             &mut scratch
         ),
         "provider/@mod.moth"

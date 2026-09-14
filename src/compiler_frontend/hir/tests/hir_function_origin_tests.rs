@@ -48,7 +48,7 @@ fn function_node(
 }
 
 use crate::compiler_frontend::hir::hir_builder::build_ast_with_registered_types;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 fn find_function_id_by_path(
     module: &crate::compiler_frontend::hir::module::HirModule,
@@ -70,7 +70,7 @@ let normal_fn = path_fork.try_intern_child(entry_path, string_table.intern("help
 let ast = build_ast_with_registered_types(
     vec![
         function_node(entry_start, None),
-        function_node(normal_fn.clone(), None),
+        function_node(normal_fn, None),
     ],
     entry_path,
 );
@@ -122,13 +122,13 @@ let stable_function_origin =
 let ast = build_ast_with_registered_types(
     vec![
         function_node(entry_start, None),
-        function_node(normal_fn.clone(), None),
+        function_node(normal_fn, None),
     ],
     entry_path,
 );
 
 let lookup = HirFunctionOriginLookup::from_seeds(vec![FunctionOriginSeed {
-    path: normal_fn.clone(),
+    path: normal_fn,
     origin: stable_function_origin.clone(),
 }])
 .expect("exact function-origin path should be unique");
@@ -190,7 +190,7 @@ let stable_module_origin = StableModuleOriginIdentity::from_portable_path(
 let ast = build_ast_with_registered_types(
     vec![
         function_node(entry_start, None),
-        function_node(normal_fn.clone(), None),
+        function_node(normal_fn, None),
     ],
     entry_path,
 );
@@ -242,9 +242,9 @@ let first_origin =
 let ast = build_ast_with_registered_types(
     vec![
         function_node(entry_start, None),
-        function_node(normal_fn.clone(), None),
+        function_node(normal_fn, None),
     ],
-    entry_path.clone(),
+    entry_path,
 );
 
 let lookup = HirFunctionOriginLookup::from_seeds(vec![FunctionOriginSeed {

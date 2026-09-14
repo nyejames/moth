@@ -49,7 +49,7 @@ fn reactive_assignment_records_invalidation_after_initialization() { let mut pat
 let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
 let external_package_registry = default_external_package_registry(&mut string_table);
 let count_path = symbol("count", &mut path_fork, &mut string_table);
-let source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
+let source = reactive_source(count_path, ReactiveSourceKind::Declaration);
 
 let start = function_node(
     start_name,
@@ -60,7 +60,7 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                count_path.clone(),
+                count_path,
                 Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
             )),
             None,
@@ -68,7 +68,7 @@ let start = function_node(
         node(
             NodeKind::Assignment {
                 target: assignment_target(
-                    count_path.clone(),
+                    count_path,
                     DataType::Int,
                     builtin_type_ids::INT,
                     None,
@@ -103,13 +103,13 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() { let mut 
 let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
 let external_package_registry = default_external_package_registry(&mut string_table);
 let render_name = symbol("render_reactive_parameter", &mut path_fork, &mut string_table);
-let render_name_for_lookup = render_name.clone();
+let render_name_for_lookup = render_name;
 let parameter_path = symbol("source", &mut path_fork, &mut string_table);
 let view_path = symbol("view", &mut path_fork, &mut string_table);
 let mut parameter =
-    param_with_type_id(parameter_path.clone(), builtin_type_ids::INT, false, None);
+    param_with_type_id(parameter_path, builtin_type_ids::INT, false, None);
 parameter.value.reactive_source = Some(reactive_source(
-    parameter_path.clone(),
+    parameter_path,
     ReactiveSourceKind::Parameter,
 ));
 
@@ -127,7 +127,7 @@ let render = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                view_path.clone(),
+                view_path,
                 Expression::string_slice(
                     string_table.intern("reactive"),
                     None,
@@ -211,7 +211,7 @@ let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table
 let external_package_registry = default_external_package_registry(&mut string_table);
 let count_path = symbol("count", &mut path_fork, &mut string_table);
 let view_path = symbol("view", &mut path_fork, &mut string_table);
-let source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
+let source = reactive_source(count_path, ReactiveSourceKind::Declaration);
 let template_metadata = metadata_with_subscription(source.clone(), None);
 
 let start = function_node(
@@ -223,14 +223,14 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                count_path.clone(),
+                count_path,
                 Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
             )),
             None,
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                view_path.clone(),
+                view_path,
                 Expression::string_slice(
                     string_table.intern("<p>count</p>"),
                     None,
@@ -254,7 +254,7 @@ let start = function_node(
         node(
             NodeKind::Assignment {
                 target: assignment_target(
-                    count_path.clone(),
+                    count_path,
                     DataType::Int,
                     builtin_type_ids::INT,
                     None,
@@ -287,10 +287,10 @@ let external_package_registry = default_external_package_registry(&mut string_ta
 let mutate_path = symbol("mutate", &mut path_fork, &mut string_table);
 let value_path = symbol("value", &mut path_fork, &mut string_table);
 let count_path = symbol("count", &mut path_fork, &mut string_table);
-let source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
+let source = reactive_source(count_path, ReactiveSourceKind::Declaration);
 
 let callee = function_node(
-    mutate_path.clone(),
+    mutate_path,
     FunctionSignature {
         parameters: vec![param_with_type_id(
             value_path,
@@ -313,7 +313,7 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                count_path.clone(),
+                count_path,
                 Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
             )),
             None,
@@ -323,7 +323,7 @@ let start = function_node(
                 mutate_path,
                 vec![CallArgument::positional(
                     reference_expr_with_datatype(
-                        count_path.clone(),
+                        count_path,
                         DataType::Int,
                         builtin_type_ids::INT,
                         None,
@@ -395,10 +395,10 @@ let external_package_registry = default_external_package_registry(&mut string_ta
 let inspect_path = symbol("inspect", &mut path_fork, &mut string_table);
 let parameter_path = symbol("value", &mut path_fork, &mut string_table);
 let count_path = symbol("count", &mut path_fork, &mut string_table);
-let source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
+let source = reactive_source(count_path, ReactiveSourceKind::Declaration);
 
 let inspect = function_node(
-    inspect_path.clone(),
+    inspect_path,
     FunctionSignature {
         parameters: vec![param_with_type_id(
             parameter_path,
@@ -421,7 +421,7 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                count_path.clone(),
+                count_path,
                 Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
             )),
             None,
@@ -431,7 +431,7 @@ let start = function_node(
                 inspect_path,
                 vec![CallArgument::positional(
                     reference_expr_with_datatype(
-                        count_path.clone(),
+                        count_path,
                         DataType::Int,
                         builtin_type_ids::INT,
                         None,
@@ -497,7 +497,7 @@ fn field_write_records_reactive_invalidation() { let mut path_fork = crate::comp
 let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
 let external_package_registry = default_external_package_registry(&mut string_table);
 let source_path = symbol("state", &mut path_fork, &mut string_table);
-let source = reactive_source(source_path.clone(), ReactiveSourceKind::Declaration);
+let source = reactive_source(source_path, ReactiveSourceKind::Declaration);
 
 let start = function_node(
     start_name,
@@ -507,7 +507,7 @@ let start = function_node(
     },
     vec![node(
         NodeKind::VariableDeclaration(make_test_variable(
-            source_path.clone(),
+            source_path,
             Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
         )),
         None,
@@ -538,9 +538,9 @@ fn reactive_parameter_does_not_grant_mutation_permission() { let mut path_fork =
 let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
 let external_package_registry = default_external_package_registry(&mut string_table);
 let param_path = symbol("source", &mut path_fork, &mut string_table);
-let mut parameter = param_with_type_id(param_path.clone(), builtin_type_ids::INT, false, None);
+let mut parameter = param_with_type_id(param_path, builtin_type_ids::INT, false, None);
 parameter.value.reactive_source = Some(reactive_source(
-    param_path.clone(),
+    param_path,
     ReactiveSourceKind::Parameter,
 ));
 
@@ -571,7 +571,7 @@ fn map_mutation_records_reactive_invalidation() { let mut path_fork = crate::com
 let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
 let external_package_registry = default_external_package_registry(&mut string_table);
 let map_path = symbol("scores", &mut path_fork, &mut string_table);
-let source = reactive_source(map_path.clone(), ReactiveSourceKind::Declaration);
+let source = reactive_source(map_path, ReactiveSourceKind::Declaration);
 
 let start = function_node(
     start_name,
@@ -581,7 +581,7 @@ let start = function_node(
     },
     vec![node(
         NodeKind::VariableDeclaration(make_test_variable(
-            map_path.clone(),
+            map_path,
             Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
         )),
         None,

@@ -60,7 +60,7 @@ fn range_loop_spec(
 use crate::compiler_frontend::hir::hir_builder::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId, BlockId, BlockId) {
     let start = &module.functions[module
@@ -308,7 +308,7 @@ let location = None;
 let step_symbol = super::symbol("step", &mut path_fork, &mut string_table);
 let step_decl = node(
     NodeKind::VariableDeclaration(Declaration {
-        id: step_symbol.clone(),
+        id: step_symbol,
         value: Expression::int(2, location, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,

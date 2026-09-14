@@ -217,7 +217,6 @@ fn build_table(
         trait_environment,
         type_environment,
         string_table,
-        path_fork,
         reexport_target_paths: &FxHashSet::default(),
     })
 }
@@ -240,14 +239,14 @@ fn retains_every_public_root_category_in_sorted_header_order() {
     // nominal TypeIds. The function, alias and constant still use the builtin int TypeId.
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: struct_path.clone(),
+        path: struct_path,
         fields: Box::new([]),
         generic_parameters: None,
         const_record: false,
     });
     let (_, choice_type_id) = type_environment.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
-        path: choice_path.clone(),
+        path: choice_path,
         variants: Box::new([]),
         generic_parameters: None,
     });
@@ -465,7 +464,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
     let (_, public_struct_type_id) =
         type_environment.register_nominal_struct(StructTypeDefinition {
             id: NominalTypeId(0),
-            path: public_struct.clone(),
+            path: public_struct,
             fields: Box::new([]),
             generic_parameters: None,
             const_record: false,
@@ -473,7 +472,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
     let (_, private_struct_type_id) =
         type_environment.register_nominal_struct(StructTypeDefinition {
             id: NominalTypeId(0),
-            path: private_struct.clone(),
+            path: private_struct,
             fields: Box::new([]),
             generic_parameters: None,
             const_record: false,
@@ -972,7 +971,7 @@ fn retains_source_trait_fact_for_generic_struct_bound() {
     let struct_path = path("public_struct", &mut string_table, &mut path_fork);
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: struct_path.clone(),
+        path: struct_path,
         fields: Box::new([]),
         generic_parameters: Some(list_id),
         const_record: false,
@@ -1036,7 +1035,7 @@ fn retains_core_trait_fact_for_generic_struct_bound() {
     let struct_path = path("public_struct", &mut string_table, &mut path_fork);
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: struct_path.clone(),
+        path: struct_path,
         fields: Box::new([]),
         generic_parameters: Some(list_id),
         const_record: false,
@@ -1099,7 +1098,7 @@ fn missing_trait_definition_for_bound_is_compiler_error() {
     let struct_path = path("public_struct", &mut string_table, &mut path_fork);
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: struct_path.clone(),
+        path: struct_path,
         fields: Box::new([]),
         generic_parameters: Some(list_id),
         const_record: false,
@@ -1148,7 +1147,7 @@ fn missing_resolved_struct_fields_is_internal_error() {
 
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: struct_path.clone(),
+        path: struct_path,
         fields: Box::new([]),
         generic_parameters: None,
         const_record: false,

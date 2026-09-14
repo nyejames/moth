@@ -153,7 +153,7 @@ content #= [wrapper: [:Hello]]
 
 #[test]
 fn collects_and_strips_top_level_doc_comment_templates() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("[$doc:doc]\n[:runtime]");
+    let (ast, _path_fork, string_table) = parse_single_file_ast("[$doc:doc]\n[:runtime]");
 
     assert_eq!(ast.doc_fragments.len(), 1);
     assert!(matches!(ast.doc_fragments[0].kind, AstDocFragmentKind::Doc));
@@ -179,7 +179,7 @@ fn collects_and_strips_top_level_doc_comment_templates() {
 
 #[test]
 fn collects_doc_comment_with_site_root_markdown_link() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("[$doc: See @/docs (Docs)]\n[:runtime]");
+    let (ast, _path_fork, string_table) = parse_single_file_ast("[$doc: See @/docs (Docs)]\n[:runtime]");
 
     assert_eq!(ast.doc_fragments.len(), 1);
     assert_eq!(
@@ -190,7 +190,7 @@ fn collects_doc_comment_with_site_root_markdown_link() {
 
 #[test]
 fn collects_top_level_doc_fragments_in_source_order() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("[$doc:first]\n[$doc:second]\n[$doc:third]");
+    let (ast, _path_fork, string_table) = parse_single_file_ast("[$doc:first]\n[$doc:second]\n[$doc:third]");
     let doc_fragments = ast.doc_fragments;
 
     assert_eq!(doc_fragments.len(), 3);
@@ -321,7 +321,7 @@ doc body
 ]
 "#;
 
-    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let (ast, _path_fork, string_table) = parse_single_file_ast(source);
 
     assert_eq!(
         ast.doc_fragments.len(),
@@ -344,7 +344,7 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
 
     let mut results = FxHashMap::default();
     results.insert(
-        path.clone(),
+        path,
         FoldedConstTemplateResult::new(ConstStringValue::Text(value)),
     );
 
@@ -371,7 +371,7 @@ fn collects_const_top_level_fragments_from_folded_value() {
 
     let mut results = FxHashMap::default();
     results.insert(
-        path.clone(),
+        path,
         FoldedConstTemplateResult::new(ConstStringValue::Text(value)),
     );
 
@@ -401,11 +401,11 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
 
     let mut results = FxHashMap::default();
     results.insert(
-        first_path.clone(),
+        first_path,
         FoldedConstTemplateResult::new(ConstStringValue::Text(first_value)),
     );
     results.insert(
-        second_path.clone(),
+        second_path,
         FoldedConstTemplateResult::new(ConstStringValue::Text(second_value)),
     );
 
@@ -478,15 +478,15 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
 
     let mut results = FxHashMap::default();
     results.insert(
-        piece_path.clone(),
+        piece_path,
         FoldedConstTemplateResult::new(piece_value.clone()),
     );
     results.insert(
-        all_text_path.clone(),
+        all_text_path,
         FoldedConstTemplateResult::new(all_text_value.clone()),
     );
     results.insert(
-        text_path.clone(),
+        text_path,
         FoldedConstTemplateResult::new(ConstStringValue::Text(plain_text)),
     );
 

@@ -160,6 +160,10 @@ fn cast_target_context_for_parameter_expectation(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "argument parsing keeps the token stream, scope, mutable interner/string/path state, syntax contexts, and optional expectations as separate borrows"
+)]
 fn parse_call_arguments_inner(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

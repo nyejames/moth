@@ -46,8 +46,7 @@ use std::path::PathBuf;
 /// Build the direct-export seed for one active-root source using a deterministic synthetic
 /// module origin.
 ///
-/// The receiver-method catalog defaults to empty, which exercises the free-binding projection
-
+/// The receiver-method catalog defaults to empty, which exercises the free-binding projection.
 fn parse_single_file_headers_with_fork(
     source: &str,
     string_table: &mut StringTable,
@@ -204,13 +203,13 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
     let mut headers = Vec::new();
     let mut module_symbols = ModuleSymbols::empty();
     for (output, path) in prepared_outputs.into_iter().zip(canonical_paths.iter()) {
-        let source_file = output.source_file.clone();
+        let source_file = output.source_file;
         module_symbols
             .file_roles_by_source
-            .insert(source_file.clone(), output.file_role);
+            .insert(source_file, output.file_role);
         module_symbols
             .file_module_membership
-            .insert(source_file.clone(), module_root.clone());
+            .insert(source_file, module_root);
 
         let file_id = source_files
             .get_by_canonical_path(path)
@@ -383,16 +382,16 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
     );
     let target_header =
         header_named(&fixture.headers, "value", &fixture.string_table, &fixture.path_fork);
-    let target_path = target_header.tokens.src_path.clone();
-    let target_source = target_header.source_file.clone();
+    let target_path = target_header.tokens.src_path;
+    let target_source = target_header.source_file;
     let expected_span = target_header.name_span;
 
     fixture
         .module_symbols
         .canonical_source_by_symbol_path
-        .insert(target_path.clone(), target_source);
+        .insert(target_path, target_source);
     fixture.module_symbols.module_root_public_exports.insert(
-        fixture.module_root.clone(),
+        fixture.module_root,
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicValue"),
             target: PublicExportTarget::SourceDeclaration { path: target_path },
@@ -472,7 +471,7 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
     }])
     .expect("one authored provider should register");
     fixture.module_symbols.module_root_public_exports.insert(
-        fixture.module_root.clone(),
+        fixture.module_root,
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicImported"),
             target: PublicExportTarget::ProviderSelection {
@@ -910,7 +909,7 @@ fn module_symbols_with_module_root_export_targets(
             Some(PublicExportEntry {
                 export_name: path_fork.try_component(*target)?,
                 target: PublicExportTarget::SourceDeclaration {
-                    path: target.clone(),
+                    path: *target,
                 },
             })
         })
@@ -932,7 +931,7 @@ fn add_source_package_export_target(
     let entry = PublicExportEntry {
         export_name,
         target: PublicExportTarget::SourceDeclaration {
-            path: target.clone(),
+            path: *target,
         },
     };
     module_symbols
@@ -1005,7 +1004,7 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     // the AST `source_path_is_public_from_root_file` nameability owner.
     let local_path = struct_header_path(&headers, "Local", &string_table, &path_fork);
     let imported_path_decl = struct_header_path(&headers, "Imported", &string_table, &path_fork);
-    let module_symbols = module_symbols_with_module_root_export_targets(&[local_path.clone(), imported_path_decl.clone()], &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(&[local_path, imported_path_decl], &mut string_table, &mut path_fork);
 
     let index = build_public_source_nominal_origin_index(
         &source_module_origins,
@@ -1461,7 +1460,7 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
 
     let local_trait_path = trait_header_path(&headers, "RENDERABLE", &string_table, &path_fork);
     let imported_trait_path = trait_header_path(&headers, "IMPORTED_TRAIT", &string_table, &path_fork);
-    let module_symbols = module_symbols_with_module_root_export_targets(&[local_trait_path.clone(), imported_trait_path.clone()], &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(&[local_trait_path, imported_trait_path], &mut string_table, &mut path_fork);
 
     let index = build_public_source_trait_origin_index(
         &source_module_origins,

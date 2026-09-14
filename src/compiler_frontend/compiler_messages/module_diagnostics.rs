@@ -103,7 +103,7 @@ impl ModuleDiagnostics {
                     render_source_contexts,
                     render_type_contexts,
                     render_path_contexts: render_path_contexts
-                        .map_or_else(Vec::new, |contexts| *contexts),
+                        .map_or_else(Vec::new, |contexts| contexts.into_vec()),
                 })
             }
             Some(error) => {
@@ -142,7 +142,7 @@ impl ModuleDiagnostics {
             render_source_contexts: self.render_source_contexts,
             render_type_contexts: self.render_type_contexts,
             render_path_contexts: (!self.render_path_contexts.is_empty())
-                .then(|| Box::new(self.render_path_contexts)),
+                .then(|| self.render_path_contexts.into_boxed_slice()),
         }
     }
     /// Classify a premerge batch into a diagnosed module or a typed invariant failure.

@@ -360,7 +360,7 @@ impl ModuleSymbols {
                             self.ordered_semantic_declarations.len(),
                         ),
                         header_index,
-                        path: header.tokens.src_path.clone(),
+                        path: header.tokens.src_path,
                         kind,
                         declaration: declaration_from_header(header, string_table, path_fork),
                     });

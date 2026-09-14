@@ -632,6 +632,7 @@ impl HirSideTable {
     }
 
     #[inline]
+    #[cfg(any(test, feature = "show_hir"))]
     pub(crate) fn choice_name_path(&self, choice_id: ChoiceId) -> Option<PathId> {
         self.choice_names.get(&choice_id).copied()
     }
@@ -686,6 +687,7 @@ impl HirSideTable {
 
     /// Resolves a function name to its leaf component.
     #[inline]
+    #[cfg(any(test, feature = "show_hir"))]
     pub(crate) fn resolve_function_name<'a>(
         &self,
         function_id: FunctionId,

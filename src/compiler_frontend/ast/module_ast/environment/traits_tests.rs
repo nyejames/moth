@@ -22,7 +22,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -35,7 +35,7 @@ use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 #[test]
 fn displayable_registers_through_unified_core_path() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 
@@ -57,7 +57,7 @@ fn displayable_registers_through_unified_core_path() {
 #[test]
 fn displayable_resolves_via_core_trait_id_for_name() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
@@ -73,7 +73,7 @@ fn displayable_resolves_via_core_trait_id_for_name() {
 #[test]
 fn register_core_trait_returns_same_id_for_repeated_calls() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
 

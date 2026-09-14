@@ -166,7 +166,7 @@ fn apply_reactive_declaration_metadata(
 ) {
     if is_reactive_binding {
         value.reactive_source = Some(ReactiveSource {
-            path: qualified_name.clone(),
+            path: *qualified_name,
             kind: ReactiveSourceKind::Declaration,
         });
     } else {

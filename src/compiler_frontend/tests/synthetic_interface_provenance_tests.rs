@@ -21,7 +21,7 @@ use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, Bu
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -325,7 +325,7 @@ fn provenance_unioned_through_constant_folding() {
     };
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let folded = match constant_fold(rpn.items, &mut string_table).expect("folding should succeed")
     {
         ConstantFoldOutcome::Folded(stack) => stack,

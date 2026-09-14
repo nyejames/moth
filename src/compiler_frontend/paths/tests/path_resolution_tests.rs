@@ -32,7 +32,7 @@ fn prepared_source_package_roots(
     source_packages: &SourcePackageRegistry,
 ) -> PreparedSourcePackageRoots {
     let mut prep_string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     crate::build_system::create_project_modules::source_package_discovery::
         build_source_package_boundary_indexes(
             source_packages,

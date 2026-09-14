@@ -331,7 +331,7 @@ fn project_evidence_trait_identity(
             if !context.public_source_trait_origins.contains_key(path) {
                 return Ok(ProjectedTrait::Private);
             }
-            ResolvedTraitSourceFact::Source(definition.canonical_path.clone())
+            ResolvedTraitSourceFact::Source(definition.canonical_path)
         };
 
     let identity = project_trait_source_fact_to_canonical_identity(

@@ -487,7 +487,7 @@ pub(crate) fn choice_type_id(
                     let field_definitions = fields
                         .iter()
                         .map(|field| FieldDefinition {
-                            name: field.id.clone(),
+                            name: field.id,
                             type_id: field.value.type_id,
                             span: field.value.span,
                         })
@@ -540,7 +540,7 @@ pub(crate) fn build_ast_with_choices(
             let field_definitions = fields
                 .iter()
                 .map(|field| FieldDefinition {
-                    name: field.id.clone(),
+                    name: field.id,
                     type_id: field.value.type_id,
                     span: field.value.span,
                 })
@@ -548,7 +548,7 @@ pub(crate) fn build_ast_with_choices(
 
             let definition = StructTypeDefinition {
                 id: NominalTypeId(0),
-                path: name.clone(),
+                path: *name,
                 fields: field_definitions.into_boxed_slice(),
                 generic_parameters: None,
                 const_record: false,
@@ -578,7 +578,7 @@ pub(crate) fn build_ast_with_choices(
                         let field_definitions = fields
                             .iter()
                             .map(|field| FieldDefinition {
-                                name: field.id.clone(),
+                                name: field.id,
                                 type_id: field.value.type_id,
                                 span: field.value.span,
                             })
@@ -594,7 +594,7 @@ pub(crate) fn build_ast_with_choices(
 
         let definition = ChoiceTypeDefinition {
             id: NominalTypeId(0),
-            path: choice_def.nominal_path.clone(),
+            path: choice_def.nominal_path,
             variants: variant_definitions.into_boxed_slice(),
             generic_parameters: None,
         };

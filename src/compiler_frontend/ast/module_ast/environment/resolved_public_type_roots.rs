@@ -24,7 +24,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -141,7 +141,6 @@ pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
     pub trait_environment: &'a TraitEnvironment,
     pub type_environment: &'a TypeEnvironment,
     pub string_table: &'a StringTable,
-    pub path_fork: &'a PathInternerFork,
     /// Source declaration paths re-exported through the root's `export:` block from private files
     /// in the same module.
     pub reexport_target_paths: &'a FxHashSet<PathId>,
@@ -176,7 +175,6 @@ pub(crate) fn build_resolved_public_type_roots(
         trait_environment,
         type_environment,
         string_table,
-        path_fork,
         reexport_target_paths,
     } = input;
 
@@ -538,7 +536,7 @@ fn build_trait_source_facts(
         if facts
             .insert(
                 trait_id,
-                ResolvedTraitSourceFact::Source(definition.canonical_path.clone()),
+                ResolvedTraitSourceFact::Source(definition.canonical_path),
             )
             .is_some()
         {
@@ -690,7 +688,7 @@ fn nominal_receiver_path(receiver: &ReceiverKey) -> Option<&PathId> {
 fn missing_public_root_fact(
     description: &str,
     path: &PathId,
-    string_table: &StringTable,
+    _string_table: &StringTable,
 ) -> CompilerError {
     CompilerError::compiler_error(format!(
         "Public {description} '{path:?}' was not published before root-table construction.",

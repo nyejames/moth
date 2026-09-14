@@ -86,7 +86,7 @@ fn hash_in_expression_position_rejected() {
         numeric_token("2", &scope, &mut string_table),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -142,7 +142,7 @@ fn hash_before_template_head_allowed() {
         token(TokenKind::TemplateHead, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -185,7 +185,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         token(TokenKind::Symbol(name), &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -247,11 +247,11 @@ fn hash_from_tokenized_source_rejected() {
     // Slice from after Assign to end
     let expr_tokens: Vec<Token> = file_tokens.tokens[index..].to_vec();
     let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
-    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, expr_tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, expr_tokens);
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
-        scope.clone(),
+        scope,
         Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
@@ -328,7 +328,7 @@ fn constant_identifier_uses_module_store_tir() {
 
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Constant,
-        scope.clone(),
+        scope,
         Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],

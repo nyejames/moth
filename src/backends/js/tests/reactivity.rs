@@ -24,7 +24,7 @@ use crate::compiler_frontend::hir::reactivity::{
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Builds a minimal HIR module containing one reactive `Int` source local assigned a literal value.

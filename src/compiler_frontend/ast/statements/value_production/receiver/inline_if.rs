@@ -51,20 +51,20 @@ pub(super) fn parse_inline_value_if(
     let then_body = vec![then_value_node(
         output.then_values,
         output.then_span,
-        context.scope.clone(),
+        context.scope,
     )];
     let else_body = vec![then_value_node(
         output.else_values,
         output.else_span,
-        context.scope.clone(),
+        context.scope,
     )];
 
     let value_if = ValueIfBlock {
         condition,
         then_body,
         else_body,
-        then_scope: context.scope.clone(),
-        else_scope: context.scope.clone(),
+        then_scope: context.scope,
+        else_scope: context.scope,
         span,
         generic_request_ranges: output.generic_request_ranges,
         result_type_ids: output.result_type_ids,

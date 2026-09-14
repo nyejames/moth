@@ -341,6 +341,10 @@ impl ModuleNamespaceSet {
     /// WHY: replaces the legacy filesystem source-surface fallback and candidate probing with
     /// indexed facts.
     /// Resolve one compiler-semantic dependency through the boundary-aware namespace.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "namespace resolution keeps the retained provider path, declaring file, source index, boundary, package prefix, and mutable string/path forks as separate borrows"
+    )]
     pub(crate) fn resolve_dependency(
         &self,
         provider: &RetainedDependencyPath,

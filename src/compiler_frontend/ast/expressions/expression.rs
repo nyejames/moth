@@ -1054,7 +1054,7 @@ impl Expression {
         );
         let struct_type = if let Some(key) = generic_instance_key {
             DataType::Struct {
-                nominal_path: nominal_path.clone(),
+                nominal_path,
                 type_id,
                 const_record,
                 generic_instance_key: Some(key),

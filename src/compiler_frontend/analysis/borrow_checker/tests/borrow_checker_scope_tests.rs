@@ -46,7 +46,7 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
@@ -67,7 +67,7 @@ let start_fn = function_node(
                     NodeKind::VariableDeclaration(make_test_variable(
                         y,
                         reference_expr_with_datatype(
-                            x.clone(),
+                            x,
                             DataType::Int,
                             BOOL,
                             test_source_location(3),
@@ -110,7 +110,7 @@ let arm = MatchArm {
         NodeKind::VariableDeclaration(make_test_variable(
             y,
             reference_expr_with_datatype(
-                x.clone(),
+                x,
                 DataType::Int,
                 BOOL,
                 test_source_location(4),
@@ -129,7 +129,7 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
@@ -179,7 +179,7 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
@@ -191,7 +191,7 @@ let start_fn = function_node(
                     NodeKind::VariableDeclaration(make_test_variable(
                         y,
                         reference_expr_with_datatype(
-                            x.clone(),
+                            x,
                             DataType::Int,
                             BOOL,
                             test_source_location(3),
@@ -234,7 +234,7 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
@@ -253,9 +253,9 @@ let start_fn = function_node(
                 ),
                 vec![node(
                     NodeKind::VariableDeclaration(make_test_variable(
-                        y.clone(),
+                        y,
                         reference_expr_with_datatype(
-                            x.clone(),
+                            x,
                             DataType::Int,
                             BOOL,
                             test_source_location(3),

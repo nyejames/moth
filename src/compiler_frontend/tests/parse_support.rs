@@ -86,8 +86,7 @@ fn test_file_value_resolution_services(
                     path_syntax
                         .try_path(reference.path_syntax)
                         .expect("prepared reference should point into its path table")
-                        .root
-                        .clone(),
+                        .root,
                     InvalidCompileTimePathReason::MissingTarget,
                     Some(reference.span),
                 ),

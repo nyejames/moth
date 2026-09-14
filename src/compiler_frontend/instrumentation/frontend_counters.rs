@@ -163,8 +163,11 @@ pub(crate) enum FrontendCounter {
     // Path-table fork/merge volume (Phase 2 Slice 2B). Node count totals interned nodes
     // including ROOT; max depth is a gauge updated on intern via fetch_max.
     PathNodeCount,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     PathTableCopyCount,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     PathTableCopyNodeRows,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     PathTableCopyBytes,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     PathMaxDepth,

@@ -24,7 +24,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::path_interner::PathId;
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     fresh_success_returns, function_node, make_test_variable, node, param_with_type_id,
@@ -38,7 +38,7 @@ use crate::compiler_frontend::hir::hir_builder::{
     HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
     build_ast_with_registered_types, lower_ast,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 #[test]
 fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
@@ -50,7 +50,7 @@ let chooser_fn = function_node(
     chooser,
     FunctionSignature {
         parameters: vec![param_with_type_id(
-            x.clone(),
+            x,
             builtin_type_ids::INT,
             false,
             None,
@@ -131,13 +131,13 @@ let choice_variants = vec![
     },
 ];
 
-let status_type_id = choice_type_id(status_path.clone(), &choice_variants);
+let status_type_id = choice_type_id(status_path, &choice_variants);
 
 let label_fn = function_node(
     label_fn_name,
     FunctionSignature {
         parameters: vec![param_with_type_id(
-            status_local.clone(),
+            status_local,
             status_type_id,
             false,
             None,
@@ -155,7 +155,7 @@ let label_fn = function_node(
             arms: vec![
                 MatchArm {
                     pattern: MatchPattern::ChoiceVariant {
-                        nominal_path: status_path.clone(),
+                        nominal_path: status_path,
                         tag: 0,
                         captures: vec![],
                         span: None,
@@ -172,7 +172,7 @@ let label_fn = function_node(
                 },
                 MatchArm {
                     pattern: MatchPattern::ChoiceVariant {
-                        nominal_path: status_path.clone(),
+                        nominal_path: status_path,
                         tag: 1,
                         captures: vec![],
                         span: None,
@@ -238,7 +238,7 @@ let x = super::symbol("x", &mut path_fork, &mut string_table);
 let match_node = node(
     NodeKind::Match {
         scrutinee: reference_expr_with_type_id(
-            x.clone(),
+            x,
             builtin_type_ids::INT,
             None,
             ValueMode::ImmutableReference,
@@ -324,7 +324,7 @@ let x = super::symbol("x", &mut path_fork, &mut string_table);
 let match_node = node(
     NodeKind::Match {
         scrutinee: reference_expr_with_type_id(
-            x.clone(),
+            x,
             builtin_type_ids::INT,
             None,
             ValueMode::ImmutableReference,
@@ -402,7 +402,7 @@ let start_fn = function_node(
     start_name,
     FunctionSignature {
         parameters: vec![param_with_type_id(
-            x.clone(),
+            x,
             builtin_type_ids::INT,
             false,
             None,
@@ -451,7 +451,7 @@ let start_fn = function_node(
     start_name,
     FunctionSignature {
         parameters: vec![param_with_type_id(
-            x.clone(),
+            x,
             builtin_type_ids::INT,
             false,
             None,
@@ -461,7 +461,7 @@ let start_fn = function_node(
     vec![node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
-                x.clone(),
+                x,
                 builtin_type_ids::INT,
                 None,
                 ValueMode::ImmutableReference,
@@ -637,7 +637,7 @@ let x = super::symbol("x", &mut path_fork, &mut string_table);
 let match_node = node(
     NodeKind::Match {
         scrutinee: reference_expr_with_type_id(
-            x.clone(),
+            x,
             builtin_type_ids::INT,
             None,
             ValueMode::ImmutableReference,
@@ -720,7 +720,7 @@ let x = super::symbol("x", &mut path_fork, &mut string_table);
 let match_node = node(
     NodeKind::Match {
         scrutinee: reference_expr_with_type_id(
-            x.clone(),
+            x,
             builtin_type_ids::INT,
             None,
             ValueMode::ImmutableReference,
@@ -811,12 +811,12 @@ let choice_variants = vec![
     },
 ];
 
-let status_type_id = choice_type_id(status_path.clone(), &choice_variants);
+let status_type_id = choice_type_id(status_path, &choice_variants);
 
 let match_node = node(
     NodeKind::Match {
         scrutinee: reference_expr_with_type_id(
-            status_local.clone(),
+            status_local,
             status_type_id,
             None,
             ValueMode::ImmutableOwned,
@@ -824,7 +824,7 @@ let match_node = node(
         arms: vec![
             MatchArm {
                 pattern: MatchPattern::ChoiceVariant {
-                    nominal_path: status_path.clone(),
+                    nominal_path: status_path,
                     tag: 0,
                     captures: vec![],
                     span: None,
@@ -841,7 +841,7 @@ let match_node = node(
             },
             MatchArm {
                 pattern: MatchPattern::ChoiceVariant {
-                    nominal_path: status_path.clone(),
+                    nominal_path: status_path,
                     tag: 1,
                     captures: vec![],
                     span: None,
@@ -944,7 +944,7 @@ let option_int_type_id = type_environment.intern_option(builtin_type_ids::INT);
 let match_node = node(
     NodeKind::Match {
         scrutinee: reference_expr_with_type_id(
-            maybe_name.clone(),
+            maybe_name,
             option_int_type_id,
             None,
             ValueMode::ImmutableReference,
@@ -952,7 +952,7 @@ let match_node = node(
         arms: vec![MatchArm {
             pattern: MatchPattern::OptionPresentCapture {
                 name: capture_name,
-                binding_path: capture_path.clone(),
+                binding_path: capture_path,
                 inner_type_id: builtin_type_ids::INT,
                 span: None,
                 binding_span: None,

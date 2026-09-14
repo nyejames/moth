@@ -9,7 +9,7 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 
@@ -50,7 +50,7 @@ fn synthetic_physical_resolution_cache_reuses_settled_outcome() {
     let mut path_syntax = PathSyntaxTable::new();
     let path = path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
-        path.clone(),
+        path,
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let reference = PreparedFileReference {
@@ -93,7 +93,7 @@ fn synthetic_moth_value_skips_physical_resolution_for_missing_target() {
     let mut path_syntax = PathSyntaxTable::new();
     let path = path_fork.try_intern_portable_path("missing.moth", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
-        path.clone(),
+        path,
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let reference = PreparedFileReference {
@@ -140,7 +140,7 @@ fn synthetic_not_a_directory_is_a_typed_path_failure() {
     let mut path_syntax = PathSyntaxTable::new();
     let path = path_fork.try_intern_portable_path("not_a_directory/value.mtf", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
-        path.clone(),
+        path,
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let reference = PreparedFileReference {
@@ -198,7 +198,7 @@ fn synthetic_in_owner_dangling_alias_watches_resolved_physical_prefix() {
     let mut path_syntax = PathSyntaxTable::new();
     let path = path_fork.try_intern_portable_path("alias/leaf.svg", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
-        path.clone(),
+        path,
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let reference = PreparedFileReference {
@@ -259,7 +259,7 @@ fn synthetic_dangling_alias_resolves_nested_symlink_targets_before_parent_segmen
     let mut path_syntax = PathSyntaxTable::new();
     let path = path_fork.try_intern_portable_path("alias/missing.svg", &mut strings).expect("test path fits");
     let path_syntax_id = path_syntax.push(
-        path.clone(),
+        path,
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let reference = PreparedFileReference {
@@ -328,7 +328,7 @@ fn synthetic_dangling_symlink_cycles_and_excessive_depth_are_infrastructure_erro
                    path_syntax: &mut PathSyntaxTable| {
         let authored_path = path_fork.try_intern_portable_path(path, strings).expect("test path fits");
         let path_syntax_id = path_syntax.push(
-            authored_path.clone(),
+            authored_path,
             SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         );
         let reference = PreparedFileReference {
@@ -418,7 +418,7 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
                    path_syntax: &mut PathSyntaxTable| {
         let authored_path = path_fork.try_intern_portable_path(path, strings).expect("test path fits");
         let path_syntax_id = path_syntax.push(
-            authored_path.clone(),
+            authored_path,
             SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         );
         let reference = PreparedFileReference {

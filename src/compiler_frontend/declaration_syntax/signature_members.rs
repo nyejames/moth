@@ -514,6 +514,10 @@ fn record_ordinary_member_name(
     }
     Ok(())
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "signature member parsing keeps the token stream, member path, mutable string/warning/span state, the reserved-this flag, member context, and path fork as separate borrows"
+)]
 fn parse_signature_member_syntax(
     token_stream: &mut FileTokens,
     full_name: PathId,

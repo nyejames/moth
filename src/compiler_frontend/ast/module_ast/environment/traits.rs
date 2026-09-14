@@ -420,8 +420,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(ResolvedTraitDefinition {
             id: trait_environment.next_trait_id(),
             name: declaration.name,
-            canonical_path: header.tokens.src_path.clone(),
-            source_file: header.source_file.clone(),
+            canonical_path: header.tokens.src_path.to_owned(),
+            source_file: header.source_file,
             this_type,
             requirements,
             declaration_span: source_span(header, declaration.name_span),
@@ -500,7 +500,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         );
         for parameter in resolved_signature.signature.parameters.iter().skip(1) {
             parameters.push(requirement_parameter_from_type(
-                parameter.id.clone(),
+                parameter.id,
                 parameter.value.value_mode.clone(),
                 parameter.value.type_id,
                 parameter.value.span,

@@ -325,6 +325,10 @@ pub(crate) fn parse_external_function_call_expression(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "external call parsing keeps the token stream, external identity and definition, call span, scope, and mutable interner/string/path state as separate borrows"
+)]
 fn parse_external_function_call_parts(
     token_stream: &mut FileTokens,
     external_function_id: ExternalFunctionId,

@@ -242,6 +242,10 @@ fn missing_source_load_input_index(result: &MissingSourceLoadResult) -> usize {
 ///
 /// Failures travel as [`CollectReachableInputsError`]; the final boundary converts the inner
 /// [`PremergeFailure`] once and attaches the finished source database when present.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "reachable-input collection keeps the entry path, resolver, directives, and mutable external-import/kind/resource/path/string state as separate borrows"
+)]
 pub(super) fn collect_reachable_input_files(
     entry_path: &Path,
     project_path_resolver: &ProjectPathResolver,

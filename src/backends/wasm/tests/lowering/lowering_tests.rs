@@ -25,12 +25,12 @@ use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
 fn assertion_failure_module(
-    mut path_fork: &mut PathInternerFork,
+    path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
     message_evaluation: HirAssertionMessageEvaluation,
@@ -117,7 +117,7 @@ fn assertion_failure_module(
         },
     };
 
-    build_module(&mut path_fork, string_table,
+    build_module(path_fork, string_table,
     vec![(function, path, HirFunctionOrigin::EntryStart)],
     vec![block],
     FunctionId(0),)

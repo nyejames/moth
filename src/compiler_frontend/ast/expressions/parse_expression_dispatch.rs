@@ -159,6 +159,10 @@ fn reject_second_operand_after_value_template(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "suffix dispatch keeps the token stream, scope, mutable interner/string/rpn/path state, catch policy, and the postfix expression as separate borrows"
+)]
 fn push_expression_after_suffixes(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -256,6 +260,10 @@ fn push_expression_after_suffixes(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "operand dispatch keeps the token stream, scope, mutable interner/string/rpn/path state, catch policy, and the operand expression as separate borrows"
+)]
 pub(super) fn push_expression_operand(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -287,6 +295,10 @@ pub(super) fn push_expression_operand(
 /// callers to construct `NodeKind::ExpressionStatement` themselves.
 /// WHY: constant references may carry declaration-origin expression spans, but diagnostics
 /// for suffixes and const-record misuse should still point at the source use site.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "operand dispatch keeps the token stream, scope, mutable interner/string/rpn/path state, catch policy, and the spanned operand input as separate borrows"
+)]
 pub(super) fn push_expression_operand_with_span(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -1260,6 +1272,10 @@ fn parse_cast_expression(
     Ok(ExpressionTokenStep::Continue)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "cast operand parsing keeps the token stream, scope, mutable interner/expected-type/string/path state, value mode, and parenthesis policy as separate borrows"
+)]
 fn parse_cast_operand_expression(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

@@ -49,7 +49,7 @@ fn typed_constant_retains_local_ordering_hint_for_declared_type() {
     // WHY: the declared type creates a structural ordering constraint so that the type
     // is sorted before any constant that references it. Initializer-expression references
     // are collected later during binding; this check owns the declared type annotation.
-    let (headers, string_table) =
+    let (headers, _string_table) =
         parse_single_file_headers_with_table("struct NavBar {}\ntheme #NavBar = default_navbar\n");
 
     let constant_header = headers
@@ -131,7 +131,7 @@ fn struct_fields_retain_local_ordering_hints_for_named_field_types() {
 fn function_error_return_retains_local_ordering_hint_for_named_type() {
     // WHY: final `T!` error slots are part of the declaration surface. Their named types must
     // participate in local declaration ordering before AST resolves function signatures.
-    let (headers, string_table) = parse_single_file_headers_with_table(
+    let (headers, _string_table) = parse_single_file_headers_with_table(
         "AppError = |message String|\nparse || -> Int, AppError!:\n    return 1\n;\n",
     );
 

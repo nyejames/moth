@@ -468,7 +468,7 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
             resource,
         } => {
             assert_eq!((*start, *length), (0, source.len() as u32));
-            assert_eq!(*resource, SourceSpanCapacityResource::ExtendedSpanTable);
+            assert_eq!(*resource, SourceSpanCapacityResource::ExtendedSpan);
         }
         payload => panic!("unexpected source-capacity payload: {payload:?}"),
     }
@@ -505,7 +505,7 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
             resource,
         } => {
             assert_eq!((*start, *length), (0, malformed_source.len() as u32));
-            assert_eq!(*resource, SourceSpanCapacityResource::ExtendedSpanTable);
+            assert_eq!(*resource, SourceSpanCapacityResource::ExtendedSpan);
         }
         payload => panic!("unexpected malformed-source capacity payload: {payload:?}"),
     }

@@ -392,10 +392,9 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                     CompilerError::compiler_error(
                         "Imported folded choice type has no consumer-local nominal path",
                     )
-                })?
-                .clone();
+                })?;
             ExpressionKind::ChoiceConstruct {
-                nominal_path,
+                nominal_path: nominal_path.to_owned(),
                 tag: variant.tag,
                 fields: projected,
             }

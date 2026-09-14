@@ -193,7 +193,7 @@ impl ModuleMaterialisationPreparation {
             let Some(identity) = template.declaration_identity.as_ref() else {
                 continue;
             };
-            if let Some(previous_path) = paths_by_identity.insert(identity.clone(), path.clone()) {
+            if let Some(previous_path) = paths_by_identity.insert(identity.clone(), *path) {
                 return Err(CompilerError::compiler_error(format!(
                     "Generic template identity {identity:?} is retained at both {previous_path:?} and {path:?}",
                 )));
@@ -287,17 +287,13 @@ impl ModuleMaterialisationPreparation {
                 &content_value_at_path,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
-            stable_nested_bodies.push((
-                path.clone(),
-                nested_template.source_file.clone(),
-                stable_nested_body,
-            ));
+            stable_nested_bodies.push((*path, nested_template.source_file, stable_nested_body));
         }
 
         let (mut string_table, requester_string_remap, string_table_base_len) = self
             .fork_materialisation_string_table(boundary_string_table)
             .map_err(|error| CompilerMessages::from_error_ref(error, boundary_string_table))?;
-        let source_file = template.source_file.clone();
+        let source_file = template.source_file;
         let materialised_body = stable_body
             .materialise(source_file, path_fork, &mut string_table)
             .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
@@ -374,7 +370,7 @@ impl ModuleMaterialisationPreparation {
             environment,
             GeneratedSidecarRequest {
                 identity,
-                function_path: template.function_path.clone(),
+                function_path: template.function_path,
                 requester_context,
                 requester_string_remap: &requester_string_remap,
                 requester_call_span,
@@ -500,7 +496,7 @@ where
 fn install_generated_request_evidence(
     identity: &GeneratedFunctionIdentity,
     requester_context: &ModuleMaterialisationPreparation,
-    requester_string_remap: &StringIdRemap,
+    _requester_string_remap: &StringIdRemap,
     environment: &mut AstModuleEnvironment,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerError> {
@@ -611,7 +607,7 @@ fn install_generated_request_evidence(
             let method_path = requester_mapping.method_path;
             requirements.push(TraitRequirementEvidence {
                 requirement_id: generated_requirement.id,
-                method_path: method_path.clone(),
+                method_path,
             });
 
             let (source_target, source_summary) = if let Some(source_contract) = requester_context
@@ -630,13 +626,13 @@ fn install_generated_request_evidence(
                     Some(GeneratedDeclarationIdentity::Public(origin)) => {
                         SourceFunctionTarget::Imported {
                             origin: origin.clone(),
-                            local_path: requester_mapping.method_path.clone(),
+                            local_path: requester_mapping.method_path,
                         }
                     }
                     Some(GeneratedDeclarationIdentity::ModulePrivate(identity)) => {
                         SourceFunctionTarget::ModulePrivate {
                             identity: identity.clone(),
-                            local_path: requester_mapping.method_path.clone(),
+                            local_path: requester_mapping.method_path,
                         }
                     }
                     None => {
@@ -657,12 +653,12 @@ fn install_generated_request_evidence(
             let target = match source_target {
                 SourceFunctionTarget::Imported { origin, .. } => SourceFunctionTarget::Imported {
                     origin,
-                    local_path: method_path.clone(),
+                    local_path: method_path,
                 },
                 SourceFunctionTarget::ModulePrivate { identity, .. } => {
                     SourceFunctionTarget::ModulePrivate {
                         identity,
-                        local_path: method_path.clone(),
+                        local_path: method_path,
                     }
                 }
                 SourceFunctionTarget::Local(_) | SourceFunctionTarget::Generated { .. } => {
@@ -672,7 +668,7 @@ fn install_generated_request_evidence(
                 }
             };
             imported_contracts.push((
-                method_path.clone(),
+                method_path,
                 AstImportedFunctionContract {
                     target,
                     summary: source_summary,

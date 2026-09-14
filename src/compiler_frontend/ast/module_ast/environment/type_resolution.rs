@@ -142,13 +142,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         );
                         let list_id = registered.list_id;
                         self.generic_parameter_lists_by_path
-                            .insert(header.tokens.src_path.clone(), registered);
+                            .insert(header.tokens.src_path, registered);
                         Some(list_id)
                     };
 
                     let struct_def = StructTypeDefinition {
                         id: NominalTypeId(0),
-                        path: header.tokens.src_path.clone(),
+                        path: header.tokens.src_path,
                         fields: Box::new([]),
                         generic_parameters: generic_param_list_id,
                         const_record: false,
@@ -156,7 +156,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     let (_, struct_type_id) =
                         self.type_environment.register_nominal_struct(struct_def);
                     Rc::make_mut(&mut self.nominal_type_ids_by_path)
-                        .insert(header.tokens.src_path.clone(), struct_type_id);
+.insert(header.tokens.src_path, struct_type_id);
 
                     self.replace_declaration(
                         declaration_id,
@@ -193,20 +193,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         );
                         let list_id = registered.list_id;
                         self.generic_parameter_lists_by_path
-                            .insert(header.tokens.src_path.clone(), registered);
+                            .insert(header.tokens.src_path, registered);
                         Some(list_id)
                     };
 
                     let choice_def = ChoiceTypeDefinition {
                         id: NominalTypeId(0),
-                        path: header.tokens.src_path.clone(),
+                        path: header.tokens.src_path,
                         variants: Box::new([]),
                         generic_parameters: generic_param_list_id,
                     };
                     let (_, choice_type_id) =
                         self.type_environment.register_nominal_choice(choice_def);
                     Rc::make_mut(&mut self.nominal_type_ids_by_path)
-                        .insert(header.tokens.src_path.clone(), choice_type_id);
+.insert(header.tokens.src_path, choice_type_id);
 
                     self.replace_declaration(
                         declaration_id,
@@ -358,7 +358,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let visibility = self.header_visibility(header, string_table)?;
 
-            let source_file_scope = header.source_file.clone();
+            let source_file_scope = header.source_file;
             let generic_parameter_scope = self.generic_parameter_scope_for_header(
                 header,
                 generic_parameters,
@@ -467,7 +467,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let source_file_scope = header.source_file.clone();
+            let source_file_scope = header.source_file;
             let visibility = self.header_visibility(header, string_table)?;
 
             let generic_parameter_scope = self.generic_parameter_scope_for_header(
@@ -612,7 +612,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ----------------------------
         // Ensure no runtime struct contains itself as a field type, directly or indirectly.
         // This check runs after all field types are resolved so the full graph is visible.
-        validate_no_recursive_runtime_structs(&self.resolved_struct_fields_by_path, string_table)
+        validate_no_recursive_runtime_structs(&self.resolved_struct_fields_by_path)
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
         Ok(())
@@ -837,7 +837,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.resolved_type_aliases_by_path,
         );
 
-        validate_nominal_generic_bound_evidence(type_id, span, &evidence_context)
+        let instance_name = self
+            .type_environment
+            .nominal_path(type_id)
+            .and_then(|path| self.path_fork.component(*path));
+        validate_nominal_generic_bound_evidence(
+            type_id,
+            instance_name,
+            span,
+            &evidence_context,
+        )
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
     }
 

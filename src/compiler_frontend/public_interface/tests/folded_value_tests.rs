@@ -608,7 +608,7 @@ fn constant_record_owns_choice_with_stable_variant_name() {
     ]);
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
-        path: choice_path.clone(),
+        path: choice_path,
         variants,
         generic_parameters: None,
     });
@@ -863,7 +863,7 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
         .expect("test path fits");
     let module_constants = vec![
         Declaration {
-            id: public_path.clone(),
+            id: public_path,
             value: Expression::int(1, None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
@@ -1032,7 +1032,7 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
 #[test]
 fn public_structural_string_preserves_resource_identity_and_piece_order() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut resources = ModuleResourceTable::new();
     let origin = StableResourceOriginId::module_owned(
         module_origin(),
@@ -1069,7 +1069,7 @@ fn public_structural_string_preserves_resource_identity_and_piece_order() {
 #[test]
 fn text_is_available_for_a_piece_list_that_carries_only_text() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let resources = ModuleResourceTable::new();
     let head = string_table.intern("docs/");
     let tail = string_table.intern("intro.html");

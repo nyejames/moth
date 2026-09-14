@@ -138,6 +138,10 @@ fn create_multiple_expressions_inner(
 // WHAT: parses one expression and evaluates the AST fragment into a typed expression node.
 // WHY: expression parsing is the choke point where token structure, place rules, and expected
 //      type information meet before later lowering stages.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "expression entry keeps the token stream, scope, mutable interner/expected-type/string/path state, value mode, and parenthesis policy as separate borrows"
+)]
 pub fn create_expression(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -168,6 +172,10 @@ pub fn create_expression(
 // WHAT: parses a nested expression while preserving ordinary expression semantics.
 // WHY: `catch` is procedural recovery syntax, so nested expression positions must reject it even
 // when they reuse a function/body context that would allow `catch` at the outer statement boundary.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "nested expression entry keeps the token stream, scope, mutable interner/expected-type/string/path state, value mode, and parenthesis policy as separate borrows"
+)]
 pub(crate) fn create_expression_without_boundary_catch(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

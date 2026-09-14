@@ -263,7 +263,7 @@ impl PathSyntaxTable {
     ) -> Result<PathSyntaxId, CompilerError> {
         let source_path = source.try_path(id)?;
         self.paths.push(PathSyntax {
-            root: source_path.root.clone(),
+            root: source_path.root,
             span: source_path.span,
         });
         Ok(PathSyntaxId::from_index(self.paths.len() - 1))

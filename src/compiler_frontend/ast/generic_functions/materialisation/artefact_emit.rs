@@ -382,7 +382,7 @@ impl GenericTemplateArtefact {
     ) -> Result<HeaderBindingEnvironment, CompilerError> {
         let mut environment = HeaderBindingEnvironment::default();
         environment.file_visibility_by_source.insert(
-            source_file.clone(),
+            *source_file,
             Arc::new(self.visibility.materialise(
                 external_package_registry,
                 path_fork,
@@ -407,7 +407,7 @@ impl GenericTemplateArtefact {
         }
         for callable in &self.callables {
             let local_path = callable.local_path;
-            let target = callable.target.materialise(local_path.clone());
+            let target = callable.target.materialise(local_path);
             let SourceFunctionTarget::Imported { origin, .. } = &target else {
                 // Generated and module-private callables materialise through the generated
                 // function lanes; only imported provider callables enter the header contract
@@ -448,7 +448,7 @@ impl GenericTemplateArtefact {
             let local_path = nominal.local_path;
             environment
                 .type_environment
-                .register_nominal_path_alias(local_path.clone(), type_id)?;
+                .register_nominal_path_alias(local_path, type_id)?;
             let generated_nominal_path = environment
                 .type_environment
                 .nominal_path(type_id)
@@ -476,15 +476,15 @@ impl GenericTemplateArtefact {
                 None
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
-            Rc::make_mut(&mut lookups.nominal_type_ids_by_path).insert(local_path.clone(), type_id);
-            Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path.clone());
+            Rc::make_mut(&mut lookups.nominal_type_ids_by_path).insert(local_path, type_id);
+            Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path);
             if let Some(kind) = generic_kind {
                 let declarations = Rc::make_mut(&mut lookups.generic_declarations_by_path);
                 declarations
-                    .entry(local_path.clone())
+                    .entry(local_path)
                     .or_insert_with(|| kind.clone());
                 declarations
-                    .entry(generated_nominal_path.clone())
+                    .entry(generated_nominal_path)
                     .or_insert(kind);
             }
             if !lookups
@@ -508,7 +508,7 @@ impl GenericTemplateArtefact {
                 append_materialised_declaration(
                     lookups,
                     materialised_nominal_declaration(
-                        local_path.clone(),
+                        local_path,
                         type_id,
                         &environment.type_environment,
                     )?,
@@ -554,7 +554,7 @@ impl GenericTemplateArtefact {
                     },
                 )?;
             let declaration = Declaration {
-                id: local_path.clone(),
+                id: local_path,
                 value: Expression::new(
                     ExpressionKind::NoValue,
                     Default::default(),
@@ -568,16 +568,16 @@ impl GenericTemplateArtefact {
             let lookups = Rc::make_mut(&mut environment.lookups);
             append_materialised_declaration(lookups, declaration, path_fork)?;
             Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
-                local_path.clone(),
+                local_path,
                 ResolvedFunctionSignature {
                     receiver: None,
                     signature,
                 },
             );
             Rc::make_mut(&mut lookups.declaration_semantics)
-                .register_materialised_function(local_path.clone());
+                .register_materialised_function(local_path);
             lookups.imported_functions_by_local_path.insert(
-                local_path.clone(),
+                local_path,
                 AstImportedFunctionContract {
                     target: callable.target.materialise(local_path),
                     summary: callable.summary.clone(),
@@ -620,7 +620,7 @@ impl GenericTemplateArtefact {
                 )?;
                 value.value_mode = ValueMode::ImmutableReference;
                 let declaration = Declaration {
-                    id: local_path.clone(),
+                    id: local_path,
                     value,
                     binding_span: None,
                     config_qualifier: None,
@@ -693,7 +693,7 @@ impl GenericTemplateArtefact {
                     Ok::<ReceiverKey, CompilerError>(method.receiver.materialise(string_table))
                 })?;
             let declaration = Declaration {
-                id: method_path.clone(),
+                id: method_path,
                 value: Expression::new(
                     ExpressionKind::NoValue,
                     Default::default(),
@@ -713,7 +713,7 @@ impl GenericTemplateArtefact {
                 append_materialised_declaration(lookups, declaration, path_fork)?;
             }
             Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
-                method_path.clone(),
+                method_path,
                 ResolvedFunctionSignature {
                     receiver: Some(receiver.clone()),
                     signature: signature.clone(),
@@ -727,9 +727,9 @@ impl GenericTemplateArtefact {
                 path_fork,
             )?;
             Rc::make_mut(&mut lookups.declaration_semantics)
-                .register_materialised_function(method_path.clone());
+                .register_materialised_function(method_path);
             lookups.imported_functions_by_local_path.insert(
-                method_path.clone(),
+                method_path,
                 AstImportedFunctionContract {
                     target: method.target.materialise(method_path),
                     summary: method.summary.clone().ok_or_else(|| {
@@ -1014,7 +1014,7 @@ impl GenericTemplateArtefact {
                     .into_generic_body()
             };
             let template = GenericFunctionTemplate {
-                function_path: nested_path.clone(),
+                function_path: nested_path,
                 source_file,
                 declaration_identity: Some(nested.declaration_identity.clone()),
                 generic_parameter_owner: nested.generic_parameter_owner.clone(),
@@ -1026,9 +1026,9 @@ impl GenericTemplateArtefact {
             let lookups = Rc::make_mut(&mut environment.lookups);
             lookups
                 .generic_function_templates_by_path
-                .insert(nested_path.clone(), template);
+                .insert(nested_path, template);
             Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
-                nested_path.clone(),
+                nested_path,
                 ResolvedFunctionSignature {
                     receiver: receiver.clone(),
                     signature: signature.clone(),
@@ -1051,7 +1051,7 @@ impl GenericTemplateArtefact {
                 append_materialised_declaration(
                     lookups,
                     Declaration {
-                        id: nested_path.clone(),
+                        id: nested_path,
                         value: Expression::new(
                             ExpressionKind::NoValue,
                             Default::default(),
@@ -1311,7 +1311,7 @@ impl StableFunctionSignature {
             value.value_mode = parameter.value_mode.clone();
             if parameter.reactive {
                 value.reactive_source = Some(ReactiveSource {
-                    path: parameter_path.clone(),
+                    path: parameter_path,
                     kind: ReactiveSourceKind::Parameter,
                 });
             }

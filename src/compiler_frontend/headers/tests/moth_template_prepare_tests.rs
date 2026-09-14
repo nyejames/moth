@@ -610,7 +610,7 @@ impl MothTemplateScopeFixture {
         &self,
         prepared_relative_paths: &[&str],
         source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
-        mut path_fork: &mut PathInternerFork,
+        path_fork: &mut PathInternerFork,
     ) -> Result<
         (
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
@@ -660,7 +660,7 @@ impl MothTemplateScopeFixture {
                         &source_path,
                         TokenizerEntryMode::SourceFile,
                         &mut string_table,
-                        &mut path_fork,
+                        path_fork,
                         &mut span_builder,
                     )
                     .map_err(|error| match error {
@@ -702,7 +702,7 @@ impl MothTemplateScopeFixture {
                 &context,
                 input,
                 &mut string_table,
-                &mut path_fork,
+                path_fork,
             );
             span_builders.push((source_id, span_builder));
             let mut output = result.map_err(|error| match error {
@@ -715,7 +715,7 @@ impl MothTemplateScopeFixture {
                 }
             })?;
             output
-                .freeze_path_syntax(&string_table, &mut path_fork)
+                .freeze_path_syntax(&string_table, path_fork)
                 .expect("fixture prepared output should satisfy the prepared-file invariant gate");
             prepared_files.push(output);
         }
@@ -730,7 +730,7 @@ impl MothTemplateScopeFixture {
                     .expect("prepared source retains its original span builder");
                 diagnostic.capture_preparation_span(source)
             },
-            &mut path_fork,
+            path_fork,
         )
         .map_err(|failure| match failure {
             HeaderPreparationFailure::Diagnosed(bag) => {
@@ -748,7 +748,7 @@ impl MothTemplateScopeFixture {
             Some(&self.project_path_resolver),
             &self.source_files,
             &mut string_table,
-            &mut path_fork,
+            path_fork,
         )
         .map_err(|failure| match failure {
             HeaderPreparationFailure::Diagnosed(bag) => {
@@ -936,7 +936,7 @@ fn folded_constant_value(
 
 #[test]
 fn moth_template_preparation_produces_private_content_constant() {
-    let (output, string_table, _span_builder) = prepare_directly("# Heading");
+    let (output, _string_table, _span_builder) = prepare_directly("# Heading");
     let header = &output.headers[0];
     let declaration = content_constant(&output);
     assert_eq!(

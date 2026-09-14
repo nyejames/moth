@@ -33,7 +33,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 fn reactive_declaration_metadata_is_bound_to_local() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 let count_path = super::symbol("count", &mut path_fork, &mut string_table);
-let source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
+let source = reactive_source(count_path, ReactiveSourceKind::Declaration);
 
 let start_function = function_node(
     start_name,
@@ -43,7 +43,7 @@ let start_function = function_node(
     },
     vec![node(
         NodeKind::VariableDeclaration(make_test_variable(
-            count_path.clone(),
+            count_path,
             Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
         )),
         None,
@@ -74,9 +74,9 @@ assert_eq!(source.type_id, builtin_type_ids::INT); }
 fn reactive_parameter_metadata_is_bound_to_function_param() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 let count_path = super::symbol("count", &mut path_fork, &mut string_table);
-let mut parameter = param_with_type_id(count_path.clone(), builtin_type_ids::INT, false, None);
+let mut parameter = param_with_type_id(count_path, builtin_type_ids::INT, false, None);
 parameter.value.reactive_source = Some(reactive_source(
-    count_path.clone(),
+    count_path,
     ReactiveSourceKind::Parameter,
 ));
 
@@ -114,7 +114,7 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() { let mut path_
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 let count_path = super::symbol("count", &mut path_fork, &mut string_table);
 let view_path = super::symbol("view", &mut path_fork, &mut string_table);
-let count_source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
+let count_source = reactive_source(count_path, ReactiveSourceKind::Declaration);
 let template_metadata = metadata_with_subscription(count_source.clone(), None);
 
 let start_function = function_node(
@@ -126,7 +126,7 @@ let start_function = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                count_path.clone(),
+                count_path,
                 Expression::int(1, None, ValueMode::MutableOwned)
                     .with_reactive_source(count_source),
             )),
@@ -134,7 +134,7 @@ let start_function = function_node(
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                view_path.clone(),
+                view_path,
                 Expression::string_slice(
                     string_table.intern("<p>count</p>"),
                     None,
@@ -184,12 +184,12 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() { let mut
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 let count_path = super::symbol("count", &mut path_fork, &mut string_table);
 let view_path = super::symbol("view", &mut path_fork, &mut string_table);
-let count_source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
+let count_source = reactive_source(count_path, ReactiveSourceKind::Declaration);
 let template_metadata = metadata_with_subscription(count_source.clone(), None);
 
 let reactive_view_reference = || {
     reference_expr_with_type_id(
-        view_path.clone(),
+        view_path,
         builtin_type_ids::STRING,
         None,
         ValueMode::ImmutableReference,
@@ -214,7 +214,7 @@ let start_function = function_node(
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                view_path.clone(),
+                view_path,
                 Expression::string_slice(
                     string_table.intern("<p>count</p>"),
                     None,

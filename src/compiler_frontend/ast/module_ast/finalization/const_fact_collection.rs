@@ -106,12 +106,12 @@ impl<'a> ConstFactCollector<'a> {
             // The base records the store id, not an expression. Body-local advisory resolution
             // still consumes `Expression` operands, so one is built at the reference that needs
             // it rather than for all of a module's constants up front.
-            module_base.insert(path.clone(), value_id);
+            module_base.insert(*path, value_id);
 
             self.facts.declarations.insert(
-                path.clone(),
+                *path,
                 AstConstDeclarationFact {
-                    declaration_path: path.clone(),
+                    declaration_path: *path,
                     scope: ConstBindingScope::ExplicitTopLevel,
                     source: ConstBindingSource::ExplicitHash,
                     value_kind: ConstFactValueKind::from_const_value_kind(metadata.value_kind),
@@ -194,9 +194,9 @@ impl<'a> ConstFactCollector<'a> {
         {
             Ok(fact) => {
                 if let AstConstFactValue::Expression(expression) = &fact.value {
-                    env.insert(declaration.id.clone(), expression.as_ref().clone());
+env.insert(declaration.id, expression.as_ref().clone());
                 }
-                self.facts.declarations.insert(declaration.id.clone(), fact);
+                self.facts.declarations.insert(declaration.id, fact);
             }
 
             Err(error) if error.is_expected_non_const_resolution() => {
@@ -374,9 +374,9 @@ impl<'a> ConstFactCollector<'a> {
         {
             Ok(fact) => {
                 if let AstConstFactValue::Expression(expression) = &fact.value {
-                    env.insert(declaration.id.clone(), expression.as_ref().clone());
+env.insert(declaration.id, expression.as_ref().clone());
                 }
-                self.facts.declarations.insert(declaration.id.clone(), fact);
+                self.facts.declarations.insert(declaration.id, fact);
             }
 
             Err(error) if error.is_expected_non_const_resolution() => {

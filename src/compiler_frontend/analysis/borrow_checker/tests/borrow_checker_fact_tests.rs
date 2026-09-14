@@ -61,14 +61,14 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                y.clone(),
+                y,
                 Expression::int(0, test_source_location(2), ValueMode::ImmutableOwned),
             )),
             test_source_location(2),
@@ -88,7 +88,7 @@ let start_fn = function_node(
                 vec![node(
                     NodeKind::Assignment {
                         target: assignment_target(
-                            x.clone(),
+                            x,
                             DataType::Int,
                             builtin_type_ids::INT,
                             test_source_location(4),
@@ -104,7 +104,7 @@ let start_fn = function_node(
                 Some(vec![node(
                     NodeKind::Assignment {
                         target: assignment_target(
-                            x.clone(),
+                            x,
                             DataType::Int,
                             builtin_type_ids::INT,
                             test_source_location(5),
@@ -168,7 +168,7 @@ for value_id in value_ids {
 } }
 
 #[test]
-fn assertion_failure_message_is_collected_as_a_borrow_value_root() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let message = HirExpression {
+fn assertion_failure_message_is_collected_as_a_borrow_value_root() { let _path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let message = HirExpression {
     id: HirValueId(41),
     kind: HirExpressionKind::Load(HirPlace::Local(LocalId(7))),
     ty: builtin_type_ids::STRING,
@@ -266,16 +266,16 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                data.clone(),
+                data,
                 Expression::int(7, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                first_ref.clone(),
+                first_ref,
                 Expression::reference_with_type_id(
-                    data.clone(),
+                    data,
                     DataType::Int,
                     builtin_type_ids::INT,
                     test_source_location(2),
@@ -358,7 +358,7 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                source.clone(),
+                source,
                 Expression::int(7, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -984,7 +984,7 @@ let external_call = Expression::handled_fallible_host_function_call_with_typed_a
         id: external_id,
         args: vec![CallArgument::positional(
             reference_expr_with_datatype(
-                input_name.clone(),
+                input_name,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
                 test_source_location(2),
@@ -1000,7 +1000,7 @@ let external_call = Expression::handled_fallible_host_function_call_with_typed_a
     &mut expression_types,
 );
 let unknown = function_node(
-    unknown_name.clone(),
+    unknown_name,
     FunctionSignature {
         parameters: vec![param_with_datatype(
             input_name,
@@ -1037,7 +1037,7 @@ let unknown = function_node(
     None,
 );
 let caller = function_node(
-    caller_name.clone(),
+    caller_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -1064,7 +1064,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                argument_name.clone(),
+                argument_name,
                 Expression::string_slice(
                     string_table.intern("hello"),
                     test_source_location(5),
@@ -1075,9 +1075,9 @@ let caller = function_node(
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                result_name.clone(),
+                result_name,
                 Expression::handled_fallible_function_call_with_typed_arguments(
-                    unknown_name.clone(),
+                    unknown_name,
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             argument_name,
@@ -1322,7 +1322,7 @@ fn collect_reachable_blocks(
     blocks
 }
 
-fn collect_statement_values(kind: HirStatementKind, out: &mut FxHashSet<HirValueId>) { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); match kind {
+fn collect_statement_values(kind: HirStatementKind, out: &mut FxHashSet<HirValueId>) { let _path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); match kind {
     HirStatementKind::Assign { value, .. } => collect_expression_values(&value, out),
     HirStatementKind::Call { args, .. } => {
         for arg in args {
@@ -1354,7 +1354,7 @@ fn collect_statement_values(kind: HirStatementKind, out: &mut FxHashSet<HirValue
     }
 } }
 
-fn collect_terminator_values(terminator: &HirTerminator, out: &mut FxHashSet<HirValueId>) { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); match terminator {
+fn collect_terminator_values(terminator: &HirTerminator, out: &mut FxHashSet<HirValueId>) { let _path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); match terminator {
     HirTerminator::If { condition, .. } => collect_expression_values(condition, out),
     HirTerminator::FallibleBranch { result, .. } => collect_expression_values(result, out),
     HirTerminator::Match { scrutinee, arms } => {
@@ -1388,7 +1388,7 @@ fn collect_terminator_values(terminator: &HirTerminator, out: &mut FxHashSet<Hir
     | HirTerminator::Continue { .. } => {}
 } }
 
-fn collect_expression_values(expression: &HirExpression, out: &mut FxHashSet<HirValueId>) { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); out.insert(expression.id);
+fn collect_expression_values(expression: &HirExpression, out: &mut FxHashSet<HirValueId>) { let _path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); out.insert(expression.id);
 
 match &expression.kind {
     HirExpressionKind::BinOp { left, right, .. } => {

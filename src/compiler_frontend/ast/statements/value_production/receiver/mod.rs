@@ -229,6 +229,10 @@ pub fn try_parse_value_block_at_receiver_with_target(
 /// It therefore carries the shared two-lane error type instead of collapsing an internal frozen
 /// The receiver parser preserves infrastructure failures from recursive expression/body parsing.
 type ReceiverResult<T> = Result<T, ExpressionParseError>;
+#[allow(
+    clippy::too_many_arguments,
+    reason = "receiver value parsing keeps the token stream, scope, mutable interner/string/path state, the value target, header position, and span as separate borrows"
+)]
 fn parse_bool_value_if_after_condition(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

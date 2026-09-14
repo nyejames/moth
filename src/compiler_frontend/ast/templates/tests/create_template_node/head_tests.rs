@@ -79,7 +79,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let scope = token_stream.src_path.clone();
+    let scope = token_stream.src_path;
     let stale_name = string_table.intern("stale_template");
     let stale_template = Template {
         tir_reference: TemplateTirReference {
@@ -101,7 +101,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
     let context = with_test_path_context(
         ScopeContext::new_for_tests(
             ContextKind::Template,
-            scope.clone(),
+            scope,
             Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
@@ -130,13 +130,13 @@ fn imported_const_template_context(
     path_fork: &PathInternerFork,
 ) -> ScopeContext {
     let mut visible_declarations = FxHashSet::default();
-    visible_declarations.insert(declaration.id.clone());
+    visible_declarations.insert(declaration.id);
 
     let mut visible_bindings = FxHashMap::default();
     visible_bindings.insert(
         visible_name,
         crate::compiler_frontend::headers::binding_environment::SourceDeclarationTarget::Local(
-            declaration.id.clone(),
+            declaration.id,
         ),
     );
 
@@ -148,7 +148,7 @@ fn imported_const_template_context(
         ..FileVisibility::default()
     };
 
-    constant_template_context(scope, &[declaration], &path_fork).with_file_visibility(Arc::new(file_visibility))
+    constant_template_context(scope, &[declaration], path_fork).with_file_visibility(Arc::new(file_visibility))
 }
 
 /// Builds a const-required option-capture template fixture directly as a
@@ -172,7 +172,7 @@ fn const_required_option_capture_template_with_direct_tir(
     let span = None;
 
     let capture_reference = Expression::reference_with_type_id(
-        capture_path.clone(),
+        capture_path,
         DataType::StringSlice,
         inner_type_id,
         span,
@@ -261,7 +261,7 @@ fn parse_template_error(
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     expect_template_diagnostic(
         Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -275,7 +275,7 @@ fn parse_runtime_template(source: &str) -> (Template, ScopeContext, StringTable)
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let template =
         Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -292,7 +292,7 @@ fn parse_control_flow_template_after_body_parse(
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -362,7 +362,7 @@ fn parse_control_flow_template_after_composition(
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -391,7 +391,7 @@ fn parse_control_flow_template_after_composition_error(
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -419,7 +419,7 @@ fn parse_runtime_template_without_validation(
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -521,7 +521,7 @@ fn const_required_construction(source: &str) -> PreparedTemplateConstruction {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("const-required template should parse")
@@ -533,7 +533,7 @@ fn parse_const_required_template(source: &str) -> (Template, ScopeContext, Strin
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -551,7 +551,7 @@ fn parse_const_required_template_error(
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     expect_template_diagnostic(
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)

@@ -64,7 +64,7 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
     &mut string_table,
     &mut span_builder, &mut path_fork);
     let context = new_constant_context_with_style_directives(
-        token_stream.src_path.clone(),
+        token_stream.src_path,
         &style_directives,
         &path_fork,
     );
@@ -107,7 +107,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[stale_template]", &mut string_table, &mut span_builder, &mut path_fork);
-    let scope = token_stream.src_path.clone();
+    let scope = token_stream.src_path;
     let stale_name = string_table.intern("stale_template");
     let stale_template = Template {
         tir_reference: TemplateTirReference {
@@ -129,7 +129,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let context = with_test_path_context(
         ScopeContext::new_for_tests(
             ContextKind::Template,
-            scope.clone(),
+            scope,
             Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
@@ -188,7 +188,7 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
         *id = crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE;
     }
 
-    let scope = token_stream.src_path.clone();
+    let scope = token_stream.src_path;
     let style_directives = frontend_test_style_directives();
     let context = with_test_path_context(
         runtime_template_context(&scope, &mut string_table, &mut path_fork),
@@ -292,14 +292,14 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     let style_directives = frontend_test_style_directives();
     let context = ScopeContext::new_for_tests(
         ContextKind::Constant,
-        token_stream.src_path.clone(),
+        token_stream.src_path,
         Rc::new(TopLevelDeclarationTable::new(vec![content_declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
     )
     .with_style_directives(&style_directives)
-    .with_source_file_scope(token_stream.src_path.clone())
+    .with_source_file_scope(token_stream.src_path)
     .with_file_value_resolution(Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
             resolved_references,
@@ -371,14 +371,14 @@ fn template_head_extensionless_path_retains_exact_span() {
     let style_directives = frontend_test_style_directives();
     let context = ScopeContext::new_for_tests(
         ContextKind::Constant,
-        token_stream.src_path.clone(),
+        token_stream.src_path,
         Rc::new(TopLevelDeclarationTable::new(vec![], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
     )
     .with_style_directives(&style_directives)
-    .with_source_file_scope(token_stream.src_path.clone())
+    .with_source_file_scope(token_stream.src_path)
     .with_file_value_resolution(Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
             resolved_references,
@@ -456,7 +456,7 @@ fn parsed_template_tir_reference_carries_empty_view_context() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source("[: body]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template source should parse");
@@ -531,7 +531,7 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(
         Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)

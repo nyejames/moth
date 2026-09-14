@@ -405,7 +405,7 @@ fn nominal_struct_registration_allocates_id() {
 
     let struct_def = StructTypeDefinition {
         id: NominalTypeId(0), // will be overwritten by register_nominal_struct
-        path: path.clone(),
+        path,
         fields: Box::new([]),
         generic_parameters: None,
         const_record: false,
@@ -438,7 +438,7 @@ fn nominal_choice_registration_allocates_id() {
 
     let choice_def = ChoiceTypeDefinition {
         id: NominalTypeId(0),
-        path: path.clone(),
+        path,
         variants: Box::new([]),
         generic_parameters: None,
     };
@@ -464,7 +464,7 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
         id: NominalTypeId(0),
         path: point_path,
         fields: vec![FieldDefinition {
-            name: value_name.clone(),
+            name: value_name,
             type_id: env.builtins().int,
             span: None,
         }]
@@ -530,7 +530,7 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
         id: NominalTypeId(0),
         path: box_path,
         fields: vec![FieldDefinition {
-            name: item_name.clone(),
+            name: item_name,
             type_id: box_parameter_type_id,
             span: None,
         }]
@@ -615,7 +615,7 @@ fn receiver_key_queries_use_type_id_semantics() {
     let point_path = test_path(&mut path_builder, &mut table, "Point");
     let (_, point_type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: point_path.clone(),
+        path: point_path,
         fields: Box::new([]),
         generic_parameters: None,
         const_record: false,
@@ -628,7 +628,7 @@ fn receiver_key_queries_use_type_id_semantics() {
     let const_config_path = test_path(&mut path_builder, &mut table, "Config");
     let (_, const_config_type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: const_config_path.clone(),
+        path: const_config_path,
         fields: Box::new([]),
         generic_parameters: None,
         const_record: true,
@@ -655,7 +655,7 @@ fn receiver_key_queries_use_type_id_semantics() {
     let box_path = test_path(&mut path_builder, &mut table, "Box");
     let (box_nominal_id, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: box_path.clone(),
+        path: box_path,
         fields: Box::new([]),
         generic_parameters: Some(box_parameter_list),
         const_record: false,

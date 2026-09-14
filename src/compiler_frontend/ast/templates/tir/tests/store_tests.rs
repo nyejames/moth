@@ -32,7 +32,7 @@ use crate::compiler_frontend::ast::templates::tir::slot_plan::convert_tir_tree_t
 use crate::compiler_frontend::ast::templates::tir::store::MalformedTirStore;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -96,7 +96,7 @@ fn store_starts_empty() {
 fn push_returns_sequential_ids_per_collection() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     // Nodes allocate sequential TemplateIrNodeIds from their own index space.
     let node_a = store.push_node(TemplateIrNode::new(
@@ -139,7 +139,7 @@ fn push_returns_sequential_ids_per_collection() {
 fn typed_retrieval_returns_stored_entry() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     // Template: round-trips the root node id through get_template.
     let node_id = store.push_node(TemplateIrNode::new(

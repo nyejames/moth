@@ -694,7 +694,7 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
         crate::compiler_frontend::compiler_messages::DiagnosticPayload::SourceSpanCapacity {
             start: 0,
             length: u32::MAX,
-            resource: SourceSpanCapacityResource::LogicalPathTable,
+            resource: SourceSpanCapacityResource::LogicalPath,
         }
     );
     assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
@@ -891,7 +891,7 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
     let mut compiled = semantic_result_with_local_path();
     compiled.module.metadata.materialisation_context = None;
     let string_base_len = string_table.len();
-    let mut module_string_fork = string_table.fork_source().fork_for_module();
+    let module_string_fork = string_table.fork_source().fork_for_module();
     let mut module_path_fork = path_interner.fork_source().fork_for_module();
     let mut module_string_table = module_string_fork.into_parts().0;
     let local_path = module_path_fork

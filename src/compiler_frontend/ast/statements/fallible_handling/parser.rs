@@ -169,6 +169,10 @@ impl HandledFallibleCall {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "fallible suffix parsing keeps the token stream, scope, mutable interner/string/path state, the parsed expression, and the value/catch policy flags as separate borrows"
+)]
 pub(crate) fn parse_fallible_handling_suffix_for_expression(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

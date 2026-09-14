@@ -160,7 +160,7 @@ pub(crate) fn parse_dependency_clause(
     let mut index = start_index + 1;
 
     let provider = ScannedDependencyProvider {
-        path: path_syntax_row.root.clone(),
+        path: path_syntax_row.root,
         path_syntax: *path_id,
         path_span,
     };

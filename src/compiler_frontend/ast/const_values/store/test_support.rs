@@ -142,7 +142,7 @@ impl ConstValueStore {
                 ),
             })?;
         let path = declaration.id;
-        if self.values_by_path.insert(path.clone(), value).is_some() {
+        if self.values_by_path.insert(path, value).is_some() {
             return Err(CompilerError::compiler_error(
                 "two finalized module constants share the defining path",
             ));

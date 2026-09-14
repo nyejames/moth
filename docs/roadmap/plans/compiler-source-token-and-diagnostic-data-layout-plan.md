@@ -9,10 +9,13 @@
 > **Status:**
 > Phase 1 is delivered on main. Phase 2 complete-path interning is accepted at the continuation
 > checkpoint `c17672bb5` on `diagnostic-data-layout-changes` (diagnostic correction `e7d9a7ab5`
-> plus validation-lane stabilization). Phase 3 token-store work is the next action, starting at
-> Slice 3A. Package work stays paused until accepted Phase 3. After Phase 3 this plan pauses:
-> Wiring V1, then native result slots and Core const evaluation run first, and Phase 4 resumes only
-> after a rebase and explicit reactivation. The roadmap retains those separate checkpoints.
+> plus validation-lane stabilization). The bounded pre-Phase-3 validation restoration is complete:
+> warning-denied native Clippy and the integration suite are green, and the only remaining red gate
+> is the explicitly accepted inherited generic-instantiation scaling exception recorded below.
+> Phase 3 token-store work remains queued and has not started; Slice 3A is the next action only after
+> this capsule is accepted. Package work stays paused until accepted Phase 3. After Phase 3 this plan
+> pauses: Wiring V1, then native result slots and Core const evaluation run first, and Phase 4 resumes
+> only after a rebase and explicit reactivation. The roadmap retains those separate checkpoints.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -69,13 +72,13 @@ from a compressed summary alone.
 ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
-CURRENT_SLICE:
 - Phase: the accepted Phase 2 continuation checkpoint is `c17672bb5` on
   `diagnostic-data-layout-changes`; it carries the diagnostic correction `e7d9a7ab5` (path/string
   attachment and remap ownership) and the merged-revision validation-lane stabilization.
   Phase 2 complete-path interning is accepted, including final review corrections in `aed38042f`
-  (generated path/string pairing and report-owner path retention). Next: Phase 3 Slice 3A token
-  array layout selection.
+  (generated path/string pairing and report-owner path retention). The bounded pre-Phase-3
+  validation restoration is complete; Phase 3 Slice 3A token array layout selection remains queued
+  and has not started.
 - Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
   diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
 - Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
@@ -83,18 +86,21 @@ CURRENT_SLICE:
   diagnosed lanes retain issuing path tables, imported nominals intern defining names, provider
   materialisation keeps the live string/path pair through nested requests, and final report metrics
   count only path tables reachable from diagnostic owners.
-- Validation evidence (dated, at the `c17672bb5` checkpoint, 2026-09-13): targeted capacity,
-  ownership, materialisation and invariant suites pass; the exact all-feature workspace check
-  compiles; the clean and warning-heavy retention probes complete successfully with 0 and 1
-  retained path tables respectively; feature-lane-check reports 0 findings; source audit reports
-  0 findings; docs check reports no errors or warnings; bench-ci covers 82 preflight cases and
-  frontend timing averages -3 ms; timers-erasure-check passes.
-  Approved red exceptions, explicitly not green: the warning-denied native Clippy lane still
-  reports the repository's inherited warning-denied findings; validate-common integration reports
-  baseline-equivalent failures inherited from main (31/1,959 at the recorded attempt); and
-  bench-scaling's generic-instantiation budget remains over target in both current (n^1.82) and
-  pre-cleanup baseline (n^1.77). Each exception is pre-existing and not caused by this branch; the
-  benchmark evidence records the separate workload probes.
+- Validation evidence (dated 2026-09-14, current workspace): `just ci-clippy-native` passes on
+  Rust 1.97.1 with warnings denied; the integration suite passes `1973/1973`, including
+  individually filtered passes for all 21 previously failing case IDs (the facade case expands to
+  two backend executions); the repaired evidence-projection unit test passes in isolation; and
+  `just validate` reaches the complexity gate with feature-lane-check (0 findings), source audit
+  (1,389 files, 0 findings), first-party dependency audit (21 files, 80 JavaScript sources, 0
+  findings), 5,134 workspace tests, integration (1973/1973), docs (no errors or warnings), and
+  bench-ci shared preflight (82/82) successful.
+- The only remaining red result is the inherited generic-instantiation scaling series. The dedicated
+  `just bench-scaling` rerun measured `frontend.generated.materialise` at 79.917, 254.149, 897.235
+  and 3419.368 ms for sizes 20, 40, 80 and 160, fitting `n^1.81` against the unchanged `n^1.70`
+  budget. The subsequent full-validation rerun measured 81.078, 253.503, 908.907 and 3422.923 ms,
+  fitting `n^1.80`; both constant and nominal series stayed within budget. The recorded pre-cleanup
+  current-main comparison remains `n^1.77`. This is an explicitly accepted independent baseline
+  exception for Phase 3; do not raise or loosen the budget, and Phase 3 must prove no worsening.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -108,9 +114,17 @@ history; the summaries below retain only contracts and evidence needed by later 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 remains complete. Phase 2 PathId cutover, generated identity pairing and report-owner
   retention metrics are accepted at `c17672bb5` with the diagnostic correction and
-  validation-lane stabilization; refreshed probe evidence is recorded. The final integration audit
-  approved the complete change with no required findings.
-- Next work is Phase 3 fixed tokens and source-owned retained syntax, starting with Slice 3A.
+  validation-lane stabilization; refreshed probe evidence is recorded. The bounded pre-Phase-3
+  restoration fixed the warning-denied native Clippy baseline, repaired the current integration
+  defects, and leaves no integration exceptions to carry forward.
+- The complete validation run passes every gate through bench-ci: feature coverage, source and
+  first-party audits, 5,134 workspace tests, all 1,973 integration executions, docs, and 82/82
+  benchmark preflight cases. It remains red only because the inherited generic-instantiation
+  series fits `n^1.81` in the dedicated baseline rerun (`n^1.80` in the later full-gate rerun)
+  against its unchanged `n^1.70` budget; the recorded current-main comparison was `n^1.77`.
+- Phase 3 fixed-token work is queued but not started. Slice 3A may begin only with this named
+  scaling exception consciously retained as its baseline; no Phase 3 code or benchmark work has
+  started in this restoration pass.
 - After Phase 3, this plan pauses. Wiring V1 runs, then native result slots and Core const
   evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
   reactivated (see the Phase 4 reactivation gate in the Phase 4 section).
@@ -379,8 +393,9 @@ before the first implementation phase that freezes reports.
 ### Current roadmap state
 
 Test Suite Hardening was delivered in `03168082d`. This plan is the sole active representation
-migration, accepted through Phase 2 at checkpoint `c17672bb5`; Phase 3 is the current work. The
-diagnostics plan remains paused until the full migration completes.
+migration, accepted through Phase 2 at checkpoint `c17672bb5`; the bounded pre-Phase-3 validation
+restoration is complete, and Phase 3 remains queued rather than started. The diagnostics plan remains
+paused until the full migration completes.
 
 ### Approved private discovery-finalization contract
 
@@ -677,7 +692,7 @@ tables are Git history.
 ### Standing correction contracts
 
 These remain in force for later phases. They do not reopen Phase 1; Phase 2 is accepted and
-Phase 3 is the next action.
+Phase 3 is the next queued action after the named pre-Phase-3 validation baseline is retained.
 
 #### Cold ownership
 

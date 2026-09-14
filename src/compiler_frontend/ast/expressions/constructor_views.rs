@@ -49,7 +49,7 @@ impl ConstructorField {
         declarations
             .iter()
             .map(|declaration| ConstructorField {
-                name: declaration.id.clone(),
+                name: declaration.id,
                 type_id: declaration.value.type_id,
                 access_mode: ConstructorFieldAccessMode::Shared,
                 default_value: extract_default_value(&declaration.value),
@@ -70,7 +70,7 @@ impl ConstructorField {
             .iter()
             .enumerate()
             .map(|(index, field_definition)| ConstructorField {
-                name: field_definition.name.clone(),
+                name: field_definition.name,
                 type_id: field_definition.type_id,
                 access_mode: ConstructorFieldAccessMode::Shared,
                 default_value: default_sources
@@ -87,7 +87,7 @@ impl ConstructorField {
         field_definitions
             .iter()
             .map(|field_definition| ConstructorField {
-                name: field_definition.name.clone(),
+                name: field_definition.name,
                 type_id: field_definition.type_id,
                 access_mode: ConstructorFieldAccessMode::Shared,
                 default_value: None,

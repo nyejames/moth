@@ -277,14 +277,14 @@ fn rebind_source_identity_updates_source_spans_without_changing_paths() {
     let tokens = vec![
         make_token(
             TokenKind::Symbol(table.intern("alpha")),
-            original_scope.clone(),
+            original_scope,
         ),
-        make_token(TokenKind::Path(helper_util), original_scope.clone()),
+        make_token(TokenKind::Path(helper_util), original_scope),
     ];
 
     let canonical = std::path::PathBuf::from("/canonical/logical.moth");
     let mut file_tokens = FileTokens::new_with_identity(
-        original_scope.clone(),
+        original_scope,
         SourceId::COMPILATION_ROOT,
         None,
         tokens,
@@ -293,7 +293,7 @@ fn rebind_source_identity_updates_source_spans_without_changing_paths() {
 
     let file_id = SourceId::from_index(7);
     file_tokens
-        .rebind_source_identity(logical_scope.clone(), file_id, Some(canonical.clone()))
+        .rebind_source_identity(logical_scope, file_id, Some(canonical.clone()))
         .expect("the sole mutable source table should accept final identity rebinding");
 
     // Top-level identity fields are rebound.

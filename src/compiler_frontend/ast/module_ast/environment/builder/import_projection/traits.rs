@@ -121,7 +121,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 let OriginDeclarationId::Trait(origin) = origin else {
                     return None;
                 };
-                Some((path.clone(), origin.clone()))
+                Some((*path, origin.clone()))
             })
             .collect::<Vec<_>>();
         visible_paths.sort_by_key(|(path, _)| {

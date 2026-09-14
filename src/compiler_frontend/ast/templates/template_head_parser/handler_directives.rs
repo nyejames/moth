@@ -35,6 +35,10 @@ struct ParsedHandlerDirectiveArgument {
     error_span: Option<SourceSpan>,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "handler directive application keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and handler spec as separate borrows"
+)]
 pub(super) fn apply_handler_style_directive(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

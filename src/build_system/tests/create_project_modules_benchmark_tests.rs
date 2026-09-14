@@ -1,5 +1,6 @@
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use super::*;
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]

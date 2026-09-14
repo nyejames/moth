@@ -202,6 +202,10 @@ fn evaluate_compound_assignment_value(
 /// WHY: this is the core mutation logic shared by `handle_mutation` (which
 ///      parses field access first) and `handle_mutation_target` (which receives
 ///      an already-built target node from the caller).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mutation building keeps the token stream, declaration, place target, span, scope, and mutable interner/string/path state as separate borrows"
+)]
 fn build_mutation_from_target(
     token_stream: &mut FileTokens,
     variable_declaration: &Declaration,
@@ -367,7 +371,7 @@ fn build_mutation_from_target(
     Ok(AstNode {
         kind: NodeKind::Assignment { target, value },
         span,
-        scope: context.scope.clone(),
+        scope: context.scope,
     })
 }
 
@@ -377,6 +381,10 @@ fn build_mutation_from_target(
 ///       have already resolved the left-hand side (e.g. after field-access parsing).
 /// WHY: keeps the public surface small; callers that already own the target
 ///      node do not need to re-parse it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mutation handling keeps the token stream, declaration, place target, span, scope, and mutable interner/string/path state as separate borrows"
+)]
 pub(crate) fn handle_mutation_target(
     token_stream: &mut FileTokens,
     variable_declaration: &Declaration,

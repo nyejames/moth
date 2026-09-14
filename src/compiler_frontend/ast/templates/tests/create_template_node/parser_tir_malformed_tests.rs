@@ -23,7 +23,7 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     expect_template_diagnostic(
         Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -48,7 +48,7 @@ fn parse_template_diagnostic_with_replaced_body_token(
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("template source should contain a body token");
     body_token.kind = TokenKind::Comma;
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(
         Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
@@ -65,7 +65,7 @@ fn parse_template_diagnostic_with_span_builder(
     let mut path_fork = PathInternerFork::empty();
     let mut token_stream =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(
         Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)

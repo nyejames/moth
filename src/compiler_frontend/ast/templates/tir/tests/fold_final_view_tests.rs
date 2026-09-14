@@ -54,7 +54,7 @@ use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -175,7 +175,7 @@ fn project_pattern_for_template(
 #[test]
 fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let before = string_table.intern("before");
     let after = string_table.intern("after");
@@ -256,7 +256,7 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
 #[test]
 fn const_template_projection_preserves_structured_slot_order() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let before = string_table.intern("before");
     let after = string_table.intern("after");
@@ -318,7 +318,7 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
 #[test]
 fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let location = None;
     let before = string_table.intern("before");
@@ -386,7 +386,7 @@ fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), T
 fn const_template_projection_preserves_selected_branch_and_fallback_slots()
 -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let location = None;
 
@@ -449,7 +449,7 @@ fn const_template_projection_preserves_selected_branch_and_fallback_slots()
 #[test]
 fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let location = None;
     let (template_id, occurrence) = {
@@ -496,7 +496,7 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
 #[test]
 fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let location = None;
     let named_key = SlotKey::Named(string_table.intern("named"));
@@ -564,7 +564,7 @@ fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), Tem
 #[test]
 fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let location = None;
     let (template_id, body_occurrence) = {
@@ -636,7 +636,7 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
 #[test]
 fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let location = None;
 
@@ -701,7 +701,7 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
 #[test]
 fn final_view_fold_branch_selects_body() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
@@ -736,7 +736,7 @@ fn final_view_fold_branch_selects_body() {
 #[test]
 fn final_view_fold_false_branch_no_else_is_no_output() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
@@ -771,7 +771,7 @@ fn final_view_fold_false_branch_no_else_is_no_output() {
 #[test]
 fn final_view_fold_false_branch_selects_fallback() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
@@ -844,7 +844,7 @@ fn build_range_loop_template(
 #[test]
 fn final_view_fold_loop_body_concatenates_iterations() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let dot_text = string_table.intern(".");
@@ -876,7 +876,7 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
         let mut builder = TemplateIrBuilder::new(store);
         let body = builder.push_dynamic_expression_node(
             Expression::reference_with_type_id(
-                item_path.clone(),
+                item_path,
                 DataType::Int,
                 builtin_type_ids::INT,
                 None,
@@ -950,7 +950,7 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
 #[test]
 fn final_view_fold_zero_iteration_loop_is_no_output() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let dot_text = string_table.intern(".");
@@ -971,7 +971,7 @@ fn final_view_fold_zero_iteration_loop_is_no_output() {
 #[test]
 fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         build_range_loop_template(
             string_table,
@@ -999,7 +999,7 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
 #[test]
 fn final_view_fold_loop_preserves_output_before_break_and_continue() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     // [break] stops the loop after the first iteration, preserving only the
     // output produced before the break signal.
@@ -1057,7 +1057,7 @@ fn final_view_fold_loop_preserves_output_before_break_and_continue() {
 #[test]
 fn final_view_fold_aggregate_wrapper_preserves_aggregate_output_position() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let aggregate_node = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
@@ -1091,7 +1091,7 @@ fn final_view_fold_aggregate_wrapper_preserves_aggregate_output_position() {
 #[test]
 fn final_view_fold_validates_present_aggregate_wrapper_without_body_output() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let empty_body = builder.push_sequence_node(vec![], None);
@@ -1121,7 +1121,7 @@ fn final_view_fold_validates_present_aggregate_wrapper_without_body_output() {
 #[test]
 fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
         let aggregate_node = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
@@ -1225,7 +1225,7 @@ fn build_formatted_markdown_fixture(string_table: &mut StringTable) -> FinalView
 #[test]
 fn final_view_fold_formatted_markdown_text() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_formatted_markdown_fixture(&mut string_table);
     let emission =
         fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Formatted)
@@ -1246,7 +1246,7 @@ fn final_view_fold_formatted_markdown_text() {
 #[test]
 fn final_view_runtime_slot_application_requires_handoff() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let handoff = OwnedRuntimeSlotApplicationHandoff {

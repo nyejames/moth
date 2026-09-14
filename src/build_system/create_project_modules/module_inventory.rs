@@ -1116,6 +1116,10 @@ fn order_discovered_modules_by_compile_waves(
 /// provider resolution serial because provider discovery mutates build-scoped registries;
 /// sufficiently large owned-source sets may overlap only candidate reads and ordinary `.moth`
 /// tokenization before that serial BFS, while semantic module compilation remains serial.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "serial module scheduling keeps seeds, discovery context, external-import and resource state, the check-only flag, and mutable string/path tables as separate borrows"
+)]
 fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
     context: ModuleDiscoveryContext<'_, '_>,

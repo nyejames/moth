@@ -123,6 +123,8 @@ pub(crate) struct PremergeDiagnosticBatch {
 /// The mixed form exists only for that double-failure tail: the diagnosed batch stays
 /// authoritative for user output while the finish failure stays observable on the outer
 /// infrastructure lane instead of being dropped or fabricated into a user diagnostic.
+/// The rare mixed `CompilerError` is boxed so the failure lane stays under the large-error
+/// threshold.
 /// WHY: premerge producers must return one lane that keeps authored-source rejection
 /// separate from malformed retained state; the final merge boundary owns the single
 /// conversion into `CompilerMessages`.
@@ -132,7 +134,7 @@ pub(crate) enum PremergeFailure {
     Infrastructure(CompilerError),
     Mixed {
         batch: PremergeDiagnosticBatch,
-        error: CompilerError,
+        error: Box<CompilerError>,
     },
 }
 
@@ -209,7 +211,7 @@ impl PremergeFailure {
             Self::Infrastructure(error) => CompilerMessages::from_error_ref(error, string_table),
             Self::Mixed { batch, error } => {
                 let mut messages = batch.into_messages();
-                messages.set_infrastructure_error(error);
+                messages.set_infrastructure_error(*error);
                 messages
             }
         }
@@ -443,7 +445,7 @@ impl PremergeDiagnosticBatch {
             render_source_contexts: Vec::new(),
             render_type_contexts,
             render_path_contexts: (!render_path_contexts.is_empty())
-                .then(|| Box::new(render_path_contexts)),
+                .then(|| render_path_contexts.into_boxed_slice()),
         }
     }
 }

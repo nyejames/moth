@@ -48,7 +48,7 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
@@ -57,7 +57,7 @@ let start_fn = function_node(
             NodeKind::VariableDeclaration(make_test_variable(
                 y,
                 Expression::reference_with_type_id(
-                    x.clone(),
+                    x,
                     DataType::Int,
                     builtin_type_ids::INT,
                     test_source_location(2),
@@ -136,7 +136,7 @@ let start_fn = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                counter.clone(),
+                counter,
                 Expression::int(0, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
@@ -144,7 +144,7 @@ let start_fn = function_node(
         node(
             NodeKind::Assignment {
                 target: assignment_target(
-                    counter.clone(),
+                    counter,
                     DataType::Int,
                     builtin_type_ids::INT,
                     test_source_location(2),

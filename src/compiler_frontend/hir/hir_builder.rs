@@ -711,7 +711,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<T, CompilerError> {
         let mut previous_bindings = Vec::new();
         for (path, local_id) in bindings {
-            let previous = self.locals_by_name.insert(path.clone(), local_id);
+            let previous = self.locals_by_name.insert(path, local_id);
             previous_bindings.push((path, previous));
         }
 

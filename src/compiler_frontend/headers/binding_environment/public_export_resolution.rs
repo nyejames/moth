@@ -132,7 +132,7 @@ fn try_resolve_package_public_export(
             match &entry.target {
                 PublicExportTarget::SourceDeclaration { path } => {
                     return Some(PublicExportLookupResult::ExportedSource {
-                        path: path.clone(),
+                        path: *path,
                         exported_entries: exports.clone(),
                     });
                 }
@@ -144,7 +144,7 @@ fn try_resolve_package_public_export(
                     return Some(PublicExportLookupResult::ExportedProviderSelection {
                         selection: *selection,
                         source_name: *source_name,
-                        diagnostic_path: diagnostic_path.clone(),
+                        diagnostic_path: *diagnostic_path,
                     });
                 }
                 PublicExportTarget::External(symbol_id) => {
@@ -262,7 +262,7 @@ fn try_resolve_module_root_public_export(
                                 return Some(PublicExportLookupResult::ExportedProviderSelection {
                                     selection: *selection,
                                     source_name: *source_name,
-                                    diagnostic_path: diagnostic_path.clone(),
+                                    diagnostic_path: *diagnostic_path,
                                 });
                             }
                             PublicExportTarget::External(symbol_id) => {
@@ -285,7 +285,7 @@ fn try_resolve_module_root_public_export(
                     )
                     {
                         return Some(PublicExportLookupResult::ExportedSource {
-                            path: path.clone(),
+                            path: *path,
                             exported_entries: exports.clone(),
                         });
                     }
@@ -322,7 +322,7 @@ fn try_resolve_module_root_public_export(
                     match &entry.target {
                         PublicExportTarget::SourceDeclaration { path } => {
                             return Some(PublicExportLookupResult::ExportedSource {
-                                path: path.clone(),
+                                path: *path,
                                 exported_entries: exports.clone(),
                             });
                         }
@@ -334,7 +334,7 @@ fn try_resolve_module_root_public_export(
                             return Some(PublicExportLookupResult::ExportedProviderSelection {
                                 selection: *selection,
                                 source_name: *source_name,
-                                diagnostic_path: diagnostic_path.clone(),
+                                diagnostic_path: *diagnostic_path,
                             });
                         }
                         PublicExportTarget::External(symbol_id) => {
@@ -397,7 +397,7 @@ pub(crate) fn check_source_package_boundary(
 
     let public_surface_name_id = input.string_table.intern(target_package);
     Err(CompilerDiagnostic::not_exported_by_public_surface(
-        input.requested_path.clone(),
+        *input.requested_path,
         public_surface_name_id,
         ImportPublicSurfaceType::SourcePackage,
         input.span,

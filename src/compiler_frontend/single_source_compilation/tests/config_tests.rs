@@ -19,7 +19,7 @@ use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValu
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
@@ -31,7 +31,7 @@ fn compile_project_source(
     globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet,
 ) -> Result<(CompiledConfigSource, StringTable), CompilerMessages> {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let outcome = compile_config_source(
@@ -57,7 +57,7 @@ fn compile_project_source(
 #[test]
 fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
 
@@ -108,7 +108,7 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
 #[test]
 fn projects_authored_anonymous_const_records() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
 
@@ -238,7 +238,7 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
 #[test]
 fn rejects_config_local_nominal_values_with_structured_diagnostics() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
 
@@ -280,7 +280,7 @@ fn rejects_authored_plain_bindings_inside_the_service() {
     // `entry_root = "src"` is a plain runtime binding: the service rejects the start-body
     // statement itself instead of handing an AST node to build-side validation.
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
 
@@ -324,7 +324,7 @@ fn rejects_nested_record_literal_inside_a_grouped_project_record() {
     // Nested `|...|` literals are rejected by the shared record grammar inside the service:
     // record-valued children must be declared first and referenced by name.
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
 
@@ -367,7 +367,7 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
     // Record fields resolve through the enclosing constant scope only: a sibling field name
     // is not a constant, so reusing it must be rejected instead of resolving implicitly.
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
 
@@ -409,7 +409,7 @@ fn rejects_config_qualifier_on_builder_section_fields() {
     // project qualifier is intentionally limited to grouped project fields. The service rejects
     // this before any folded section value reaches build-side validation.
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
 
@@ -1014,7 +1014,7 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
     for (suffix, expected_reason, expected_text) in cases {
         let source = format!("padding #= \"{long_value}\"\n{suffix}");
         let mut strings = StringTable::new();
-        let mut path_fork = PathInternerFork::empty();
+        let _path_fork = PathInternerFork::empty();
         let surface = BuilderSurface::with_mandatory_core();
         let directives = StyleDirectiveRegistry::built_ins();
         let authored_path = Path::new("project/config.moth");

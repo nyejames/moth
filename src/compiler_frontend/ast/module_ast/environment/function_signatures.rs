@@ -344,7 +344,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .push(entry.clone());
             if catalog
                 .by_function_path
-                .insert(function_path.clone(), entry)
+                .insert(*function_path, entry)
                 .is_some()
             {
                 return Err(self.error_messages(

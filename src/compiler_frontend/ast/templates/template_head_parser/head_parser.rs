@@ -761,6 +761,10 @@ pub fn parse_template_head(
 /// Dispatches a `$directive` token using the already-resolved registry spec.
 /// Returns `true` if the caller should defer separator-token advancement because
 /// the directive parser consumed trailing tokens directly.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "directive dispatch keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and registry spec as separate borrows"
+)]
 fn parse_style_directive_from_spec(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

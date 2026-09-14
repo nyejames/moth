@@ -60,6 +60,10 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
     Ok(false)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "core directive parsing keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and kind as separate borrows"
+)]
 pub(super) fn parse_core_style_directive(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

@@ -51,7 +51,7 @@ fn validate_dependency_boundary_against_base(
     base_kind: &CompileTimePathBase,
     canonical_base: &Path,
     dependency_path: PathId,
-    path_fork: &PathInternerFork,
+    _path_fork: &PathInternerFork,
 ) -> Result<(), DependencyPathResolutionError> {
     if !target_path.starts_with(canonical_base) {
         let reason = match base_kind {
@@ -61,7 +61,7 @@ fn validate_dependency_boundary_against_base(
             _ => InvalidImportPathReason::EscapesProjectRoot,
         };
         let diagnostic =
-            CompilerDiagnostic::invalid_import_path(dependency_path.clone(), reason, None);
+            CompilerDiagnostic::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
     Ok(())
@@ -128,7 +128,7 @@ pub(crate) fn validate_dependency_case_sensitivity(
             expected: string_table.intern(&expected),
         };
         let diagnostic =
-            CompilerDiagnostic::invalid_import_path(dependency_path.clone(), reason, None);
+            CompilerDiagnostic::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
 

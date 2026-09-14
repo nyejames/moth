@@ -50,7 +50,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // component is a malformed provider identity, not a selected source name.
         if !remaining.is_empty() {
             return Err(CompilerDiagnostic::direct_symbol_path_import(
-                dependency.dependency.path.clone(),
+                dependency.dependency.path,
                 Some(dependency.dependency.span),
             )
             .into());
@@ -120,7 +120,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // direct symbol-path dependency, which is invalid for bare dependencies.
         if !remaining.is_empty() {
             return Err(CompilerDiagnostic::direct_symbol_path_import(
-                dependency.dependency.path.clone(),
+                dependency.dependency.path,
                 Some(dependency.dependency.span),
             )
             .into());

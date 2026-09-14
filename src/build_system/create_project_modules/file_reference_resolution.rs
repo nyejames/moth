@@ -89,6 +89,10 @@ impl<'a> FileReferenceResolver<'a> {
     /// User-authored resolution failures become retained diagnostic outcomes. Missing targets
     /// also register a build-only watch interest. A disagreement between the source index and a
     /// canonical target is an infrastructure invariant failure and returns `CompilerError`.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "resolution keeps consumer module identity, path syntax, the reference, source database, and mutable string/path/discovered-source state as separate borrows"
+    )]
     pub(crate) fn resolve(
         &mut self,
         consumer_module_id: ModuleId,
@@ -238,7 +242,7 @@ impl<'a> FileReferenceResolver<'a> {
                         .and_then(|extension| extension.to_str())
                         .unwrap_or_default();
                     let mut diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
-                        authored_path.clone(),
+                        authored_path,
                         string_table.intern(extension),
                         Some(reference.span),
                     );
@@ -392,7 +396,7 @@ impl<'a> FileReferenceResolver<'a> {
             class: reference.class,
             outcome: {
                 let mut diagnostic = CompilerDiagnostic::invalid_compile_time_path(
-                    authored_path.clone(),
+                    authored_path,
                     reason,
                     Some(reference.span),
                 );
@@ -951,7 +955,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 return Ok(SingleFileResolvedReference {
                     outcome: {
                         let mut diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
-                            authored_path.clone(),
+                            authored_path,
                             string_table.intern(extension),
                             Some(reference.span),
                         );

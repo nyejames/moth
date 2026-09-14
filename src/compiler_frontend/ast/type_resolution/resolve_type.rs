@@ -490,6 +490,10 @@ pub(crate) fn resolve_type(
 
         DataType::TypeParameter { .. } => Ok(data_type.to_owned()),
         DataType::GenericInstance { base, arguments } => {
+            let instance_name = match base {
+                GenericBaseType::Named(name) => Some(*name),
+                _ => None,
+            };
             let resolved_base =
                 resolve_generic_base_type(base, arguments, span, context, string_table)?;
             let mut resolved_arguments = Vec::with_capacity(arguments.len());
@@ -519,6 +523,7 @@ pub(crate) fn resolve_type(
                     base_path,
                     kind,
                     &resolved_arguments,
+                    instance_name,
                     span,
                     context,
                 )?

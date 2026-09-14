@@ -5,7 +5,7 @@ use crate::compiler_frontend::ast::ast_nodes::IfBranchMetadata;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueLexicalScope;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -21,7 +21,7 @@ fn terminating_value_body_lift_uses_explicit_branch_scope() {
             body: vec![AstNode {
                 kind: NodeKind::Return(vec![Expression::int(1, span, ValueMode::ImmutableOwned)]),
                 span,
-                scope: nested_scope.clone(),
+                scope: nested_scope,
             }],
         },
         span,
@@ -31,7 +31,7 @@ fn terminating_value_body_lift_uses_explicit_branch_scope() {
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::LexicalScope(ValueLexicalScope {
                 body: vec![nested_terminal],
-                scope: branch_scope.clone(),
+                scope: branch_scope,
                 result_type_ids: vec![builtin_type_ids::INT],
             })),
         },
@@ -81,8 +81,8 @@ fn inactive_static_branch_drops_nested_provenance() {
             Some(Vec::new()),
             IfBranchMetadata::new(
                 IfGenericRequestRanges::default(),
-                nested_scope.clone(),
-                Some(nested_scope.clone()),
+                nested_scope,
+                Some(nested_scope),
             ),
         ),
         span,
@@ -95,8 +95,8 @@ fn inactive_static_branch_drops_nested_provenance() {
             Some(Vec::new()),
             IfBranchMetadata::new(
                 IfGenericRequestRanges::default(),
-                then_scope.clone(),
-                Some(else_scope.clone()),
+                then_scope,
+                Some(else_scope),
             ),
         ),
         span,

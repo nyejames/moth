@@ -191,7 +191,7 @@ impl<'a> ConstValueResolver<'a> {
         let value_kind = self.fact_value_kind(&resolved)?;
 
         Ok(AstConstDeclarationFact {
-            declaration_path: declaration.id.clone(),
+            declaration_path: declaration.id,
             scope: ConstBindingScope::PrivateTopLevel,
             source: ConstBindingSource::InferredImmutable,
             value_kind,
@@ -216,7 +216,7 @@ impl<'a> ConstValueResolver<'a> {
         let value_kind = self.fact_value_kind(&resolved)?;
 
         Ok(AstConstDeclarationFact {
-            declaration_path: declaration.id.clone(),
+            declaration_path: declaration.id,
             scope: ConstBindingScope::BodyLocal,
             source: ConstBindingSource::InferredImmutable,
             value_kind,

@@ -79,7 +79,7 @@ fn validate_owned_handoff_with_orphan_type_id(node: OwnedRuntimeTemplateNode) {
 #[test]
 fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision() {
     let mut strings = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let selectors = vec![
         TemplateBranchSelector::Bool(orphan_bool_expression()),
         TemplateBranchSelector::OptionPresentCapture {
@@ -374,7 +374,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
 #[test]
 fn static_true_assertion_message_reaches_type_validation_before_elision() {
     let mut strings = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let structural = Expression::string_slice(
         strings.intern("structural"),
         None,
@@ -465,7 +465,7 @@ fn template_with_dynamic_overlay(
 #[test]
 fn validation_checks_effective_dynamic_expression_overlay() {
     let mut strings = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let structural = Expression::string_slice(
         strings.intern("structural"),
         None,
@@ -491,7 +491,7 @@ fn validation_checks_effective_dynamic_expression_overlay() {
 #[test]
 fn validation_rejects_non_finalized_template_reference() {
     let mut strings = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let structural = Expression::string_slice(
         strings.intern("structural"),
         None,

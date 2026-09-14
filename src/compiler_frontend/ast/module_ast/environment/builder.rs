@@ -128,7 +128,7 @@ fn collect_reexport_target_paths(
             };
 
             if module_symbols.file_module_membership.get(target_source) == Some(module_root) {
-                paths.insert(path.clone());
+                paths.insert(*path);
             }
         }
     }
@@ -672,7 +672,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 trait_environment: &trait_environment,
                 type_environment: &self.type_environment,
                 string_table,
-                path_fork: &*self.path_fork,
                 reexport_target_paths: &reexport_target_paths,
             })
             .map_err(|error| self.error_messages(error, string_table))?;
@@ -860,7 +859,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         header: &Header,
         _string_table: &mut StringTable,
     ) -> ScopeContext {
-        let source_file_scope = header.source_file.clone();
+        let source_file_scope = header.source_file;
 
         let mut context = ScopeContext::new(
             ContextKind::ConstantHeader,
@@ -941,7 +940,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let struct_def = StructTypeDefinition {
                 id: NominalTypeId(0),
-                path: path.clone(),
+                path: *path,
                 fields: field_definitions,
                 generic_parameters: None,
                 const_record: false,
@@ -953,7 +952,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     struct_type_id,
                 )
                 .map_err(|error| self.error_messages(error, string_table))?;
-            Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(path.clone(), struct_type_id);
+            Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(*path, struct_type_id);
 
             // Build a synthetic placeholder declaration so the builtin struct is reachable
             // through the declaration table during body parsing.
@@ -972,12 +971,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             self.replace_declaration(
                 declaration_id,
                 Declaration {
-                    id: path.clone(),
+                    id: *path,
                     value: Expression::new(
                         ExpressionKind::NoValue,
                         None,
                         struct_type_id,
-                        DataType::runtime_struct(path.clone(), struct_type_id),
+                        DataType::runtime_struct(*path, struct_type_id),
                         ValueMode::ImmutableReference,
                     ),
                     binding_span: None,
@@ -1144,7 +1143,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             definitions.push(FieldDefinition {
-                name: field.id.clone(),
+                name: field.id,
                 type_id,
                 span: field.value.span,
             });

@@ -128,6 +128,10 @@ fn type_id_is_external(type_id: TypeId, type_interner: &AstTypeInterner<'_>) -> 
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "postfix chain parsing keeps the token stream, receiver expression and span, chain access, scope, and mutable interner/string/path state as separate borrows"
+)]
 pub(crate) fn parse_postfix_chain_expression(
     token_stream: &mut FileTokens,
     receiver_expression: Expression,

@@ -12,7 +12,9 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::FrozenIdentityContext;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
+#[cfg(test)]
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
@@ -53,6 +55,7 @@ pub(crate) struct DiagnosticPrimaryPosition<'a> {
 /// path through a legacy component-vector value.
 #[derive(Clone, Copy)]
 pub(crate) enum DiagnosticPathContext<'a> {
+    #[cfg(test)]
     Fork(&'a PathInternerFork),
     Table(&'a PathTable),
 }
@@ -65,6 +68,7 @@ impl<'a> DiagnosticPathContext<'a> {
         scratch: &mut Vec<StringId>,
     ) -> String {
         let components = match self {
+            #[cfg(test)]
             Self::Fork(fork) => fork.resolve_components(path, scratch),
             Self::Table(table) => table.resolve_components(path, scratch),
         };
@@ -148,14 +152,15 @@ impl<'a> DiagnosticRenderContext<'a> {
         self
     }
 
-    pub(crate) fn with_path_fork(
-        mut self,
-        path_fork: &'a PathInternerFork,
-    ) -> Self {
+
+
+    #[cfg(test)]
+    pub(crate) fn with_path_fork(mut self, path_fork: &'a PathInternerFork) -> Self {
         self.path_context = Some(DiagnosticPathContext::Fork(path_fork));
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn with_path_table(mut self, path_table: &'a PathTable) -> Self {
         self.path_context = Some(DiagnosticPathContext::Table(path_table));
         self
@@ -190,8 +195,10 @@ impl<'a> DiagnosticRenderContext<'a> {
 
     pub(crate) fn path_table(self) -> Option<&'a PathTable> {
         match self.path_context {
+            #[cfg(test)]
+            Some(DiagnosticPathContext::Fork(_)) => None,
             Some(DiagnosticPathContext::Table(table)) => Some(table),
-            Some(DiagnosticPathContext::Fork(_)) | None => None,
+            None => None,
         }
     }
 

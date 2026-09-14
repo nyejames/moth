@@ -564,6 +564,8 @@ impl FileTokens {
         }
     }
 
+
+    #[cfg(test)]
     /// Remap a token stream while it still owns its mutable path table.
     pub(crate) fn remap_preparing_string_ids(
         &mut self,
@@ -576,6 +578,7 @@ impl FileTokens {
         Ok(())
     }
 
+    #[cfg(test)]
     /// Remap a preparing stream's file identity and its mutable path table.
     pub(crate) fn remap_preparing_path_ids(
         &mut self,

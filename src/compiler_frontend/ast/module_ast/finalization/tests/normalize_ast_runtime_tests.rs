@@ -302,7 +302,7 @@ fn registered_runtime_template(
 #[test]
 fn ordinary_runtime_template_handoff_uses_module_tir_store() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let text = string_table.intern("hello ");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -333,7 +333,7 @@ fn ordinary_runtime_template_handoff_uses_module_tir_store() {
 #[test]
 fn folded_template_preserves_selected_effective_dynamic_provenance() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let unselected_text = string_table.intern("unselected");
     let selected_structural_text = string_table.intern("selected structural");
     let selected_effective_text = string_table.intern("selected effective");
@@ -482,7 +482,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
 #[test]
 fn runtime_template_expression_normalization_replaces_template_with_owned_handoff() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let text = string_table.intern("hello ");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -628,7 +628,7 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
 #[test]
 fn nested_runtime_template_normalizes_through_final_view() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let nested_text = string_table.intern("nested runtime text");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -750,7 +750,7 @@ fn find_runtime_handoff_in_node(node: &OwnedRuntimeTemplateNode, found: &mut boo
 #[test]
 fn nested_const_template_folds_through_final_view() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let child_text_str = "child folded text";
     let child_text = string_table.intern(child_text_str);
     let child_byte_len = child_text_str.len();
@@ -836,7 +836,7 @@ fn reactive_metadata_derived_from_nested_final_view() {
 
         let subscription = ReactiveSubscription {
             source: ReactiveSource {
-                path: reactive_path.clone(),
+                path: reactive_path,
                 kind: ReactiveSourceKind::Declaration,
             },
             type_id: builtin_type_ids::STRING,
@@ -845,7 +845,7 @@ fn reactive_metadata_derived_from_nested_final_view() {
 
         let dynamic_node = builder.push_dynamic_expression_node(
             Expression::reference_with_type_id(
-                reactive_path.clone(),
+                reactive_path,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
                 None,
@@ -952,7 +952,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         };
 
     let mut parameter = Declaration {
-        id: parameter_path.clone(),
+        id: parameter_path,
         value: Expression::no_value_with_type_id(
             None,
             DataType::Int,
@@ -963,12 +963,12 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         config_qualifier: None,
     };
     parameter.value.reactive_source = Some(ReactiveSource {
-        path: parameter_path.clone(),
+        path: parameter_path,
         kind: ReactiveSourceKind::Parameter,
     });
 
     let parameter_reference = Expression::reference_with_type_id(
-        parameter_path.clone(),
+        parameter_path,
         DataType::Int,
         builtin_type_ids::INT,
         None,
@@ -976,7 +976,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         ConstRecordState::RuntimeValue,
     )
     .with_reactive_source(ReactiveSource {
-        path: parameter_path.clone(),
+        path: parameter_path,
         kind: ReactiveSourceKind::Parameter,
     });
     let function_template = template_expression(
@@ -992,7 +992,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         }),
     );
     let function = fixture_function_node(
-        function_path.clone(),
+        function_path,
         FunctionSignature {
             parameters: vec![parameter],
             returns: vec![ReturnSlot {
@@ -1007,7 +1007,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
     );
 
     let active_argument = Expression::reference_with_type_id(
-        active_source_path.clone(),
+        active_source_path,
         DataType::Int,
         builtin_type_ids::INT,
         None,
@@ -1015,7 +1015,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         ConstRecordState::RuntimeValue,
     )
     .with_reactive_source(ReactiveSource {
-        path: active_source_path.clone(),
+        path: active_source_path,
         kind: ReactiveSourceKind::Declaration,
     });
     let mut type_environment = TypeEnvironment::new();
@@ -1034,7 +1034,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         template_expression(&mut template_ir_store.borrow_mut(), active_call, None);
 
     let inactive_reference = Expression::reference_with_type_id(
-        inactive_source_path.clone(),
+        inactive_source_path,
         DataType::Int,
         builtin_type_ids::INT,
         None,
@@ -1046,7 +1046,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         inactive_reference,
         Some(ReactiveSubscription {
             source: ReactiveSource {
-                path: inactive_source_path.clone(),
+                path: inactive_source_path,
                 kind: ReactiveSourceKind::Declaration,
             },
             type_id: builtin_type_ids::INT,
@@ -1129,7 +1129,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
 #[test]
 fn helper_artifact_rejected_after_final_view_traversal() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let text = string_table.intern("slot insert content");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -1207,7 +1207,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
     // `synchronize_normalized_public_defaults`, not through a direct
     // `normalize_expression_templates` call labelled generic.
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("generic default text");
@@ -1245,7 +1245,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
 #[test]
 fn static_true_assertion_discards_normalized_runtime_template_message_after_validation() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let template = registered_runtime_template(
         string_table.intern("inactive: "),

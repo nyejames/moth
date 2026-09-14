@@ -163,7 +163,7 @@ fn reactive_param_declaration(
 ) -> Declaration {
     let mut declaration = param_declaration(name, type_id, string_table, path_fork);
     declaration.value.reactive_source = Some(ReactiveSource {
-        path: declaration.id.clone(),
+        path: declaration.id,
         kind: ReactiveSourceKind::Parameter,
     });
     declaration
@@ -809,7 +809,7 @@ fn generic_parameter_with_source_trait_bound_projects_canonical_source_identity(
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(
         source_trait_id,
-        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(trait_path.clone()),
+        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(trait_path),
     );
 
     let mut trait_origins = FxHashMap::default();
@@ -930,7 +930,7 @@ fn multiple_bounds_preserve_declaration_order() {
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(
         source_trait_id,
-        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(source_trait_path.clone()),
+        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(source_trait_path),
     );
     trait_source_facts.insert(
         displayable_trait_id,
@@ -1063,11 +1063,11 @@ fn duplicate_canonical_generic_bound_identity_is_compiler_error() {
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(
         first_trait_id,
-        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(trait_path.clone()),
+        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(trait_path),
     );
     trait_source_facts.insert(
         second_trait_id,
-        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(trait_path.clone()),
+        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(trait_path),
     );
 
     let mut trait_origins = FxHashMap::default();
@@ -1118,7 +1118,7 @@ fn source_trait_bound_resolves_to_provider_module_origin_not_active_origin() {
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(
         source_trait_id,
-        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(trait_path.clone()),
+        crate::compiler_frontend::ast::ResolvedTraitSourceFact::Source(trait_path),
     );
 
     // The trait is defined by an imported provider module whose origin differs from the
@@ -1698,7 +1698,7 @@ fn project_struct_with_receiver_method(
 ) -> crate::compiler_frontend::public_interface::PublicReceiverMethodSemantics {
     let receiver_path = path("Counter", string_table, path_fork);
     let (_, struct_type_id) =
-        register_struct_at_path(env, receiver_path.clone(), empty_fields(), None);
+        register_struct_at_path(env, receiver_path, empty_fields(), None);
     let root = struct_root("Counter", struct_type_id, Vec::new(), string_table, path_fork);
     let binding = export_binding(
         "Counter",
@@ -1844,16 +1844,16 @@ fn receiver_methods_join_by_exact_origin_not_rendered_name() {
     let shapes_path = module_path("shapes", "Counter", &mut string_table, &mut path_fork);
     let imports_path = module_path("imports", "Counter", &mut string_table, &mut path_fork);
     let (_shapes_nominal_id, _) =
-        register_struct_at_path(&mut env, shapes_path.clone(), empty_fields(), None);
+        register_struct_at_path(&mut env, shapes_path, empty_fields(), None);
     let (_imports_nominal_id, _) =
-        register_struct_at_path(&mut env, imports_path.clone(), empty_fields(), None);
+        register_struct_at_path(&mut env, imports_path, empty_fields(), None);
 
     let shapes_origin = struct_origin("Counter");
     let imports_origin = imported_struct_origin("Counter");
 
     let nominal_map = FxHashMap::from_iter([
-        (shapes_path.clone(), shapes_origin.clone()),
-        (imports_path.clone(), imports_origin.clone()),
+        (shapes_path, shapes_origin.clone()),
+        (imports_path, imports_origin.clone()),
     ]);
 
     // A "tick" method on each receiver. Rendered names collide ("Counter::tick"), so only the
@@ -1869,8 +1869,8 @@ fn receiver_methods_join_by_exact_origin_not_rendered_name() {
             };
             receiver_entry(method_path, ReceiverKey::Struct(receiver_path), signature)
         };
-    let entry_shapes = make_entry(tick_shapes_path, shapes_path.clone(), &mut string_table);
-    let entry_imports = make_entry(tick_imports_path, imports_path.clone(), &mut string_table);
+    let entry_shapes = make_entry(tick_shapes_path, shapes_path, &mut string_table);
+    let entry_imports = make_entry(tick_imports_path, imports_path, &mut string_table);
 
     // A free-function binding + root provides the module origin for the seed builder. The
     // test exercises receiver-method seeds, not free-function seeds.
@@ -1952,8 +1952,8 @@ fn duplicate_receiver_method_entry_is_compiler_error() {
 
     // Two entries with the same exact stable receiver origin and method name.
     let entry_a = receiver_entry(
-        method_path.clone(),
-        ReceiverKey::Struct(receiver_path.clone()),
+        method_path,
+        ReceiverKey::Struct(receiver_path),
         signature.clone(),
     );
     let entry_b = receiver_entry(method_path, ReceiverKey::Struct(receiver_path), signature);
@@ -1994,8 +1994,8 @@ fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
     let alpha_path = path("Alpha", &mut string_table, &mut path_fork);
     let beta_path = path("Beta", &mut string_table, &mut path_fork);
     let (_alpha_id, _) =
-        register_struct_at_path(&mut env, alpha_path.clone(), empty_fields(), None);
-    let (_beta_id, _) = register_struct_at_path(&mut env, beta_path.clone(), empty_fields(), None);
+        register_struct_at_path(&mut env, alpha_path, empty_fields(), None);
+    let (_beta_id, _) = register_struct_at_path(&mut env, beta_path, empty_fields(), None);
 
     let shared_method_path = path("tick", &mut string_table, &mut path_fork);
     let param = param_declaration("delta", int_id, &mut string_table, &mut path_fork);
@@ -2004,13 +2004,13 @@ fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
         returns: vec![return_slot(int_id, ReturnChannel::Success)],
     };
     let entry_alpha = receiver_entry(
-        shared_method_path.clone(),
-        ReceiverKey::Struct(alpha_path.clone()),
+        shared_method_path,
+        ReceiverKey::Struct(alpha_path),
         signature.clone(),
     );
     let entry_beta = receiver_entry(
         shared_method_path,
-        ReceiverKey::Struct(beta_path.clone()),
+        ReceiverKey::Struct(beta_path),
         signature,
     );
 

@@ -326,7 +326,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             .iter()
             .filter(|seed| !seed.generic_template)
             .map(|seed| FunctionOriginSeed {
-                path: seed.path.clone(),
+                path: seed.path,
                 origin: seed.origin.clone(),
             })
             .collect();

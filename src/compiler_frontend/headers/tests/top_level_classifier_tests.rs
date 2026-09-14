@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 

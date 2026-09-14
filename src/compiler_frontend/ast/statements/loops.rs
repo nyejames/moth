@@ -42,7 +42,7 @@ pub fn create_loop(
         .tokens
         .get(token_stream.index.saturating_sub(1));
     let span = header_token.map(|token| SourceSpan::new(token_stream.file_id, token.span));
-    let scope = context.scope.clone();
+    let scope = context.scope;
     let colon_index = find_loop_header_colon_index(token_stream)?;
 
     let header_tokens = &token_stream.tokens[token_stream.index..colon_index];

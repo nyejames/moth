@@ -75,9 +75,9 @@ impl<'a> HirBuilder<'a> {
                     )?;
 
                     self.locals_by_name
-                        .insert(capture.binding_path.clone(), local_id);
+.insert(capture.binding_path, local_id);
                     self.side_table
-                        .bind_local_name(local_id, capture.binding_path.clone());
+                        .bind_local_name(local_id, capture.binding_path);
                     local_ids.push(local_id);
                 }
 
@@ -108,9 +108,9 @@ impl<'a> HirBuilder<'a> {
                     &binding_fallback_span,
                 )?;
 
-                self.locals_by_name.insert(binding_path.clone(), local_id);
+                self.locals_by_name.insert(*binding_path, local_id);
                 self.side_table
-                    .bind_local_name(local_id, binding_path.clone());
+                    .bind_local_name(local_id, *binding_path);
 
                 Ok(vec![local_id])
             }
@@ -370,11 +370,11 @@ fn arm_capture_bindings(
         MatchPattern::ChoiceVariant { captures, .. } => captures
             .iter()
             .zip(capture_locals.iter())
-            .map(|(capture, &local_id)| (capture.binding_path.clone(), local_id))
+            .map(|(capture, &local_id)| (capture.binding_path, local_id))
             .collect(),
         MatchPattern::OptionPresentCapture { binding_path, .. } => {
             if let Some(&local_id) = capture_locals.first() {
-                vec![(binding_path.clone(), local_id)]
+                vec![(*binding_path, local_id)]
             } else {
                 Vec::new()
             }

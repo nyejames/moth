@@ -260,9 +260,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
 
-            Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(local_path.clone(), type_id);
+            Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(local_path, type_id);
             self.type_environment
-                .register_nominal_path_alias(local_path.clone(), type_id)?;
+                .register_nominal_path_alias(local_path, type_id)?;
 
             let (generic_parameters, kind) = match &record.semantics {
                 PublicDeclarationSemantics::Struct(semantics) => (
@@ -277,7 +277,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
             if !generic_parameters.is_empty() {
                 Rc::make_mut(&mut self.generic_declarations_by_path)
-                    .insert(local_path.clone(), kind.clone());
+                    .insert(local_path, kind.clone());
 
                 let internal_path = self
                     .type_environment
@@ -289,7 +289,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         )
                     })?;
                 Rc::make_mut(&mut self.generic_declarations_by_path)
-                    .insert(internal_path.clone(), kind);
+                    .insert(internal_path, kind);
 
                 if let PublicDeclarationSemantics::Struct(_) = &record.semantics {
                     let fields = self
@@ -302,7 +302,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             )
                         })?;
                     Rc::make_mut(&mut self.resolved_struct_fields_by_path)
-                        .insert(local_path.clone(), fields);
+                        .insert(local_path, fields);
                 }
             }
             Rc::make_mut(&mut self.declaration_table)
@@ -462,8 +462,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     "Imported struct shell was unavailable during member projection",
                 )
             })?
-            .path
-            .clone();
+            .path;
         let mut fields = Vec::with_capacity(semantics.fields.len());
         let mut field_declarations = Vec::with_capacity(semantics.fields.len());
 
@@ -474,7 +473,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .try_intern_child(nominal_path, string_table.intern(&field.name))
                 .ok_or_else(|| CompilerError::compiler_error("Imported field path table exhausted"))?;
             fields.push(FieldDefinition {
-                name: field_path.clone(),
+                name: field_path,
                 type_id: field_type_id,
                 span: None,
             });
@@ -501,7 +500,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.type_environment
             .update_struct_fields(type_id, fields.into_boxed_slice());
         Rc::make_mut(&mut self.resolved_struct_fields_by_path)
-            .insert(nominal_path.clone(), field_declarations.clone());
+            .insert(nominal_path, field_declarations.clone());
         if semantics.generic_parameters.is_empty() {
             self.imported_struct_definitions
                 .push(AstImportedStructDefinition { nominal_path });
@@ -523,8 +522,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     "Imported choice shell was unavailable during member projection",
                 )
             })?
-            .path
-            .clone();
+            .path;
         let mut variants = Vec::with_capacity(semantics.variants.len());
 
         for (tag, variant) in semantics.variants.iter().enumerate() {

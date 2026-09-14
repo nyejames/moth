@@ -52,7 +52,7 @@ pub(crate) fn resolve_visible_named_type_path(
                 .get(&name)
                 .or_else(|| visibility.visible_source_names.get(&name))
             {
-                return VisibleNamedTypeResolution::Declaration(target.local_path().clone());
+                return VisibleNamedTypeResolution::Declaration(*target.local_path());
             }
 
             if visibility.visible_external_symbols.contains_key(&name) {
@@ -85,7 +85,7 @@ pub(crate) fn resolve_visible_named_type_path(
 
             match record.type_members.get(&final_name) {
                 Some(NamespaceTypeMember::SourceDeclaration(target)) => {
-                    VisibleNamedTypeResolution::Declaration(target.local_path().clone())
+                    VisibleNamedTypeResolution::Declaration(*target.local_path())
                 }
                 Some(NamespaceTypeMember::ExternalSymbol(_)) => {
                     VisibleNamedTypeResolution::External
@@ -185,7 +185,7 @@ pub(super) fn canonicalize_local_ordering_hints(
                     .or_else(|| visibility.visible_type_alias_names.get(&local_name))
                 {
                     canonical.insert(LocalDeclarationOrderingHint::source_owned(
-                        resolved_path.local_path().clone(),
+                        *resolved_path.local_path(),
                     ));
                 }
                 // External symbols and virtual or provider dependencies have no header graph

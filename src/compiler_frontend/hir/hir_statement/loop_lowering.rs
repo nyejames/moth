@@ -1214,7 +1214,7 @@ impl<'a> HirBuilder<'a> {
         self.side_table.map_local_source(&local);
         self.register_local_in_block(block_id, local, span_ref)?;
         self.side_table
-            .bind_local_name(local_id, binding.id.clone());
+            .bind_local_name(local_id, binding.id);
         self.side_table
             .bind_local_origin(local_id, HirLocalOriginKind::User, None, None);
         self.side_table
@@ -1232,7 +1232,7 @@ impl<'a> HirBuilder<'a> {
             binding.binding_span,
         )?;
 
-        Ok((binding.id.clone(), local_id))
+        Ok((binding.id, local_id))
     }
 
     fn range_iteration_type(

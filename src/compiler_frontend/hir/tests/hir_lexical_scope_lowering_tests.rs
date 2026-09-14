@@ -16,7 +16,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
+    build_ast_with_registered_types, lower_ast,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -78,8 +78,8 @@ let start_function = function_node(
 let ast = build_ast_with_registered_types(vec![start_function], entry_path);
 let (module, _type_environment) =
     lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
-let inner_local = local_by_name(&module, &path_fork, &string_table, "inner");
-let after_local = local_by_name(&module, &path_fork, &string_table, "after");
+let _inner_local = local_by_name(&module, &path_fork, &string_table, "inner");
+let _after_local = local_by_name(&module, &path_fork, &string_table, "after");
 let start_function = &module.functions[module
     .start_function
     .expect("normal test module should have start")

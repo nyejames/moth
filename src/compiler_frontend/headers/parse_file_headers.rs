@@ -59,6 +59,10 @@ use std::path::Path;
 ///
 /// The caller lends the source's original live span builder so per-file diagnostics and warnings
 /// can retain their exact primary and related byte ranges before the result crosses a preparation boundary.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "header parsing keeps the token stream, entry path, options, mutable string/path/span state, and the two fragment offsets as separate borrows"
+)]
 pub fn parse_file_headers_with_table(
     file_tokens: &mut FileTokens,
     entry_file_path: &Path,
@@ -171,6 +175,10 @@ fn capture_preparation_spans(
 ///       tokenization, such as config parsing that runs token-level validation first.
 /// WHY: the caller lends the original source span builder so this boundary can capture diagnostic
 ///      ranges, then retains that same builder for later retained-token span resolution.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "file preparation keeps owned tokens, the entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
+)]
 pub(crate) fn prepare_file_from_tokens(
     mut file_tokens: FileTokens,
     entry_file_path: &Path,
@@ -467,6 +475,10 @@ fn collect_source_build_config_contracts(
 /// WHY: these facts depend on provider interfaces and the project path resolver, so they cannot
 /// be known during syntax preparation. Keeping binding separate lets the build system schedule
 /// it after required providers have compiled.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "header binding keeps prepared syntax, external registries and resolution tables, provider dependencies, optional resolver, source database, and mutable string/path state as separate borrows"
+)]
 pub(in crate::compiler_frontend) fn bind_module_headers(
     prepared: PreparedHeaderSyntax,
     external_package_registry: &ExternalPackageRegistry,

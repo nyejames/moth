@@ -686,7 +686,7 @@ fn merge_rejects_delta_base_longer_than_destination() {
         .try_intern_portable_path("a/b", &mut base_strings)
         .unwrap();
     let path_source = base_builder.fork_source();
-    let mut fork = path_source.fork_for_module();
+    let fork = path_source.fork_for_module();
 
     let mut destination = PathInternerBuilder::new();
 
@@ -707,7 +707,7 @@ fn merge_rejects_delta_base_longer_than_destination() {
     assert_eq!(delta_len, 3);
     // The destination must still be untouched by the rejected merge.
     assert_eq!(destination.len(), 1);
-    assert!(destination.paths().contains(base) == false);
+    assert!(!destination.paths().contains(base));
 }
 
 #[test]
@@ -723,7 +723,7 @@ fn merge_rejects_structurally_divergent_base_rows() {
         .try_intern_portable_path("a/b", &mut donor_strings)
         .unwrap();
     let donor_source = donor_builder.fork_source();
-    let mut donor_fork = donor_source.fork_for_module();
+    let donor_fork = donor_source.fork_for_module();
 
     let mut destination_strings = StringTable::new();
     let mut destination_builder = PathInternerBuilder::new();
@@ -879,8 +879,8 @@ fn merge_accepts_empty_and_identity_deltas() {
         .unwrap();
     let path_source = builder.fork_source();
     let string_source = string_table.fork_source();
-    let (mut fork_strings, string_base_len) = string_source.fork_for_module().into_parts();
-    let mut fork = path_source.fork_for_module();
+    let (fork_strings, string_base_len) = string_source.fork_for_module().into_parts();
+    let fork = path_source.fork_for_module();
 
     let string_remap = string_table.merge_delta_from(&fork_strings, string_base_len);
     let remap = builder

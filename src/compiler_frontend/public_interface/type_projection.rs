@@ -349,6 +349,10 @@ impl<'a> RootIndex<'a> {
 /// under a `GenericDeclarationOrigin::nominal_type`. Receiver methods with a validated
 /// `GenericFunctionTemplate` alias their local `GenericParameterId` values to the receiver
 /// nominal's already-registered stable identities without becoming declaration owners.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "generic origin registration keeps the mutable resolver, root table, export bindings, function templates, nominal resolver, type environment, and string/path state as separate borrows"
+)]
 pub(super) fn register_generic_parameter_origins(
     generic_resolver: &mut TransientGenericParameterOriginResolver,
     root_table: &ResolvedPublicTypeRootTable,
@@ -920,6 +924,10 @@ pub(super) fn project_struct_parts(
 ///
 /// WHAT: validates the nominal resolves to the export binding's origin, projects the exported
 /// generic parameter surfaces and the choice variants. Returns the parts the declaration join
+#[allow(
+    clippy::too_many_arguments,
+    reason = "choice projection keeps the origin and runtime type ids, type environment, projection context, trait fact and origin tables, and string/path state as separate borrows"
+)]
 pub(super) fn project_choice_parts(
     type_origin: OriginTypeId,
     type_id: TypeId,
@@ -1056,6 +1064,10 @@ pub(super) fn project_return_slots(
 /// Total-join retained struct field declarations against the canonical
 /// [`StructTypeDefinition`] fields and project stable field type slots with folded defaults.
 ///
+#[allow(
+    clippy::too_many_arguments,
+    reason = "field projection keeps the root type, struct definition, retained declarations, type environment, projection context, and string/path/folded-value state as separate borrows"
+)]
 fn project_fields_with_defaults(
     root_type_id: TypeId,
     struct_definition: &StructTypeDefinition,

@@ -24,7 +24,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
 };
@@ -69,7 +69,7 @@ fn add_const_fact(
         .try_intern_portable_path(name, string_table)
         .expect("test path fits");
     module.const_facts.declarations.insert(
-        declaration_path.clone(),
+        declaration_path,
         HirConstDeclarationFact {
             declaration_path,
             scope: ConstBindingScope::ExplicitTopLevel,

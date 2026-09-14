@@ -38,7 +38,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId,
     StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::FxHashMap;
@@ -323,7 +323,7 @@ fn builtin_none_identity_is_canonical() {
 fn builtin_error_struct_projects_to_builtin_identity() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let (_, error_type_id) = register_struct(&mut env, &mut string_table, "Error");
     let resolver = MapNominalOriginResolver::new();
     let generic_resolver = MapGenericParameterOriginResolver::new();
@@ -348,7 +348,7 @@ fn builtin_error_struct_projects_to_builtin_identity() {
 fn durable_canonical_interner_preserves_exact_origin_and_reuses_type_id() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let (_, normal_type_id) = register_struct(&mut env, &mut string_table, "NormalCard");
     let (_, support_type_id) = register_struct(&mut env, &mut string_table, "SupportCard");
     let package = StablePackageIdentity::project_local("test-project");
@@ -400,7 +400,7 @@ fn durable_canonical_interner_preserves_exact_origin_and_reuses_type_id() {
 fn projects_direct_struct_to_source_nominal_origin() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let (nominal_id, type_id) = register_struct(&mut env, &mut string_table, "Button");
 
     let mut resolver = MapNominalOriginResolver::new();
@@ -423,7 +423,7 @@ fn projects_direct_struct_to_source_nominal_origin() {
 fn projects_direct_choice_to_source_nominal_origin() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let (nominal_id, type_id) = register_choice(&mut env, &mut string_table, "Status");
 
     let mut resolver = MapNominalOriginResolver::new();
@@ -723,7 +723,7 @@ fn projects_fallible_carrier_preserving_success_error_order() {
 fn projects_concrete_generic_nominal_instance() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let param_list_id = register_single_param_list(&mut env, &mut string_table);
     let (box_nominal_id, _) =
         register_generic_struct(&mut env, &mut string_table, "Box", param_list_id);
@@ -787,7 +787,7 @@ fn generic_instance_distinguishes_different_concrete_arguments() {
 fn absent_nominal_origin_returns_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let (nominal_id, type_id) = register_struct(&mut env, &mut string_table, "Missing");
 
     let resolver = MapNominalOriginResolver::new();
@@ -969,7 +969,7 @@ fn malformed_map_arity_returns_compiler_error() {
 fn malformed_generic_instance_arity_returns_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let param_list_id = register_single_param_list(&mut env, &mut string_table);
     let (box_nominal_id, _) =
         register_generic_struct(&mut env, &mut string_table, "Box", param_list_id);
@@ -1002,7 +1002,7 @@ fn malformed_generic_instance_arity_returns_compiler_error() {
 fn generic_instance_of_non_generic_base_returns_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let (plain_nominal_id, _) = register_struct(&mut env, &mut string_table, "Thing");
 
     // Thing declares no generic parameters; a zero-argument instance is not a legal instance.
@@ -1063,7 +1063,7 @@ fn generic_instance_of_unknown_base_returns_compiler_error() {
 fn generic_instance_with_missing_parameter_list_returns_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     // Register a struct that claims a parameter list that was never registered.
     let (dangling_nominal_id, _) = register_generic_struct(
         &mut env,
@@ -1146,7 +1146,7 @@ fn canonical_identity_carries_no_local_ids_or_paths() {
 fn recursive_generic_instance_arguments_are_canonical() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let param_list_id = register_single_param_list(&mut env, &mut string_table);
     let (box_nominal_id, _) =
         register_generic_struct(&mut env, &mut string_table, "Box", param_list_id);
@@ -1189,7 +1189,7 @@ fn exported_generic_parameter_identity_is_equal_across_distinct_generic_paramete
     let mut env_a = TypeEnvironment::new();
     let mut env_b = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     // Consume GenericParameterId(0) in env_a with a synthetic parameter so the real list's
     // parameter gets GenericParameterId(1).
@@ -1334,7 +1334,7 @@ fn receiver_method_cannot_be_a_generic_declaration_origin() {
 fn projects_option_of_exported_generic_parameter() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let param_list_id = register_single_param_list(&mut env, &mut string_table);
     let (box_nominal_id, _) =
@@ -1380,7 +1380,7 @@ fn projects_option_of_exported_generic_parameter() {
 fn projects_collection_of_exported_generic_parameter() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let param_list_id = register_single_param_list(&mut env, &mut string_table);
     let (_container_nominal_id, _) =
@@ -1426,7 +1426,7 @@ fn projects_collection_of_exported_generic_parameter() {
 fn missing_generic_parameter_resolver_entry_returns_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let param_list_id = register_single_param_list(&mut env, &mut string_table);
     let (_box_nominal_id, _) =
@@ -1463,7 +1463,7 @@ fn missing_generic_parameter_resolver_entry_returns_compiler_error() {
 fn synthetic_generic_parameter_rejected_by_absence_from_resolver() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     // A synthetic parameter (e.g. trait `This`) is not an exported generic declaration parameter.
     let synthetic_type_id = env.register_synthetic_generic_parameter(string_table.intern("This"));

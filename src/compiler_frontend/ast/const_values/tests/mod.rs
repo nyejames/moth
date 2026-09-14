@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -67,7 +67,7 @@ fn operator_item(operator: Operator) -> ExpressionRpnItem {
 #[test]
 fn literal_int_resolves_as_const() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let expression = Expression::int(42, None, ValueMode::ImmutableOwned);
@@ -84,7 +84,7 @@ fn literal_int_resolves_as_const() {
 #[test]
 fn literal_string_resolves_as_const() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let string_id = string_table.intern("hello");
@@ -106,7 +106,7 @@ fn literal_string_resolves_as_const() {
 #[test]
 fn folded_arithmetic_resolves_to_literal() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let rpn = ExpressionRpn {
@@ -227,7 +227,7 @@ fn reference_to_known_const_resolves() {
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let path = path_fork.try_intern_portable_path("ratio", &mut string_table).expect("test path fits");
-    let expression = Expression::reference_with_type_id(path.clone(), DataType::Float, builtin_type_ids::FLOAT, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
+    let expression = Expression::reference_with_type_id(path, DataType::Float, builtin_type_ids::FLOAT, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = make_environment_with(
         "ratio",
@@ -350,7 +350,7 @@ fn fact_value_kind_from_runtime_is_non_const() {
 #[test]
 fn coerced_expression_resolves_inner_value() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let inner = Expression::int(7, None, ValueMode::ImmutableOwned);

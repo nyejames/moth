@@ -201,7 +201,7 @@ pub fn create_branch(
         string_table,
         path_fork,
     );
-    let then_scope = then_context.scope.clone();
+    let then_scope = then_context.scope;
     let then_block = function_body_to_ast(
         token_stream,
         then_context,
@@ -217,7 +217,7 @@ pub fn create_branch(
         token_stream.advance();
         let else_context =
             context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
-        let else_scope = else_context.scope.clone();
+        let else_scope = else_context.scope;
         (
             Some(function_body_to_ast(
                 token_stream,
@@ -250,7 +250,7 @@ pub fn create_branch(
             condition,
             then_block,
             else_block,
-            IfBranchMetadata::new(request_ranges, then_scope.clone(), else_scope),
+            IfBranchMetadata::new(request_ranges, then_scope, else_scope),
         ),
         span: header_span,
         scope: then_scope,
@@ -292,6 +292,7 @@ fn create_option_present_capture_branch(
 
     let else_block = if token_stream.current_token_kind() == &TokenKind::Else {
         reject_same_line_else_if(token_stream)?;
+        token_stream.advance();
         let else_context =
             context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
         Some(function_body_to_ast(
@@ -326,7 +327,7 @@ fn create_option_present_capture_branch(
             exhaustiveness,
         },
         span: header_span,
-        scope: context.scope.clone(),
+        scope: context.scope,
     }])
 }
 
@@ -336,6 +337,10 @@ fn create_option_present_capture_branch(
 /// delegates exhaustiveness checking before returning the match node.
 /// WHY: all match-level invariants (at least one pattern arm before else, no duplicates,
 /// exhaustiveness) are enforced here so downstream HIR lowering can assume valid input.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "match node construction keeps the scrutinee, header span, token stream, scope, mutable interner/warning/string/path state as separate borrows"
+)]
 fn create_match_node(
     scrutinee: Expression,
     header_span: Option<SourceSpan>,
@@ -376,6 +381,10 @@ fn create_match_node(
 /// WHY: statement matches and value-producing matches have identical pattern
 /// semantics; the value form only changes the active value target while parsing
 /// arm bodies.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "match block parsing keeps the scrutinee, token stream, scope, mutable interner/warning/string/path state, and optional value target as separate borrows"
+)]
 pub(crate) fn parse_match_block(
     scrutinee: Expression,
     token_stream: &mut FileTokens,
@@ -400,7 +409,7 @@ pub(crate) fn parse_match_block(
     token_stream.advance();
     let mut match_context =
         context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
-
+    match_context.active_value_target = active_value_target;
     let mut arms: Vec<MatchArm> = Vec::new();
     let mut else_block = None;
     let mut seen_else = false;

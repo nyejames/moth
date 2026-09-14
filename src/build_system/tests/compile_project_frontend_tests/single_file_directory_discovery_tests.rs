@@ -96,7 +96,7 @@ fn single_file_rejects_wrong_extension() {
     let mut config = Config::new(txt_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,
@@ -135,7 +135,7 @@ fn single_file_rejects_missing_file() {
     let mut config = Config::new(missing_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,
@@ -165,7 +165,7 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
     let mut config = Config::new(moth_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,
@@ -209,7 +209,7 @@ fn directory_project_discovers_multiple_entry_modules() {
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
         &mut config,
@@ -262,7 +262,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let modules = compile_project_frontend(
         &mut config,
@@ -353,7 +353,7 @@ fn single_file_rejects_source_package_moth_folder_collision() {
     let mut config = Config::new(main_path.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(

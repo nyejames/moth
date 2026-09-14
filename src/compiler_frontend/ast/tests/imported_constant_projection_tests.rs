@@ -214,7 +214,7 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
         ConstStringPiece::SiteRoot,
     ];
     let module_constant = Declaration {
-        id: constant_path.clone(),
+        id: constant_path,
         value: Expression::structural_string(producer_pieces, None),
         binding_span: None,
         config_qualifier: None,
@@ -287,7 +287,7 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
     assert!(consumer_materialiser.module_resources.origins().is_empty());
     let consumer_string_type_id = consumer_materialiser.type_environment.builtins().string;
     let mut consumer_string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let materialised = materialize_public_folded_value(
         &mut consumer_materialiser,
         &constant.folded_value,
@@ -363,7 +363,7 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     ];
     let constant_path = path_fork.try_intern_portable_path("meta", &mut producer_string_table).expect("test path fits");
     let module_constant = Declaration {
-        id: constant_path.clone(),
+        id: constant_path,
         value: Expression::anonymous_const_record(
             producer_fields,
             None,
@@ -454,7 +454,7 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         .type_environment
         .anonymous_const_record_type();
     let mut consumer_string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let materialised = materialize_public_folded_value(
         &mut consumer_materialiser,
         &constant.folded_value,
@@ -614,7 +614,7 @@ fn metadata_record(
     OrderedSemanticDeclaration {
         declaration_id: DeclarationId::from_index(index),
         header_index: index,
-        path: path.clone(),
+        path: *path,
         kind,
         declaration: None,
     }
@@ -622,7 +622,7 @@ fn metadata_record(
 
 fn declaration(path: &PathId, data_type: DataType) -> Declaration {
     Declaration {
-        id: path.clone(),
+        id: *path,
         value: Expression::no_value(None, data_type, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,

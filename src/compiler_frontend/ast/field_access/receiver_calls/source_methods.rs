@@ -163,7 +163,7 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         declaration_identity: template.declaration_identity.clone(),
         evidence: selected_evidence,
         key: inference.key,
-        instance_path: inference.instance_path.clone(),
+        instance_path: inference.instance_path,
         call_span: member_span,
     };
 
@@ -305,7 +305,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                     })?;
                 (instance_path, signature, Some(request))
             } else {
-                (method.method_path.clone(), method.signature.clone(), None)
+                (method.method_path, method.signature.clone(), None)
             }
         }
     };

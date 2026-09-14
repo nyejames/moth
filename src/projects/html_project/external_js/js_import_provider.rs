@@ -105,7 +105,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
             Err(PathInternError::TableFull) => {
                 return Err(CompilerMessages::from_diagnostic_ref(
                     CompilerDiagnostic::source_table_capacity(
-                        SourceSpanCapacityResource::LogicalPathTable,
+                        SourceSpanCapacityResource::LogicalPath,
                     ),
                     context.string_table,
                 ));

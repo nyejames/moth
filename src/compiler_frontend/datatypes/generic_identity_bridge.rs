@@ -126,6 +126,7 @@ impl PathNameResolver for PathTable {
     }
 }
 
+#[cfg(any(test, feature = "show_hir"))]
 pub fn display_generic_instantiation_key_with_fork(
     key: &GenericInstantiationKey,
     path_fork: &PathInternerFork,

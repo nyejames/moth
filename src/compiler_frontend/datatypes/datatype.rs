@@ -639,13 +639,13 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
             ids::BuiltinTypeKey::None => DataType::None,
         },
         Some(TypeDefinition::Struct(def)) => DataType::Struct {
-            nominal_path: def.path.clone(),
+            nominal_path: def.path,
             type_id,
             const_record: def.const_record,
             generic_instance_key: None,
         },
         Some(TypeDefinition::Choice(def)) => DataType::Choices {
-            nominal_path: def.path.clone(),
+            nominal_path: def.path,
             type_id,
             generic_instance_key: None,
         },
@@ -725,7 +725,7 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
                     .map(|arg| type_id_to_data_type(*arg, type_environment))
                     .collect();
                 DataType::GenericInstance {
-                    base: GenericBaseType::ResolvedNominal(path.clone()),
+                    base: GenericBaseType::ResolvedNominal(*path),
                     arguments,
                 }
             } else {

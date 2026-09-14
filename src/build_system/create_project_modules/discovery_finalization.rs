@@ -316,6 +316,10 @@ pub(super) fn finalize_missing_source_loads(
 /// WHY: header preparation needs traversal identities before the closure is complete, but no
 ///      traversal-domain identity may cross this discovery boundary. Ownership is established
 ///      before any fallible output transformation so terminal failures retain source context.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "finalization keeps reachable files, the source cache, entry and resolver state, mutable string/path forks, the deferred failure, and resolved references as separate borrows"
+)]
 pub(super) fn finalize_reachable_files(
     files: Vec<ReachableSourceFile>,
     mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,

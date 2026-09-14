@@ -283,7 +283,7 @@ fn intern_filesystem_path_identity(
             }
             PathInternError::TableFull => CompilerMessages::from_diagnostic(
                 CompilerDiagnostic::source_table_capacity(
-                    SourceSpanCapacityResource::LogicalPathTable,
+                    SourceSpanCapacityResource::LogicalPath,
                 ),
                 table,
             ),

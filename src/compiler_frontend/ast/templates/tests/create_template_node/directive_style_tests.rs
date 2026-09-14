@@ -65,7 +65,7 @@ fn directive_tokens(
 fn test_context(scope: PathId, path_fork: &PathInternerFork) -> ScopeContext {
     ScopeContext::new_for_tests(
         ContextKind::Constant,
-        scope.clone(),
+        scope,
         Rc::new(TopLevelDeclarationTable::new(vec![], path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],

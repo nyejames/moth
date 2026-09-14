@@ -32,7 +32,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::hir::hir_builder::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 /// Extracts the result-local assignment and merge target from a value-block arm block.
 fn value_block_result_assignment(
@@ -102,7 +102,7 @@ let value_match_expr = Expression::new(
     ExpressionKind::ValueBlock {
         block: Box::new(ValueBlock::Match(ValueMatchBlock {
             scrutinee: reference_expr_with_type_id(
-                x.clone(),
+                x,
                 builtin_type_ids::INT,
                 None,
                 ValueMode::ImmutableReference,

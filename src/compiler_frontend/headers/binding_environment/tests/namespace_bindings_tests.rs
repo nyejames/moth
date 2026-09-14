@@ -208,10 +208,10 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
         let expected_span = dependency.dependency.span;
 
         let mut module_symbols = ModuleSymbols::empty();
-        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols.module_file_paths.insert(source_file);
         module_symbols
             .file_dependency_clauses_by_source
-            .insert(source_file.clone(), vec![dependency]);
+            .insert(source_file, vec![dependency]);
 
         let error = prepare_binding_environment(BindingEnvironmentInput {
             module_symbols: &module_symbols,
@@ -251,10 +251,10 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
             .expect("namespace alias should have a binding span");
 
         let mut module_symbols = ModuleSymbols::empty();
-        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols.module_file_paths.insert(source_file);
         module_symbols
             .file_dependency_clauses_by_source
-            .insert(source_file.clone(), vec![dependency]);
+            .insert(source_file, vec![dependency]);
 
         let error = prepare_binding_environment(BindingEnvironmentInput {
             module_symbols: &module_symbols,
@@ -302,19 +302,19 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
 
     let declaration_path = intern_path(&["src", "existing"], &mut string_table, &mut path_fork);
     let mut declared_paths = FxHashSet::default();
-    declared_paths.insert(declaration_path.clone());
+    declared_paths.insert(declaration_path);
     let declaration_span = LocalSpan::exact(5, 8, &mut span_builder)
         .expect("focused declaration span should fit the inline representation");
     let expected_previous_span = SourceSpan::new(SourceId::COMPILATION_ROOT, declaration_span);
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .declaration_spans_by_symbol_path
         .insert(declaration_path, expected_previous_span);
     module_symbols
         .declared_paths_by_file
-        .insert(source_file.clone(), declared_paths);
+        .insert(source_file, declared_paths);
     module_symbols
         .file_dependency_clauses_by_source
         .insert(source_file, vec![dependency]);
@@ -361,7 +361,7 @@ fn explicit_moth_extension_diagnostic_retains_dependency_path_span() {
     let expected_span = dependency.dependency.span;
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .file_dependency_clauses_by_source
         .insert(source_file, vec![dependency]);
@@ -416,13 +416,13 @@ fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
         let expected_span = selection_store[0].source_span;
 
         let mut module_symbols = ModuleSymbols::empty();
-        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols.module_file_paths.insert(source_file);
         module_symbols
             .file_dependency_clauses_by_source
-            .insert(source_file.clone(), vec![dependency]);
+            .insert(source_file, vec![dependency]);
         module_symbols
             .dependency_selections_by_source
-            .insert(source_file.clone(), selection_store);
+            .insert(source_file, selection_store);
 
         let error = prepare_binding_environment(BindingEnvironmentInput {
             module_symbols: &module_symbols,
@@ -477,13 +477,13 @@ fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
             .span;
 
         let mut module_symbols = ModuleSymbols::empty();
-        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols.module_file_paths.insert(source_file);
         module_symbols
             .file_dependency_clauses_by_source
-            .insert(source_file.clone(), vec![dependency]);
+            .insert(source_file, vec![dependency]);
         module_symbols
             .dependency_selections_by_source
-            .insert(source_file.clone(), selection_store);
+            .insert(source_file, selection_store);
 
         let error = prepare_binding_environment(BindingEnvironmentInput {
             module_symbols: &module_symbols,
@@ -536,16 +536,16 @@ fn source_selection_binding_rejects_keyword_shadow_names_before_source_validatio
             .map_or(selection_store[0].source_span, |alias| alias.span);
 
         let mut module_symbols = ModuleSymbols::empty();
-        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols.module_file_paths.insert(source_file);
         module_symbols
             .dependency_bindable_source_symbol_paths
             .insert(symbol_path);
         module_symbols
             .file_dependency_clauses_by_source
-            .insert(source_file.clone(), vec![dependency]);
+            .insert(source_file, vec![dependency]);
         module_symbols
             .dependency_selections_by_source
-            .insert(source_file.clone(), selection_store);
+            .insert(source_file, selection_store);
 
         let error = prepare_binding_environment(BindingEnvironmentInput {
             module_symbols: &module_symbols,
@@ -693,9 +693,9 @@ fn binding_counters_separate_namespace_clauses_from_selected_names() {
     }
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     module_symbols.file_dependency_clauses_by_source.insert(
-        source_file.clone(),
+        source_file,
         vec![namespace_clause, selection_clause],
     );
     module_symbols
@@ -796,10 +796,10 @@ fn external_nested_namespace_tree_builds_correctly() {
     let dependency = test_dependency(dependency_path);
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .file_dependency_clauses_by_source
-        .insert(source_file.clone(), vec![dependency]);
+        .insert(source_file, vec![dependency]);
 
     let external_dependency_resolution_table = ExternalImportResolutionTable::new();
     let environment = prepare_binding_environment(BindingEnvironmentInput {
@@ -991,15 +991,15 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
         .expect("method path should have a leaf name");
 
     let mut declared_paths = FxHashSet::default();
-    declared_paths.insert(method_path.clone());
+    declared_paths.insert(method_path);
 
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols
         .declared_paths_by_file
-        .insert(helper_file.clone(), declared_paths);
+        .insert(helper_file, declared_paths);
     module_symbols
         .dependency_bindable_source_symbol_paths
-        .insert(method_path.clone());
+        .insert(method_path);
     module_symbols.receiver_method_paths.insert(method_path);
 
     let registry = ExternalPackageRegistry::new();
@@ -1034,24 +1034,24 @@ fn module_root_namespace_uses_prepared_root_file_identity() {
     let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
     let root_file = intern_path(&["helper", "@home.moth"], &mut string_table, &mut path_fork);
     let dependency = test_dependency(intern_path(&["helper"], &mut string_table, &mut path_fork));
-    let module_root = dependency.dependency.path.clone();
+    let module_root = dependency.dependency.path;
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
-    module_symbols.module_file_paths.insert(root_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
+    module_symbols.module_file_paths.insert(root_file);
     module_symbols.file_module_membership.insert(
-        source_file.clone(),
+        source_file,
         intern_path(&["entry-root"], &mut string_table, &mut path_fork),
     );
     module_symbols
         .file_module_membership
-        .insert(root_file.clone(), module_root.clone());
+        .insert(root_file, module_root);
     module_symbols
         .module_root_boundaries
         .push(ModuleRootBoundary {
             dependency_prefix: intern_path(&["helper"], &mut string_table, &mut path_fork),
             module_root,
-            root_file: root_file.clone(),
+            root_file,
         });
 
     let registry = ExternalPackageRegistry::new();
@@ -1104,7 +1104,7 @@ fn prelude_symbol_visibility_has_no_authored_span() {
     let mut path_fork = PathInternerFork::empty();
     let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
 
     let environment = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
@@ -1179,13 +1179,13 @@ fn explicit_external_symbol_binding_retains_authored_span() {
     };
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .file_dependency_clauses_by_source
-        .insert(source_file.clone(), vec![dependency]);
+        .insert(source_file, vec![dependency]);
     module_symbols
         .dependency_selections_by_source
-        .insert(source_file.clone(), dependency_selections);
+        .insert(source_file, dependency_selections);
 
     let environment = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
@@ -1243,7 +1243,7 @@ fn prelude_namespace_alias_injects_unshadowed_record() {
     let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
 
     let environment = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
@@ -1295,15 +1295,15 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
     let declaration_path = intern_path(&["src", "prelude_ns"], &mut string_table, &mut path_fork);
 
     let mut declared_paths = FxHashSet::default();
-    declared_paths.insert(declaration_path.clone());
+    declared_paths.insert(declaration_path);
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     let mut span_builder = ExtendedSpanBuilder::new();
     let declaration_span = LocalSpan::exact(12, 10, &mut span_builder)
         .expect("focused declaration span should fit the inline representation");
     module_symbols.declaration_spans_by_symbol_path.insert(
-        declaration_path.clone(),
+        declaration_path,
         SourceSpan::new(SourceId::COMPILATION_ROOT, declaration_span),
     );
     module_symbols
@@ -1363,10 +1363,10 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
     };
 
     let mut module_symbols = ModuleSymbols::empty();
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .file_dependency_clauses_by_source
-        .insert(source_file.clone(), vec![dependency]);
+        .insert(source_file, vec![dependency]);
 
     let environment = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
@@ -1407,29 +1407,29 @@ fn nested_module_root_depends_on_child_facade_resolves_child_root() {
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols
         .module_file_paths
-        .insert(helper_mod_file.clone());
+        .insert(helper_mod_file);
     module_symbols
         .module_file_paths
-        .insert(grandchild_mod_file.clone());
+        .insert(grandchild_mod_file);
     module_symbols
         .file_module_membership
-        .insert(helper_mod_file.clone(), helper_root.clone());
+        .insert(helper_mod_file, helper_root);
     module_symbols
         .file_module_membership
-        .insert(grandchild_mod_file.clone(), grandchild_root.clone());
+        .insert(grandchild_mod_file, grandchild_root);
     module_symbols
         .module_root_boundaries
         .push(ModuleRootBoundary {
             dependency_prefix: intern_path(&["helper"], &mut string_table, &mut path_fork),
-            module_root: helper_root.clone(),
-            root_file: helper_mod_file.clone(),
+            module_root: helper_root,
+            root_file: helper_mod_file,
         });
     module_symbols
         .module_root_boundaries
         .push(ModuleRootBoundary {
             dependency_prefix: intern_path(&["helper", "child"], &mut string_table, &mut path_fork),
-            module_root: grandchild_root.clone(),
-            root_file: grandchild_mod_file.clone(),
+            module_root: grandchild_root,
+            root_file: grandchild_mod_file,
         });
 
     let registry = ExternalPackageRegistry::new();
@@ -1474,7 +1474,7 @@ fn provider_semantics_bind_once_across_many_shells() {
     // Ten authored shells reference the same provider, one direct constant selection each.
     let mut module_symbols = ModuleSymbols::empty();
     let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     let mut dependency_selections = Vec::new();
     let dependencies = names
         .iter()
@@ -1495,10 +1495,10 @@ fn provider_semantics_bind_once_across_many_shells() {
         .collect();
     module_symbols
         .file_dependency_clauses_by_source
-        .insert(source_file.clone(), dependencies);
+        .insert(source_file, dependencies);
     module_symbols
         .dependency_selections_by_source
-        .insert(source_file.clone(), dependency_selections);
+        .insert(source_file, dependency_selections);
 
     let provider_dependencies = SourceProviderDependencySet::new(
         names
@@ -1722,7 +1722,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
 
     let mut module_symbols = ModuleSymbols::empty();
     let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     let mut dependency_selections = Vec::new();
     let mut alpha_dependency = test_dependency(intern_path(&["alpha"], &mut string_table, &mut path_fork));
     alpha_dependency.dependency.dependency_shell_id =
@@ -1747,10 +1747,10 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
     let dependencies = vec![alpha_dependency, beta_dependency];
     module_symbols
         .file_dependency_clauses_by_source
-        .insert(source_file.clone(), dependencies);
+        .insert(source_file, dependencies);
     module_symbols
         .dependency_selections_by_source
-        .insert(source_file.clone(), dependency_selections);
+        .insert(source_file, dependency_selections);
 
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
@@ -1967,10 +1967,10 @@ fn single_file_module_symbols(
 ) -> ModuleSymbols {
     let mut module_symbols = ModuleSymbols::empty();
     let source_file = intern_path(&["src", "@page.moth"], string_table, path_fork);
-    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .file_dependency_clauses_by_source
-        .insert(source_file.clone(), dependencies);
+        .insert(source_file, dependencies);
     module_symbols
         .dependency_selections_by_source
         .insert(source_file, dependency_selections);

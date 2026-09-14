@@ -25,6 +25,10 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// WHAT: validates that `{...}` literals are used with a compatible expected type and dispatches
 ///       to the correct collection or map parser.
 /// WHY: curly-brace syntax introduces both homogeneous collections and ordered maps; the builtin
+#[allow(
+    clippy::too_many_arguments,
+    reason = "curly literal parsing keeps the token stream, scope, mutable interner/string/rpn/path state, expected type, and value mode as separate borrows"
+)]
 pub(crate) fn parse_curly_literal_expression(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

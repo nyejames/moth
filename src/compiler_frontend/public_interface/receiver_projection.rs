@@ -136,7 +136,7 @@ pub(crate) fn build_callable_seed_table(
             };
             push_seed(
                 &mut seeds,
-                root.path.clone(),
+                root.path,
                 function_origin.clone(),
                 generic_parameter_list_id.is_some(),
                 CallableSeedKind::FreeFunction,
@@ -205,7 +205,7 @@ pub(crate) fn build_callable_seed_table(
             let generic_template = generic_function_templates.contains_key(&entry.function_path);
             push_seed(
                 &mut seeds,
-                entry.function_path.clone(),
+                entry.function_path,
                 method_origin,
                 generic_template,
                 CallableSeedKind::ReceiverMethod {

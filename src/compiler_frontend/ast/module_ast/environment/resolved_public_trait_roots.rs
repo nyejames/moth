@@ -201,22 +201,22 @@ fn is_active_root_public_trait_declaration(header: &Header) -> bool {
 fn build_trait_root(
     canonical_path: &PathId,
     trait_environment: &TraitEnvironment,
-    string_table: &StringTable,
+    _string_table: &StringTable,
 ) -> Result<ResolvedPublicTraitRoot, CompilerError> {
     let Some(trait_id) = trait_environment.id_for_path(canonical_path) else {
         return Err(CompilerError::compiler_error(format!(
-            "resolved public trait-root construction: a public active-root trait '{}' has no \
+            "resolved public trait-root construction: a public active-root trait '{:?}' has no \
              registered TraitEnvironment definition",
-            format!("{canonical_path:?}")
+            canonical_path.to_owned()
         )));
     };
 
     let Some(definition) = trait_environment.get(trait_id) else {
         return Err(CompilerError::compiler_error(format!(
-            "resolved public trait-root construction: TraitId({}) for trait '{}' has no resolved \
+            "resolved public trait-root construction: TraitId({}) for trait '{:?}' has no resolved \
              definition",
             trait_id.0,
-            format!("{canonical_path:?}")
+            canonical_path.to_owned(),
         )));
     };
 
@@ -225,9 +225,9 @@ fn build_trait_root(
     // malformed transient AST data.
     if matches!(definition.visibility, TraitVisibility::Core) {
         return Err(CompilerError::compiler_error(format!(
-            "resolved public trait-root construction: a public active-root trait '{}' resolved \
+            "resolved public trait-root construction: a public active-root trait '{:?}' resolved \
              to a compiler-owned core trait; core traits are not authored source declarations",
-            format!("{canonical_path:?}")
+            canonical_path.to_owned(),
         )));
     }
 
@@ -274,7 +274,7 @@ fn build_trait_requirement_fact(
         .parameters
         .iter()
         .map(|parameter| ResolvedTraitParameterFact {
-            name: parameter.name.clone(),
+            name: parameter.name,
             value_mode: parameter.value_mode.clone(),
             type_id: parameter.type_id,
         })

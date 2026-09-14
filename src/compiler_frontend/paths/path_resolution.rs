@@ -317,7 +317,7 @@ impl ProjectPathResolver {
 
         let Some(candidate) = existing_candidates.first() else {
             return Err(DependencyPathResolutionError::Diagnostic(
-                CompilerDiagnostic::missing_import_target(dependency_path.clone(), None),
+                CompilerDiagnostic::missing_import_target(dependency_path, None),
             ));
         };
 

@@ -157,7 +157,7 @@ pub(crate) fn compile_config_source(
             return ConfigCompilationOutcome {
                 result: Err(CompilerMessages::from_diagnostic(
                     CompilerDiagnostic::source_table_capacity(
-                        SourceSpanCapacityResource::LogicalPathTable,
+                        SourceSpanCapacityResource::LogicalPath,
                     ),
                     string_table.clone(),
                 )),

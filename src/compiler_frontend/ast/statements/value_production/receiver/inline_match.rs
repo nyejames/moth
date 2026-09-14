@@ -152,12 +152,12 @@ fn parse_inline_value_match(
     let then_body = vec![then_value_node(
         output.then_values,
         output.then_span,
-        then_context.scope.clone(),
+        then_context.scope,
     )];
     let else_body = vec![then_value_node(
         output.else_values,
         output.else_span,
-        context.scope.clone(),
+        context.scope,
     )];
 
     let value_match = ValueMatchBlock {

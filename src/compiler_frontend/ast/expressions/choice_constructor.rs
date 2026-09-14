@@ -266,13 +266,13 @@ pub(super) fn parse_choice_construct(
             }
 
             let diagnostic_type = DataType::Choices {
-                nominal_path: nominal_path.clone(),
+                nominal_path,
                 type_id: choice_type_id,
                 generic_instance_key,
             };
 
             let choice_expr = Expression::choice_construct(ChoiceConstructInput {
-                nominal_path: nominal_path.clone(),
+                nominal_path,
                 tag: variant_index,
                 fields: vec![],
                 diagnostic_type,
@@ -377,7 +377,7 @@ pub(super) fn parse_choice_construct(
                 }
 
                 choice_fields.push(Declaration {
-                    id: field.name.clone(),
+                    id: field.name,
                     value,
                     binding_span: None,
                     config_qualifier: None,
@@ -393,13 +393,13 @@ pub(super) fn parse_choice_construct(
             };
 
             let diagnostic_type = DataType::Choices {
-                nominal_path: nominal_path.clone(),
+                nominal_path,
                 type_id: choice_type_id,
                 generic_instance_key,
             };
 
             let choice_expr = Expression::choice_construct(ChoiceConstructInput {
-                nominal_path: nominal_path.clone(),
+                nominal_path,
                 tag: variant_index,
                 fields: choice_fields,
                 diagnostic_type,
@@ -435,7 +435,7 @@ fn choice_variant_shells_to_definitions(shells: &[ChoiceVariant]) -> Vec<ChoiceV
                     let field_defs: Vec<FieldDefinition> = fields
                         .iter()
                         .map(|field| FieldDefinition {
-                            name: field.id.clone(),
+                            name: field.id,
                             type_id: field.value.type_id,
                             span: field.value.span,
                         })

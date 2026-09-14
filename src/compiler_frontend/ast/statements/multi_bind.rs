@@ -157,7 +157,7 @@ pub(crate) fn parse_multi_bind_statement(
             value: rhs_expression,
         },
         span: node_span,
-        scope: context.scope.clone(),
+        scope: context.scope,
     }))
 }
 
@@ -167,7 +167,7 @@ fn validate_multi_bind_target_identifiers(
     parsed_targets: &[BindingTargetSyntax],
     context: &ScopeContext,
     string_table: &mut StringTable,
-    path_fork: &PathInternerFork,
+    _path_fork: &PathInternerFork,
 ) -> MultiBindResult<()> {
     for target in parsed_targets {
         ensure_not_keyword_shadow_identifier(target.name, target.span, string_table)?;
@@ -375,7 +375,7 @@ fn resolve_known_slot_types(
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
-    path_fork: &PathInternerFork,
+    _path_fork: &PathInternerFork,
 ) -> MultiBindResult<Vec<Option<TypeId>>> {
     let mut known = Vec::with_capacity(parsed_targets.len());
 

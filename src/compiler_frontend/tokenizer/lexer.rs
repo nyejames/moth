@@ -508,6 +508,10 @@ fn greater_than_is_template_tag_end(
 /// tokenizations against one builder append to it.
 ///
 /// WHY: later frontend stages should prefer explicit file identity over path string comparisons.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "tokenization keeps the source text, path identity, entry mode, directives, mutable string/path/span state, and file identity as separate borrows"
+)]
 pub fn tokenize(
     source_code: &str,
     src_path: PathId,

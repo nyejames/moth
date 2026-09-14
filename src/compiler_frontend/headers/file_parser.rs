@@ -674,6 +674,17 @@ fn handle_symbol_item_with_export_mode(
     )?;
 
     if export_mode.is_public()
+        && matches!(
+            &header.kind,
+            HeaderKind::TraitConformance { .. } | HeaderKind::TraitIncompatibility { .. }
+        )
+    {
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::invalid_export_target(Some(current_span)),
+        ));
+    }
+
+    if export_mode.is_public()
         && let HeaderKind::Function { signature, .. } = &header.kind
         && is_receiver_method_candidate(signature, context.string_table, context.path_fork)
     {

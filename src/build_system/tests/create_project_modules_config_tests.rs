@@ -1,5 +1,5 @@
 use super::*;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn parses_config_constant_declarations() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -73,7 +73,7 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
             build_config_inputs: &build_config_inputs,
         };
         let mut string_table = StringTable::new();
-        let mut path_fork = PathInternerFork::empty();
+        let _path_fork = PathInternerFork::empty();
         let mut source_files = SourceDatabase::empty();
 
         let result = compile_project_config_file(
@@ -187,7 +187,7 @@ fn loads_canonical_config_file_from_project_root() {
         build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
 
     let validated_output_settings = load_project_config(
@@ -358,7 +358,7 @@ fn directory_projects_require_config_moth() {
         build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut source_files = SourceDatabase::empty();
 
     let messages = load_project_config(
@@ -782,7 +782,7 @@ fn project_local_package_folder_does_not_register_source_metadata() {
     config.entry_root = PathBuf::from("src");
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let resolver = super::project_roots::build_project_path_resolver(
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -821,7 +821,7 @@ fn ordinary_package_folder_does_not_collide_with_entry_root() {
     .expect("config should parse");
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let result = super::project_roots::build_project_path_resolver(
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1403,7 +1403,7 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
 
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
 
     let mut builder_frontend_surface = crate::builder_surface::SourcePackageRegistry::new();
     builder_frontend_surface.register_filesystem_root(

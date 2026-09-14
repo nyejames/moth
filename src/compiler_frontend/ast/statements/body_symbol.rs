@@ -51,7 +51,7 @@ fn push_accessed_symbol_statement(
         ast.push(AstNode {
             span: accessed_expression.span,
             kind: NodeKind::ExpressionStatement(accessed_expression),
-            scope: context.scope.clone(),
+            scope: context.scope,
         });
         return Ok(());
     }
@@ -185,7 +185,7 @@ pub(crate) fn parse_this_statement(
             ast.push(AstNode {
                 kind: NodeKind::ExpressionStatement(expression),
                 span,
-                scope: context.scope.clone(),
+                scope: context.scope,
             });
             Ok(())
         }
@@ -356,7 +356,7 @@ pub(crate) fn parse_symbol_statement(
                 ast.push(AstNode {
                     kind: NodeKind::ExpressionStatement(expression),
                     span,
-                    scope: context.scope.clone(),
+                    scope: context.scope,
                 });
                 return Ok(());
             }
@@ -406,7 +406,7 @@ pub(crate) fn parse_symbol_statement(
         ast.push(AstNode {
             kind: NodeKind::ExpressionStatement(external_call_expression),
             span: external_call_span,
-            scope: context.scope.clone(),
+            scope: context.scope,
         });
         return Ok(());
     }
@@ -459,7 +459,7 @@ pub(crate) fn parse_symbol_statement(
         ast.push(AstNode {
             kind: NodeKind::ExpressionStatement(expression),
             span,
-            scope: context.scope.clone(),
+            scope: context.scope,
         });
         return Ok(());
     }
@@ -486,7 +486,7 @@ pub(crate) fn parse_symbol_statement(
             ast.push(AstNode {
                 kind: NodeKind::StructDefinition(declaration.id.to_owned(), params.to_owned()),
                 span: declaration_span,
-                scope: context.scope.clone(),
+                scope: context.scope,
             });
         }
 
@@ -498,7 +498,7 @@ pub(crate) fn parse_symbol_statement(
                     body.to_owned(),
                 ),
                 span: declaration_span,
-                scope: context.scope.clone(),
+                scope: context.scope,
             });
         }
 
@@ -506,7 +506,7 @@ pub(crate) fn parse_symbol_statement(
             ast.push(AstNode {
                 kind: NodeKind::VariableDeclaration(declaration.to_owned()),
                 span: declaration_span,
-                scope: context.scope.clone(),
+                scope: context.scope,
             });
         }
     }

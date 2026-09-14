@@ -41,7 +41,7 @@ fn test_scope(
     );
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
-        scope.clone(),
+        scope,
         Rc::new(TopLevelDeclarationTable::new(vec![], path_fork) ),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
@@ -138,7 +138,7 @@ fn bounded_expression_parses_simple_literal() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -176,7 +176,7 @@ fn bounded_expression_nested_parentheses() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -215,7 +215,7 @@ fn bounded_expression_nested_curly_braces() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(

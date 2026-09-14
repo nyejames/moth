@@ -67,7 +67,7 @@ fn collect_emitted_declaration_defaults_rejects_duplicate_function_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let path = path_fork.try_intern_portable_path("dup_func", &mut string_table).expect("test path fits");
-    let emitted = vec![function_node(path.clone()), function_node(path.clone())];
+    let emitted = vec![function_node(path), function_node(path)];
 
     let result = collect_emitted_declaration_defaults(&emitted);
 
@@ -82,7 +82,7 @@ fn collect_emitted_declaration_defaults_rejects_duplicate_struct_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let path = path_fork.try_intern_portable_path("dup_struct", &mut string_table).expect("test path fits");
-    let emitted = vec![struct_node(path.clone()), struct_node(path.clone())];
+    let emitted = vec![struct_node(path), struct_node(path)];
 
     let result = collect_emitted_declaration_defaults(&emitted);
 
@@ -114,57 +114,57 @@ fn synchronize_receiver_secondary_indexes_copies_signatures_and_preserves_order(
         .expect("test method path fits");
 
     let primary_a = receiver_entry(
-        method_a.clone(),
-        ReceiverKey::Struct(struct_a.clone()),
-        source_file.clone(),
+        method_a,
+        ReceiverKey::Struct(struct_a),
+        source_file,
         marker_signature(2),
     );
     let primary_b = receiver_entry(
-        method_b.clone(),
-        ReceiverKey::Struct(struct_b.clone()),
-        source_file.clone(),
+        method_b,
+        ReceiverKey::Struct(struct_b),
+        source_file,
         marker_signature(3),
     );
 
     // Secondary entries intentionally carry stale zero-parameter signatures so the copy from
     // the primary index is observable.
     let secondary_a = receiver_entry(
-        method_a.clone(),
-        ReceiverKey::Struct(struct_a.clone()),
-        source_file.clone(),
+        method_a,
+        ReceiverKey::Struct(struct_a),
+        source_file,
         marker_signature(0),
     );
     let secondary_b = receiver_entry(
-        method_b.clone(),
-        ReceiverKey::Struct(struct_b.clone()),
-        source_file.clone(),
+        method_b,
+        ReceiverKey::Struct(struct_b),
+        source_file,
         marker_signature(0),
     );
 
     let mut catalog = ReceiverMethodCatalog::default();
-    catalog.by_function_path.insert(method_a.clone(), primary_a);
-    catalog.by_function_path.insert(method_b.clone(), primary_b);
+    catalog.by_function_path.insert(method_a, primary_a);
+    catalog.by_function_path.insert(method_b, primary_b);
     catalog.by_receiver_and_name.insert(
-        (ReceiverKey::Struct(struct_a.clone()), shared_name),
+        (ReceiverKey::Struct(struct_a), shared_name),
         vec![secondary_a],
     );
     catalog.by_receiver_and_name.insert(
-        (ReceiverKey::Struct(struct_b.clone()), shared_name),
+        (ReceiverKey::Struct(struct_b), shared_name),
         vec![secondary_b],
     );
     catalog.by_method_name.insert(
         shared_name,
         vec![
             receiver_entry(
-                method_a.clone(),
-                ReceiverKey::Struct(struct_a.clone()),
-                source_file.clone(),
+                method_a,
+                ReceiverKey::Struct(struct_a),
+                source_file,
                 marker_signature(0),
             ),
             receiver_entry(
-                method_b.clone(),
-                ReceiverKey::Struct(struct_b.clone()),
-                source_file.clone(),
+                method_b,
+                ReceiverKey::Struct(struct_b),
+                source_file,
                 marker_signature(0),
             ),
         ],
@@ -175,14 +175,14 @@ fn synchronize_receiver_secondary_indexes_copies_signatures_and_preserves_order(
 
     // by_receiver_and_name entries received the synchronized primary signatures.
     let synced_a =
-        &catalog.by_receiver_and_name[&(ReceiverKey::Struct(struct_a.clone()), shared_name)][0];
+        &catalog.by_receiver_and_name[&(ReceiverKey::Struct(struct_a), shared_name)][0];
     assert_eq!(
         synced_a.signature.parameters.len(),
         2,
         "by_receiver_and_name entry for method_a must copy the primary signature"
     );
     let synced_b =
-        &catalog.by_receiver_and_name[&(ReceiverKey::Struct(struct_b.clone()), shared_name)][0];
+        &catalog.by_receiver_and_name[&(ReceiverKey::Struct(struct_b), shared_name)][0];
     assert_eq!(
         synced_b.signature.parameters.len(),
         3,
@@ -228,21 +228,21 @@ fn synchronize_receiver_secondary_indexes_rejects_missing_by_receiver_and_name_e
         .expect("single-component path has a name");
 
     let primary = receiver_entry(
-        method_a.clone(),
-        ReceiverKey::Struct(struct_a.clone()),
-        source_file.clone(),
+        method_a,
+        ReceiverKey::Struct(struct_a),
+        source_file,
         marker_signature(1),
     );
 
     let mut catalog = ReceiverMethodCatalog::default();
-    catalog.by_function_path.insert(method_a.clone(), primary);
+    catalog.by_function_path.insert(method_a, primary);
     // Omit by_receiver_and_name; by_method_name is present and consistent.
     catalog.by_method_name.insert(
         method_name,
         vec![receiver_entry(
-            method_a.clone(),
-            ReceiverKey::Struct(struct_a.clone()),
-            source_file.clone(),
+            method_a,
+            ReceiverKey::Struct(struct_a),
+            source_file,
             marker_signature(0),
         )],
     );
@@ -267,30 +267,30 @@ fn synchronize_receiver_secondary_indexes_rejects_duplicate_by_receiver_and_name
         .expect("single-component path has a name");
 
     let primary = receiver_entry(
-        method_a.clone(),
-        ReceiverKey::Struct(struct_a.clone()),
-        source_file.clone(),
+        method_a,
+        ReceiverKey::Struct(struct_a),
+        source_file,
         marker_signature(1),
     );
     let duplicate = receiver_entry(
-        method_a.clone(),
-        ReceiverKey::Struct(struct_a.clone()),
-        source_file.clone(),
+        method_a,
+        ReceiverKey::Struct(struct_a),
+        source_file,
         marker_signature(0),
     );
 
     let mut catalog = ReceiverMethodCatalog::default();
-    catalog.by_function_path.insert(method_a.clone(), primary);
+    catalog.by_function_path.insert(method_a, primary);
     catalog.by_receiver_and_name.insert(
-        (ReceiverKey::Struct(struct_a.clone()), method_name),
+        (ReceiverKey::Struct(struct_a), method_name),
         vec![duplicate.clone(), duplicate],
     );
     catalog.by_method_name.insert(
         method_name,
         vec![receiver_entry(
-            method_a.clone(),
-            ReceiverKey::Struct(struct_a.clone()),
-            source_file.clone(),
+            method_a,
+            ReceiverKey::Struct(struct_a),
+            source_file,
             marker_signature(0),
         )],
     );
@@ -320,30 +320,30 @@ fn synchronize_receiver_secondary_indexes_rejects_wrong_receiver_key() {
     // validation passes (it finds the entry by function path), and the secondary loop must
     // reject the wrong receiver key.
     let primary = receiver_entry(
-        method_a.clone(),
-        ReceiverKey::Struct(struct_a.clone()),
-        source_file.clone(),
+        method_a,
+        ReceiverKey::Struct(struct_a),
+        source_file,
         marker_signature(1),
     );
     let wrong_key_entry = receiver_entry(
-        method_a.clone(),
-        ReceiverKey::Struct(struct_b.clone()),
-        source_file.clone(),
+        method_a,
+        ReceiverKey::Struct(struct_b),
+        source_file,
         marker_signature(0),
     );
 
     let mut catalog = ReceiverMethodCatalog::default();
-    catalog.by_function_path.insert(method_a.clone(), primary);
+    catalog.by_function_path.insert(method_a, primary);
     catalog.by_receiver_and_name.insert(
-        (ReceiverKey::Struct(struct_a.clone()), method_name),
+        (ReceiverKey::Struct(struct_a), method_name),
         vec![wrong_key_entry],
     );
     catalog.by_method_name.insert(
         method_name,
         vec![receiver_entry(
-            method_a.clone(),
-            ReceiverKey::Struct(struct_a.clone()),
-            source_file.clone(),
+            method_a,
+            ReceiverKey::Struct(struct_a),
+            source_file,
             marker_signature(0),
         )],
     );
@@ -400,39 +400,39 @@ fn synchronize_receiver_secondary_indexes_rejects_extra_secondary_entry() {
         .expect("single-component path has a name");
 
     let primary = receiver_entry(
-        method_a.clone(),
-        ReceiverKey::Struct(struct_a.clone()),
-        source_file.clone(),
+        method_a,
+        ReceiverKey::Struct(struct_a),
+        source_file,
         marker_signature(1),
     );
 
     let mut catalog = ReceiverMethodCatalog::default();
-    catalog.by_function_path.insert(method_a.clone(), primary);
+    catalog.by_function_path.insert(method_a, primary);
     catalog.by_receiver_and_name.insert(
-        (ReceiverKey::Struct(struct_a.clone()), method_name),
+        (ReceiverKey::Struct(struct_a), method_name),
         vec![receiver_entry(
-            method_a.clone(),
-            ReceiverKey::Struct(struct_a.clone()),
-            source_file.clone(),
+            method_a,
+            ReceiverKey::Struct(struct_a),
+            source_file,
             marker_signature(0),
         )],
     );
     catalog.by_method_name.insert(
         method_name,
         vec![receiver_entry(
-            method_a.clone(),
-            ReceiverKey::Struct(struct_a.clone()),
-            source_file.clone(),
+            method_a,
+            ReceiverKey::Struct(struct_a),
+            source_file,
             marker_signature(0),
         )],
     );
     // An extra by_receiver_and_name entry whose function path is not a primary.
     catalog.by_receiver_and_name.insert(
-        (ReceiverKey::Struct(struct_b.clone()), orphan_name),
+        (ReceiverKey::Struct(struct_b), orphan_name),
         vec![receiver_entry(
-            orphan.clone(),
-            ReceiverKey::Struct(struct_b.clone()),
-            source_file.clone(),
+            orphan,
+            ReceiverKey::Struct(struct_b),
+            source_file,
             marker_signature(0),
         )],
     );

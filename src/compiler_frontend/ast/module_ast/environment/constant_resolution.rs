@@ -269,7 +269,7 @@ impl ConstantResolutionSession {
         // through the header-built visibility package so namespace bindings and aliases behave
         // exactly like they do in function/start body contexts.
         .with_file_visibility(Arc::clone(file_visibility))
-        .with_source_file_scope(header.source_file.clone())
+        .with_source_file_scope(header.source_file)
         .with_declaring_file_id(header.tokens.file_id)
         .with_resolved_type_aliases(resolved_type_aliases)
         .with_resolved_module_constants(resolved_constants)

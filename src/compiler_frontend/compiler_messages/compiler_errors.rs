@@ -153,7 +153,7 @@ pub struct CompilerMessages {
     /// Path-free diagnostics without type contexts retain no caller-supplied table. Retained rows
     /// remain separate from source/frozen contexts because diagnosed lanes may finish before a
     /// source database or boundary path builder exists.
-    pub(crate) render_path_contexts: Option<Box<Vec<RenderPathContext>>>,
+    pub(crate) render_path_contexts: Option<Box<[RenderPathContext]>>,
 }
 
 const _: () = assert!(std::mem::size_of::<CompilerMessages>() <= 128);
@@ -228,6 +228,7 @@ impl CompilerMessages {
     /// foreign domains is not detectable from bare tables; the provider/materialisation boundary
     /// solves it by retaining each table with its source `FrozenStringTable` and rebasing by
     /// spelling.
+    #[cfg(test)]
     pub(crate) fn attach_path_table_if_missing(
         &mut self,
         path_table: Arc<PathTable>,
@@ -263,10 +264,13 @@ impl CompilerMessages {
             )));
         }
 
-        self.render_path_contexts = Some(Box::new(vec![RenderPathContext {
-            diagnostic_range: 0..self.diagnostics.len(),
-            path_table,
-        }]));
+        self.render_path_contexts = Some(
+            vec![RenderPathContext {
+                diagnostic_range: 0..self.diagnostics.len(),
+                path_table,
+            }]
+            .into_boxed_slice(),
+        );
         Ok(())
     }
 
@@ -873,13 +877,17 @@ impl CompilerMessages {
         }
 
         if let Some(mut path_contexts) = render_path_contexts {
-            for path_context in path_contexts.iter_mut() {
+            for path_context in &mut path_contexts {
                 path_context.diagnostic_range.start += shift;
                 path_context.diagnostic_range.end += shift;
             }
-            self.render_path_contexts
-                .get_or_insert_with(|| Box::new(Vec::new()))
-                .extend(*path_contexts);
+            let mut combined = self
+                .render_path_contexts
+                .take()
+                .map(|boxed| boxed.into_vec())
+                .unwrap_or_default();
+            combined.extend(path_contexts.into_vec());
+            self.render_path_contexts = Some(combined.into_boxed_slice());
         }
         for mut type_context in render_type_contexts {
             type_context.diagnostic_range.start += shift;
@@ -1230,7 +1238,7 @@ fn remap_type_contexts_preserving_frozen_context(
 /// must keep the original component IDs while any premerge path table continues through the
 /// supplied mutable-table remap.
 fn remap_path_contexts_preserving_frozen_context(
-    path_contexts: Option<&mut Box<Vec<RenderPathContext>>>,
+    path_contexts: Option<&mut Box<[RenderPathContext]>>,
     remap: &StringIdRemap,
     frozen_contexts: &[RenderFrozenContext],
 ) {
@@ -1241,7 +1249,7 @@ fn remap_path_contexts_preserving_frozen_context(
         return;
     };
 
-    let incoming = std::mem::take(&mut **path_contexts);
+    let incoming = std::mem::replace(path_contexts, Box::new([])).into_vec();
     let mut remapped = Vec::with_capacity(incoming.len());
     for context in incoming {
         let segments = type_context_segments(&context.diagnostic_range, frozen_contexts);
@@ -1271,7 +1279,7 @@ fn remap_path_contexts_preserving_frozen_context(
             });
         }
     }
-    **path_contexts = remapped;
+    *path_contexts = remapped.into_boxed_slice();
 }
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]

@@ -225,7 +225,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             for path in declared_paths {
                 file_visibility
                     .visible_declaration_paths_mut()
-                    .insert(path.clone());
+                    .insert(*path);
 
                 let Some(name) = self.path_fork.component(*path) else {
                     continue;
@@ -251,15 +251,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 let is_trait = self.module_symbols.trait_paths.contains(path);
                 let binding = if is_type_alias {
                     VisibleNameBinding::TypeAlias {
-                        canonical_path: path.clone(),
+                        canonical_path: *path,
                     }
                 } else if is_trait {
                     VisibleNameBinding::Trait {
-                        canonical_path: path.clone(),
+                        canonical_path: *path,
                     }
                 } else {
                     VisibleNameBinding::SameFileDeclaration {
-                        declaration_path: path.clone(),
+                        declaration_path: *path,
                     }
                 };
 
@@ -273,15 +273,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 if is_type_alias {
                     file_visibility
                         .visible_type_alias_names
-                        .insert(name, SourceDeclarationTarget::Local(path.clone()));
+                        .insert(name, SourceDeclarationTarget::Local(*path));
                 } else if is_trait {
                     file_visibility
                         .visible_trait_names
-                        .insert(name, SourceDeclarationTarget::Local(path.clone()));
+                        .insert(name, SourceDeclarationTarget::Local(*path));
                 } else {
                     file_visibility
                         .visible_source_names
-                        .insert(name, SourceDeclarationTarget::Local(path.clone()));
+                        .insert(name, SourceDeclarationTarget::Local(*path));
                 }
             }
         }
@@ -290,12 +290,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         for path in &self.module_symbols.builtin_visible_symbol_paths {
             file_visibility
                 .visible_declaration_paths_mut()
-                .insert(path.clone());
+                .insert(*path);
             if let Some(name) = self.path_fork.component(*path) {
                 registry.register(name, VisibleNameBinding::Builtin, None)?;
                 file_visibility
                     .visible_source_names
-                    .insert(name, SourceDeclarationTarget::Local(path.clone()));
+                    .insert(name, SourceDeclarationTarget::Local(*path));
             }
         }
 
@@ -457,7 +457,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         self.environment
             .file_visibility_by_source
-            .insert(source_file.clone(), Arc::new(file_visibility));
+            .insert(*source_file, Arc::new(file_visibility));
         Ok(())
     }
 
@@ -557,24 +557,24 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         let binding = match &declaration.semantics {
             PublicDeclarationSemantics::TransparentAlias(_) => VisibleNameBinding::TypeAlias {
-                canonical_path: local_path.clone(),
+                canonical_path: *local_path,
             },
             PublicDeclarationSemantics::Trait(_) => VisibleNameBinding::Trait {
-                canonical_path: local_path.clone(),
+                canonical_path: *local_path,
             },
             _ => VisibleNameBinding::SourceDependency {
-                canonical_path: local_path.clone(),
+                canonical_path: *local_path,
             },
         };
 
         registry.register(local_name, binding, local_name_span)?;
         file_visibility
             .visible_declaration_paths_mut()
-            .insert(local_path.clone());
+            .insert(*local_path);
 
         let target = SourceDeclarationTarget::Imported {
             origin: origin.clone(),
-            local_path: local_path.clone(),
+            local_path: *local_path,
         };
         match &declaration.semantics {
             PublicDeclarationSemantics::TransparentAlias(_) => {
@@ -596,7 +596,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         self.environment
             .imported_declarations_by_local_path
-            .insert(local_path.clone(), origin.clone());
+            .insert(*local_path, origin.clone());
 
         let receiver_methods = match &declaration.semantics {
             PublicDeclarationSemantics::Struct(structure) => Some(&structure.receiver_methods),
@@ -619,11 +619,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             && view.concrete_call_summary(&function_origin).is_some()
         {
             self.environment.imported_functions_by_local_path.insert(
-                local_path.clone(),
+                *local_path,
                 super::ImportedFunctionContract {
                     target: SourceFunctionTarget::Imported {
                         origin: function_origin,
-                        local_path: local_path.clone(),
+                        local_path: *local_path,
                     },
                 },
             );
@@ -836,7 +836,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         };
 
         let mut record = NamespaceRecord::empty(NamespaceRecordSource::SourceFile(
-            dependency.dependency.path.clone(),
+            dependency.dependency.path,
         ));
         for binding in &interface.export_bindings {
             let declaration = view.declaration(binding.origin()).ok_or_else(|| {
@@ -852,7 +852,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .expect("path interner fork exhausted while binding imported declaration");
             let target = SourceDeclarationTarget::Imported {
                 origin: binding.origin().clone(),
-                local_path: local_path.clone(),
+                local_path,
             };
 
             match &declaration.semantics {
@@ -896,11 +896,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         && view.concrete_call_summary(function_origin).is_some()
                     {
                         self.environment.imported_functions_by_local_path.insert(
-                            local_path.clone(),
+                            local_path,
                             super::ImportedFunctionContract {
                                 target: SourceFunctionTarget::Imported {
                                     origin: function_origin.clone(),
-                                    local_path: local_path.clone(),
+                                    local_path,
                                 },
                             },
                         );
@@ -980,7 +980,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .expect("path interner fork exhausted while binding receiver method");
             let target = SourceFunctionTarget::Imported {
                 origin: method.method_origin.clone(),
-                local_path: method_path.clone(),
+                local_path: method_path,
             };
 
             file_visibility
@@ -1032,13 +1032,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             registry.register(
                 name,
                 VisibleNameBinding::SourceDependency {
-                    canonical_path: path.clone(),
+                    canonical_path: path,
                 },
                 span,
             )?;
             file_visibility
                 .visible_declaration_paths_mut()
-                .insert(path.clone());
+                .insert(path);
             file_visibility
                 .visible_source_names
                 .insert(name, SourceDeclarationTarget::Local(path));
@@ -1070,7 +1070,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 }
 
                 if self.symbol_origin_matches_source(path.local_path(), source_file) {
-                    Some((*name, path.local_path().clone()))
+                    Some((*name, *path.local_path()))
                 } else {
                     None
                 }
@@ -1211,7 +1211,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .declaration_spans_by_symbol_path
                 .get(path)
                 .copied();
-            implicit_constants.push((entry.export_name, path.clone(), span));
+            implicit_constants.push((entry.export_name, *path, span));
         }
     }
 
@@ -1638,7 +1638,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             &*self.path_fork,
         ) {
             return Err(CompilerDiagnostic::explicit_moth_extension(
-                dependency.dependency.path.clone(),
+                dependency.dependency.path,
                 Some(dependency.dependency.span),
             )
             .into());
@@ -1716,7 +1716,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
             ResolvedDependencyTarget::External { .. } => {
                 Err(CompilerDiagnostic::direct_symbol_path_import(
-                    dependency.dependency.path.clone(),
+                    dependency.dependency.path,
                     Some(dependency.dependency.span),
                 )
                 .into())

@@ -112,7 +112,7 @@ impl<'a> HirBuilder<'a> {
             &capture_span,
             *binding_span,
         )?;
-        self.with_temporary_local_bindings([(binding_path.clone(), capture_local)], |builder| {
+        self.with_temporary_local_bindings([(*binding_path, capture_local)], |builder| {
             append_present(builder)
         })?;
 

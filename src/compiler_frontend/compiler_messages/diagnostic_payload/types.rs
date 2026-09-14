@@ -30,9 +30,9 @@ pub enum NameNamespace {
 /// diagnostic stays spanless rather than manufacturing source provenance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SourceSpanCapacityResource {
-    ExtendedSpanTable,
-    LogicalPathTable,
-    SourceIdentityTable,
+    ExtendedSpan,
+    LogicalPath,
+    SourceIdentity,
 }
 
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.

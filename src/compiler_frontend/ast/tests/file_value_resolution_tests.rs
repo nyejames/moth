@@ -48,7 +48,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{tokenize, TokenizeFailure};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};

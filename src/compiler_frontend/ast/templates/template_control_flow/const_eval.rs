@@ -74,17 +74,17 @@ pub(crate) fn collect_option_capture_binding_path(
     output: &mut Vec<PathId>,
 ) {
     if let MatchPattern::OptionPresentCapture { binding_path, .. } = pattern {
-        output.push(binding_path.clone());
+        output.push(*binding_path);
     }
 }
 
 fn collect_loop_binding_paths(bindings: &LoopBindings, output: &mut Vec<PathId>) {
     if let Some(item) = &bindings.item {
-        output.push(item.id.clone());
+        output.push(item.id);
     }
 
     if let Some(index) = &bindings.index {
-        output.push(index.id.clone());
+        output.push(index.id);
     }
 }
 

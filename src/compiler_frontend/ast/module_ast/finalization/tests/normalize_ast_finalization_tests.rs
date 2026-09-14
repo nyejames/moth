@@ -4,7 +4,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn finalization_fold_composed_tir_root_folds_view_text() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let view_text = string_table.intern("store-backed view");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -34,7 +34,7 @@ fn finalization_fold_composed_tir_root_folds_view_text() {
 #[test]
 fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let normalized_text = string_table.intern("normalized dynamic payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -153,7 +153,7 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
 #[test]
 fn finalization_merges_expression_overrides_without_duplicate_sites() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
@@ -236,7 +236,7 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
 #[test]
 fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let normalized_text = string_table.intern("normalized parsed dynamic payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -299,7 +299,7 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
 #[test]
 fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collection() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let (root_template_id, root_context, child_site_id) = {
         let mut store = template_ir_store.borrow_mut();
@@ -412,7 +412,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
 #[test]
 fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let normalized_text = string_table.intern("normalized branch selector payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -523,7 +523,7 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
 #[test]
 fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let normalized_text = string_table.intern("normalized loop header payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -641,7 +641,7 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let structural_text = string_table.intern("structural dynamic payload");
     let overlay_text = string_table.intern("finalized expression overlay");
 
@@ -938,7 +938,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
 #[test]
 fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let structural_text = string_table.intern("structural");
     let override_text = string_table.intern("root-override");
 
@@ -1068,7 +1068,7 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
 #[test]
 fn finalization_rejects_nested_runtime_wrapper_in_exact_wrapper_overlay() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let (template, template_ir_store) =
         nested_wrapper_finalization_fixture(&mut string_table, true);
 
@@ -1092,7 +1092,7 @@ fn finalization_rejects_nested_runtime_wrapper_in_exact_wrapper_overlay() {
 #[test]
 fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("runtime root");
@@ -1140,7 +1140,7 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
 #[test]
 fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("runtime handoff");
@@ -1191,7 +1191,7 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
 #[test]
 fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("runtime slot root");
@@ -1253,7 +1253,7 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
 #[test]
 fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagnostic() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("module constant runtime plan");
@@ -1304,7 +1304,7 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
 #[test]
 fn finalization_accepts_supported_nested_wrapper_exact_view() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let (template, template_ir_store) =
         nested_wrapper_finalization_fixture(&mut string_table, false);
 
@@ -1331,7 +1331,7 @@ fn finalization_accepts_supported_nested_wrapper_exact_view() {
 #[test]
 fn finalization_fold_uses_resolved_slot_view_context() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let before_text = string_table.intern("before");
     let after_text = string_table.intern("after");
     let fill_text = string_table.intern("filled");
@@ -1439,7 +1439,7 @@ fn finalization_fold_uses_resolved_slot_view_context() {
 #[test]
 fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let text_id = string_table.intern("text before unfilled slot");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -1501,7 +1501,7 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let text_id = string_table.intern("formatted text before unfilled slot");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));

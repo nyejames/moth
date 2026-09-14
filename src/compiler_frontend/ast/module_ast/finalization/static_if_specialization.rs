@@ -207,9 +207,9 @@ impl StaticIfSpecializer<'_> {
                         else_provenance
                     });
                     let selected_scope = if select_then {
-                        Some(branch_metadata.then_scope.clone())
+                        Some(branch_metadata.then_scope)
                     } else {
-                        branch_metadata.else_scope.clone()
+                        branch_metadata.else_scope
                     };
                     let body = if select_then {
                         std::mem::take(then_body)
@@ -272,7 +272,7 @@ impl StaticIfSpecializer<'_> {
             }
             NodeKind::Function(function_path, _, body) => {
                 let previous_function_path =
-                    self.current_function_path.replace(function_path.clone());
+                    self.current_function_path.replace(*function_path);
                 let mut function_environment = environment.clone();
                 let result = self.specialize_body(body, &mut function_environment);
                 self.current_function_path = previous_function_path;
@@ -459,12 +459,12 @@ impl StaticIfSpecializer<'_> {
                     let (body, scope) = if select_then {
                         (
                             std::mem::take(&mut value_if.then_body),
-                            value_if.then_scope.clone(),
+                            value_if.then_scope,
                         )
                     } else {
                         (
                             std::mem::take(&mut value_if.else_body),
-                            value_if.else_scope.clone(),
+                            value_if.else_scope,
                         )
                     };
                     Some(ValueLexicalScope {
@@ -581,7 +581,7 @@ impl StaticIfSpecializer<'_> {
             return;
         };
         self.function_provenance
-            .entry(function_path.clone())
+            .entry(*function_path)
             .or_default()
             .merge(provenance);
     }
@@ -598,7 +598,7 @@ impl StaticIfSpecializer<'_> {
             .resolver
             .resolve_expression(&declaration.value, environment)
         {
-            Ok(expression) => environment.insert(declaration.id.clone(), expression),
+            Ok(expression) => environment.insert(declaration.id, expression),
             Err(ConstResolutionError::TemplateClassification(error)) => {
                 return Err(TemplateNormalizationError::from(error));
             }
@@ -644,7 +644,7 @@ fn take_terminal_value_body(expression: &mut Expression) -> Option<(Vec<AstNode>
             if exits.terminates && !exits.produces_value && !exits.can_fall_through {
                 Some((
                     std::mem::take(&mut value_lexical_scope.body),
-                    value_lexical_scope.scope.clone(),
+                    value_lexical_scope.scope,
                 ))
             } else {
                 None
@@ -658,7 +658,7 @@ fn take_terminal_value_body(expression: &mut Expression) -> Option<(Vec<AstNode>
 fn module_const_environment(const_values: &ConstValueStore) -> ConstValueEnvironment {
     let module = const_values
         .iter_module_constant_views()
-        .map(|row| (row.path.clone(), row.id))
+        .map(|row| (*row.path, row.id))
         .collect::<FxHashMap<_, _>>();
     ConstValueEnvironment::with_module_base(module)
 }

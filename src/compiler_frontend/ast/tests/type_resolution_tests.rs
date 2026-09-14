@@ -161,7 +161,7 @@ fn checked_conversion_rejects_inferred_type() {
 #[test]
 fn checked_conversion_rejects_unresolved_namespaced_type() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment =
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
 
@@ -193,7 +193,7 @@ fn checked_conversion_rejects_unresolved_namespaced_type() {
 #[test]
 fn optional_conversion_returns_none_for_unresolved_named_type() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment =
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
     let missing = string_table.intern("Missing");
@@ -243,7 +243,7 @@ fn optional_conversion_returns_some_for_resolved_builtin() {
 #[test]
 fn literal_capacity_resolves_to_fixed_collection() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
     let mut resolution_context =
@@ -342,7 +342,7 @@ fn constant_capacity_resolves_to_fixed_collection() {
 #[test]
 fn nested_fixed_collections_fold_both_capacities() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
     let mut resolution_context =
@@ -468,7 +468,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
     let wrapper_path = path_fork.try_intern_portable_path("wrapper", &mut string_table).expect("test path fits");
     let wrapper_template = slot_field_default_template(&mut template_ir_store.borrow_mut());
     let wrapper_declaration = Declaration {
-        id: wrapper_path.clone(),
+        id: wrapper_path,
         value: Expression::template(wrapper_template, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -526,7 +526,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
     let builder_member =
         SyntheticInterfaceMemberIdentity::new(SyntheticInterfaceClass::Builder, "assets", "bundle");
     let constant = Declaration {
-        id: constant_path.clone(),
+        id: constant_path,
         value: Expression::int(7, None, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
                 project_member.clone(),
@@ -848,7 +848,7 @@ fn map_type_syntax_rejects_invalid_source_key_types() {
 #[test]
 fn map_type_resolves_for_supported_key() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
     let mut resolution_context =
@@ -888,7 +888,7 @@ fn map_type_resolves_for_supported_key() {
 #[test]
 fn map_type_rejects_unsupported_key() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
     let mut resolution_context =
@@ -925,7 +925,7 @@ fn map_type_rejects_unsupported_key() {
 #[test]
 fn map_key_capability_rejects_generic_key_as_unsupported() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let parameter_name = string_table.intern("Key");
     let key_type_id = type_environment.register_synthetic_generic_parameter(parameter_name);
@@ -949,7 +949,7 @@ fn map_key_capability_rejects_generic_key_as_unsupported() {
 #[test]
 fn map_type_rejects_excessive_inline_nesting() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
     let mut resolution_context =
@@ -995,7 +995,7 @@ fn map_type_rejects_excessive_inline_nesting() {
 #[test]
 fn map_type_allows_two_level_nesting() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
     let mut resolution_context =

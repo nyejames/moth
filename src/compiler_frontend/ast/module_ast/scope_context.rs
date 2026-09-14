@@ -518,7 +518,7 @@ impl Clone for ScopeContext {
 
         Self {
             kind: self.kind.clone(),
-            scope: self.scope.clone(),
+            scope: self.scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
             template_ir_store: Rc::clone(&self.template_ir_store),
@@ -880,7 +880,7 @@ impl ScopeContext {
 
         ScopeContext {
             kind: ContextKind::Expression,
-            scope: self.scope.clone(),
+            scope: self.scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
             template_ir_store: Rc::clone(&self.template_ir_store),
@@ -921,7 +921,7 @@ impl ScopeContext {
 
         ScopeContext {
             kind: template_kind,
-            scope: self.scope.clone(),
+            scope: self.scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
             template_ir_store: Rc::clone(&self.template_ir_store),

@@ -1922,7 +1922,7 @@ impl CompilerDiagnostic {
             SpanCapacityReason::ExtendedTableFull => Ok(Self::source_span_capacity(
                 error.start(),
                 error.length(),
-                SourceSpanCapacityResource::ExtendedSpanTable,
+                SourceSpanCapacityResource::ExtendedSpan,
                 span,
             )),
             SpanCapacityReason::EndUnrepresentable => {

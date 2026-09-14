@@ -14,6 +14,10 @@ use crate::compiler_frontend::paths::path_normalization::{
 /// Resolve provider-backed and binding-backed dependency classes before indexed source resolution.
 ///
 /// Directory module scheduling calls this with provider references retained by header syntax.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "structural provider resolution keeps the retained path, clause kind, declaring file, resolver, and mutable path/external-import/resolution/string state as separate borrows"
+)]
 pub(crate) fn resolve_structural_provider_reference(
     provider: &RetainedDependencyPath,
     clause_kind: DependencyClauseKind,
@@ -104,6 +108,10 @@ struct ScannedMothSource {
     source_byte_count: usize,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "scanning keeps the canonical file, directives, resolver, entry path, and mutable database/path/cache/string state as separate borrows"
+)]
 fn scan_and_cache_local_moth_source(
     canonical_file: &Path,
     style_directives: &StyleDirectiveRegistry,
@@ -138,6 +146,10 @@ fn scan_and_cache_local_moth_source(
         source_byte_count,
     })
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "template scanning keeps the canonical file, directives, resolver, entry path, and mutable database/path/cache/string state as separate borrows"
+)]
 fn scan_and_cache_local_moth_template_source(
     canonical_file: &Path,
     style_directives: &StyleDirectiveRegistry,
@@ -478,6 +490,10 @@ fn walk_reachable_sources(
 /// files and returns the completed final source identity domain with prepared inputs.
 /// WHY: source kind belongs to Stage 0 input discovery. Builder-supported content assets can be
 /// loaded and carried forward without being treated as Moth module roots.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "reachable traversal keeps the entry point, resolver, directives, and mutable external-import/kind/resource/path/string state as separate borrows"
+)]
 pub(crate) fn discover_reachable_source_files(
     entry_point: &Path,
     project_path_resolver: &ProjectPathResolver,
@@ -648,7 +664,7 @@ fn resolve_module_root_bare_dependency(
             crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
                 SourceDiscoveryError::Diagnostic(
                     CompilerDiagnostic::source_table_capacity(
-                        SourceSpanCapacityResource::LogicalPathTable,
+                        SourceSpanCapacityResource::LogicalPath,
                     ),
                 )
             }
@@ -663,7 +679,7 @@ fn resolve_module_root_bare_dependency(
         .try_join(module_prefix, provider, &mut scratch)
         .ok_or_else(|| {
             SourceDiscoveryError::Diagnostic(CompilerDiagnostic::source_table_capacity(
-                SourceSpanCapacityResource::LogicalPathTable,
+                SourceSpanCapacityResource::LogicalPath,
             ))
         })?;
 

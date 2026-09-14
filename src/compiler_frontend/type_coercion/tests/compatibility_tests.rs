@@ -4,7 +4,7 @@ use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::BuiltinTypeConstructor;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeConstructor};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::{
     TypeCompatibilityCache, TypeCompatibilityMode, is_declaration_compatible,
@@ -193,7 +193,7 @@ fn struct_type_identity_is_nominal_and_const_record_sensitive_only() {
 
     let (_, runtime_a) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: path.clone(),
+        path,
         fields: Box::new([]),
         generic_parameters: None,
         const_record: false,
@@ -201,7 +201,7 @@ fn struct_type_identity_is_nominal_and_const_record_sensitive_only() {
 
     let (_, runtime_b) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: path.clone(),
+        path,
         fields: Box::new([]),
         generic_parameters: None,
         const_record: false,
@@ -257,7 +257,7 @@ fn const_record_generic_instance_is_not_compatible_with_runtime_generic_instance
 
     let (runtime_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: pair_path.clone(),
+        path: pair_path,
         fields: Box::new([]),
         generic_parameters: None,
         const_record: false,

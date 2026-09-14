@@ -198,6 +198,10 @@ fn parse_catch_error_binding(
 /// WHAT: validates the leading colon, sets up a child control-flow context with the
 /// error variable bound, parses the handler body, and validates value-production requirements.
 /// WHY: this is the shared backend for both binding and no-binding catch handlers.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "catch body parsing keeps the token stream, scope, mutable interner/string/path state, handler site, error binding, and warning sink as separate borrows"
+)]
 fn parse_catch_fallible_handler_body(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

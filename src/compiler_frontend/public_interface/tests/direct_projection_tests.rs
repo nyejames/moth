@@ -397,7 +397,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         returns: vec![],
     };
     let entry = receiver_entry(
-        method_fn_path.clone(),
+        method_fn_path,
         ReceiverKey::Struct(receiver_path),
         signature,
     );
@@ -504,7 +504,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         returns: vec![],
     };
     let mut entry = receiver_entry(
-        method_fn_path.clone(),
+        method_fn_path,
         ReceiverKey::Struct(receiver_path),
         method_signature.clone(),
     );
@@ -538,7 +538,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     let mut receiver_catalog = ReceiverMethodCatalog::default();
     receiver_catalog
         .by_function_path
-        .insert(method_fn_path.clone(), entry);
+        .insert(method_fn_path, entry);
     let projection_input = AstPublicInterfaceProjectionInput {
         root_table,
         trait_roots: vec![],
@@ -549,21 +549,21 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     // Build a generic function template for the receiver method, using the same generic
     // parameter list as the receiver nominal so the aliasing step sees matching parameters.
     let template = GenericFunctionTemplate {
-        function_path: method_fn_path.clone(),
+        function_path: method_fn_path,
         source_file: PathId::ROOT,
         declaration_identity: None,
         generic_parameter_owner: None,
         generic_parameter_list_id: list_id,
         signature: method_signature,
         body_tokens: Some(GenericFunctionBody::source(FileTokens::new(
-            method_fn_path.clone(),
+            method_fn_path,
             SourceId::COMPILATION_ROOT,
             vec![],
         ))),
         declaration_span: None,
     };
     let template_map: FxHashMap<PathId, GenericFunctionTemplate> =
-        [(method_fn_path.clone(), template)].into_iter().collect();
+        [(method_fn_path, template)].into_iter().collect();
 
     let registry = ExternalPackageRegistry::new();
     let build_result = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
@@ -620,7 +620,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
 
 #[test]
 fn module_origin_survives_empty_public_surface() {
-    let mut path_fork = PathInternerFork::empty();
+    let path_fork = PathInternerFork::empty();
     let string_table = StringTable::new();
     let env = TypeEnvironment::new();
     let export_seed = DirectExportSeed::new(module_origin(), vec![], FxHashMap::default());
@@ -1048,8 +1048,8 @@ fn receiver_method_retains_folded_parameter_defaults() {
     };
 
     let entry = receiver_entry(
-        method_fn_path.clone(),
-        ReceiverKey::Struct(receiver_path.clone()),
+        method_fn_path,
+        ReceiverKey::Struct(receiver_path),
         signature,
     );
 

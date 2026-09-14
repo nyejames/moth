@@ -1,5 +1,5 @@
 use super::*;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 #[test]
 fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independent() {
     let forward = synthetic_identity_fixture(&["alpha", "beta"]);

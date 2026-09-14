@@ -314,7 +314,7 @@ fn parse_copy_place_payload(
 pub(crate) fn place_expression_from_expression(expression: &Expression) -> Option<PlaceExpression> {
     match &expression.kind {
         ExpressionKind::Reference(path) => Some(PlaceExpression {
-            kind: PlaceExpressionKind::Local(path.clone()),
+            kind: PlaceExpressionKind::Local(*path),
             type_id: expression.type_id,
             diagnostic_type: expression.diagnostic_type.clone(),
             value_mode: expression.value_mode.clone(),
@@ -374,7 +374,7 @@ pub(crate) fn root_binding_name_of_place(
 ///      expression tree (local reference or field access) that the evaluator already understands.
 pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expression {
     let kind = match &place.kind {
-        PlaceExpressionKind::Local(path) => ExpressionKind::Reference(path.clone()),
+        PlaceExpressionKind::Local(path) => ExpressionKind::Reference(*path),
 
         PlaceExpressionKind::Field { base, field } => ExpressionKind::FieldAccess {
             base: Box::new(expression_from_place_expression(base)),

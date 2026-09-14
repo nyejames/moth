@@ -56,6 +56,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+#[cfg(any(test, feature = "show_hir"))]
 use std::fmt::Write as _;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 

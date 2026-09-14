@@ -15,7 +15,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 #[test]
 fn lowers_while_to_header_body_exit_shape() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();

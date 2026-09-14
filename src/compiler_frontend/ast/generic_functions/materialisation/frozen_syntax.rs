@@ -116,7 +116,7 @@ impl StableBodySyntax {
 
         let mut pool = FrozenStringPool::default();
         let mut frozen_tokens = tokens.tokens.clone();
-        let (mut path_syntax, path_syntax_map) =
+        let (path_syntax, path_syntax_map) =
             source_path_syntax.capture_persistent_generic_subset(&mut frozen_tokens)?;
         let mut path_syntax_map = path_syntax_map.into_iter().collect::<Vec<_>>();
         path_syntax_map.sort_by_key(|(_, compact_id)| *compact_id);
@@ -254,11 +254,3 @@ impl FrozenStringPool {
     }
 }
 
-fn pool_remap(id: StringId, remap: &[StringId]) -> Result<StringId, CompilerError> {
-    let index = id.index() as usize;
-    remap.get(index).copied().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "frozen generic payload references out-of-range pool entry {index}"
-        ))
-    })
-}

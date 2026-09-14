@@ -50,7 +50,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
             let diagnostic_type = DataType::Function(Box::new(None), signature.clone());
             let declaration = Declaration {
-                id: local_path.clone(),
+                id: local_path,
                 value: Expression::new(
                     ExpressionKind::NoValue,
                     None,
@@ -72,7 +72,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     )
                 })?;
             self.resolved_function_signatures_by_path.insert(
-                local_path.clone(),
+                local_path,
                 ResolvedFunctionSignature {
                     receiver: None,
                     signature: signature.clone(),
@@ -101,7 +101,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
                 self.generic_function_templates_by_path.insert(
-                    local_path.clone(),
+                    local_path,
                     GenericFunctionTemplate {
                         function_path: local_path,
                         source_file: PathId::ROOT,
@@ -236,8 +236,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 string_table,
                             )
                         })?
-                        .path
-                        .clone();
+                        .path;
                     crate::compiler_frontend::datatypes::ReceiverKey::Struct(path)
                 }
                 crate::compiler_frontend::semantic_identity::OriginTypeCategory::Choice => {
@@ -252,8 +251,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 string_table,
                             )
                         })?
-                        .path
-                        .clone();
+                        .path;
                     crate::compiler_frontend::datatypes::ReceiverKey::Choice(path)
                 }
                 crate::compiler_frontend::semantic_identity::OriginTypeCategory::TransparentAlias => {
@@ -281,7 +279,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     )
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
                 self.resolved_function_signatures_by_path.insert(
-                    method_path.clone(),
+                    method_path,
                     ResolvedFunctionSignature {
                         receiver: Some(receiver.clone()),
                         signature: signature.clone(),
@@ -294,7 +292,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 ) {
                     if self
                         .projected_imported_receiver_methods_by_local_path
-                        .insert(method_path.clone(), method.method_origin.clone())
+                        .insert(method_path, method.method_origin.clone())
                         .is_some()
                     {
                         return Err(CompilerMessages::from_error_ref(
@@ -306,7 +304,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     }
                     self.index_imported_receiver_method_path(
                         method.method_origin.clone(),
-                        method_path.clone(),
+                        method_path,
                         string_table,
                     );
                     let generic_parameter_list_id =
@@ -357,7 +355,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 };
                 if self
                     .projected_imported_receiver_methods_by_local_path
-                    .insert(method_path.clone(), method.method_origin.clone())
+                    .insert(method_path, method.method_origin.clone())
                     .is_some()
                 {
                     return Err(CompilerMessages::from_error_ref(
@@ -369,7 +367,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
                 self.index_imported_receiver_method_path(
                     method.method_origin.clone(),
-                    method_path.clone(),
+                    method_path,
                     string_table,
                 );
                 self.projected_imported_functions_by_local_path.insert(

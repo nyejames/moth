@@ -88,6 +88,10 @@ fn resolve_provider_target_via_filesystem(
     Ok(canonical_source_path)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "provider invocation keeps canonical and consumer paths, import identity, prefix, provider trait object, resolver, and mutable path/external-import/string state as separate borrows"
+)]
 fn invoke_provider_and_record_resolution(
     canonical_source_path: PathBuf,
     consumer_canonical_path: &Path,
@@ -267,7 +271,7 @@ fn check_provider_dependency_module_boundary(
     if consumer_container != target_container {
         return Err(SourceDiscoveryError::from(
             CompilerDiagnostic::cross_module_import_not_exported(
-                dependency_path.clone(),
+                dependency_path,
                 source_span,
             ),
         ));

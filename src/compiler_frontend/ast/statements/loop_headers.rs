@@ -959,7 +959,7 @@ fn token_stream_with_eof(
 
     let mut tokens_with_eof = tokens.to_vec();
     let eof_anchor = &tokens[tokens.len() - 1];
-    let src_path = context.scope.clone();
+    let src_path = context.scope;
     tokens_with_eof.push(Token::new(TokenKind::Eof, eof_anchor.span));
 
     FileTokens::new_from_slice(

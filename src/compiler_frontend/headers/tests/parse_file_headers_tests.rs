@@ -157,6 +157,10 @@ pub(crate) fn prepare_single_file_with_fork(
     (output, span_builder)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test builder mirrors the production preparation boundary inputs: source, path, shared context, and mutable string/span/path state plus the two offsets"
+)]
 fn prepare_test_source_file(
     source: &str,
     file_path: &Path,

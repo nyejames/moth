@@ -708,7 +708,7 @@ fn parse_type_slice(
     let mut slice_tokens = tokens.to_vec();
     slice_tokens.push(Token::new(TokenKind::Eof, LocalSpan::source_start()));
     let mut stream = FileTokens::new_path_free_substream(
-        outer_stream.src_path.clone(),
+        outer_stream.src_path,
         outer_stream.file_id,
         outer_stream.canonical_os_path.clone(),
         slice_tokens,

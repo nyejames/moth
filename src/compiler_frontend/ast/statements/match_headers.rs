@@ -105,6 +105,10 @@ pub(crate) fn parse_scrutinee_until_is(
 /// binding so the matched branch can reference the unwrapped value.
 /// WHY: statement `if`, template `if`, full matches and value single predicates
 /// share one capture-scope construction rule.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "capture-scope construction keeps the match context, capture identity, binding and pattern spans, inner type, and mutable interner/string/path state as separate borrows"
+)]
 pub(crate) fn build_option_present_capture_scope_and_pattern(
     match_context: &ScopeContext,
     capture_name: StringId,
@@ -112,7 +116,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     inner_type_id: TypeId,
     pattern_span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
+    _string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
     let mut arm_scope = match_context.clone();
@@ -133,7 +137,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
 
     let capture_data_type = diagnostic_type_spelling(inner_type_id, type_interner.environment());
     let declaration = Declaration {
-        id: binding_path.clone(),
+        id: binding_path,
         value: Expression::new(
             ExpressionKind::NoValue,
             binding_span,
@@ -298,7 +302,7 @@ fn parse_match_pattern_header(
         let nominal_path = type_environment
             .nominal_path(scrutinee.type_id)
             .cloned()
-            .unwrap_or_else(|| match_context.scope.clone());
+            .unwrap_or(match_context.scope);
 
         // Every bare symbol is resolved as a declared choice variant. Unknown
         // names receive the direct UnknownVariant diagnostic; no whole-value
@@ -452,7 +456,7 @@ fn build_arm_scope_with_choice_captures(
     match_context: &ScopeContext,
     parsed_pattern: ParsedChoicePattern,
     type_environment: &TypeEnvironment,
-    string_table: &mut StringTable,
+    _string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
     let mut arm_scope = match_context.clone();
@@ -544,7 +548,7 @@ fn convert_choice_payload(
             fields: fields
                 .iter()
                 .map(|field| Declaration {
-                    id: field.name.clone(),
+                    id: field.name,
                     value: Expression::new(
                         ExpressionKind::NoValue,
                         field.span,

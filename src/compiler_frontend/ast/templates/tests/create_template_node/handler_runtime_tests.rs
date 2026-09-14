@@ -42,7 +42,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let mut token_stream = template_tokens_from_source("[html_defaults.color]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let scope = token_stream.src_path.clone();
+    let scope = token_stream.src_path;
 
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
@@ -52,9 +52,9 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let field_path = path_fork.try_intern_child(struct_path, field_name).expect("test path fits");
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: struct_path.clone(),
+        path: struct_path,
         fields: vec![FieldDefinition {
-            name: field_path.clone(),
+            name: field_path,
             type_id: string_type_id,
             span: None,
         }]
@@ -196,7 +196,7 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let scope = token_stream.src_path.clone();
+    let scope = token_stream.src_path;
     let list_shell_name = string_table.intern("list_shell");
     let keep_going_name = string_table.intern("keep_going");
     let declaration = Declaration {
@@ -370,7 +370,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     let flags_scope = path_fork.try_intern_portable_path("flags.moth", &mut string_table).expect("test path fits");
     let imported_path = path_fork.try_intern_child(flags_scope, show_banner).expect("test path fits");
     let declaration = Declaration {
-        id: imported_path.clone(),
+        id: imported_path,
         value: Expression::bool(true, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -706,7 +706,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let mut context = new_constant_context(token_stream.src_path, &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -756,7 +756,7 @@ fn const_required_template_loop_reports_non_const_collection_source() {
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+let mut context = new_constant_context(token_stream.src_path, &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let collection_type_id =
         type_environment.intern_collection(type_environment.builtins().string, None);
@@ -808,7 +808,7 @@ fn const_required_template_loop_reports_non_const_body() {
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+let mut context = new_constant_context(token_stream.src_path, &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -899,7 +899,7 @@ fn const_required_construction_preparation_is_reused_by_folding() {
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let context = new_constant_context(token_stream.src_path, &path_fork);
 
     reset_ast_counters();
     let construction =
@@ -992,7 +992,7 @@ fn const_required_template_option_capture_present_folds_then_branch() {
     let mut path_fork = PathInternerFork::empty();
     let context_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
-    let context = new_constant_context(context_scope.clone(), &path_fork);
+    let context = new_constant_context(context_scope, &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
@@ -1032,7 +1032,7 @@ fn const_required_template_option_capture_absent_folds_else_branch() {
     let mut path_fork = PathInternerFork::empty();
     let context_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
-    let context = new_constant_context(context_scope.clone(), &path_fork);
+    let context = new_constant_context(context_scope, &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
@@ -1163,7 +1163,7 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
     let mut token_stream = template_tokens_from_source("[if maybe_name is |name|: [name]]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let mut context = new_constant_context(token_stream.src_path, &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let maybe_name_type_id = type_environment.intern_option(type_environment.builtins().string);
@@ -1209,7 +1209,7 @@ fn const_required_template_if_rejects_runtime_local_condition() {
     let mut token_stream = template_tokens_from_source("[if show_banner: Visible]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = new_constant_context(token_stream.src_path.clone(), &path_fork);
+    let mut context = new_constant_context(token_stream.src_path, &path_fork);
     let show_banner = string_table.intern("show_banner");
     context.add_var(
         Declaration {

@@ -181,6 +181,10 @@ impl DirectExportSeed {
 ///      reconstructed by a later stage. Resolving the origin from the table validates that every
 ///      directly-defined public declaration belongs to one unique active module origin, instead
 ///      of trusting a single loose argument.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "export seed projection keeps the origin table, active root id, sorted headers, symbols, provider dependencies, registry, and string/path state as separate borrows"
+)]
 pub(in crate::compiler_frontend) fn build_direct_export_seed(
     source_module_origins: &SourceModuleOriginTable,
     active_root_file_id: SourceId,
@@ -439,7 +443,7 @@ fn index_public_nominal_type_origins(
             continue;
         }
 
-        nominal_type_origins.insert(header.tokens.src_path.clone(), origin);
+        nominal_type_origins.insert(header.tokens.src_path, origin);
     }
 
     Ok(nominal_type_origins)
@@ -523,7 +527,7 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
                 header.tokens.src_path, existing, origin
             )));
         }
-        origins.insert(header.tokens.src_path.clone(), origin);
+            origins.insert(header.tokens.src_path, origin);
     }
 
     Ok(origins)
@@ -580,7 +584,7 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
                 header.tokens.src_path, existing, origin
             )));
         }
-        origins.insert(header.tokens.src_path.clone(), origin);
+            origins.insert(header.tokens.src_path, origin);
     }
 
     Ok(origins)

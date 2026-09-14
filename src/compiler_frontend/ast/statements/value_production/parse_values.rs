@@ -232,6 +232,10 @@ fn parse_single_inferred_declaration_value(
 /// forms such as `none` still parse; unknown slots stay inferred.
 /// WHY: mixed multi-bind must keep known-slot context at parse time even though
 /// unknown siblings are inferred later from every producing path.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "fixed-arity value parsing keeps the token stream, scope, mutable interner/string/path state, arity, slot types, and receiver kind as separate borrows"
+)]
 pub(crate) fn parse_fixed_arity_inferred_values(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

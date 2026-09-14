@@ -1,18 +1,18 @@
 # September 2026 Summary
 
+## End-to-end CLI / macOS Apple Silicon (6D851D)
+Change since initial benchmark: -6ms avg; 9 faster, 0 slower; 28/40 cases; workload changed: 12 cases (speed_test_check, speed_test_build, docs_check, type_stress_check, fold_stress_check, collection_stress_check, one_module_kitchen_sink_check, expression_rpn_churn_check, collection_map_borrow_churn_check, import_external_churn_check, import_external_churn_build, borrow_stress_check)
+Timing schema: 2
+Initial: all ~56ms, Core ~25ms, Docs ~280ms, Stress ~70ms, Module ~11ms, Borrow ~7ms
+Latest: all ~50ms, Core ~21ms, Docs ~263ms, Stress ~63ms, Module ~10ms, Borrow ~6ms
+Case spread latest: ~161ms
+
 ## Diagnostic data layout / macOS Apple Silicon (6D851D)
 Change since initial benchmark: baseline
 Timing schema: 2
 Initial: all ~33ms, Data layout ~33ms
 Latest: all ~33ms, Data layout ~33ms
 Case spread latest: ~21ms
-
-## End-to-end CLI / macOS Apple Silicon (6D851D)
-Change since initial benchmark: -29ms avg; 17 faster, 0 slower; 28/40 cases; workload changed: 12 cases (speed_test_check, speed_test_build, docs_check, type_stress_check, fold_stress_check, collection_stress_check, one_module_kitchen_sink_check, expression_rpn_churn_check, collection_map_borrow_churn_check, import_external_churn_check, import_external_churn_build, borrow_stress_check)
-Timing schema: 2
-Initial: all ~56ms, Core ~25ms, Docs ~280ms, Stress ~70ms, Module ~11ms, Borrow ~7ms
-Latest: all ~32ms, Core ~16ms, Docs ~208ms, Stress ~37ms, Module ~9ms, Borrow ~5ms
-Case spread latest: ~88ms
 ## Frontend phases / macOS Apple Silicon (6D851D)
 Change since initial benchmark: baseline
 Timing schema: 2
@@ -48,3 +48,9 @@ Stage movement: check total -953ms, frontend -708ms, boundary compile -679ms
 Timing schema: 2
 **baseline**; 2 cases, avg ~33ms
 Avg: all ~33ms, Data layout ~33ms
+
+# End-to-end CLI / macOS Apple Silicon (6D851D): September 13th - 22:28
+Timing schema: 2
+mixed: avg +17ms; 1 faster, 8 slower; 39/40 cases; workload changed: 1 case (docs_check)
+Avg: all ~50ms, Core ~21ms, Docs ~263ms, Stress ~63ms, Module ~10ms, Borrow ~6ms
+Stage movement: check total +655ms, frontend +493ms, module semantics +492ms

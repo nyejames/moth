@@ -194,7 +194,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
         if declaration.value.type_id == builtin_type_ids::STRING {
             declaration.value.reactive_template =
                 Some(ReactiveTemplateMetadata::from_template_value_parameter(
-                    declaration.id.clone(),
+                    declaration.id,
                     parameter.span,
                 ));
         }
@@ -283,12 +283,12 @@ pub(crate) fn signature_member_to_declaration(
 
     if member.is_reactive {
         value.reactive_source = Some(ReactiveSource {
-            path: member.id.clone(),
+            path: member.id,
             kind: ReactiveSourceKind::Parameter,
         });
     }
     Ok(Declaration {
-        id: member.id.clone(),
+        id: member.id,
         value,
         binding_span: member_span,
         config_qualifier: None,
@@ -479,7 +479,7 @@ fn token_stream_with_eof(
 
     let mut tokens_with_eof = tokens.to_vec();
     let eof_anchor = tokens.last().unwrap_or(first_token);
-    let src_path = context.scope.clone();
+    let src_path = context.scope;
     let eof_token = Token::new(TokenKind::Eof, eof_anchor.span);
     tokens_with_eof.push(eof_token);
 

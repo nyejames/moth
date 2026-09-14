@@ -227,7 +227,7 @@ pub(crate) fn install_generated_request_contracts(
         let contract = AstImportedFunctionContract {
             target: SourceFunctionTarget::Generated {
                 identity,
-                local_path: request.instance_path.clone(),
+                local_path: request.instance_path,
             },
             summary,
             fallible_carrier_type_id,
@@ -235,7 +235,7 @@ pub(crate) fn install_generated_request_contracts(
 
         if module_ast
             .imported_functions_by_local_path
-            .insert(request.instance_path.clone(), contract)
+            .insert(request.instance_path, contract)
             .is_some()
         {
             return Err(CompilerError::compiler_error(

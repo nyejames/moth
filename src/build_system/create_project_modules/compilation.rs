@@ -149,7 +149,7 @@ pub(super) fn publish_compiled_module(
             crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
                 PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
                     CompilerDiagnostic::source_table_capacity(
-                        SourceSpanCapacityResource::LogicalPathTable,
+                        SourceSpanCapacityResource::LogicalPath,
                     ),
                     std::mem::take(string_table),
                 ))
@@ -393,7 +393,7 @@ pub(super) fn append_finish_failure(
     match failure {
         PremergeFailure::Diagnosed(batch) => PremergeFailure::Mixed {
             batch,
-            error: finish_error,
+            error: Box::new(finish_error),
         },
         PremergeFailure::Mixed {
             batch,

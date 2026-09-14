@@ -20,7 +20,7 @@ use crate::compiler_frontend::hir::reactivity::{
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 fn optional_message(
     id: u32,
@@ -50,7 +50,7 @@ fn optional_message(
 }
 
 fn function_with_assertion(
-    mut path_fork: &mut PathInternerFork,
+    path_fork: &mut PathInternerFork,
     blocks: Vec<HirBlock>,
     string_table: &mut StringTable,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
@@ -64,7 +64,7 @@ fn function_with_assertion(
         params: vec![],
         return_type: types.unit,
     };
-    let module = build_module(&mut path_fork, string_table, function_name, blocks, function, local_names);
+    let module = build_module(path_fork, string_table, function_name, blocks, function, local_names);
 
     lower_hir_to_js(
         &module,

@@ -408,7 +408,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         file_role: FileRole::ActiveModuleRoot,
     };
     let failure = create_top_level_const_template(
-        scope.clone(),
+        scope,
         opening_token,
         0,
         &mut token_stream,
@@ -752,7 +752,7 @@ fn struct_field_default_stays_in_header_syntax_tokens() {
 
 #[test]
 fn function_parameter_default_path_rows_use_the_file_owned_table() {
-    let (headers, string_table) = parse_single_file_headers_with_table(
+    let (headers, _string_table) = parse_single_file_headers_with_table(
         "label |prefix String = [: [@docs/intro.md] ]| -> String:\n;\n",
     );
     let function_header = headers
@@ -782,7 +782,7 @@ fn function_parameter_default_path_rows_use_the_file_owned_table() {
 
 #[test]
 fn struct_field_default_path_rows_use_the_file_owned_table() {
-    let (headers, string_table) = parse_single_file_headers_with_table(
+    let (headers, _string_table) = parse_single_file_headers_with_table(
         "Options = |\n    path String = [: [@docs/intro.md] ],\n|\n",
     );
     let struct_header = headers
@@ -809,7 +809,7 @@ fn struct_field_default_path_rows_use_the_file_owned_table() {
 
 #[test]
 fn function_default_and_body_path_rows_stay_distinct() {
-    let (headers, string_table) = parse_single_file_headers_with_table(
+    let (headers, _string_table) = parse_single_file_headers_with_table(
         "label |prefix String = [: [@docs/intro.md] ]| -> String:\n    io.line([: [@docs/body.md]])\n;\n",
     );
     let function_header = headers
@@ -850,7 +850,7 @@ fn function_default_and_body_path_rows_stay_distinct() {
 
 #[test]
 fn retained_header_substreams_share_one_frozen_file_path_table() {
-    let (headers, string_table) = parse_single_file_headers_with_table(
+    let (headers, _string_table) = parse_single_file_headers_with_table(
         "label |prefix String = [: [@docs/default.md] ]| -> String:\n;\nio.line([: [@docs/start.md]])\n",
     );
     let function_header = headers

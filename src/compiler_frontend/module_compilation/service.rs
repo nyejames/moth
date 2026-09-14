@@ -199,11 +199,8 @@ pub(crate) fn compile_module(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
         )),
         Err(mut failure) => {
-            if let Err(error) =
-                failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
-            {
-                return Err(error);
-            }
+            failure
+                .attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))?;
             match failure {
                 PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
                     Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
@@ -212,7 +209,7 @@ pub(crate) fn compile_module(
                 PremergeFailure::Infrastructure(error) => Err(error),
                 // Mixed double-failures only arise at source-finalization tails and never reach
                 // module compilation; abort through the typed lane if one ever does.
-                PremergeFailure::Mixed { error, .. } => Err(error),
+                PremergeFailure::Mixed { error, .. } => Err(*error),
             }
         },
     }
@@ -595,7 +592,7 @@ fn run_semantic_stages(
     let public_origins_by_path = public_interface_build
         .callable_seeds
         .iter()
-        .map(|seed| (seed.path.clone(), seed.origin.clone()))
+        .map(|seed| (seed.path, seed.origin.clone()))
         .collect::<FxHashMap<_, _>>();
     let private_function_origin_seeds = materialisation_context_builder
         .install_concrete_executable_contracts(

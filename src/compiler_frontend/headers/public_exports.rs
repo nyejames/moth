@@ -98,7 +98,7 @@ fn intern_public_surface_path(
             ),
             PathInternError::TableFull => HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::source_table_capacity(
-                    SourceSpanCapacityResource::LogicalPathTable,
+                    SourceSpanCapacityResource::LogicalPath,
                 ),
             ),
             PathInternError::BaseMismatch { .. } => HeaderParseFailure::Infrastructure(
@@ -124,6 +124,10 @@ fn is_authored_public_export(header: &Header) -> bool {
 
 /// Build public export maps and file package/module membership from parsed headers and the path
 /// resolver.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "public export building keeps mutable symbols, headers, resolver, source database, registry, provider dependencies, and mutable string/path state as separate borrows"
+)]
 pub(super) fn build_public_exports(
     module_symbols: &mut ModuleSymbols,
     headers: &[Header],
@@ -391,6 +395,10 @@ fn build_module_root_public_exports_pass1(
 
     Ok(export_locations)
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "root dependency building keeps mutable symbols, export locations, resolver, source database, registry, provider dependencies, and mutable string/path state as separate borrows"
+)]
 fn build_module_root_public_dependencies(
     module_symbols: &mut ModuleSymbols,
     export_locations: &FxHashMap<PathId, FxHashMap<StringId, SourceSpan>>,

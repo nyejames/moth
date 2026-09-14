@@ -359,7 +359,7 @@ fn declaration_lanes_reject_mismatched_and_duplicate_header_associations() {
             generic_parameters: Default::default(),
             signature: Default::default(),
         },
-        function_path.clone(),
+        function_path,
         &mut string_table,
     );
 
@@ -430,7 +430,7 @@ fn declaration_lanes_reject_non_dense_ids_and_out_of_range_headers() {
             generic_parameters: Default::default(),
             signature: Default::default(),
         },
-        function_path.clone(),
+        function_path,
         &mut string_table,
     );
     let function_declaration = || {
@@ -805,7 +805,7 @@ fn ordered_declaration(
     OrderedSemanticDeclaration {
         declaration_id: DeclarationId::from_index(declaration_index),
         header_index,
-        path: path.clone(),
+        path: *path,
         kind,
         declaration,
     }

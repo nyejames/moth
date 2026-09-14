@@ -106,11 +106,12 @@ pub(crate) fn generated_evidence_pair_is_selected(
 
 pub(crate) fn validate_nominal_generic_bound_evidence(
     type_id: TypeId,
+    instance_name: Option<StringId>,
     span: Option<SourceSpan>,
     context: &GenericBoundEvidenceContext<'_>,
 ) -> GenericBoundValidationResult<()> {
     let mut visited = FxHashSet::default();
-    validate_type_recursive(type_id, span, context, &mut visited)
+    validate_type_recursive(type_id, instance_name, span, context, &mut visited)
 }
 
 /// Resolve reusable evidence for one concrete type, including evidence declared on a generic
@@ -146,6 +147,7 @@ pub(crate) fn evidence_for_type(
 
 fn validate_type_recursive(
     type_id: TypeId,
+    instance_name: Option<StringId>,
     span: Option<SourceSpan>,
     context: &GenericBoundEvidenceContext<'_>,
     visited: &mut FxHashSet<TypeId>,
@@ -156,30 +158,30 @@ fn validate_type_recursive(
 
     match context.type_environment.get(type_id) {
         Some(TypeDefinition::GenericInstance(instance)) => {
-            validate_instance_bounds(type_id, span, context)?;
+            validate_instance_bounds(type_id, instance_name, span, context)?;
 
             for argument in &instance.arguments {
-                validate_type_recursive(*argument, span, context, visited)?;
+                validate_type_recursive(*argument, None, span, context, visited)?;
             }
         }
 
         Some(TypeDefinition::Constructed(definition)) => {
             for argument in &definition.arguments {
-                validate_type_recursive(*argument, span, context, visited)?;
+                validate_type_recursive(*argument, None, span, context, visited)?;
             }
         }
 
         Some(TypeDefinition::Function(definition)) => {
             for parameter in &definition.parameters {
-                validate_type_recursive(parameter.type_id, span, context, visited)?;
+                validate_type_recursive(parameter.type_id, None, span, context, visited)?;
             }
 
             for return_type in &definition.returns {
-                validate_type_recursive(*return_type, span, context, visited)?;
+                validate_type_recursive(*return_type, None, span, context, visited)?;
             }
 
             if let Some(error_type) = definition.error_return {
-                validate_type_recursive(error_type, span, context, visited)?;
+                validate_type_recursive(error_type, None, span, context, visited)?;
             }
         }
 
@@ -199,6 +201,7 @@ fn validate_type_recursive(
 
 fn validate_instance_bounds(
     instance_type_id: TypeId,
+    instance_name: Option<StringId>,
     span: Option<SourceSpan>,
     context: &GenericBoundEvidenceContext<'_>,
 ) -> GenericBoundValidationResult<()> {
@@ -224,7 +227,7 @@ fn validate_instance_bounds(
     for (parameter, concrete_type_id) in parameter_list.parameters.iter().zip(&instance.arguments) {
         for trait_id in &parameter.trait_bounds {
             validate_single_bound(
-                instance_type_id,
+                instance_name,
                 parameter.name,
                 *concrete_type_id,
                 *trait_id,
@@ -238,7 +241,7 @@ fn validate_instance_bounds(
 }
 
 fn validate_single_bound(
-    instance_type_id: TypeId,
+    instance_name: Option<StringId>,
     parameter_name: StringId,
     concrete_type_id: TypeId,
     trait_id: TraitId,
@@ -278,7 +281,6 @@ fn validate_single_bound(
         .get(trait_id)
         .map(|definition| definition.name)
         .unwrap_or(parameter_name);
-    let instance_name = None;
 
     Err(CompilerDiagnostic::invalid_generic_instantiation(
         instance_name,

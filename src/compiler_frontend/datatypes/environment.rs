@@ -843,7 +843,7 @@ impl TypeEnvironment {
                 let mut substituted_fields = Vec::with_capacity(struct_def.fields.len());
                 for field in struct_def.fields.iter() {
                     substituted_fields.push(FieldDefinition {
-                        name: field.name.clone(),
+                        name: field.name,
                         type_id: self.substitute_type_id(field.type_id, &mapping),
                         span: field.span,
                     });
@@ -868,7 +868,7 @@ impl TypeEnvironment {
                         let mut substituted_record_fields = Vec::with_capacity(fields.len());
                         for field in fields.iter() {
                             substituted_record_fields.push(FieldDefinition {
-                                name: field.name.clone(),
+                                name: field.name,
                                 type_id: self.substitute_type_id(field.type_id, &mapping),
                                 span: field.span,
                             });
@@ -1063,7 +1063,7 @@ impl TypeEnvironment {
         let struct_index = self.struct_definitions.len();
         let nominal_id = NominalTypeId(self.nominal_count() as u32);
         definition.id = nominal_id;
-        let canonical_path = definition.path.clone();
+        let canonical_path = definition.path;
 
         self.nominal_registry
             .push(NominalEntry::Struct(struct_index));
@@ -1126,7 +1126,7 @@ impl TypeEnvironment {
         let choice_index = self.choice_definitions.len();
         let nominal_id = NominalTypeId(self.nominal_count() as u32);
         definition.id = nominal_id;
-        let canonical_path = definition.path.clone();
+        let canonical_path = definition.path;
 
         self.nominal_registry
             .push(NominalEntry::Choice(choice_index));
@@ -1783,22 +1783,22 @@ impl TypeEnvironment {
             },
 
             TypeDefinition::Struct(definition) => {
-                Some(ReceiverKey::Struct(definition.path.clone()))
+                Some(ReceiverKey::Struct(definition.path))
             }
 
             TypeDefinition::Choice(definition) => {
-                Some(ReceiverKey::Choice(definition.path.clone()))
+                Some(ReceiverKey::Choice(definition.path))
             }
 
             TypeDefinition::GenericInstance(instance) => {
                 let base_type_id = self.type_id_for_nominal_id(instance.base)?;
                 match self.get(base_type_id)? {
                     TypeDefinition::Struct(base_definition) => {
-                        Some(ReceiverKey::Struct(base_definition.path.clone()))
+                        Some(ReceiverKey::Struct(base_definition.path))
                     }
 
                     TypeDefinition::Choice(base_definition) => {
-                        Some(ReceiverKey::Choice(base_definition.path.clone()))
+                        Some(ReceiverKey::Choice(base_definition.path))
                     }
 
                     _ => None,
@@ -1839,8 +1839,8 @@ impl TypeEnvironment {
                 }
                 BuiltinTypeKey::None => None,
             },
-            TypeDefinition::Struct(def) => Some(TypeIdentityKey::Nominal(def.path.clone())),
-            TypeDefinition::Choice(def) => Some(TypeIdentityKey::Nominal(def.path.clone())),
+            TypeDefinition::Struct(def) => Some(TypeIdentityKey::Nominal(def.path)),
+            TypeDefinition::Choice(def) => Some(TypeIdentityKey::Nominal(def.path)),
             TypeDefinition::Constructed(constructed) => match constructed.constructor {
                 TypeConstructor::Builtin(BuiltinTypeConstructor::Collection { fixed_capacity }) => {
                     let element_id = constructed.arguments.first()?;
@@ -1874,7 +1874,7 @@ impl TypeEnvironment {
                 TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => None,
             },
             TypeDefinition::GenericInstance(instance) => {
-                let base_path = self.nominal_path_by_id(instance.base)?.clone();
+                let base_path = *self.nominal_path_by_id(instance.base)?;
                 let arguments = instance
                     .arguments
                     .iter()

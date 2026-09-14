@@ -254,7 +254,7 @@ pub(crate) fn parse_function_body_statements(
                 body_nodes.push(AstNode {
                     kind: NodeKind::Break,
                     span: Some(token_stream.current_span()),
-                    scope: context.scope.clone(),
+                    scope: context.scope,
                 });
                 token_stream.advance();
             }
@@ -272,7 +272,7 @@ pub(crate) fn parse_function_body_statements(
                 body_nodes.push(AstNode {
                     kind: NodeKind::Continue,
                     span: Some(token_stream.current_span()),
-                    scope: context.scope.clone(),
+                    scope: context.scope,
                 });
                 token_stream.advance();
             }
@@ -335,7 +335,7 @@ pub(crate) fn parse_function_body_statements(
                         span: then_span,
                     }),
                     span: then_span,
-                    scope: context.scope.clone(),
+                    scope: context.scope,
                 });
             }
 
@@ -391,7 +391,7 @@ pub(crate) fn parse_function_body_statements(
                 body_nodes.push(AstNode {
                     kind: NodeKind::PushStartRuntimeFragment(expression),
                     span: fragment_span,
-                    scope: context.scope.clone(),
+                    scope: context.scope,
                 })
             }
 
@@ -420,7 +420,7 @@ pub(crate) fn parse_function_body_statements(
                 body_nodes.push(AstNode {
                     kind: NodeKind::ExpressionStatement(expression),
                     span,
-                    scope: context.scope.clone(),
+                    scope: context.scope,
                 });
             }
 

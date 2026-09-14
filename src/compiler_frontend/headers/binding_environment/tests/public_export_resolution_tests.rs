@@ -35,7 +35,7 @@ fn empty_exports_for_roots(
 ) -> FxHashMap<PathId, FxHashSet<PublicExportEntry>> {
     let mut map = FxHashMap::default();
     for root in roots {
-        map.entry(root.clone()).or_default();
+        map.entry(*root).or_default();
     }
     map
 }
@@ -50,16 +50,16 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
     let entry_root = intern_path(&["entry-root"], &mut string_table, &mut path_fork);
     let helper_root = intern_path(&["helper-root"], &mut string_table, &mut path_fork);
     let helper_mod_file = intern_path(&["helper", "@mod.moth"], &mut string_table, &mut path_fork);
-    let consumer_file = helper_mod_file.clone();
+    let consumer_file = helper_mod_file;
 
     let mut file_module_membership = FxHashMap::default();
-    file_module_membership.insert(helper_mod_file.clone(), helper_root.clone());
-    file_module_membership.insert(entry_root.clone(), entry_root.clone());
+    file_module_membership.insert(helper_mod_file, helper_root);
+    file_module_membership.insert(entry_root, entry_root);
 
     let boundaries = vec![ModuleRootBoundary {
         dependency_prefix: intern_path(&["helper"], &mut string_table, &mut path_fork),
-        module_root: helper_root.clone(),
-        root_file: helper_mod_file.clone(),
+        module_root: helper_root,
+        root_file: helper_mod_file,
     }];
 
     let module_root_public_exports = empty_exports_for_roots(std::slice::from_ref(&helper_root));
@@ -99,13 +99,13 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
     let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
 
     let mut file_module_membership = FxHashMap::default();
-    file_module_membership.insert(page_file.clone(), entry_root.clone());
-    file_module_membership.insert(child_mod_file.clone(), child_root.clone());
+    file_module_membership.insert(page_file, entry_root);
+    file_module_membership.insert(child_mod_file, child_root);
 
     let boundaries = vec![ModuleRootBoundary {
         dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
-        module_root: child_root.clone(),
-        root_file: child_mod_file.clone(),
+        module_root: child_root,
+        root_file: child_mod_file,
     }];
 
     let greet_name = string_table.intern("greet");
@@ -114,12 +114,12 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
     child_exports.insert(PublicExportEntry {
         export_name: greet_name,
         target: PublicExportTarget::SourceDeclaration {
-            path: greet_source.clone(),
+            path: greet_source,
         },
     });
 
     let mut module_root_public_exports = FxHashMap::default();
-    module_root_public_exports.insert(child_root.clone(), child_exports);
+    module_root_public_exports.insert(child_root, child_exports);
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
@@ -153,13 +153,13 @@ fn cross_module_child_dependency_missing_symbol_is_not_exported() {
     let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
 
     let mut file_module_membership = FxHashMap::default();
-    file_module_membership.insert(page_file.clone(), entry_root.clone());
-    file_module_membership.insert(child_mod_file.clone(), child_root.clone());
+    file_module_membership.insert(page_file, entry_root);
+    file_module_membership.insert(child_mod_file, child_root);
 
     let boundaries = vec![ModuleRootBoundary {
         dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
-        module_root: child_root.clone(),
-        root_file: child_mod_file.clone(),
+        module_root: child_root,
+        root_file: child_mod_file,
     }];
 
     let module_root_public_exports = empty_exports_for_roots(&[child_root]);
@@ -199,12 +199,12 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
         DependencySelectionId::new(DependencyShellId::new(SourceId::from_index(4), 9), 3);
 
     let mut file_module_membership = FxHashMap::default();
-    file_module_membership.insert(page_file.clone(), entry_root);
-    file_module_membership.insert(child_mod_file.clone(), child_root.clone());
+    file_module_membership.insert(page_file, entry_root);
+    file_module_membership.insert(child_mod_file, child_root);
 
     let boundaries = vec![ModuleRootBoundary {
         dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
-        module_root: child_root.clone(),
+        module_root: child_root,
         root_file: child_mod_file,
     }];
 
@@ -214,7 +214,7 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
         target: PublicExportTarget::ProviderSelection {
             selection,
             source_name,
-            diagnostic_path: diagnostic_path.clone(),
+            diagnostic_path,
         },
     });
     let mut module_root_public_exports = FxHashMap::default();
@@ -258,13 +258,13 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
     let utils_mod_file = intern_path(&["lib", "utils", "@mod.moth"], &mut string_table, &mut path_fork);
 
     let mut file_module_membership = FxHashMap::default();
-    file_module_membership.insert(utils_mod_file.clone(), utils_root.clone());
-    file_module_membership.insert(entry_root.clone(), entry_root.clone());
+    file_module_membership.insert(utils_mod_file, utils_root);
+    file_module_membership.insert(entry_root, entry_root);
 
     let boundaries = vec![ModuleRootBoundary {
         dependency_prefix: intern_path(&["lib", "utils"], &mut string_table, &mut path_fork),
-        module_root: utils_root.clone(),
-        root_file: utils_mod_file.clone(),
+        module_root: utils_root,
+        root_file: utils_mod_file,
     }];
 
     let module_root_public_exports = empty_exports_for_roots(&[utils_root]);
@@ -304,8 +304,8 @@ fn consumer_without_module_membership_uses_empty_prefix() {
 
     let boundaries = vec![ModuleRootBoundary {
         dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
-        module_root: child_root.clone(),
-        root_file: child_mod_file.clone(),
+        module_root: child_root,
+        root_file: child_mod_file,
     }];
 
     let module_root_public_exports = empty_exports_for_roots(&[child_root]);

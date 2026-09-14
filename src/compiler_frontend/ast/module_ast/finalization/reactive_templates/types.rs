@@ -46,14 +46,14 @@ impl ReactiveTemplateValueEnvironment {
 
     pub(super) fn record_declaration(&mut self, declaration: &Declaration) {
         self.values.insert(
-            declaration.id.clone(),
+            declaration.id,
             declaration.value.reactive_template.clone(),
         );
     }
 
     pub(super) fn record_assignment(&mut self, path: &PathId, value: &Expression) {
         self.values
-            .insert(path.clone(), value.reactive_template.clone());
+            .insert(*path, value.reactive_template.clone());
     }
 
     pub(super) fn record_binding_metadata(
@@ -61,7 +61,7 @@ impl ReactiveTemplateValueEnvironment {
         path: &PathId,
         metadata: Option<ReactiveTemplateMetadata>,
     ) {
-        self.values.insert(path.clone(), metadata);
+        self.values.insert(*path, metadata);
     }
 
     pub(super) fn metadata_for_path(

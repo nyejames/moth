@@ -38,7 +38,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 fn float_expr(
     value: f64,
@@ -185,7 +185,7 @@ let loc = None;
 let source_name = symbol("source_float", &mut path_fork, &mut string_table);
 
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
-builder.test_register_function_name(source_name.clone(), FunctionId(7));
+builder.test_register_function_name(source_name, FunctionId(7));
 
 let source = Expression::function_call_with_typed_arguments(
     source_name,
@@ -281,7 +281,7 @@ fn runtime_float_template_interpolation_lowers_to_format_float_statement() { let
 let loc = None;
 let value_name = symbol("value", &mut path_fork, &mut string_table);
 let value_ref = reference_expr_with_type_id(
-    value_name.clone(),
+    value_name,
     builtin_type_ids::FLOAT,
     loc,
     ValueMode::ImmutableReference,
@@ -334,12 +334,12 @@ let loc = None;
 let value_path = symbol("value", &mut path_fork, &mut string_table);
 let value_local = LocalId(20);
 let source = ReactiveSource {
-    path: value_path.clone(),
+    path: value_path,
     kind: ReactiveSourceKind::Declaration,
 };
 
 let value_ref = reference_expr_with_type_id(
-    value_path.clone(),
+    value_path,
     builtin_type_ids::FLOAT,
     loc,
     ValueMode::ImmutableReference,
@@ -365,7 +365,7 @@ let handoff = OwnedRuntimeTemplateHandoff {
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 register_local(
     &mut builder,
-    value_path.clone(),
+    value_path,
     value_local,
     builtin_type_ids::FLOAT,
     loc,
@@ -373,7 +373,7 @@ register_local(
 builder.side_table.bind_reactive_source(HirReactiveSource {
     id: ReactiveSourceId(0),
     local_id: value_local,
-    path: value_path.clone(),
+    path: value_path,
     kind: HirReactiveSourceKind::Declaration,
     type_id: builtin_type_ids::FLOAT,
     span: loc,

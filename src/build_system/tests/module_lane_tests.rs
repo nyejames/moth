@@ -818,7 +818,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
 #[test]
 fn boundary_outcome_sorting_is_independent_of_wave_order() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut boundary = CompiledGraphBoundary {
         structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
         modules: ModuleArtifactStore::new(0),
@@ -883,7 +883,7 @@ fn test_module_diagnostics(
 #[test]
 fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
     let messages = frontend
         .into_render_messages_with_frozen_identity(&mut string_table, None, None)
@@ -1488,7 +1488,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         .expect("blocked slot should transition");
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let boundary = CompiledGraphBoundary {
         structure: graph,
         modules: store,
@@ -1686,7 +1686,7 @@ fn single_node_graph() -> ProjectModuleGraph {
 fn boundary_validation_rejects_diagnosed_lane_mismatch_in_both_directions() {
     // Record present but the slot is successful.
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut boundary = test_graph_boundary(
         vec![minimal_lane_module(PathBuf::from("@single.moth"), false)],
         "test",
@@ -1766,7 +1766,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
 #[test]
 fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut store = ModuleArtifactStore::new(2);
     store
         .mark_diagnosed(ModuleId::from_index(0))

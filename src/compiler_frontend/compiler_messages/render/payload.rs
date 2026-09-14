@@ -561,15 +561,15 @@ fn source_span_capacity_message(
     resource: SourceSpanCapacityResource,
 ) -> String {
     match resource {
-        SourceSpanCapacityResource::ExtendedSpanTable => format!(
+        SourceSpanCapacityResource::ExtendedSpan => format!(
             "This source needs an exact span at byte offset {start} with length {length}, but its \
              extended span table cannot hold another long or late range."
         ),
-        SourceSpanCapacityResource::LogicalPathTable => format!(
+        SourceSpanCapacityResource::LogicalPath => format!(
             "This project needs more than {length} logical path entries in its compact path \
              identity table; the four-byte path table cannot address another entry."
         ),
-        SourceSpanCapacityResource::SourceIdentityTable => format!(
+        SourceSpanCapacityResource::SourceIdentity => format!(
             "This project needs more than {length} source files in its compact source identity \
              table; the four-byte identity table cannot address another source."
         ),

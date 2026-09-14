@@ -168,12 +168,12 @@ pub(super) fn collect_namespace_source_paths(
 ) {
     for member in record.value_members.values() {
         if let NamespaceValueMember::SourceDeclaration(target) = member {
-            selected.insert(target.local_path().clone());
+            selected.insert(*target.local_path());
         }
     }
     for member in record.type_members.values() {
         if let NamespaceTypeMember::SourceDeclaration(target) = member {
-            selected.insert(target.local_path().clone());
+            selected.insert(*target.local_path());
         }
     }
     for child in record.child_namespaces.values() {

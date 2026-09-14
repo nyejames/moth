@@ -14,7 +14,7 @@ macro_rules! define_reasoned_diagnostic_registry {
             Import::InvalidImportPath => {
                 payload: InvalidImportPath;
                 fields: { path: PathId, reason: InvalidImportPathReason }
-                bindings: { path, reason }
+                bindings: { reason }
                 remap: {
                     reason.remap_string_ids(remap);
                 }
@@ -23,7 +23,7 @@ macro_rules! define_reasoned_diagnostic_registry {
             Import::InvalidExternalModule => {
                 payload: InvalidExternalModule;
                 fields: { path: PathId, reason: InvalidExternalModuleReason }
-                bindings: { path, reason }
+                bindings: { reason }
                 remap: {
                     reason.remap_string_ids(remap);
                 }
@@ -607,7 +607,7 @@ macro_rules! define_reasoned_diagnostic_registry {
             Rule::InvalidCompileTimePath => {
                 payload: InvalidCompileTimePath;
                 fields: { path: PathId, reason: InvalidCompileTimePathReason }
-                bindings: { path, reason }
+                bindings: { reason }
                 remap: {
                     reason.remap_string_ids(remap);
                 }

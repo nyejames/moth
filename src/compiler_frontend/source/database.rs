@@ -181,6 +181,7 @@ impl SourceDatabase {
     /// WHY: traversal owns no per-source ownership inventory, so it cannot produce Stage 0's
     ///      logical-identity order. Ordering here keeps identity assignment the compiler's
     ///      decision rather than a property of how a producer happened to walk the filesystem.
+    #[cfg(test)]
     pub(crate) fn from_registration_index_sorted_by_logical_path(
         registration_index: &SourceRegistrationIndex<'_>,
         entry_file_path: &Path,
@@ -334,6 +335,7 @@ impl SourceDatabase {
     }
 
     /// Fork the registered logical-path table for one local frontend preparation wave.
+    #[cfg(test)]
     pub(crate) fn fork_path_interner(
         &self,
     ) -> crate::compiler_frontend::symbols::path_interner::PathInternerFork {
@@ -1144,10 +1146,10 @@ impl SourceCapacityError {
     pub(crate) fn resource(self) -> crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource {
         match self {
             Self::LogicalPathTableFull => {
-                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::LogicalPathTable
+                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::LogicalPath
             }
             Self::SourceIdentityTableFull => {
-                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::SourceIdentityTable
+                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::SourceIdentity
             }
         }
     }
@@ -1173,16 +1175,6 @@ impl From<CompilerError> for SourceDatabaseError {
     }
 }
 
-impl SourceDatabaseError {
-    pub(crate) fn infrastructure(self) -> CompilerError {
-        match self {
-            Self::Capacity(capacity) => CompilerError::compiler_error(format!(
-                "authored source capacity rejection reached an infrastructure lane: {capacity:?}"
-            )),
-            Self::Infrastructure(error) => error,
-        }
-    }
-}
 
 fn non_utf8_logical_path_error(logical_path: &Path) -> CompilerError {
     CompilerError::file_error(

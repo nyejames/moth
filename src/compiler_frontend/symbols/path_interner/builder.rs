@@ -108,6 +108,8 @@ impl PathInternerBuilder {
         Ok(logical_path)
     }
 
+
+    #[cfg(test)]
     /// Intern a portable forward-slash path without changing its exact separator spelling.
     ///
     /// WHY: source logical spellings are already canonical at production boundaries, and silently

@@ -138,6 +138,10 @@ fn evidence_for_bound_method<'a>(
     .and_then(|evidence_id| evidence_environment.get(evidence_id)))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "bound method lookup keeps the scope, receiver node and type, member identity and span, type environment, and mutable string/path state as separate borrows"
+)]
 pub(super) fn lookup_generic_bound_receiver_method(
     scope_context: &ScopeContext,
     receiver_node: &AstNode,

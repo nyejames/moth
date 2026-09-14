@@ -38,7 +38,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut project_source_files = None;
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
@@ -155,7 +155,7 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "first",
@@ -242,7 +242,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "broken",
@@ -322,7 +322,7 @@ io.line(result)
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
@@ -398,7 +398,7 @@ independent_result Int = independent(42)
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _counter_capture =
         crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
@@ -555,7 +555,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -642,7 +642,7 @@ html #= ||\n",
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "pkg",
@@ -850,7 +850,7 @@ export:
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "pkg",
@@ -985,7 +985,7 @@ same_private_box PrivateBox of Bool = forward(private_box)
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
@@ -1289,7 +1289,7 @@ wrapped Wrapper = identity(make())
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let frontend = compile_project_frontend(
         &mut config,
@@ -1359,7 +1359,7 @@ fn source_package_warning_retained_by_frontend_outcome() {
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "warnpkg",
@@ -1534,7 +1534,7 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "pkg",

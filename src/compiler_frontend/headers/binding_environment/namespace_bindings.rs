@@ -147,7 +147,7 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
         if record.value_members.contains_key(&name_id) || record.type_members.contains_key(&name_id)
         {
             return Err(CompilerDiagnostic::duplicate_import_surface_member(
-                child_surface_path.clone(),
+                child_surface_path,
                 name_id,
                 self.span,
             )
@@ -217,7 +217,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         let record_source = match &namespace_target {
             ResolvedNamespaceTarget::SourceFile(file_path) => {
-                NamespaceRecordSource::SourceFile(file_path.clone())
+                NamespaceRecordSource::SourceFile(*file_path)
             }
             ResolvedNamespaceTarget::ExternalPackage { package_path } => {
                 NamespaceRecordSource::ExternalPackage(*package_path)
@@ -403,13 +403,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let root_file = self
             .module_symbols
             .source_package_root_files
-            .get(&package_prefix)?
-            .clone();
+            .get(&package_prefix)?;
 
         self.module_symbols
             .module_file_paths
-            .contains(&root_file)
-            .then_some(ResolvedNamespaceTarget::SourceFile(root_file))
+            .contains(root_file)
+            .then_some(ResolvedNamespaceTarget::SourceFile(*root_file))
     }
 
     fn resolve_module_root_public_export(
@@ -441,7 +440,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .contains(&boundary.root_file)
             {
                 return Some(ResolvedNamespaceTarget::SourceFile(
-                    boundary.root_file.clone(),
+                    boundary.root_file,
                 ));
             }
         }
@@ -526,7 +525,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .module_root_boundaries
             .iter()
             .find(|boundary| boundary.module_root == *module_root)
-            .map(|boundary| boundary.root_file.clone())
+            .map(|boundary| boundary.root_file)
     }
 
     /// Derive the local namespace name from a dependency clause, validating the default name.
@@ -543,7 +542,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             clause.effective_namespace_local_name(self.string_table, &*self.path_fork)
         else {
             return Err(CompilerDiagnostic::invalid_namespace_default_name(
-                clause.dependency.path.clone(),
+                clause.dependency.path,
                 namespace_span,
             )
             .into());
@@ -551,7 +550,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         if !is_valid_identifier(self.string_table.resolve(local_name)) {
             return Err(CompilerDiagnostic::invalid_namespace_default_name(
-                clause.dependency.path.clone(),
+                clause.dependency.path,
                 namespace_span,
             )
             .into());
@@ -629,7 +628,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             value_members,
             type_members,
             child_namespaces: FxHashMap::default(),
-            record_source: NamespaceRecordSource::SourceFile(file_path.clone()),
+            record_source: NamespaceRecordSource::SourceFile(*file_path),
         })
     }
 
@@ -665,7 +664,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                             type_members.insert(
                                 entry.export_name,
                                 NamespaceTypeMember::SourceDeclaration(
-                                    SourceDeclarationTarget::Local(symbol_path.clone()),
+                                    SourceDeclarationTarget::Local(*symbol_path),
                                 ),
                             );
                         }
@@ -673,7 +672,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                             value_members.insert(
                                 entry.export_name,
                                 NamespaceValueMember::SourceDeclaration(
-                                    SourceDeclarationTarget::Local(symbol_path.clone()),
+                                    SourceDeclarationTarget::Local(*symbol_path),
                                 ),
                             );
                         }
@@ -723,7 +722,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             value_members,
             type_members,
             child_namespaces: FxHashMap::default(),
-            record_source: NamespaceRecordSource::SourceFile(root_file.clone()),
+            record_source: NamespaceRecordSource::SourceFile(*root_file),
         })
     }
 
@@ -794,7 +793,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .expect("path interner fork exhausted while binding provider namespace member");
             let target = SourceDeclarationTarget::Imported {
                 origin: origin.clone(),
-                local_path: local_path.clone(),
+                local_path,
             };
 
             match &declaration.semantics {
@@ -834,11 +833,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         && view.concrete_call_summary(function_origin).is_some()
                     {
                         self.environment.imported_functions_by_local_path.insert(
-                            local_path.clone(),
+                            local_path,
                             super::ImportedFunctionContract {
                                 target: super::SourceFunctionTarget::Imported {
                                     origin: function_origin.clone(),
-                                    local_path: local_path.clone(),
+                                    local_path,
                                 },
                             },
                         );
@@ -995,7 +994,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         for name in value_members.keys() {
             if type_members.contains_key(name) {
                 return Err(CompilerDiagnostic::duplicate_import_surface_member(
-                    surface_path.clone(),
+                    *surface_path,
                     *name,
                     span,
                 )

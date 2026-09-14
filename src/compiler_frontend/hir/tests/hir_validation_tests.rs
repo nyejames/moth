@@ -135,7 +135,7 @@ fn validation_error_for_injected_local_type(
 
 fn inject_collection_expression_statement(module: &mut HirModule,
 collection_type_id: TypeId,
-span: Option<SourceSpan>,) { let mut path_fork = super::PathInternerFork::empty(); let entry_block_index = start_entry_block_index(module);
+span: Option<SourceSpan>,) { let _path_fork = super::PathInternerFork::empty(); let entry_block_index = start_entry_block_index(module);
 let entry_block = &mut module.blocks[entry_block_index];
 let value_id = HirValueId(9000);
 let statement_id = HirNodeId(9000);
@@ -219,7 +219,7 @@ validate_module_for_tests(&module, &string_table, &type_environment)
     .expect("validator should accept a valid lowered module"); }
 
 #[test]
-fn validator_rejects_assertion_message_evaluation_fact_mismatch() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_assertion_message_evaluation_fact_mismatch() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
 let entry_block_index = start_entry_block_index(&module);
 let entry_block = &mut module.blocks[entry_block_index];
 let message_span = None;
@@ -256,7 +256,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_numeric_op_operand_shape_mismatch() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_numeric_op_operand_shape_mismatch() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let entry_block_index = start_entry_block_index(&module);
 let entry_region = module.blocks[entry_block_index].region;
@@ -313,7 +313,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_plain_numeric_binop() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_plain_numeric_binop() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let entry_block_index = start_entry_block_index(&module);
 let entry_region = module.blocks[entry_block_index].region;
@@ -403,7 +403,7 @@ fn append_expression_for_validation(
 }
 
 #[test]
-fn validator_accepts_internal_string_append_with_scalar_chunk() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_accepts_internal_string_append_with_scalar_chunk() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let string_type = type_environment.builtins().string;
 let expression = append_expression_for_validation(
@@ -426,7 +426,7 @@ validate_module_for_tests(&module, &string_table, &type_environment)
     .expect("valid StringAppend should pass HIR validation"); }
 
 #[test]
-fn validator_rejects_string_append_with_non_string_result() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_string_append_with_non_string_result() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let string_type = type_environment.builtins().string;
 let expression = append_expression_for_validation(
@@ -454,7 +454,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_string_append_with_non_string_accumulator() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_string_append_with_non_string_accumulator() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let expression = append_expression_for_validation(
     &mut module,
@@ -481,7 +481,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_plain_numeric_unary_op() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_plain_numeric_unary_op() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let entry_block_index = start_entry_block_index(&module);
 let entry_region = module.blocks[entry_block_index].region;
@@ -528,7 +528,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_plain_string_concatenation_binop() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_plain_string_concatenation_binop() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let entry_block_index = start_entry_block_index(&module);
 let entry_region = module.blocks[entry_block_index].region;
@@ -587,7 +587,7 @@ fn inject_float_statement(module: &mut HirModule,
 type_environment: &TypeEnvironment,
 span: &Option<SourceSpan>,
 kind: HirStatementKind,
-result_type: TypeId,) { let mut path_fork = super::PathInternerFork::empty(); let entry_block_index = start_entry_block_index(module);
+result_type: TypeId,) { let _path_fork = super::PathInternerFork::empty(); let entry_block_index = start_entry_block_index(module);
 let entry_region = module.blocks[entry_block_index].region;
 let result_local = LocalId(9000);
 
@@ -635,7 +635,7 @@ module.side_table.map_statement(*span, &statement);
 module.blocks[entry_block_index].statements.push(statement); }
 
 #[test]
-fn validator_accepts_format_float_trap() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_accepts_format_float_trap() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let string_type = type_environment.builtins().string;
 
@@ -662,7 +662,7 @@ validate_module_for_tests(&module, &string_table, &type_environment)
     .expect("validator should accept FormatFloat with Trap and String result local"); }
 
 #[test]
-fn validator_accepts_validate_float_trap() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_accepts_validate_float_trap() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let float_type = type_environment.builtins().float;
 
@@ -689,7 +689,7 @@ validate_module_for_tests(&module, &string_table, &type_environment)
     .expect("validator should accept ValidateFloat with Trap and Float result local"); }
 
 #[test]
-fn validator_rejects_format_float_trap_with_non_string_result() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_format_float_trap_with_non_string_result() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let float_type = type_environment.builtins().float;
 
@@ -723,7 +723,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_accepts_format_float_return_error_with_carrier() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+fn validator_accepts_format_float_return_error_with_carrier() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
 let span = None;
 let string_type = type_environment.builtins().string;
 let int_type = type_environment.builtins().int;
@@ -752,7 +752,7 @@ validate_module_for_tests(&module, &string_table, &type_environment)
     .expect("validator should accept FormatFloat with ReturnError and carrier result local"); }
 
 #[test]
-fn validator_rejects_format_float_return_error_without_carrier() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_format_float_return_error_without_carrier() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let string_type = type_environment.builtins().string;
 
@@ -785,7 +785,7 @@ assert!(error.msg.contains(
 )); }
 
 #[test]
-fn validator_rejects_validate_float_return_error_without_carrier() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_validate_float_return_error_without_carrier() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let span = None;
 let float_type = type_environment.builtins().float;
 
@@ -858,7 +858,7 @@ let start_fn = function_node(
     start_name,
     FunctionSignature {
         parameters: vec![param_with_type_id(
-            x.clone(),
+            x,
             builtin_type_ids::INT,
             false,
             None,
@@ -998,7 +998,7 @@ assert_eq!(error.error_type, ErrorType::HirTransformation);
 assert!(error.msg.contains("Unresolved generic parameter")); }
 
 #[test]
-fn validator_rejects_collection_containing_generic_parameter() { let mut path_fork = super::PathInternerFork::empty(); let error = validation_error_for_injected_local_type(|string_table, type_environment| {
+fn validator_rejects_collection_containing_generic_parameter() { let _path_fork = super::PathInternerFork::empty(); let error = validation_error_for_injected_local_type(|string_table, type_environment| {
     let generic_type_id = generic_parameter_type_id(string_table, type_environment);
     type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
@@ -1012,7 +1012,7 @@ assert_eq!(error.error_type, ErrorType::HirTransformation);
 assert!(error.msg.contains("Unresolved generic parameter")); }
 
 #[test]
-fn validator_rejects_option_and_result_containing_generic_parameter() { let mut path_fork = super::PathInternerFork::empty(); let option_error =
+fn validator_rejects_option_and_result_containing_generic_parameter() { let _path_fork = super::PathInternerFork::empty(); let option_error =
     validation_error_for_injected_local_type(|string_table, type_environment| {
         let generic_type_id = generic_parameter_type_id(string_table, type_environment);
         type_environment.intern_constructed(
@@ -1035,7 +1035,7 @@ assert_eq!(result_error.error_type, ErrorType::HirTransformation);
 assert!(result_error.msg.contains("Unresolved generic parameter")); }
 
 #[test]
-fn validator_rejects_generic_nominal_instance_containing_generic_parameter() { let mut path_fork = super::PathInternerFork::empty(); let error = validation_error_for_injected_local_type(|string_table, type_environment| {
+fn validator_rejects_generic_nominal_instance_containing_generic_parameter() { let _path_fork = super::PathInternerFork::empty(); let error = validation_error_for_injected_local_type(|string_table, type_environment| {
     let generic_type_id = generic_parameter_type_id(string_table, type_environment);
     let box_path = PathId::ROOT;
     let (nominal_id, _) = type_environment.register_nominal_struct(StructTypeDefinition {
@@ -1053,7 +1053,7 @@ assert_eq!(error.error_type, ErrorType::HirTransformation);
 assert!(error.msg.contains("Unresolved generic parameter")); }
 
 #[test]
-fn validator_rejects_function_type_containing_generic_parameter() { let mut path_fork = super::PathInternerFork::empty(); let error = validation_error_for_injected_local_type(|string_table, type_environment| {
+fn validator_rejects_function_type_containing_generic_parameter() { let _path_fork = super::PathInternerFork::empty(); let error = validation_error_for_injected_local_type(|string_table, type_environment| {
     let generic_type_id = generic_parameter_type_id(string_table, type_environment);
     type_environment.intern_function(FunctionTypeKey {
         parameters: Box::new([generic_type_id]),
@@ -1105,7 +1105,7 @@ assert_eq!(error.error_type, ErrorType::HirTransformation);
 assert!(error.msg.contains("Unresolved generic parameter")); }
 
 #[test]
-fn validator_rejects_function_return_type_containing_generic_parameter() { let mut path_fork = super::PathInternerFork::empty(); let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_function_return_type_containing_generic_parameter() { let _path_fork = super::PathInternerFork::empty(); let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
 let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
 
 let start_index = module
@@ -1158,7 +1158,7 @@ assert_eq!(error.error_type, ErrorType::HirTransformation);
 assert!(error.msg.contains("Unresolved generic parameter")); }
 
 #[test]
-fn validator_rejects_choice_payload_type_containing_generic_parameter() { let mut path_fork = super::PathInternerFork::empty(); let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_choice_payload_type_containing_generic_parameter() { let _path_fork = super::PathInternerFork::empty(); let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
 let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
 let field_name = string_table.intern("value");
 
@@ -1180,7 +1180,7 @@ assert_eq!(error.error_type, ErrorType::HirTransformation);
 assert!(error.msg.contains("Unresolved generic parameter")); }
 
 #[test]
-fn validator_rejects_expression_type_containing_generic_parameter() { let mut path_fork = super::PathInternerFork::empty(); let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_expression_type_containing_generic_parameter() { let _path_fork = super::PathInternerFork::empty(); let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
 let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
 
 let entry_block_index = start_entry_block_index(&module);
@@ -1212,7 +1212,7 @@ assert_eq!(error.error_type, ErrorType::HirTransformation);
 assert!(error.msg.contains("Unresolved generic parameter")); }
 
 #[test]
-fn validator_rejects_anonymous_const_record_marker_on_local() { let mut path_fork = super::PathInternerFork::empty(); let error = validation_error_for_injected_local_type(|_, type_environment| {
+fn validator_rejects_anonymous_const_record_marker_on_local() { let _path_fork = super::PathInternerFork::empty(); let error = validation_error_for_injected_local_type(|_, type_environment| {
     type_environment.anonymous_const_record_type()
 });
 assert_eq!(error.error_type, ErrorType::HirTransformation);
@@ -1225,7 +1225,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_anonymous_const_record_marker_on_expression() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_anonymous_const_record_marker_on_expression() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let marker = type_environment.anonymous_const_record_type();
 let entry_block_index = start_entry_block_index(&module);
 let entry_block = &mut module.blocks[entry_block_index];
@@ -1260,7 +1260,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_anonymous_const_record_marker_on_function_return() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_anonymous_const_record_marker_on_function_return() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let marker = type_environment.anonymous_const_record_type();
 let start_function = module
     .start_function
@@ -1277,7 +1277,7 @@ assert!(
 ); }
 
 #[test]
-fn classify_hir_type_rejects_anonymous_const_record_marker() { let mut path_fork = super::PathInternerFork::empty(); let type_environment = TypeEnvironment::new();
+fn classify_hir_type_rejects_anonymous_const_record_marker() { let _path_fork = super::PathInternerFork::empty(); let type_environment = TypeEnvironment::new();
 let error = classify_hir_type(
     type_environment.anonymous_const_record_type(),
     &type_environment,
@@ -1829,7 +1829,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_collection_expression_with_non_collection_type() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_collection_expression_with_non_collection_type() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let int_type = type_environment.builtins().int;
 inject_collection_expression_statement(&mut module, int_type, None);
 
@@ -1843,7 +1843,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_accepts_collection_expression_with_growable_collection_type() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+fn validator_accepts_collection_expression_with_growable_collection_type() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
 let int_type = type_environment.builtins().int;
 let growable_collection = type_environment.intern_collection(int_type, None);
 inject_collection_expression_statement(&mut module, growable_collection, None);
@@ -1852,7 +1852,7 @@ validate_module_for_tests(&module, &string_table, &type_environment)
     .expect("validator should accept Collection expression with growable collection type"); }
 
 #[test]
-fn validator_accepts_collection_expression_with_fixed_collection_type() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+fn validator_accepts_collection_expression_with_fixed_collection_type() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
 let int_type = type_environment.builtins().int;
 let fixed_collection = type_environment.intern_collection(int_type, Some(64));
 inject_collection_expression_statement(&mut module, fixed_collection, None);
@@ -1871,7 +1871,7 @@ validate_module_for_tests(&module, &string_table, &type_environment)
 fn inject_nonfinite_float_expression(module: &mut HirModule,
 float_type: TypeId,
 value: f64,
-span: &Option<SourceSpan>,) { let mut path_fork = super::PathInternerFork::empty(); let entry_block_index = start_entry_block_index(module);
+span: &Option<SourceSpan>,) { let _path_fork = super::PathInternerFork::empty(); let entry_block_index = start_entry_block_index(module);
 let entry_region = module.blocks[entry_block_index].region;
 let expression = float_expression(
     HirValueId(9000),
@@ -1892,7 +1892,7 @@ module.side_table.map_statement(*span, &statement);
 module.blocks[entry_block_index].statements.push(statement); }
 
 #[test]
-fn validator_rejects_nonfinite_float_literal_infinity() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_nonfinite_float_literal_infinity() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let float_type = type_environment.builtins().float;
 let span = None;
 
@@ -1909,7 +1909,7 @@ assert!(
 ); }
 
 #[test]
-fn validator_rejects_nonfinite_float_literal_nan() { let mut path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+fn validator_rejects_nonfinite_float_literal_nan() { let _path_fork = super::PathInternerFork::empty(); let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
 let float_type = type_environment.builtins().float;
 let span = None;
 

@@ -172,7 +172,7 @@ fn declaration_table_without_module_values(
         if !generated.replace_by_id(
             declaration_id,
             Declaration {
-                id: path.clone(),
+                id: *path,
                 value: Expression::no_value_with_type_id(
                     metadata.span,
                     metadata.diagnostic_type.clone(),
@@ -784,7 +784,7 @@ impl ModuleMaterialisationPreparation {
                         .contains(visible_name)
                         .then(|| StableVisibleDeclaration {
                             visible_name: visible_name.to_owned(),
-                            local_path: target.local_path().clone(),
+                            local_path: *target.local_path(),
                             origin: match target {
                                 SourceDeclarationTarget::Local(_) => None,
                                 SourceDeclarationTarget::Imported { origin, .. } => {
@@ -1078,7 +1078,7 @@ impl ModuleMaterialisationPreparation {
         let signatures = self
             .resolved_function_signatures_by_path
             .iter()
-            .map(|(path, resolved)| (path.clone(), resolved.clone()))
+            .map(|(path, resolved)| (*path, resolved.clone()))
             .collect::<Vec<_>>();
         let mut private_executables = Vec::new();
 
@@ -1092,7 +1092,7 @@ impl ModuleMaterialisationPreparation {
             let target = if let Some(origin) = public_origins_by_path.get(&path) {
                 SourceFunctionTarget::Imported {
                     origin: origin.clone(),
-                    local_path: path.clone(),
+                    local_path: path,
                 }
             } else {
                 let category = if resolved.receiver.is_some() {
@@ -1107,10 +1107,10 @@ impl ModuleMaterialisationPreparation {
                     category,
                     path_fork,
                 )?;
-                private_executables.push((path.clone(), identity.clone()));
+                private_executables.push((path, identity.clone()));
                 SourceFunctionTarget::ModulePrivate {
                     identity,
-                    local_path: path.clone(),
+                    local_path: path,
                 }
             };
 
@@ -1222,7 +1222,7 @@ impl ModuleMaterialisationPreparation {
         let nominal_types = self
             .nominal_type_ids_by_path
             .iter()
-            .map(|(path, type_id)| (path.clone(), *type_id))
+            .map(|(path, type_id)| (*path, *type_id))
             .collect::<Vec<_>>();
         for (path, type_id) in nominal_types {
             if self
@@ -1428,7 +1428,7 @@ impl ModuleMaterialisationPreparation {
             source_nominal_paths: (*lookups.source_nominal_paths).clone(),
             public_trait_paths: public_trait_roots
                 .iter()
-                .map(|root| root.canonical_path.clone())
+                .map(|root| root.canonical_path)
                 .collect(),
             nominal_blueprints: FxHashMap::default(),
             receiver_methods: (*lookups.receiver_methods).clone(),

@@ -178,8 +178,12 @@ pub(crate) fn infer_generic_nominal_constructor(
             .map(|visibility| &visibility.visible_namespace_records),
         resolved_type_aliases: context.shared.resolved_type_aliases.as_deref(),
     };
-    if let Err(mut diagnostic) =
-        validate_nominal_generic_bound_evidence(instance_type_id, input.span, &evidence_context)
+    if let Err(mut diagnostic) = validate_nominal_generic_bound_evidence(
+        instance_type_id,
+        Some(string_table.intern(input.display_name)),
+        input.span,
+        &evidence_context,
+    )
     {
         diagnostic.primary_span = input.span;
         return Err(CallValidationError::Diagnostic(diagnostic));

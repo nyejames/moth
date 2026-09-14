@@ -36,6 +36,10 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "identifier parsing keeps the token stream, scope, mutable rpn/interner/string/path state, and the catch and evidence policy flags as separate borrows"
+)]
 pub(super) fn parse_identifier_or_call(
     token_stream: &mut FileTokens,
     context: &ScopeContext,

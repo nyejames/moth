@@ -502,7 +502,7 @@ pub(crate) fn infer_generic_function_call(
 
     Ok(GenericFunctionInference {
         key: GenericFunctionInstanceKey {
-            function_path: template.function_path.clone(),
+            function_path: template.function_path,
             type_arguments,
         },
         instance_path,
@@ -621,6 +621,10 @@ impl<'a> GenericCallExpectedContext<'a> {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "call binding collection keeps the template, routed arguments, expectations, and mutable binding/evidence/type/string/path state as separate borrows"
+)]
 fn collect_call_argument_bindings(
     template: &GenericFunctionTemplate,
     routed_arguments: &[Option<CallArgument>],
@@ -660,6 +664,10 @@ fn collect_call_argument_bindings(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "expected-result binding collection keeps the template, expected types, and mutable binding/evidence/type/string/path state plus the call span as separate inputs"
+)]
 fn collect_expected_result_bindings(
     template: &GenericFunctionTemplate,
     expected_result_type_ids: &[TypeId],

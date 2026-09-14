@@ -129,7 +129,7 @@ fn path_is_visible_type(
 pub(crate) fn validate_generic_parameters_used(
     generic_parameters: &GenericParameterList,
     used_parameters: &FxHashSet<TypeParameterId>,
-    declaration_path: &PathId,
+    _declaration_path: &PathId,
     span: Option<SourceSpan>,
 ) -> TypeResolutionResult<()> {
     for parameter in &generic_parameters.parameters {

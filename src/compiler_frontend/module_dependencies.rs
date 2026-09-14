@@ -562,7 +562,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                             drop(graph);
                             let table = std::mem::take(string_table);
                             let batch = PremergeDiagnosticBatch::from_bag(diagnostic_bag, table);
-                            PremergeFailure::Mixed { batch, error }
+                            PremergeFailure::Mixed { batch, error: Box::new(error) }
                         } else {
                             PremergeFailure::Infrastructure(error)
                         };

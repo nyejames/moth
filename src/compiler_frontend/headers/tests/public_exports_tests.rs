@@ -33,7 +33,7 @@ fn duplicate_public_export_retains_first_owner_span_across_passes() {
         .insert(
             export_name,
             PublicExportTarget::SourceDeclaration {
-                path: source_path.clone(),
+                path: source_path,
             },
             Some(first_span),
             &string_table,

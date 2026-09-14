@@ -170,7 +170,7 @@ impl TraitEnvironment {
         let definition = ResolvedTraitDefinition {
             id,
             name,
-            canonical_path: path.clone(),
+            canonical_path: path,
             source_file,
             this_type,
             requirements: vec![requirement],
@@ -182,7 +182,7 @@ impl TraitEnvironment {
         self.paths_by_id
             .entry(id)
             .or_default()
-            .push(definition.canonical_path.clone());
+            .push(definition.canonical_path);
         self.core_traits_by_name.insert(trait_name, id);
         self.definitions.push(definition);
         id
@@ -345,11 +345,11 @@ impl TraitEnvironment {
 
         let id = definition.id;
         self.ids_by_path
-            .insert(definition.canonical_path.clone(), id);
+            .insert(definition.canonical_path, id);
         self.paths_by_id
             .entry(id)
             .or_default()
-            .push(definition.canonical_path.clone());
+            .push(definition.canonical_path);
         self.definitions.push(definition);
         None
     }
@@ -374,7 +374,7 @@ impl TraitEnvironment {
             ));
         }
 
-        self.ids_by_path.insert(path.clone(), trait_id);
+        self.ids_by_path.insert(path, trait_id);
         self.paths_by_id.entry(trait_id).or_default().push(path);
         Ok(())
     }

@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::function_node;
 
@@ -33,15 +33,15 @@ let start_function = function_node(
     None,
 );
 
-let mut ast = build_ast_with_registered_types(vec![start_function], entry_path.clone());
+let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
 
 let explicit_path = super::symbol("site_name", &mut path_fork, &mut string_table);
 let private_path = super::symbol("page_title", &mut path_fork, &mut string_table);
 
 ast.const_facts.declarations.insert(
-    explicit_path.clone(),
+    explicit_path,
     AstConstDeclarationFact {
-        declaration_path: explicit_path.clone(),
+        declaration_path: explicit_path,
         scope: ConstBindingScope::ExplicitTopLevel,
         source: ConstBindingSource::ExplicitHash,
         value_kind: ConstFactValueKind::Literal,
@@ -54,9 +54,9 @@ ast.const_facts.declarations.insert(
 );
 
 ast.const_facts.declarations.insert(
-    private_path.clone(),
+    private_path,
     AstConstDeclarationFact {
-        declaration_path: private_path.clone(),
+        declaration_path: private_path,
         scope: ConstBindingScope::PrivateTopLevel,
         source: ConstBindingSource::InferredImmutable,
         value_kind: ConstFactValueKind::Literal,
@@ -124,9 +124,9 @@ let original_path = path_fork
 
 let mut ast_facts = AstConstFacts::default();
 ast_facts.declarations.insert(
-    original_path.clone(),
+    original_path,
     AstConstDeclarationFact {
-        declaration_path: original_path.clone(),
+        declaration_path: original_path,
         scope: ConstBindingScope::ExplicitTopLevel,
         source: ConstBindingSource::ExplicitHash,
         value_kind: ConstFactValueKind::Literal,

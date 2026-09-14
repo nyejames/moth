@@ -13,7 +13,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironmentRemapCache;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
-use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
+use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 /// One independently lowered concrete generic executable.
 ///
@@ -89,12 +89,6 @@ impl GeneratedFunctionDelta {
         self.records
     }
 
-    /// Install the merged boundary path table on every generated executable.
-    pub(crate) fn install_path_table(&mut self, path_table: std::sync::Arc<PathTable>) {
-        for record in &mut self.records {
-            record.sidecar.module.executable.path_table = std::sync::Arc::clone(&path_table);
-        }
-    }
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         for record in &mut self.records {

@@ -32,7 +32,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         methods.push(ReceiverMethodVisibility {
-            target: SourceFunctionTarget::Local(function_path.clone()),
+            target: SourceFunctionTarget::Local(*function_path),
             span,
         });
     }

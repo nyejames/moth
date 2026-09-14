@@ -149,7 +149,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn test_register_builtin_error_type(
         &mut self,
     ) -> crate::compiler_frontend::datatypes::ids::TypeId {
-        let mut path_fork = PathInternerFork::empty();
+        let _path_fork = PathInternerFork::empty();
         use crate::compiler_frontend::builtins::error_type::{
             ERROR_FIELD_CODE, ERROR_FIELD_MESSAGE,
         };
@@ -264,13 +264,13 @@ impl<'a> HirBuilder<'a> {
             crate::compiler_frontend::datatypes::ids::TypeId,
         )>,
     ) {
-        self.structs_by_name.insert(name.clone(), struct_id);
+        self.structs_by_name.insert(name, struct_id);
         self.side_table.bind_struct_name(struct_id, name);
 
         let mut hir_fields = Vec::with_capacity(fields.len());
         for (field_id, field_name, ty) in fields {
             self.fields_by_struct_and_name
-                .insert((struct_id, field_name.clone()), field_id);
+                .insert((struct_id, field_name), field_id);
             self.side_table.bind_field_name(field_id, field_name);
             hir_fields.push(HirField { id: field_id, ty });
             self.reserve_field_id(field_id);
@@ -290,7 +290,7 @@ impl<'a> HirBuilder<'a> {
     /// trees, so a test constant must be a value the store can hold.
     pub(crate) fn test_register_module_constant(&mut self, name: PathId, value: Expression) {
         let declaration = Declaration {
-            id: name.clone(),
+            id: name,
             value,
             binding_span: None,
             config_qualifier: None,
@@ -352,7 +352,7 @@ impl<'a> HirBuilder<'a> {
                         let field_definitions = fields
                             .iter()
                             .map(|field| FieldDefinition {
-                                name: field.id.clone(),
+                                name: field.id,
                                 type_id: field.value.type_id,
                                 span: field.value.span,
                             })

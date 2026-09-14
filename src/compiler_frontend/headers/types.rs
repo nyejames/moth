@@ -1645,7 +1645,7 @@ impl FileFrontendPrepareOutput {
         for header in &mut self.headers {
             header.rebind_source_identity(
                 final_file_id,
-                final_logical_path.clone(),
+                final_logical_path,
                 canonical_os_path.clone(),
                 path_fork,
             )?;

@@ -104,7 +104,7 @@ pub(crate) fn parse_return_statement(
         ast.push(AstNode {
             kind: NodeKind::ReturnError(returned_error),
             span: return_span,
-            scope: context.scope.clone(),
+            scope: context.scope,
         });
 
         return Ok(());
@@ -169,7 +169,7 @@ pub(crate) fn parse_return_statement(
         ast.push(AstNode {
             kind: NodeKind::Return(vec![return_expr]),
             span: return_span,
-            scope: context.scope.clone(),
+            scope: context.scope,
         });
 
         return Ok(());
@@ -241,7 +241,7 @@ pub(crate) fn parse_return_statement(
     ast.push(AstNode {
         kind: NodeKind::Return(returned_values),
         span: return_span,
-        scope: context.scope.clone(),
+        scope: context.scope,
     });
 
     Ok(())

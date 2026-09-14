@@ -142,7 +142,7 @@ fn configured_resolver_with_source_file_kinds(
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
     let mut index_string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root.clone(),
         super::source_tree_index::SourceTreeProjectContext {
@@ -371,7 +371,7 @@ fn module_prepared_source_names(
         .semantic
         .prepared_header_syntax
         .module_symbols;
-    let string_table = &module.prepared.semantic.string_table;
+    let _string_table = &module.prepared.semantic.string_table;
     let mut logical_paths = module_symbols
         .module_file_paths
         .iter()

@@ -177,7 +177,7 @@ fn validate_callable_seeds(
     let mut seen_origins = FxHashSet::default();
 
     for seed in seeds {
-        if let Some(previous_generic) = seen_paths.insert(seed.path.clone(), seed.generic_template)
+        if let Some(previous_generic) = seen_paths.insert(seed.path, seed.generic_template)
             && (previous_generic || seed.generic_template)
         {
             return Err(CompilerError::compiler_error(format!(

@@ -351,7 +351,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     .visibility_for(&header.source_file)
                     .map_err(|error| self.error_messages(error, string_table))?,
             );
-            let source_file_scope = header.source_file.clone();
+            let source_file_scope = header.source_file;
 
             match &header.kind {
                 HeaderKind::Function {
@@ -512,7 +512,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 self.generic_function_instances_by_key.insert(
                     request.key.clone(),
                     GenericFunctionInstance {
-                        instance_path: request.instance_path.clone(),
+                        instance_path: request.instance_path,
                         key: request.key.clone(),
                     },
                 );
@@ -662,7 +662,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         let Some(body) = template.body_tokens.clone() else {
             let instance = GenericFunctionInstance {
-                instance_path: request.instance_path.clone(),
+                instance_path: request.instance_path,
                 key: request.key.clone(),
             };
             self.generic_function_instances_by_key
@@ -724,14 +724,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let mut context = self
             .build_base_scope_context(BaseScopeContextInput {
                 kind: ContextKind::Function,
-                scope: request.instance_path.clone(),
+                scope: request.instance_path,
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
                 // Materialised bodies carry their retained donor owner; the scope threads it so
                 // Stage 0 lookups validate against the frozen facts owner and never alias the
                 // requester call-site source.
                 declaring_file_id: token_stream.file_id,
-                source_file_scope: template.source_file.clone(),
+                source_file_scope: template.source_file,
                 scope_frame_capacity: 0,
             })
             .with_visible_declarations(Arc::new(visible_declarations))
@@ -753,14 +753,16 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
             context = context.with_frozen_identity_handle(frozen_identity_handle.clone());
         }
-        context.expected_result_type_ids = signature.success_return_type_ids();
+        let expected_result_type_ids = signature.success_return_type_ids();
+        context.current_function_return_type_ids = expected_result_type_ids.clone();
+        context.expected_result_type_ids = expected_result_type_ids;
         context.expected_error_type = signature.error_return_type_id();
         context.set_local_declarations(signature.parameters.to_owned(), &*self.path_fork);
 
         // --------------------------
         //  Parse body and materialize nested instances
         // --------------------------
-        token_stream.src_path = request.instance_path.clone();
+        token_stream.src_path = request.instance_path;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
@@ -817,12 +819,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         self.generic_function_instances_by_key.insert(
             request.key.clone(),
             GenericFunctionInstance {
-                instance_path: request.instance_path.clone(),
+                instance_path: request.instance_path,
                 key: request.key,
             },
         );
         self.ast.push(AstNode {
-            kind: NodeKind::Function(request.instance_path.clone(), signature, body),
+            kind: NodeKind::Function(request.instance_path, signature, body),
             // Generated instance has no consumer-local authored declaration range.
             span: None,
             scope: request.instance_path,
@@ -974,6 +976,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .with_visible_declarations(Arc::new(visible_declarations));
         let expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
         let expected_error_type = resolved_signature.signature.error_return_type_id();
+        context.current_function_return_type_ids = expected_result_type_ids.clone();
         context.expected_result_type_ids = expected_result_type_ids;
         context.expected_error_type = expected_error_type;
         context.set_local_declarations(resolved_signature.signature.parameters.to_owned(), &*self.path_fork);
@@ -982,7 +985,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         //  Parse body and emit node
         // --------------------------
         let mut token_stream = header.tokens;
-        let function_scope = context.scope.clone();
+        let function_scope = context.scope;
 
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
@@ -1037,7 +1040,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         });
 
         let mut token_stream = header.tokens;
-        let start_scope = context.scope.clone();
+        let start_scope = context.scope;
 
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,

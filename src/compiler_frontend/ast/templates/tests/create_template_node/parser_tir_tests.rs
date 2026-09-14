@@ -24,7 +24,7 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarati
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
@@ -38,7 +38,7 @@ fn parse_template(
     path_fork: &mut PathInternerFork,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
     let mut token_stream = template_tokens_from_source(source, string_table, span_builder, path_fork);
-    let mut context = new_constant_context(token_stream.src_path.to_owned(), path_fork);
+    let context = new_constant_context(token_stream.src_path.to_owned(), path_fork);
     let template_ir_store = context.template_ir_store();
 
     let template = Template::new(&mut token_stream, &context, vec![], string_table, path_fork)
@@ -816,11 +816,11 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let source_path = path_fork.try_intern_child(scope, source_name).expect("test path fits");
     let source_span = None;
     let source = ReactiveSource {
-        path: source_path.clone(),
+        path: source_path,
         kind: ReactiveSourceKind::Declaration,
     };
     let source_expression = Expression::reference_with_type_id(
-        source_path.clone(),
+        source_path,
         DataType::StringSlice,
         builtin_type_ids::STRING,
         source_span,
@@ -830,7 +830,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     .with_reactive_source(source);
 
     let declaration = Declaration {
-        id: source_path.clone(),
+        id: source_path,
         value: source_expression,
         binding_span: None,
         config_qualifier: None,
@@ -1230,9 +1230,9 @@ fn reactive_body_segment_records_formatted_tir_phase() {
     let span = None;
 
     let source_path = path_fork.try_intern_portable_path("main.moth/#reactive0", &mut string_table).expect("test path fits");
-    let expected_source_path = source_path.clone();
+    let expected_source_path = source_path;
     let source = ReactiveSource {
-        path: source_path.clone(),
+        path: source_path,
         kind: ReactiveSourceKind::Declaration,
     };
     let subscription = ReactiveSubscription {
@@ -1336,7 +1336,7 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
     let span = None;
 
     let source_path = path_fork.try_intern_portable_path("main.moth/#reactive0", &mut string_table).expect("test path fits");
-    let expected_source_path = source_path.clone();
+    let expected_source_path = source_path;
     let subscription = ReactiveSubscription {
         source: ReactiveSource {
             path: source_path,

@@ -58,7 +58,7 @@ fn collect_initial_function_flows_from_node(
 ) {
     match &node.kind {
         NodeKind::Function(path, signature, body) => {
-            flows.insert(path.clone(), empty_flow_for_signature(signature));
+flows.insert(*path, empty_flow_for_signature(signature));
             collect_initial_function_flows_from_nodes(body, flows);
         }
 
@@ -108,7 +108,7 @@ fn collect_initial_function_flows_from_declaration(
     flows: &mut FxHashMap<PathId, FunctionTemplateFlow>,
 ) {
     if let ExpressionKind::Function(signature) = &declaration.value.kind {
-        flows.insert(declaration.id.clone(), empty_flow_for_signature(signature));
+        flows.insert(declaration.id, empty_flow_for_signature(signature));
     }
 }
 
@@ -142,7 +142,7 @@ fn refresh_function_template_flows_from_node(
         NodeKind::VariableDeclaration(declaration) => {
             if let ExpressionKind::Function(signature) = &declaration.value.kind {
                 next_flows
-                    .entry(declaration.id.clone())
+                    .entry(declaration.id)
                     .or_insert_with(|| empty_flow_for_signature(signature));
             }
         }

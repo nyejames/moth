@@ -197,6 +197,10 @@ pub(super) fn parse_anonymous_const_record_expression(
 /// `#Config` is retained as declaration metadata on the field. It is deliberately not represented
 /// as a type constructor or expression property: the compiler config service validates placement
 /// and resolves the field to an ordinary primitive or optional expression.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "record-field parsing keeps the field name, token stream, scope, mutable field/duplicate-tracking/interner/string/path state as separate borrows"
+)]
 fn parse_record_field(
     field_name: StringId,
     token_stream: &mut FileTokens,

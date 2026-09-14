@@ -701,7 +701,7 @@ fn parse_inferred_curly_literal(
 
             // Parse the value side of the first map entry.
             let mut first_value_type = ExpectedType::Infer;
-            let mut first_value_cast_target_context = CastTargetContext::None;
+            let _first_value_cast_target_context = CastTargetContext::None;
             let input = ExpressionParseInput::ordinary(
                 ExpressionParseResources {
                     token_stream,

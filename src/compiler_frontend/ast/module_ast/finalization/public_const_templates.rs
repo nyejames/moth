@@ -85,7 +85,7 @@ impl AstFinalizer<'_, '_> {
             let projected =
                 self.project_module_template_expression(declaration, &store, string_table)?;
             if module_values
-                .insert(declaration.id.clone(), projected)
+                .insert(declaration.id, projected)
                 .is_some()
             {
                 return Err(CompilerError::compiler_error(

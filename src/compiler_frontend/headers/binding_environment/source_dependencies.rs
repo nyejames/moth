@@ -192,19 +192,19 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         file_visibility
             .visible_declaration_paths_mut()
-            .insert(symbol_path.clone());
+            .insert(*symbol_path);
 
         let binding = if is_type_alias {
             VisibleNameBinding::TypeAlias {
-                canonical_path: symbol_path.clone(),
+                canonical_path: *symbol_path,
             }
         } else if is_trait {
             VisibleNameBinding::Trait {
-                canonical_path: symbol_path.clone(),
+                canonical_path: *symbol_path,
             }
         } else {
             VisibleNameBinding::SourceDependency {
-                canonical_path: symbol_path.clone(),
+                canonical_path: *symbol_path,
             }
         };
 
@@ -213,17 +213,17 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if is_type_alias {
             file_visibility.visible_type_alias_names.insert(
                 local_name,
-                SourceDeclarationTarget::Local(symbol_path.clone()),
+                SourceDeclarationTarget::Local(*symbol_path),
             );
         } else if is_trait {
             file_visibility.visible_trait_names.insert(
                 local_name,
-                SourceDeclarationTarget::Local(symbol_path.clone()),
+                SourceDeclarationTarget::Local(*symbol_path),
             );
         } else {
             file_visibility.visible_source_names.insert(
                 local_name,
-                SourceDeclarationTarget::Local(symbol_path.clone()),
+                SourceDeclarationTarget::Local(*symbol_path),
             );
         }
 

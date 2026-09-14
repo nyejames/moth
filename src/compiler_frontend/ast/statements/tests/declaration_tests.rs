@@ -18,7 +18,7 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
@@ -480,7 +480,7 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         tokens.freeze_path_syntax_for_test();
         let context = ScopeContext::new_for_tests(
             ContextKind::Function,
-            source_path.clone(),
+            source_path,
             Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
             Arc::new(ExternalPackageRegistry::new()),
             vec![],

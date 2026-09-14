@@ -20,6 +20,10 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "builtin method argument parsing keeps the token stream, member identity, expected types, scope, mutable interner/string/path state, and member span as separate borrows"
+)]
 pub(super) fn parse_builtin_method_args_typed(
     token_stream: &mut FileTokens,
     member_name: &str,

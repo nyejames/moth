@@ -559,6 +559,10 @@ impl ModulePreparationContext<'_> {
     ///       produce the same per-file result records and share the same merge/remap aggregation.
     /// WHY: keeping scheduling separate from aggregation avoids Rayon overhead on tiny modules
     ///      without changing deterministic merge order or frontend ownership boundaries.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "module preparation keeps mutable string/path forks, prepared inputs, span builders, entry path, root role, and size threshold as separate borrows"
+    )]
     fn prepare_module_files(
         &self,
         string_table: &mut StringTable,
@@ -701,7 +705,7 @@ impl ModulePreparationContext<'_> {
                     crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
                         PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
                             CompilerDiagnostic::source_table_capacity(
-                                SourceSpanCapacityResource::LogicalPathTable,
+                                SourceSpanCapacityResource::LogicalPath,
                             ),
                             std::mem::take(string_table),
                         ))
@@ -872,6 +876,10 @@ impl ModulePreparationContext<'_> {
         Ok((prepared, warnings))
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "chunk preparation keeps module inputs, fork sources, prepare context, fragment offsets, strategy, and span builders as separate borrows"
+    )]
     fn prepare_module_file_chunks(
         module: Vec<PreparedSourceInput>,
         fork_source: &StringTableForkSource,
@@ -1046,12 +1054,6 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         &mut self.path_fork
     }
 
-    /// Borrow both mutable selection inputs for one source preparation call.
-    pub(super) fn source_preparation_inputs_mut(
-        &mut self,
-    ) -> (&mut StringTable, &mut SelectedSourceTextMap) {
-        (&mut self.string_table, self.selected_source_texts)
-    }
 
     pub(super) fn source_preparation_inputs_and_path_fork_mut(
         &mut self,

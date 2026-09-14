@@ -37,7 +37,7 @@ use crate::compiler_frontend::hir::hir_builder::{
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     runtime_expr, runtime_function_call_item, runtime_operand_item, runtime_operator_item,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 fn blocks_with_user_function_call(module: &HirModule, function_id: FunctionId) -> Vec<BlockId> {
     module
@@ -189,7 +189,7 @@ let rhs_name = super::symbol("rhs_and", &mut path_fork, &mut string_table);
 let location = None;
 
 let rhs_fn = function_node(
-    rhs_name.clone(),
+    rhs_name,
     FunctionSignature {
         parameters: vec![],
         returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
@@ -208,7 +208,7 @@ let rhs_fn = function_node(
 let condition = runtime_expr(
     vec![
         runtime_operand_item(Expression::bool(false, location, ValueMode::ImmutableOwned)),
-        runtime_function_call_item(rhs_name.clone(), vec![builtin_type_ids::BOOL], location),
+        runtime_function_call_item(rhs_name, vec![builtin_type_ids::BOOL], location),
         runtime_operator_item(Operator::And, location),
     ],
     builtin_type_ids::BOOL,
@@ -305,7 +305,7 @@ let rhs_name = super::symbol("rhs_or", &mut path_fork, &mut string_table);
 let location = None;
 
 let rhs_fn = function_node(
-    rhs_name.clone(),
+    rhs_name,
     FunctionSignature {
         parameters: vec![],
         returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
@@ -324,7 +324,7 @@ let rhs_fn = function_node(
 let condition = runtime_expr(
     vec![
         runtime_operand_item(Expression::bool(true, location, ValueMode::ImmutableOwned)),
-        runtime_function_call_item(rhs_name.clone(), vec![builtin_type_ids::BOOL], location),
+        runtime_function_call_item(rhs_name, vec![builtin_type_ids::BOOL], location),
         runtime_operator_item(Operator::Or, location),
     ],
     builtin_type_ids::BOOL,
@@ -416,13 +416,13 @@ let location = None;
 let condition = runtime_expr(
     vec![
         runtime_operand_item(reference_expr_with_type_id(
-            lhs_name.clone(),
+            lhs_name,
             builtin_type_ids::BOOL,
             location,
             ValueMode::ImmutableReference,
         )),
         runtime_operand_item(reference_expr_with_type_id(
-            rhs_name.clone(),
+            rhs_name,
             builtin_type_ids::BOOL,
             location,
             ValueMode::ImmutableReference,
@@ -515,7 +515,7 @@ let location = None;
 let then_body = vec![node(
     NodeKind::ThenValue(ProducedValues {
         expressions: vec![reference_expr_with_type_id(
-            left_name.clone(),
+            left_name,
             builtin_type_ids::INT,
             location,
             ValueMode::ImmutableReference,
@@ -528,7 +528,7 @@ let then_body = vec![node(
 let else_body = vec![node(
     NodeKind::ThenValue(ProducedValues {
         expressions: vec![reference_expr_with_type_id(
-            right_name.clone(),
+            right_name,
             builtin_type_ids::INT,
             location,
             ValueMode::ImmutableReference,
@@ -553,8 +553,8 @@ let value_if_expression = Expression::new(
             ),
             then_body,
             else_body,
-            then_scope: entry_path.clone(),
-            else_scope: entry_path.clone(),
+            then_scope: entry_path,
+            else_scope: entry_path,
             span: location,
             generic_request_ranges: Default::default(),
             result_type_ids: vec![builtin_type_ids::INT],
@@ -640,7 +640,7 @@ let message_value = Expression::new(
     ExpressionKind::ValueBlock {
         block: Box::new(ValueBlock::If(ValueIfBlock {
             condition: reference_expr_with_type_id(
-                condition_name.clone(),
+                condition_name,
                 builtin_type_ids::BOOL,
                 location,
                 ValueMode::ImmutableReference,
@@ -667,8 +667,8 @@ let message_value = Expression::new(
                 }),
                 location,
             )],
-            then_scope: entry_path.clone(),
-            else_scope: entry_path.clone(),
+            then_scope: entry_path,
+            else_scope: entry_path,
             span: location,
             generic_request_ranges: Default::default(),
             result_type_ids: vec![builtin_type_ids::STRING],
@@ -688,7 +688,7 @@ let start_fn = function_node(
     start_name,
     FunctionSignature {
         parameters: vec![param_with_type_id(
-            condition_name.clone(),
+            condition_name,
             builtin_type_ids::BOOL,
             false,
             location,
@@ -760,7 +760,7 @@ let message_name = super::symbol("runtime_message", &mut path_fork, &mut string_
 let location = None;
 
 let message_fn = function_node(
-    message_name.clone(),
+    message_name,
     FunctionSignature {
         parameters: vec![],
         returns: fresh_success_returns(vec![builtin_type_ids::STRING]),
@@ -838,7 +838,7 @@ let message_value = Expression::new(
     ExpressionKind::ValueBlock {
         block: Box::new(ValueBlock::If(ValueIfBlock {
             condition: reference_expr_with_type_id(
-                condition_name.clone(),
+                condition_name,
                 builtin_type_ids::BOOL,
                 location,
                 ValueMode::ImmutableReference,
@@ -865,8 +865,8 @@ let message_value = Expression::new(
                 }),
                 location,
             )],
-            then_scope: entry_path.clone(),
-            else_scope: entry_path.clone(),
+            then_scope: entry_path,
+            else_scope: entry_path,
             span: location,
             generic_request_ranges: Default::default(),
             result_type_ids: vec![builtin_type_ids::STRING],

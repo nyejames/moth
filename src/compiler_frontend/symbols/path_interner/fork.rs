@@ -442,11 +442,9 @@ impl PathInternerFork {
 
         // The component walk borrows only the caller scratch, so interning below can reuse the
         // collected suffix without holding the fork borrow across the loop.
-        let suffix_len = scratch.len();
         let mut joined = prefix;
 
-        for index in 0..suffix_len {
-            let component = scratch[index];
+        for &component in scratch.iter() {
             joined = self.try_intern_child(joined, component)?;
         }
 

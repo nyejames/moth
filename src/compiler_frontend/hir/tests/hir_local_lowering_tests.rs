@@ -58,7 +58,7 @@ let x = super::symbol("x", &mut path_fork, &mut string_table);
 
 let body = vec![node(
     NodeKind::Return(vec![reference_expr_with_type_id(
-        x.clone(),
+        x,
         builtin_type_ids::INT,
         None,
         ValueMode::ImmutableReference,
@@ -192,14 +192,14 @@ let start_function = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                var_name.clone(),
+                var_name,
                 Expression::int(1, None, ValueMode::ImmutableOwned),
             )),
             None,
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                var_name.clone(),
+                var_name,
                 Expression::int(2, None, ValueMode::ImmutableOwned),
             )),
             None,
@@ -226,7 +226,7 @@ let x = super::symbol("x", &mut path_fork, &mut string_table);
 let helper = super::symbol("helper", &mut path_fork, &mut string_table);
 
 let helper_fn = function_node(
-    helper.clone(),
+    helper,
     FunctionSignature {
         parameters: vec![],
         returns: fresh_success_returns(vec![builtin_type_ids::INT]),
@@ -240,7 +240,7 @@ let helper_fn = function_node(
 
 let assignment = node(
     NodeKind::Assignment {
-        target: assignment_target(x.clone(), DataType::Int, builtin_type_ids::INT, None),
+        target: assignment_target(x, DataType::Int, builtin_type_ids::INT, None),
         value: Expression::function_call(helper, vec![], vec![builtin_type_ids::INT], None),
     },
     None,
@@ -296,7 +296,7 @@ let callee = super::symbol("callee", &mut path_fork, &mut string_table);
 let alloc_id = ExternalFunctionId::Synthetic(0);
 
 let callee_fn = function_node(
-    callee.clone(),
+    callee,
     FunctionSignature {
         parameters: vec![],
         returns: fresh_success_returns(vec![builtin_type_ids::INT]),

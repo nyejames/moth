@@ -15,7 +15,7 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -86,11 +86,11 @@ fn assert_hints(header: &Header, expected: &HashSet<LocalDeclarationOrderingHint
     let actual_keys = header
         .local_ordering_hints
         .iter()
-        .map(|hint| (hint.path().clone(), hint.origin(), hint.occurrence()))
+        .map(|hint| (hint.path(), hint.origin(), hint.occurrence()))
         .collect::<HashSet<_>>();
     let expected_keys = expected
         .iter()
-        .map(|hint| (hint.path().clone(), hint.origin(), hint.occurrence()))
+        .map(|hint| (hint.path(), hint.origin(), hint.occurrence()))
         .collect::<HashSet<_>>();
     assert_eq!(
         actual_keys, expected_keys,
@@ -250,7 +250,7 @@ fn resource_file_value_records_no_content_hint() {
 
 #[test]
 fn struct_field_resource_default_records_no_content_hint() {
-    let (output, strings, _span_builder, _path_fork) =
+    let (output, _strings, _span_builder, _path_fork) =
         prepare_source("Options = |\n    icon_url String = @assets/logo.svg,\n|\n");
 
     let struct_header = header_of_kind(&output.headers, "struct", |kind| {
@@ -274,7 +274,7 @@ fn struct_field_resource_default_records_no_content_hint() {
 
 #[test]
 fn dependency_clause_rows_record_no_content_hint() {
-    let (output, strings, _span_builder, _path_fork) = prepare_source(
+    let (output, _strings, _span_builder, _path_fork) = prepare_source(
         "@core/math sin\n\
      unused #= @assets/logo.svg\n",
     );

@@ -19,7 +19,7 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 
@@ -2158,7 +2158,7 @@ fn valid_at_prefixed_paths_and_operators_remain_unaffected() {
         );
     }
 
-    let (at_core, string_table) = tokenize_source("@core/math\n");
+    let (at_core, _string_table) = tokenize_source("@core/math\n");
     assert!(
         at_core
             .tokens

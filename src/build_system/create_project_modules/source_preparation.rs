@@ -68,6 +68,10 @@ pub(super) fn prepare_discovery_source(
         string_table,
     )
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "discovery preparation keeps the file path, source text, directives, resolver, entry path, and mutable database/path/string state as separate borrows"
+)]
 pub(super) fn prepare_discovery_source_text(
     file_path: &Path,
     source: String,

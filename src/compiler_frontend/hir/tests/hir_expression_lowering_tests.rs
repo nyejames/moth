@@ -311,7 +311,7 @@ fn declared_entry_block<'b>(builder: &'b HirBuilder<'_>) -> &'b HirBlock {
         .unwrap_or_else(|| panic!("declared HIR entry block {entry_id:?} should exist"))
 }
 
-fn assert_no_synthesized_helper_functions(builder: &HirBuilder<'_>) { let mut path_fork = super::PathInternerFork::empty(); assert_eq!(
+fn assert_no_synthesized_helper_functions(builder: &HirBuilder<'_>) { let _path_fork = super::PathInternerFork::empty(); assert_eq!(
     builder.module.functions.len(),
     1,
     "runtime-template lowering should retain only its declared start function"
@@ -556,7 +556,7 @@ let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
 register_local(
     &mut builder,
-    x.clone(),
+    x,
     LocalId(10),
     builtin_type_ids::INT,
     span,
@@ -586,7 +586,7 @@ let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
 builder.test_register_module_constant(
-    third_const.clone(),
+    third_const,
     Expression::int(3, span, ValueMode::ImmutableOwned),
 );
 
@@ -613,14 +613,14 @@ let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
 register_local(
     &mut builder,
-    x.clone(),
+    x,
     LocalId(10),
     builtin_type_ids::INT,
     span,
 );
 register_local(
     &mut builder,
-    y.clone(),
+    y,
     LocalId(11),
     builtin_type_ids::INT,
     span,
@@ -772,10 +772,10 @@ fn lowers_function_call_to_call_statement_and_temp_load() { let mut path_fork = 
 let function_name = super::symbol("sum", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
-builder.test_register_function_name(function_name.clone(), FunctionId(2));
+builder.test_register_function_name(function_name, FunctionId(2));
 
 let call_expr = Expression::function_call(
-    function_name.clone(),
+    function_name,
     vec![Expression::int(7, span, ValueMode::ImmutableOwned)],
     vec![builtin_type_ids::INT],
     span,
@@ -812,7 +812,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_single_return() { l
 let function_name = super::symbol("typed_result", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
-builder.test_register_function_name(function_name.clone(), FunctionId(32));
+builder.test_register_function_name(function_name, FunctionId(32));
 
 let call_expr = Expression::function_call_with_typed_arguments(
     function_name,
@@ -845,7 +845,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_no_return() { let m
 let function_name = super::symbol("no_result", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
-builder.test_register_function_name(function_name.clone(), FunctionId(33));
+builder.test_register_function_name(function_name, FunctionId(33));
 let call_expr = Expression::function_call(function_name, vec![], vec![], span);
 
 let lowered = builder
@@ -868,7 +868,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_multi_return() { le
 let function_name = super::symbol("multi_result", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
-builder.test_register_function_name(function_name.clone(), FunctionId(34));
+builder.test_register_function_name(function_name, FunctionId(34));
 
 let call_expr = Expression::function_call_with_typed_arguments(
     function_name,
@@ -950,11 +950,11 @@ let err_type = builder
     .expect("builtin String TypeId should lower in test context");
 let carrier_type = result_carrier_type_id(&mut builder.type_environment, ok_type, err_type);
 builder.test_register_function_with_return_type(
-    function_name.clone(),
+    function_name,
     FunctionId(35),
     carrier_type,
 );
-let test_scope = function_name.clone();
+let test_scope = function_name;
 
 let handled_call_expr = Expression::handled_fallible_function_call_with_typed_arguments(
     function_name,
@@ -1000,7 +1000,7 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() { let mu
 let function_name = super::symbol("handled_result_expr", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
-builder.test_register_function_name(function_name.clone(), FunctionId(36));
+builder.test_register_function_name(function_name, FunctionId(36));
 
 let ok_type = builder
     .type_environment
@@ -1050,7 +1050,7 @@ fn lowers_fresh_mutable_call_argument_via_hidden_local_with_origin_metadata() { 
 let function_name = super::symbol("mutate", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
-builder.test_register_function_name(function_name.clone(), FunctionId(24));
+builder.test_register_function_name(function_name, FunctionId(24));
 
 let fresh_argument = CallArgument::positional(
     Expression::int(7, span, ValueMode::ImmutableOwned),
@@ -1117,19 +1117,19 @@ let receiver_struct = super::symbol("Vector2", &mut path_fork, &mut string_table
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-builder.test_register_function_name(method_path.clone(), FunctionId(22));
+builder.test_register_function_name(method_path, FunctionId(22));
 
 let receiver_type_id =
-    builder.test_register_nominal_struct_type(receiver_struct.clone(), vec![], false);
+    builder.test_register_nominal_struct_type(receiver_struct, vec![], false);
 builder.test_register_struct_with_fields(
     StructId(21),
-    receiver_struct.clone(),
+    receiver_struct,
     receiver_type_id,
     vec![],
 );
 register_local(
     &mut builder,
-    receiver_name.clone(),
+    receiver_name,
     LocalId(23),
     receiver_type_id,
     span,
@@ -1142,7 +1142,7 @@ let method_expression = Expression::method_call_with_typed_arguments(
         span,
         ValueMode::MutableReference,
     ),
-    method_path.clone(),
+    method_path,
     vec![CallArgument::positional(
         Expression::int(7, span, ValueMode::ImmutableOwned),
         CallAccessMode::Shared,
@@ -1179,11 +1179,11 @@ let receiver_name = super::symbol("value", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-builder.test_register_function_name(method_path.clone(), FunctionId(41));
+builder.test_register_function_name(method_path, FunctionId(41));
 
 register_local(
     &mut builder,
-    receiver_name.clone(),
+    receiver_name,
     LocalId(42),
     builtin_type_ids::INT,
     span,
@@ -1196,7 +1196,7 @@ let method_expression = Expression::method_call_with_typed_arguments(
         span,
         ValueMode::ImmutableReference,
     ),
-    method_path.clone(),
+    method_path,
     vec![],
     vec![builtin_type_ids::INT],
     &mut builder.type_environment,
@@ -1260,16 +1260,16 @@ let outer = super::symbol("outer", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-builder.test_register_function_name(first.clone(), FunctionId(1));
-builder.test_register_function_name(second.clone(), FunctionId(2));
-builder.test_register_function_name(outer.clone(), FunctionId(3));
+builder.test_register_function_name(first, FunctionId(1));
+builder.test_register_function_name(second, FunctionId(2));
+builder.test_register_function_name(outer, FunctionId(3));
 
 let arg_one =
-    Expression::function_call(first.clone(), vec![], vec![builtin_type_ids::INT], span);
+    Expression::function_call(first, vec![], vec![builtin_type_ids::INT], span);
 let arg_two =
-    Expression::function_call(second.clone(), vec![], vec![builtin_type_ids::INT], span);
+    Expression::function_call(second, vec![], vec![builtin_type_ids::INT], span);
 let outer_call = Expression::function_call(
-    outer.clone(),
+    outer,
     vec![arg_one, arg_two],
     vec![builtin_type_ids::INT],
     span,
@@ -1447,13 +1447,13 @@ let span = None;
 let count_path = super::symbol("count", &mut path_fork, &mut string_table);
 let count_local = LocalId(24);
 let count_source = ReactiveSource {
-    path: count_path.clone(),
+    path: count_path,
     kind: ReactiveSourceKind::Declaration,
 };
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 register_local(
     &mut builder,
-    count_path.clone(),
+    count_path,
     count_local,
     builtin_type_ids::INT,
     span,
@@ -1461,7 +1461,7 @@ register_local(
 builder.side_table.bind_reactive_source(HirReactiveSource {
     id: ReactiveSourceId(0),
     local_id: count_local,
-    path: count_path.clone(),
+    path: count_path,
     kind: HirReactiveSourceKind::Declaration,
     type_id: builtin_type_ids::INT,
     span,
@@ -1557,7 +1557,7 @@ let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 register_local(
     &mut builder,
-    show_name.clone(),
+    show_name,
     LocalId(10),
     builtin_type_ids::BOOL,
     span,
@@ -1655,13 +1655,13 @@ builder.test_register_function_with_return_type(
     enclosing_return_type,
 );
 builder.test_register_function_with_return_type(
-    can_fail_name.clone(),
+    can_fail_name,
     FunctionId(7),
     callee_return_type,
 );
 register_local(
     &mut builder,
-    show_name.clone(),
+    show_name,
     LocalId(11),
     builtin_type_ids::BOOL,
     span,
@@ -1738,7 +1738,7 @@ let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 register_local(
     &mut builder,
-    show_name.clone(),
+    show_name,
     LocalId(11),
     builtin_type_ids::BOOL,
     span,
@@ -1805,7 +1805,7 @@ let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 register_local(
     &mut builder,
-    show_name.clone(),
+    show_name,
     LocalId(12),
     builtin_type_ids::BOOL,
     span,
@@ -1856,7 +1856,7 @@ let option_string = builder
     .intern_option(builtin_type_ids::STRING);
 register_local(
     &mut builder,
-    maybe_name.clone(),
+    maybe_name,
     LocalId(12),
     option_string,
     span,
@@ -1865,7 +1865,7 @@ register_local(
 let scrutinee =
     reference_expr_with_type_id(maybe_name, option_string, span, ValueMode::ImmutableOwned);
 let then_content = vec![reference_expr_with_type_id(
-    capture_path.clone(),
+    capture_path,
     builtin_type_ids::STRING,
     span,
     ValueMode::ImmutableReference,
@@ -1986,7 +1986,7 @@ let option_string = builder
     .intern_option(builtin_type_ids::STRING);
 register_local(
     &mut builder,
-    maybe_name.clone(),
+    maybe_name,
     LocalId(13),
     option_string,
     span,
@@ -1995,7 +1995,7 @@ register_local(
 let scrutinee =
     reference_expr_with_type_id(maybe_name, option_string, span, ValueMode::ImmutableOwned);
 let then_content = vec![reference_expr_with_type_id(
-    capture_path.clone(),
+    capture_path,
     builtin_type_ids::STRING,
     span,
     ValueMode::ImmutableReference,
@@ -2045,11 +2045,11 @@ let suffix = string_table.intern("</card>");
 let span = None;
 let limit_path = super::symbol("limit", &mut path_fork, &mut string_table);
 let item_binding = loop_binding("i", builtin_type_ids::INT, &mut path_fork, &mut string_table);
-let item_path = item_binding.id.clone();
+let item_path = item_binding.id;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 register_local(
     &mut builder,
-    limit_path.clone(),
+    limit_path,
     LocalId(20),
     builtin_type_ids::INT,
     span,
@@ -2121,14 +2121,14 @@ let suffix = string_table.intern("");
 let span = None;
 let items_path = super::symbol("items", &mut path_fork, &mut string_table);
 let item_binding = loop_binding("item", builtin_type_ids::INT, &mut path_fork, &mut string_table);
-let item_path = item_binding.id.clone();
+let item_path = item_binding.id;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 let collection_type = builder
     .type_environment
     .intern_collection(builtin_type_ids::INT, None);
 register_local(
     &mut builder,
-    items_path.clone(),
+    items_path,
     LocalId(21),
     collection_type,
     span,
@@ -2197,7 +2197,7 @@ let keep_going_path = super::symbol("keep_going", &mut path_fork, &mut string_ta
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 register_local(
     &mut builder,
-    keep_going_path.clone(),
+    keep_going_path,
     LocalId(22),
     builtin_type_ids::BOOL,
     span,
@@ -2249,7 +2249,7 @@ let limit_path = super::symbol("limit", &mut path_fork, &mut string_table);
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 register_local(
     &mut builder,
-    limit_path.clone(),
+    limit_path,
     LocalId(23),
     builtin_type_ids::INT,
     span,
@@ -2462,26 +2462,26 @@ let int_type = builtin_type_ids::INT;
 
 builder.test_register_struct_with_fields(
     StructId(1),
-    struct_path.clone(),
+    struct_path,
     int_type,
-    vec![(FieldId(3), field_path.clone(), int_type)],
+    vec![(FieldId(3), field_path, int_type)],
 );
 
 let struct_type_id = builder.test_register_nominal_struct_type(
-    struct_path.clone(),
-    vec![(field_path.clone(), int_type, span)],
+    struct_path,
+    vec![(field_path, int_type, span)],
     false,
 );
 
 let expr_fields = vec![Declaration {
-    id: field_path.clone(),
+    id: field_path,
     value: Expression::int(42, span, ValueMode::ImmutableOwned),
     binding_span: None,
     config_qualifier: None,
 }];
 
 let expression = Expression::struct_instance(
-    struct_path.clone(),
+    struct_path,
     expr_fields.clone(),
     span,
     ValueMode::MutableOwned,
@@ -2512,8 +2512,8 @@ let field_value = string_table.intern("red");
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
 let const_record_type_id = builder.test_register_nominal_struct_type(
-    struct_path.clone(),
-    vec![(field_path.clone(), builtin_type_ids::STRING, span)],
+    struct_path,
+    vec![(field_path, builtin_type_ids::STRING, span)],
     true,
 );
 
@@ -2550,7 +2550,7 @@ let temp_name = super::symbol("__hir_tmp_0", &mut path_fork, &mut string_table);
 let span = None;
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-builder.test_register_function_name(callee.clone(), FunctionId(8));
+builder.test_register_function_name(callee, FunctionId(8));
 
 let call_expr = Expression::function_call(callee, vec![], vec![builtin_type_ids::INT], span);
 let lowered = builder
@@ -2594,25 +2594,25 @@ let int_type = builtin_type_ids::INT;
 
 builder.test_register_struct_with_fields(
     StructId(10),
-    struct_a.clone(),
+    struct_a,
     int_type,
-    vec![(FieldId(100), field_a.clone(), int_type)],
+    vec![(FieldId(100), field_a, int_type)],
 );
 builder.test_register_struct_with_fields(
     StructId(11),
-    struct_b.clone(),
+    struct_b,
     int_type,
-    vec![(FieldId(101), field_b.clone(), int_type)],
+    vec![(FieldId(101), field_b, int_type)],
 );
 
 let local_struct_type_id = builder.test_register_nominal_struct_type(
-    struct_a.clone(),
-    vec![(field_a.clone(), int_type, span)],
+    struct_a,
+    vec![(field_a, int_type, span)],
     false,
 );
 register_local(
     &mut builder,
-    local_name.clone(),
+    local_name,
     LocalId(30),
     local_struct_type_id,
     span,
@@ -2657,21 +2657,21 @@ let template_type = builtin_type_ids::STRING;
 
 builder.test_register_struct_with_fields(
     StructId(20),
-    format_struct.clone(),
+    format_struct,
     template_type,
-    vec![(FieldId(200), center_field.clone(), template_type)],
+    vec![(FieldId(200), center_field, template_type)],
 );
 
 let format_type_id = builder.test_register_nominal_struct_type(
-    format_struct.clone(),
-    vec![(center_field.clone(), builtin_type_ids::STRING, span)],
+    format_struct,
+    vec![(center_field, builtin_type_ids::STRING, span)],
     false,
 );
 
 let format_constant = Expression::struct_instance(
-    format_struct.clone(),
+    format_struct,
     vec![Declaration {
-        id: center_field.clone(),
+        id: center_field,
         value: Expression::string_slice(center_value, span, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -2683,7 +2683,7 @@ let format_constant = Expression::struct_instance(
     format_type_id,
 );
 
-builder.test_register_module_constant(format_name.clone(), format_constant);
+builder.test_register_module_constant(format_name, format_constant);
 
 let format_reference = reference_expr_with_type_id(
     format_name,
@@ -2731,13 +2731,13 @@ let red_value = string_table.intern("red");
 let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
 let palette_type_id = builder.test_register_nominal_struct_type(
-    palette_struct.clone(),
-    vec![(red_field.clone(), builtin_type_ids::STRING, span)],
+    palette_struct,
+    vec![(red_field, builtin_type_ids::STRING, span)],
     true,
 );
 
 let palette_constant = Expression::struct_instance(
-    palette_struct.clone(),
+    palette_struct,
     vec![Declaration {
         id: red_field,
         value: Expression::string_slice(red_value, span, ValueMode::ImmutableOwned),
@@ -2751,7 +2751,7 @@ let palette_constant = Expression::struct_instance(
     palette_type_id,
 );
 
-builder.test_register_module_constant(palette_name.clone(), palette_constant);
+builder.test_register_module_constant(palette_name, palette_constant);
 
 let palette_reference = const_record_reference_expr(
     palette_name,
@@ -2804,7 +2804,7 @@ let receiver_type_id = builder
     .intern_collection(builtin_type_ids::INT, None);
 register_local(
     &mut builder,
-    receiver_name.clone(),
+    receiver_name,
     LocalId(70),
     receiver_type_id,
     span,
@@ -2991,7 +2991,7 @@ let map_type = builder
     .intern_map(builtin_type_ids::STRING, builtin_type_ids::INT);
 register_local(
     &mut builder,
-    scores_name.clone(),
+    scores_name,
     LocalId(80),
     map_type,
     span,
@@ -3133,11 +3133,11 @@ let choice_variants = vec![
     },
 ];
 let choice_type_id =
-    builder.test_register_nominal_choice_type(status_path.clone(), &choice_variants);
+    builder.test_register_nominal_choice_type(status_path, &choice_variants);
 builder.register_choice_id(&status_path, &span).unwrap();
 
 let choice_expr = choice_construct_expr(
-    status_path.clone(),
+    status_path,
     0,
     vec![],
     choice_type_id,
@@ -3483,7 +3483,7 @@ let carrier_type =
     result_carrier_type_id(&mut builder.type_environment, float_type, error_type);
 
 builder.test_register_function_with_return_type(
-    function_name.clone(),
+    function_name,
     FunctionId(99),
     carrier_type,
 );
@@ -3544,7 +3544,7 @@ let carrier_type =
     result_carrier_type_id(&mut builder.type_environment, float_type, error_type);
 
 builder.test_register_function_with_return_type(
-    function_name.clone(),
+    function_name,
     FunctionId(100),
     carrier_type,
 );

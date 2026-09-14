@@ -35,7 +35,7 @@ use crate::compiler_frontend::paths::resource_identity::{
     StableResourceOwnerId,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::integration_test_runner::assertions::html_shell_violation;
 use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_identity;

@@ -113,6 +113,10 @@ fn clone_inlined_const_field(
     Ok(Some(inlined_expression))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "const field inlining keeps the receiver node and type, field name, type environment, optional field and scope tables, template store, and path fork as separate borrows"
+)]
 fn const_inline_field_value(
     receiver_node: &AstNode,
     receiver_type_id: TypeId,

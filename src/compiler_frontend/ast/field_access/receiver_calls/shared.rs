@@ -122,7 +122,7 @@ pub(super) fn method_path_from_evidence(
         .requirements
         .iter()
         .find(|requirement_evidence| requirement_evidence.requirement_id == requirement.id)
-        .map(|requirement_evidence| requirement_evidence.method_path.clone())
+        .map(|requirement_evidence| requirement_evidence.method_path)
 }
 
 fn declaration_for_trait_bound_parameter(
@@ -183,7 +183,7 @@ pub(super) fn signature_from_trait_requirement(
             receiver_type_id,
         );
         parameters.push(declaration_for_trait_bound_parameter(
-            parameter.name.clone(),
+            parameter.name,
             type_id,
             diagnostic_type_spelling(type_id, type_environment),
             parameter.value_mode.clone(),

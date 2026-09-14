@@ -26,11 +26,11 @@ pub(crate) fn validate_no_recursive_generic_type(
         return Ok(());
     }
 
-    return Err(CompilerDiagnostic::invalid_declaration(
+    Err(CompilerDiagnostic::invalid_declaration(
         InvalidDeclarationReason::RecursiveGenericType,
         None,
         span,
-    ));
+    ))
 }
 
 fn generic_type_references_nominal_path(
@@ -181,14 +181,12 @@ fn collect_runtime_struct_dependencies(
 /// Reject runtime struct cycles that would make concrete layout impossible to lower.
 pub(crate) fn validate_no_recursive_runtime_structs(
     struct_fields_by_path: &FxHashMap<PathId, Vec<Declaration>>,
-    string_table: &StringTable,
 ) -> TypeResolutionResult<()> {
     // WHY: V1 runtime structs do not support recursive layout semantics yet.
     // These cycles must fail in AST construction with a targeted rule error.
     fn visit(
         current: &PathId,
         struct_fields_by_path: &FxHashMap<PathId, Vec<Declaration>>,
-        string_table: &StringTable,
         visiting: &mut Vec<PathId>,
         visited: &mut FxHashSet<PathId>,
     ) -> TypeResolutionResult<()> {
@@ -229,7 +227,6 @@ pub(crate) fn validate_no_recursive_runtime_structs(
                         visit(
                             &dependency,
                             struct_fields_by_path,
-                            string_table,
                             visiting,
                             visited,
                         )?;
@@ -250,7 +247,6 @@ pub(crate) fn validate_no_recursive_runtime_structs(
         visit(
             struct_path,
             struct_fields_by_path,
-            string_table,
             &mut visiting,
             &mut visited,
         )?;

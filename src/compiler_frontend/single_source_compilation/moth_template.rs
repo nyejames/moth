@@ -526,6 +526,10 @@ fn order_template_headers(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "template semantic folding keeps sorted headers, entry scope, the request, mutable string/path state, resolved references, the source builder, and module origin as separate inputs"
+)]
 fn fold_template_semantics(
     sorted: SortedHeaders,
     entry_scope: PathId,
@@ -640,6 +644,10 @@ fn attach_finalized_source_database(
 /// Prepare the standalone template source exactly once.
 ///
 /// The preparation owner lends its split database and span-builder view for this one call, so
+#[allow(
+    clippy::too_many_arguments,
+    reason = "template source preparation keeps the shared database, resolver, request, source text, entry id, mutable string/path state, and span builder as separate inputs"
+)]
 fn prepare_template_source(
     source_files: &Arc<SourceDatabase>,
     path_resolver: &ProjectPathResolver,

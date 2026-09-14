@@ -97,19 +97,19 @@ let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table
 let external_package_registry = default_external_package_registry(&mut string_table);
 
 let summary_target = symbol("summary_target", &mut path_fork, &mut string_table);
-let summary_target_name = summary_target.clone();
+let summary_target_name = summary_target;
 let shared_parameter = symbol("shared_parameter", &mut path_fork, &mut string_table);
 let mutable_parameter = symbol("mutable_parameter", &mut path_fork, &mut string_table);
 let untouched_mutable_parameter = symbol("untouched_mutable_parameter", &mut path_fork, &mut string_table);
 let reactive_parameter = symbol("reactive_parameter", &mut path_fork, &mut string_table);
 let mut reactive_parameter_declaration = param_with_type_id(
-    reactive_parameter.clone(),
+    reactive_parameter,
     builtin_type_ids::INT,
     false,
     None,
 );
 reactive_parameter_declaration.value.reactive_source = Some(ReactiveSource {
-    path: reactive_parameter.clone(),
+    path: reactive_parameter,
     kind: ReactiveSourceKind::Parameter,
 });
 
@@ -125,7 +125,7 @@ let target = function_node(
                 test_source_location(1),
             ),
             param_with_datatype(
-                mutable_parameter.clone(),
+                mutable_parameter,
                 DataType::Int,
                 builtin_type_ids::INT,
                 true,
@@ -300,11 +300,11 @@ let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table
 let external_package_registry = default_external_package_registry(&mut string_table);
 let mutator_name = symbol("mutator", &mut path_fork, &mut string_table);
 let wrapper_name = symbol("wrapper", &mut path_fork, &mut string_table);
-let wrapper_name_for_lookup = wrapper_name.clone();
+let wrapper_name_for_lookup = wrapper_name;
 let parameter_name = symbol("value", &mut path_fork, &mut string_table);
 
 let mutator = function_node(
-    mutator_name.clone(),
+    mutator_name,
     FunctionSignature {
         parameters: vec![param_with_datatype(
             symbol("input", &mut path_fork, &mut string_table),
@@ -322,7 +322,7 @@ let wrapper = function_node(
     wrapper_name,
     FunctionSignature {
         parameters: vec![param_with_datatype(
-            parameter_name.clone(),
+            parameter_name,
             DataType::Int,
             builtin_type_ids::INT,
             true,
@@ -555,7 +555,7 @@ let reader_name = symbol("reader", &mut path_fork, &mut string_table);
 let value_name = symbol("value", &mut path_fork, &mut string_table);
 
 let reader = function_node(
-    reader_name.clone(),
+    reader_name,
     FunctionSignature {
         parameters: vec![param_with_datatype(
             symbol("input", &mut path_fork, &mut string_table),
@@ -578,7 +578,7 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                value_name.clone(),
+                value_name,
                 Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
             )),
             test_source_location(2),
@@ -749,10 +749,10 @@ let x = symbol("x", &mut path_fork, &mut string_table);
 let y = symbol("y", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    alias_fn.clone(),
+    alias_fn,
     FunctionSignature {
         parameters: vec![param_with_datatype(
-            p.clone(),
+            p,
             DataType::Int,
             builtin_type_ids::INT,
             false,
@@ -786,7 +786,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -797,7 +797,7 @@ let caller = function_node(
                 Expression::function_call(
                     alias_fn,
                     vec![reference_expr_with_datatype(
-                        x.clone(),
+                        x,
                         DataType::Int,
                         builtin_type_ids::INT,
                         test_source_location(11),
@@ -862,11 +862,11 @@ let source_param = symbol("source_param", &mut path_fork, &mut string_table);
 let source_unused = symbol("source_unused", &mut path_fork, &mut string_table);
 let forward_fn = symbol("forward_fn", &mut path_fork, &mut string_table);
 let forward_param = symbol("forward_param", &mut path_fork, &mut string_table);
-let source_fn_name_for_lookup = source_fn.clone();
-let forward_fn_name_for_lookup = forward_fn.clone();
+let source_fn_name_for_lookup = source_fn;
+let forward_fn_name_for_lookup = forward_fn;
 
 let source = function_node(
-    source_fn.clone(),
+    source_fn,
     FunctionSignature {
         parameters: vec![
             param_with_datatype(
@@ -877,7 +877,7 @@ let source = function_node(
                 test_source_location(20),
             ),
             param_with_datatype(
-                source_unused.clone(),
+                source_unused,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
                 false,
@@ -926,7 +926,7 @@ let propagated_call = Expression::handled_fallible_function_call_with_typed_argu
         ),
         CallArgument::positional(
             reference_expr_with_datatype(
-                forward_param.clone(),
+                forward_param,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
                 test_source_location(30),
@@ -1021,13 +1021,13 @@ let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table
 let external_package_registry = default_external_package_registry(&mut string_table);
 
 let fresh_fn = symbol("fresh_fn", &mut path_fork, &mut string_table);
-let fresh_fn_name_for_lookup = fresh_fn.clone();
+let fresh_fn_name_for_lookup = fresh_fn;
 let p = symbol("p", &mut path_fork, &mut string_table);
 let x = symbol("x", &mut path_fork, &mut string_table);
 let y = symbol("y", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    fresh_fn.clone(),
+    fresh_fn,
     FunctionSignature {
         parameters: vec![param_with_datatype(
             p,
@@ -1058,7 +1058,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -1069,7 +1069,7 @@ let caller = function_node(
                 Expression::function_call(
                     fresh_fn,
                     vec![reference_expr_with_datatype(
-                        x.clone(),
+                        x,
                         DataType::Int,
                         builtin_type_ids::INT,
                         test_source_location(11),
@@ -1151,7 +1151,7 @@ let fallible_external_call =
         &mut expression_types,
     );
 let imprecise_return = function_node(
-    imprecise_return_name.clone(),
+    imprecise_return_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -1184,7 +1184,7 @@ let imprecise_return = function_node(
 let forward_name = symbol("forward_imprecise_return", &mut path_fork, &mut string_table);
 let mut forward_expression_types = TypeEnvironment::new();
 let forwarded_call = Expression::handled_fallible_function_call_with_typed_arguments(
-    imprecise_return_name.clone(),
+    imprecise_return_name,
     vec![],
     vec![builtin_type_ids::INT, builtin_type_ids::INT],
     FallibleExpressionHandling::Propagate,
@@ -1192,7 +1192,7 @@ let forwarded_call = Expression::handled_fallible_function_call_with_typed_argum
     None,
 );
 let forward = function_node(
-    forward_name.clone(),
+    forward_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![
@@ -1429,10 +1429,10 @@ let x = symbol("x", &mut path_fork, &mut string_table);
 let y = symbol("y", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    unknown_fn.clone(),
+    unknown_fn,
     FunctionSignature {
         parameters: vec![param_with_datatype(
-            p.clone(),
+            p,
             DataType::Int,
             builtin_type_ids::INT,
             false,
@@ -1443,7 +1443,7 @@ let callee = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                q.clone(),
+                q,
                 reference_expr_with_datatype(
                     p,
                     DataType::Int,
@@ -1475,7 +1475,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -1486,7 +1486,7 @@ let caller = function_node(
                 Expression::function_call(
                     unknown_fn,
                     vec![reference_expr_with_datatype(
-                        x.clone(),
+                        x,
                         DataType::Int,
                         builtin_type_ids::INT,
                         test_source_location(11),
@@ -1527,7 +1527,7 @@ let p = symbol("p", &mut path_fork, &mut string_table);
 let x = symbol("x", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    mut_sink.clone(),
+    mut_sink,
     FunctionSignature {
         parameters: vec![param_with_datatype(
             p,
@@ -1551,7 +1551,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -1593,7 +1593,7 @@ let b = symbol("b", &mut path_fork, &mut string_table);
 let x = symbol("x", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    mut2.clone(),
+    mut2,
     FunctionSignature {
         parameters: vec![
             param_with_datatype(
@@ -1626,7 +1626,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -1688,7 +1688,7 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
             )),
             test_source_location(1),
@@ -1742,7 +1742,7 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
@@ -1795,7 +1795,7 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
             )),
             test_source_location(1),
@@ -1838,7 +1838,7 @@ let x = symbol("x", &mut path_fork, &mut string_table);
 let y = symbol("y", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    mut2.clone(),
+    mut2,
     FunctionSignature {
         parameters: vec![
             param_with_datatype(
@@ -1871,7 +1871,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -1882,7 +1882,7 @@ let caller = function_node(
                 vec![
                     CallArgument::positional(
                         reference_expr_with_datatype(
-                            x.clone(),
+                            x,
                             DataType::Int,
                             builtin_type_ids::INT,
                             test_source_location(11),
@@ -1892,7 +1892,7 @@ let caller = function_node(
                     ),
                     CallArgument::positional(
                         reference_expr_with_datatype(
-                            x.clone(),
+                            x,
                             DataType::Int,
                             builtin_type_ids::INT,
                             test_source_location(11),
@@ -1938,7 +1938,7 @@ let mutate = symbol("mutate", &mut path_fork, &mut string_table);
 let x = symbol("x", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    read_then_mut.clone(),
+    read_then_mut,
     FunctionSignature {
         parameters: vec![
             param_with_datatype(
@@ -1971,7 +1971,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -1982,7 +1982,7 @@ let caller = function_node(
                 vec![
                     CallArgument::positional(
                         reference_expr_with_datatype(
-                            x.clone(),
+                            x,
                             DataType::Int,
                             builtin_type_ids::INT,
                             test_source_location(11),
@@ -2045,7 +2045,7 @@ let returned_call = Expression::host_function_call_with_arguments(
     host_alias,
     vec![CallArgument::positional(
         reference_expr_with_datatype(
-            original.clone(),
+            original,
             DataType::Int,
             builtin_type_ids::INT,
             test_source_location(11),
@@ -2066,13 +2066,13 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                original.clone(),
+                original,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
         ),
         node(
-            NodeKind::VariableDeclaration(make_test_variable(returned.clone(), returned_call)),
+            NodeKind::VariableDeclaration(make_test_variable(returned, returned_call)),
             test_source_location(11),
         ),
         node(
@@ -2265,7 +2265,7 @@ let x = symbol("x", &mut path_fork, &mut string_table);
 let y = symbol("y", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    mut_user.clone(),
+    mut_user,
     FunctionSignature {
         parameters: vec![param_with_datatype(
             p,
@@ -2289,7 +2289,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::ImmutableOwned),
             )),
             test_source_location(10),
@@ -2299,7 +2299,7 @@ let caller = function_node(
                 mut_user,
                 vec![CallArgument::positional(
                     reference_expr_with_datatype(
-                        x.clone(),
+                        x,
                         DataType::Int,
                         builtin_type_ids::INT,
                         test_source_location(11),
@@ -2355,7 +2355,7 @@ let start = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -2403,7 +2403,7 @@ let x = symbol("x", &mut path_fork, &mut string_table);
 let y = symbol("y", &mut path_fork, &mut string_table);
 
 let callee = function_node(
-    mut_user.clone(),
+    mut_user,
     FunctionSignature {
         parameters: vec![param_with_datatype(
             p,
@@ -2430,7 +2430,7 @@ let caller = function_node(
     vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                x.clone(),
+                x,
                 Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
@@ -2440,7 +2440,7 @@ let caller = function_node(
                 mut_user,
                 vec![CallArgument::positional(
                     reference_expr_with_datatype(
-                        x.clone(),
+                        x,
                         DataType::Int,
                         builtin_type_ids::INT,
                         same_line,
@@ -2487,10 +2487,10 @@ let sink = symbol("sink", &mut path_fork, &mut string_table);
 let param_calls = symbol("param_calls", &mut path_fork, &mut string_table);
 
 let rhs_function = function_node(
-    rhs_name.clone(),
+    rhs_name,
     FunctionSignature {
         parameters: vec![param_with_datatype(
-            param_calls.clone(),
+            param_calls,
             DataType::Int,
             builtin_type_ids::INT,
             true,
@@ -2502,7 +2502,7 @@ let rhs_function = function_node(
         node(
             NodeKind::Assignment {
                 target: assignment_target(
-                    param_calls.clone(),
+                    param_calls,
                     DataType::Int,
                     builtin_type_ids::INT,
                     test_source_location(2),
@@ -2552,7 +2552,7 @@ let short_circuit_value = Expression::runtime(
     ExpressionRpn {
         items: vec![
             ExpressionRpnItem::Operand(Expression::reference_with_type_id(
-                lhs.clone(),
+                lhs,
                 DataType::Bool,
                 builtin_type_ids::BOOL,
                 test_source_location(11),
@@ -2562,7 +2562,7 @@ let short_circuit_value = Expression::runtime(
             ExpressionRpnItem::Operand(Expression::function_call(
                 rhs_name,
                 vec![Expression::reference_with_type_id(
-                    calls.clone(),
+                    calls,
                     DataType::Int,
                     builtin_type_ids::INT,
                     test_source_location(11),
@@ -2603,7 +2603,7 @@ let start_function = function_node(
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
-                calls.clone(),
+                calls,
                 Expression::int(0, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),

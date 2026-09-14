@@ -218,7 +218,7 @@ fn compile_single_file_frontend_with_target(
                 return Err(PremergeFailure::Diagnosed(
                     PremergeDiagnosticBatch::from_diagnostic(
                         CompilerDiagnostic::source_table_capacity(
-                            SourceSpanCapacityResource::LogicalPathTable,
+                            SourceSpanCapacityResource::LogicalPath,
                         ),
                         std::mem::take(string_table),
                     ),

@@ -39,7 +39,7 @@ fn reactive_expression(
         span: None,
     };
     let expression = Expression::new(
-        ExpressionKind::Reference(source.path.clone()),
+        ExpressionKind::Reference(source.path),
         None,
         builtin_type_ids::INT,
         DataType::Int,

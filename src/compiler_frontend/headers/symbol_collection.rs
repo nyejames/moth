@@ -69,7 +69,7 @@ pub(super) fn build_module_symbols(
             // identity in the module map instead of deriving a second filesystem path spelling.
             module_symbols.canonical_source_by_symbol_path.insert(
                 header.tokens.src_path.to_owned(),
-                header.source_file.clone(),
+                header.source_file,
             );
             if let Some(name_span) = header.name_span {
                 module_symbols
@@ -359,7 +359,7 @@ fn register_header_symbol(
             );
             module_symbols
                 .trait_paths
-                .insert(header.tokens.src_path.clone());
+                .insert(header.tokens.src_path);
         }
 
         HeaderKind::TraitConformance { .. } => {

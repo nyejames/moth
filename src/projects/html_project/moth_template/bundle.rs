@@ -696,6 +696,10 @@ fn finish_source_owner(
 /// Once no later producer can append a row, every known source is finalized under the exclusive
 /// owner, its original builders and the failed producer's delta builder are installed, and the
 /// finalized database is attached to the message set.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "failure finalization keeps the failed path, failure payload, failed builder, discovered sources, entry path, resolver, and mutable string/path state as separate inputs"
+)]
 fn finalize_discovery_failure(
     failed_path: PathBuf,
     mut failure: FileFrontendPrepareFailure,

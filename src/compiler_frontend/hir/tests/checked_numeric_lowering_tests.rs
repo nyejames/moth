@@ -27,7 +27,7 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
     runtime_expr, runtime_operand_item, runtime_operator_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 fn int_expr(value: i32, span: Option<crate::compiler_frontend::source::SourceSpan>) -> Expression {
     Expression::int(value, span, ValueMode::ImmutableOwned)
@@ -69,7 +69,7 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() { let mut path_fork = sup
 let loc = None;
 let x_name = symbol("x", &mut path_fork, &mut string_table);
 let x_ref = reference_expr_with_type_id(
-    x_name.clone(),
+    x_name,
     builtin_type_ids::INT,
     loc,
     ValueMode::ImmutableReference,
@@ -235,7 +235,7 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() { let mut path_fork = super
 let loc = None;
 let x_name = symbol("x", &mut path_fork, &mut string_table);
 let x_ref = reference_expr_with_type_id(
-    x_name.clone(),
+    x_name,
     builtin_type_ids::INT,
     loc,
     ValueMode::ImmutableReference,

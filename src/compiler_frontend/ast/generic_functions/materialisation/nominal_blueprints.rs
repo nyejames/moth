@@ -221,13 +221,13 @@ pub(super) fn materialised_nominal_declaration(
 ) -> Result<Declaration, CompilerError> {
     let diagnostic_type = match type_environment.get(type_id) {
         Some(TypeDefinition::Struct(definition)) => DataType::Struct {
-            nominal_path: local_path.clone(),
+            nominal_path: local_path,
             type_id,
             const_record: definition.const_record,
             generic_instance_key: None,
         },
         Some(TypeDefinition::Choice(_)) => DataType::Choices {
-            nominal_path: local_path.clone(),
+            nominal_path: local_path,
             type_id,
             generic_instance_key: None,
         },
@@ -321,7 +321,7 @@ pub(super) fn materialised_struct_fields(
         };
         value.value_mode = ValueMode::ImmutableReference;
         declarations.push(Declaration {
-            id: field.name.clone(),
+            id: field.name,
             value,
             binding_span: None,
             config_qualifier: None,

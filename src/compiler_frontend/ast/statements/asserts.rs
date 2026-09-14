@@ -154,7 +154,7 @@ pub(crate) fn parse_assert_statement(
     ast.push(AstNode {
         kind: NodeKind::Assert { condition, message },
         span: assert_span,
-        scope: context.scope.clone(),
+        scope: context.scope,
     });
 
     Ok(())

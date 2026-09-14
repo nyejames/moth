@@ -304,12 +304,12 @@ impl ConstValueStore {
                     template_builder,
                 )?;
                 store.rows.push(ConstValueRow {
-                    path: declaration.id.clone(),
+                    path: declaration.id,
                     value,
                 });
                 if store
                     .values_by_path
-                    .insert(declaration.id.clone(), value)
+                    .insert(declaration.id, value)
                     .is_some()
                 {
                     return Err(CompilerError::compiler_error(
@@ -362,7 +362,7 @@ impl ConstValueStore {
         )?;
         if self
             .values_by_path
-            .insert(declaration.id.clone(), value)
+            .insert(declaration.id, value)
             .is_some()
         {
             return Err(CompilerError::compiler_error(
@@ -417,7 +417,7 @@ impl ConstValueStore {
             }
 
             stored_fields.push(ConstValueField {
-                name: field.id.clone(),
+                name: field.id,
                 value,
             });
         }
@@ -534,7 +534,7 @@ impl ConstValueStore {
                     .iter()
                     .map(|field| {
                         Ok(ConstValueField {
-                            name: field.id.clone(),
+                            name: field.id,
                             value: self.insert_expression(
                                 &field.value,
                                 None,
@@ -546,7 +546,7 @@ impl ConstValueStore {
                     .collect::<Result<Vec<_>, ConstValueStoreError>>()?;
                 (
                     ConstValuePayload::Choice {
-                        nominal_path: nominal_path.clone(),
+                        nominal_path: *nominal_path,
                         tag: *tag,
                         fields,
                     },
@@ -911,7 +911,7 @@ impl ConstValueStore {
                     .iter()
                     .map(|field| {
                         Ok(Declaration {
-                            id: field.name.clone(),
+                            id: field.name,
                             value: self
                                 .expression_for_store_value(field.value, template_builder)?,
                             binding_span: None,
@@ -930,13 +930,13 @@ impl ConstValueStore {
                 tag,
                 fields,
             } => ExpressionKind::ChoiceConstruct {
-                nominal_path: nominal_path.clone(),
+                nominal_path: *nominal_path,
                 tag: *tag,
                 fields: fields
                     .iter()
                     .map(|field| {
                         Ok(Declaration {
-                            id: field.name.clone(),
+                            id: field.name,
                             value: self
                                 .expression_for_store_value(field.value, template_builder)?,
                             binding_span: None,

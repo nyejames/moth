@@ -314,7 +314,7 @@ pub(super) fn install_private_semantic_closure(
         let definition = ResolvedTraitDefinition {
             id: trait_id,
             name: string_table.intern(&stable_trait.name),
-            canonical_path: canonical_path.clone(),
+            canonical_path,
             source_file,
             this_type,
             requirements,
@@ -403,6 +403,10 @@ pub(super) fn install_private_semantic_closure(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "stable trait interning keeps the blueprint, this type, nominal source, mutable type environment, registry, template store, and mutable string/path forks as separate borrows"
+)]
 fn intern_stable_trait_type(
     blueprint: &StableTraitTypeBlueprint,
     this_type: TypeId,
@@ -458,7 +462,7 @@ impl ModuleMaterialisationPreparation {
                 span: metadata.span,
             });
         }
-        constants.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+        constants.sort_by_key(|row| row.local_path);
 
         let mut aliases = self
             .resolved_type_aliases_by_path
@@ -478,7 +482,7 @@ impl ModuleMaterialisationPreparation {
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
-        aliases.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+        aliases.sort_by_key(|row| row.local_path);
 
         let traits = self.stable_private_traits()?;
         let evidence = self.stable_private_evidence()?;
@@ -678,7 +682,7 @@ impl ModuleMaterialisationPreparation {
                             .imported_declarations_by_local_path
                             .contains_key(*path))
             })
-            .map(|path| *path)
+            .copied()
             .collect::<Vec<_>>();
         paths.sort();
         paths.into_boxed_slice()
@@ -772,7 +776,7 @@ impl ModuleMaterialisationPreparation {
                 });
             }
         }
-        bindings.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+        bindings.sort_by_key(|binding| binding.local_path);
         Ok(bindings.into_boxed_slice())
     }
 
@@ -836,7 +840,7 @@ impl ModuleMaterialisationPreparation {
                 summary: contract.summary.clone(),
             });
         }
-        callables.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+        callables.sort_by_key(|binding| binding.local_path);
         Ok(callables.into_boxed_slice())
     }
     /// Collect the nominal blueprints one template's generated sidecar can need.
@@ -955,7 +959,7 @@ impl ModuleMaterialisationPreparation {
                     })
             })
             .collect::<Vec<_>>();
-        bindings.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+        bindings.sort_by_key(|binding| binding.local_path);
         bindings.into_boxed_slice()
     }
 }

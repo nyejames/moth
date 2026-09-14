@@ -34,7 +34,7 @@ impl Clone for PathTable {
 }
 
 impl PathTable {
-    pub(crate) fn from_parts(nodes: Vec<PathNode>, depths: Vec<u32>) -> Self {
+    pub(super) fn from_parts(nodes: Vec<PathNode>, depths: Vec<u32>) -> Self {
         Self { nodes, depths }
     }
     /// Rewrite component IDs after the owning diagnostic string table merges.
@@ -88,6 +88,7 @@ impl PathTable {
         self.nodes.len()
     }
     /// Return the backing vector storage used by this table, excluding the `Arc` header.
+    #[cfg(feature = "data_layout_memory_probe")]
     pub(crate) fn storage_bytes(&self) -> usize {
         self.nodes
             .capacity()

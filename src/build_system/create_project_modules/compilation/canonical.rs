@@ -191,6 +191,10 @@ struct DirectoryModuleCompileContext<'boundary, 'services> {
 }
 
 impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "constructor borrows each directory-compile service separately: boundary context, provider store, materialisations, provider and source-package edges, and the build string table"
+    )]
     fn new(
         boundary: &'boundary BoundaryCompilationContext<'services>,
         provider_store: &'boundary ModuleArtifactStore,
@@ -581,6 +585,10 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             )
         }
     }
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "module compilation takes module identity, path bases, the global path table, prepared syntax, generated functions, optional check-only and external overrides, and the timers-only context as distinct inputs"
+    )]
     fn compile_prepared(
         &self,
         module_id: ModuleId,
@@ -792,7 +800,7 @@ fn compile_check_only_job(
                 // Mixed double-failures only arise at source-finalization tails and never
                 // reach module tasks; abort through the typed lane if one ever does.
                 PremergeFailure::Mixed { error, .. } => {
-                    DirectoryModuleTaskOutcome::Infrastructure(error)
+                    DirectoryModuleTaskOutcome::Infrastructure(*error)
                 }
             };
             return DirectoryModuleTaskResult {

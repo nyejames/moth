@@ -255,7 +255,7 @@ fn user_defined_evidence_for(
 
     Some(ResolvedCastEvidence::UserDefined {
         evidence_id,
-        method_path: requirement.method_path.clone(),
+        method_path: requirement.method_path,
     })
 }
 

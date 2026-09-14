@@ -68,7 +68,7 @@ let ast = build_ast_with_registered_types(
             None,
         ),
         function_node(
-            helper_name.clone(),
+            helper_name,
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
@@ -229,7 +229,7 @@ assert!(
 #[test]
 fn validation_rejects_replaced_out_of_range_provenance_key() { let mut path_fork = super::PathInternerFork::empty(); use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::validation::validate_hir_module;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
 
 let mut string_table = StringTable::new();
 let (entry_path, start_name) = super::entry_path_and_start_name(&mut path_fork, &mut string_table);

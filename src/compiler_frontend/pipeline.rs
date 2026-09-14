@@ -253,6 +253,10 @@ impl CompilerFrontend<'static> {
     ///       string table. This allows per-file tokenization against local string-table forks.
     /// WHY: parallel and fork-based frontend preparation need to tokenize independently before
     ///      merging deltas back into the module/global table.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "pipeline tokenization keeps the source database, directives, source text, module path, entry mode, and mutable string/path/span state as separate borrows"
+    )]
     pub(crate) fn tokenize_source(
         source_files: &SourceDatabase,
         style_directives: &StyleDirectiveRegistry,

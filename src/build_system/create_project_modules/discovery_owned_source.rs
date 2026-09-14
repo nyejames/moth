@@ -9,6 +9,10 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 /// WHY: `SourceTreeIndex` owns source identity, while `SourceDatabase` and the selected-text map
 ///      own source snapshots. Borrowing either avoids a second full source-string allocation while
 ///      allowing registration-only slots to stay pending until selection.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "owned-source preparation keeps the record index, identity and snapshot sources, span builders, directives, and mutable string/path/selection state as separate borrows"
+)]
 pub(crate) fn prepare_owned_source_input(
     source_index: SourceRecordIndex,
     source_tree_index: &SourceTreeIndex,
@@ -83,6 +87,10 @@ fn owned_source_text<'a>(
         .map_err(SourceDiscoveryError::from)?;
     Ok((source_id, *source_kind, source_code))
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "owned-source tokenization keeps source identity, kind, text, the snapshot database, directives, and mutable string/path/span state as separate borrows"
+)]
 fn prepare_owned_source_text(
     source_id: SourceId,
     kind: SourceFileKind,

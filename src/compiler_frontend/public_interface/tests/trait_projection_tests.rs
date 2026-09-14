@@ -119,6 +119,10 @@ fn build_traits(
     path_fork)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test builder mirrors the direct projection boundary inputs: trait roots, bindings, facts, origin tables, type environment, and string/path state"
+)]
 fn build_traits_with_facts(
     trait_roots: &[ResolvedPublicTraitRoot],
     bindings: Vec<ExportBinding>,
@@ -814,21 +818,21 @@ fn incompatibility_identity_is_stable_across_local_trait_id_allocation() {
     let mut facts_a = FxHashMap::default();
     facts_a.insert(
         TraitId(0),
-        ResolvedTraitSourceFact::Source(alpha_path.clone()),
+        ResolvedTraitSourceFact::Source(alpha_path),
     );
     facts_a.insert(
         TraitId(10),
-        ResolvedTraitSourceFact::Source(beta_path.clone()),
+        ResolvedTraitSourceFact::Source(beta_path),
     );
 
     let mut facts_b = FxHashMap::default();
     facts_b.insert(
         TraitId(0),
-        ResolvedTraitSourceFact::Source(alpha_path.clone()),
+        ResolvedTraitSourceFact::Source(alpha_path),
     );
     facts_b.insert(
         TraitId(99),
-        ResolvedTraitSourceFact::Source(beta_path.clone()),
+        ResolvedTraitSourceFact::Source(beta_path),
     );
 
     let root_a =
@@ -882,7 +886,7 @@ fn rejects_duplicate_canonical_incompatibility_identity() {
     trait_source_facts.insert(TraitId(0), ResolvedTraitSourceFact::Source(alpha_path));
     trait_source_facts.insert(
         TraitId(1),
-        ResolvedTraitSourceFact::Source(beta_path.clone()),
+        ResolvedTraitSourceFact::Source(beta_path),
     );
     trait_source_facts.insert(TraitId(2), ResolvedTraitSourceFact::Source(beta_path));
 

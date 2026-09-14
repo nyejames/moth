@@ -39,7 +39,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn add_test_module_constant(ast: &mut Ast, declaration: Declaration) { let mut path_fork = super::PathInternerFork::empty(); let type_environment = ast.type_environment.clone();
+fn add_test_module_constant(ast: &mut Ast, declaration: Declaration) { let _path_fork = super::PathInternerFork::empty(); let type_environment = ast.type_environment.clone();
 ast.const_values
     .insert_test_declaration(declaration, &type_environment); }
 
@@ -71,7 +71,7 @@ let struct_node = node(
 );
 
 let start_function = function_node(
-    start_name.clone(),
+    start_name,
     FunctionSignature {
         parameters: vec![],
         returns: vec![],
@@ -223,7 +223,7 @@ let start_function = function_node(
     },
     vec![node(
         NodeKind::ExpressionStatement(reference_expr_with_type_id(
-            third_const.clone(),
+            third_const,
             builtin_type_ids::INT,
             None,
             ValueMode::ImmutableReference,
@@ -425,11 +425,11 @@ let struct_node = node(
         struct_name,
         vec![
             make_test_variable(
-                x_field.clone(),
+                x_field,
                 no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
             ),
             make_test_variable(
-                y_field.clone(),
+                y_field,
                 no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
             ),
         ],
@@ -693,7 +693,7 @@ let start_function = function_node(
     },
     vec![node(
         NodeKind::ExpressionStatement(reference_expr_with_type_id(
-            logo_const.clone(),
+            logo_const,
             builtin_type_ids::STRING,
             None,
             ValueMode::ImmutableReference,
@@ -870,7 +870,7 @@ fn nested_structural_piece_lists<'value>(
 fn assert_remapped_piece_text(pieces: &[ConstStringPiece],
 originals: &[StringId],
 source_table: &StringTable,
-target_table: &StringTable,) { let mut path_fork = super::PathInternerFork::empty(); assert_eq!(
+target_table: &StringTable,) { let _path_fork = super::PathInternerFork::empty(); assert_eq!(
     pieces.len(),
     originals.len(),
     "expected one text piece per authored run, got {pieces:?}"
@@ -894,7 +894,7 @@ for (piece, original) in pieces.iter().zip(originals) {
 } }
 
 #[test]
-fn remaps_structural_pieces_inside_record_fields_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+fn remaps_structural_pieces_inside_record_fields_after_table_merge() { let _path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let before = string_table.intern("docs/");
 let after = string_table.intern("page.html");
 
@@ -926,7 +926,7 @@ assert_remapped_piece_text(
 ); }
 
 #[test]
-fn remaps_structural_pieces_inside_choice_fields_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+fn remaps_structural_pieces_inside_choice_fields_after_table_merge() { let _path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let host = string_table.intern("https://");
 let page = string_table.intern("example.moth");
 
@@ -953,7 +953,7 @@ assert_eq!(
 assert_remapped_piece_text(piece_lists[0], &[host, page], &string_table, &target_table); }
 
 #[test]
-fn remaps_structural_pieces_inside_collection_elements_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+fn remaps_structural_pieces_inside_collection_elements_after_table_merge() { let _path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let before = string_table.intern("before/");
 let after = string_table.intern("after");
 
@@ -982,7 +982,7 @@ assert_remapped_piece_text(
 ); }
 
 #[test]
-fn remaps_structural_pieces_inside_range_bounds_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+fn remaps_structural_pieces_inside_range_bounds_after_table_merge() { let _path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let start_text = string_table.intern("start/");
 let end_text = string_table.intern("end");
 
@@ -1005,7 +1005,7 @@ assert_remapped_piece_text(piece_lists[0], &[start_text], &string_table, &target
 assert_remapped_piece_text(piece_lists[1], &[end_text], &string_table, &target_table); }
 
 #[test]
-fn remaps_structural_pieces_inside_option_some_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+fn remaps_structural_pieces_inside_option_some_after_table_merge() { let _path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let before = string_table.intern("wrap/");
 let after = string_table.intern("inner");
 
@@ -1034,7 +1034,7 @@ assert_remapped_piece_text(
 ); }
 
 #[test]
-fn remaps_structural_pieces_nested_two_container_levels_deep_after_table_merge() { let mut path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
+fn remaps_structural_pieces_nested_two_container_levels_deep_after_table_merge() { let _path_fork = super::PathInternerFork::empty(); let mut string_table = StringTable::new();
 let leaf_text = string_table.intern("leaf/");
 let tail_text = string_table.intern("tail");
 

@@ -307,7 +307,7 @@ fn non_utf8_output_folder_reason_has_stable_identity_and_rendering() {
 #[test]
 fn output_folder_collision_rendering_preserves_both_authored_spellings() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let reason = InvalidConfigReason::OutputFoldersNotDistinct {
         dev_folder: string_table.intern("Build"),
         release_folder: string_table.intern("build"),
@@ -431,7 +431,7 @@ fn diagnostic_bag_tracks_errors_warnings_and_order() {
     let first = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
-        span(source_path.clone()),
+        span(source_path),
     );
     let second = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
@@ -463,7 +463,7 @@ fn compiler_messages_counts_and_order_come_from_structured_diagnostics() {
     let error = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
-        span(source_path.clone()),
+        span(source_path),
     );
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
@@ -496,7 +496,7 @@ fn compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors() {
     let error = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
-        span(source_path.clone()),
+        span(source_path),
     );
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
@@ -586,7 +586,7 @@ fn attach_rejects_rendered_path_beyond_the_candidate_table() {
     // A retained diagnostic whose PathId points past the candidate table has lost its issuing
     // table: rendering would dereference a node the table cannot address. Pairing must fail
     // visibly instead of silently attaching a context that cannot spell the payload's path.
-    let mut batch_table = StringTable::new();
+    let batch_table = StringTable::new();
     let orphan_path =
         PathId::try_from_index(9).expect("index 9 fits the compact path domain");
     let diagnostic = CompilerDiagnostic::missing_import_target(orphan_path, None);
@@ -741,7 +741,7 @@ fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation
     )));
     let source_database = {
         let mut frozen_table = messages.string_table.as_ref().clone();
-        let mut path_fork = PathInternerFork::empty();
+        let path_fork = PathInternerFork::empty();
         SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
             &registration,
             project_path,
@@ -1063,7 +1063,7 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
         let mut type_environment = TypeEnvironment::new();
         let (_, frozen_type) = type_environment.register_nominal_struct(StructTypeDefinition {
             id: NominalTypeId(0),
-            path: frozen_path.clone(),
+            path: frozen_path,
             fields: Box::new([]),
             generic_parameters: None,
             const_record: false,
@@ -1128,11 +1128,11 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
 
     let mut standalone_messages = make_mixed_messages();
     let mut standalone_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     standalone_table.intern("standalone-collision");
     let standalone_remap = standalone_table.merge_from(standalone_messages.string_table.as_ref());
     standalone_messages.remap_string_ids(&standalone_remap);
-    standalone_messages.string_table = Box::new(standalone_table);
+    *standalone_messages.string_table = standalone_table;
     let standalone_rendered =
         crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
             &standalone_messages,
@@ -1156,7 +1156,7 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
     );
 
     let mut aggregate_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     aggregate_table.intern("aggregate-collision");
     let mut messages = CompilerMessages::empty(aggregate_table);
     messages.append_messages_preserving_context(standalone_messages);
@@ -1292,7 +1292,7 @@ fn append_and_remap_keep_frozen_path_tables_in_owner_domain() {
     standalone_table.intern("standalone-collision");
     let standalone_remap = standalone_table.merge_from(standalone_messages.string_table.as_ref());
     standalone_messages.remap_string_ids(&standalone_remap);
-    standalone_messages.string_table = Box::new(standalone_table);
+    *standalone_messages.string_table = standalone_table;
     let standalone_rendered =
         crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
             &standalone_messages,
@@ -1348,7 +1348,7 @@ fn colliding_owner_messages(
         .expect("colliding owner source text should be retained");
 
     let mut foreign_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let path_fork = PathInternerFork::empty();
     let foreign_path = Path::new("/package/foreign.moth");
     let foreign_registration = SourceRegistrationIndex::from_rows(std::iter::once((
         foreign_path,
@@ -1547,7 +1547,7 @@ fn remap_string_ids_updates_payloads_labels_and_tokens() {
     let first_span = exact_span(source, 10, 2, &mut span_builder);
 
     let mut path_syntax = PathSyntaxTable::new();
-    let path_id = path_syntax.push(import_path.clone(), first_span);
+    let path_id = path_syntax.push(import_path, first_span);
     let expected_token = CompilerDiagnostic::expected_token(
         TokenKind::Symbol(name),
         Some(TokenKind::Path(path_id)),
@@ -1641,7 +1641,7 @@ fn remap_string_ids_updates_legacy_dependency_replacement() {
     let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
     let mut merged_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let remap = merged_table.merge_from(&local_table);
     bag.remap_string_ids(&remap);
 
@@ -1677,7 +1677,7 @@ fn remap_string_ids_updates_compile_time_evaluation_operation() {
     // Occupy the merged table first so the merge cannot be an identity remap. A stale operation id
     // would then silently resolve to another module's text instead of naming the real operation.
     let mut merged_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     merged_table.intern("a string owned by another module");
     merged_table.intern("a second string owned by another module");
     let remap = merged_table.merge_from(&local_table);
@@ -1707,7 +1707,7 @@ fn remap_string_ids_updates_compile_time_evaluation_operation() {
 #[test]
 fn duplicate_declaration_with_previous_location_keeps_secondary_label() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let declaration_name = string_table.intern("Button");
     let source = SourceId::from_index(1);
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -1748,7 +1748,7 @@ fn duplicate_declaration_with_previous_location_keeps_secondary_label() {
 #[test]
 fn duplicate_declaration_without_previous_location_omits_secondary_label() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let declaration_name = string_table.intern("print");
     let source = SourceId::from_index(1);
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -1867,7 +1867,7 @@ fn invalid_string_escape_renderer_preserves_the_authored_escape_spelling() {
     ] {
         let diagnostic = CompilerDiagnostic::invalid_string_escape(
             InvalidStringEscapeReason::UnsupportedEscape { escaped },
-            span(source_path.clone()),
+            span(source_path),
         );
         let message =
             terminal::format_payload_guidance(&diagnostic.payload, render_context).join("\n");
@@ -1894,7 +1894,7 @@ fn invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_b
         ),
     ] {
         let diagnostic =
-            CompilerDiagnostic::invalid_string_escape(reason, span(source_path.clone()));
+            CompilerDiagnostic::invalid_string_escape(reason, span(source_path));
         let message =
             terminal::format_payload_guidance(&diagnostic.payload, render_context).join("\n");
 
@@ -1937,7 +1937,7 @@ fn rule_renderers_use_user_facing_messages_not_reason_debug_names() {
 #[test]
 fn immutable_binding_diagnostic_carries_secondary_declaration_label() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let source_path = Path::new("/project/main.moth");
     let mut source_database = SourceDatabase::build(
         std::iter::once(source_path),
@@ -2006,7 +2006,7 @@ fn syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names()
         (
             CompilerDiagnostic::invalid_path(
                 PathKind::WhitespaceMustBeQuoted,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Path components with whitespace must be quoted",
             "WhitespaceMustBeQuoted",
@@ -2015,7 +2015,7 @@ fn syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names()
             CompilerDiagnostic::invalid_dependency_clause(
                 DependencyClauseKind::NamespaceAlias,
                 InvalidDependencyClauseReason::ExpectedAliasName,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Expected alias name after `as`",
             "ExpectedAliasName",
@@ -2153,8 +2153,8 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::duplicate_declaration(
                 declaration_name,
-                span(source_path.clone()),
-                span(source_path.clone()),
+                span(source_path),
+                span(source_path),
             ),
             "Cannot declare 'Card' because that name is already visible in this scope",
             "StringId",
@@ -2163,7 +2163,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             CompilerDiagnostic::invalid_number_literal(
                 literal,
                 NumberLiteralErrorReason::MultipleDecimalPoints,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Can't have more than one decimal point in numeric literal '1.'",
             "MultipleDecimalPoints",
@@ -2172,7 +2172,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             CompilerDiagnostic::invalid_style_directive(
                 style_directive,
                 supported_directives,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Style directive '$unknown' is unsupported here",
             "InvalidStyleDirective",
@@ -2181,7 +2181,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             CompilerDiagnostic::invalid_type_annotation(
                 TypeAnnotationContext::DeclarationTarget,
                 InvalidTypeAnnotationReason::UnexpectedColon,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Unexpected ':' after declaration name",
             "UnexpectedColon",
@@ -2189,7 +2189,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_signature_member(
                 InvalidSignatureMemberReason::ChoicePayloadDefaultValue,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Choice payload fields cannot have default values.",
             "ChoicePayloadDefaultValue",
@@ -2197,7 +2197,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_signature_member(
                 InvalidSignatureMemberReason::MissingDefaultValue,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Expected a default value after '='.",
             "MissingDefaultValue",
@@ -2205,7 +2205,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::MissingColonAfterReturns,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Function return declarations must end with ':'",
             "MissingColonAfterReturns",
@@ -2213,7 +2213,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::MissingReturnType,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Function signature is missing a return type after '->'. Add a type followed by ':', or remove '->' for a no-value function.",
             "MissingReturnType",
@@ -2221,7 +2221,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::MissingTraitRequirementReturnType,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Trait requirement is missing a return type after '->'. Add a type, or remove '->' for a no-value requirement.",
             "MissingTraitRequirementReturnType",
@@ -2229,7 +2229,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_generic_application(
                 GenericApplicationErrorReason::NestedApplication,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Nested generic type applications are not supported",
             "NestedApplication",
@@ -2237,7 +2237,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::NegativeCapacity,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Fixed collection capacity must be greater than zero.",
             "NegativeCapacity",
@@ -2245,7 +2245,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::ZeroCapacity,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Fixed collection capacity must be greater than zero.",
             "ZeroCapacity",
@@ -2253,7 +2253,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::CapacityNotInt,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Collection capacity must be an integer.",
             "CapacityNotInt",
@@ -2261,7 +2261,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::CapacityNotConstant,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Collection capacity must be a positive integer literal or the bare name of a visible compile-time `Int` constant.",
             "CapacityNotConstant",
@@ -2269,7 +2269,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::CapacityOverflow,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Collection capacity is too large.",
             "CapacityOverflow",
@@ -2280,7 +2280,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
                     capacity: 2,
                     length: 3,
                 },
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Collection literal has more items than the fixed collection capacity allows.",
             "InitializerExceedsFixedCapacity",
@@ -2288,7 +2288,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::EmptyImmutableFixedCollection,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Immutable binding initialized with an empty fixed collection literal is not allowed.",
             "EmptyImmutableFixedCollection",
@@ -2296,7 +2296,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::ShorthandEmptyLiteralAmbiguous,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Capacity-only shorthand requires a non-empty collection literal so the element type can be inferred.",
             "ShorthandEmptyLiteralAmbiguous",
@@ -2304,7 +2304,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::ShorthandNonLiteralRhs,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Capacity-only shorthand requires a collection literal initializer.",
             "ShorthandNonLiteralRhs",
@@ -2312,7 +2312,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_generic_parameter(
                 InvalidGenericParameterReason::BoundsMustUseIs,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Generic parameter bounds use `is`.",
             "BoundsMustUseIs",
@@ -2320,7 +2320,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             CompilerDiagnostic::invalid_trait_keyword_usage(
                 InvalidTraitKeywordUsageReason::MustOutsideTraitSyntax,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Keyword 'must' is trait-only syntax",
             "MustOutsideTraitSyntax",
@@ -2329,7 +2329,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             CompilerDiagnostic::invalid_template_directive(
                 Some(template_directive),
                 InvalidTemplateDirectiveReason::MissingArgument,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Template directive 'insert' is missing a required argument.",
             "MissingArgument",
@@ -2343,7 +2343,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
                             .to_owned(),
                     ),
                 ),
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Invalid argument for template directive 'insert'. Unsupported language \"rustt\". Supported aliases are \"rs\"/\"rust\".",
             "InvalidArgument",
@@ -2353,7 +2353,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
                 namespace_name,
                 NameNamespace::Type,
                 NameNamespace::Value,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "'card' is a value and cannot be used as a type.",
             "NamespaceMisuse",
@@ -2363,7 +2363,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
                 DiagnosticOperator::Add,
                 builtin_type_ids::STRING,
                 Some(builtin_type_ids::INT),
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Operator `+` cannot concatenate",
             "Add",
@@ -2414,7 +2414,7 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
         (
             CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Expected an operator before this expression.",
             "ExpectedOperatorBeforeExpression",
@@ -2422,7 +2422,7 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
         (
             CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::UnresolvedStackShape,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "This expression does not resolve to exactly one value.",
             "UnresolvedStackShape",
@@ -2430,7 +2430,7 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
         (
             CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::MothFileHasNoValue,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "A `.moth` file has no file value. Bind its declarations through a dependency clause.",
             "MothFileHasNoValue",
@@ -2438,7 +2438,7 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
         (
             CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::ExtensionlessFileValue,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "A file value needs an explicit extension. Write the path with a file extension, or use a dependency clause to bind declarations.",
             "ExtensionlessFileValue",
@@ -2446,7 +2446,7 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
         (
             CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-                span(source_path.clone()),
+                span(source_path),
             ),
             "Each const-record parameter needs a value. Write `name = value`.",
             "AnonymousRecordFieldNotNamed",
@@ -2494,57 +2494,57 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
     let diagnostics = vec![
         CompilerDiagnostic::invalid_standalone_statement(
             InvalidStandaloneStatementReason::StandaloneTemplate,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::GenericParameterOutsideDeclarationHeader,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedOf,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::FallibleValueInTemplateHead,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_fallible_operand(
             InvalidFallibleOperandReason::FallibleValueNotHandled,
             UnsupportedOperatorCategory::Arithmetic,
             builtin_type_ids::STRING,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOnOptional,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::BangOnNonFallible,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_config_reason(
             Some(config_key),
             InvalidConfigReason::ValueCouldNotFold,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_cast(
             InvalidCastReason::UserDefinedEvidenceNotConstFoldable,
             None,
             None,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
             None,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::deferred_feature_reason(
             DeferredFeatureReason::AsyncBlock,
@@ -2593,23 +2593,23 @@ fn source_dependency_renderers_use_current_language_terminology() {
     let member_name = string_table.intern("member");
     let mut diagnostics = vec![
         CompilerDiagnostic::missing_import_target(
-            dependency_path.clone(),
-            span(source_path.clone()),
+            dependency_path,
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_import_path(
             dependency_path,
             InvalidImportPathReason::ParentDirectorySegment,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::dependency_namespace_used_as_value(
             namespace_name,
-            span(source_path.clone()),
+            span(source_path),
         ),
-        CompilerDiagnostic::nested_dependency_traversal(namespace_name, span(source_path.clone())),
+        CompilerDiagnostic::nested_dependency_traversal(namespace_name, span(source_path)),
         CompilerDiagnostic::dependency_alias_case_mismatch(
             alias_name,
             symbol_name,
-            span(source_path.clone()),
+            span(source_path),
         ),
     ];
 
@@ -2643,7 +2643,7 @@ fn source_dependency_renderers_use_current_language_terminology() {
             member_name,
             expected,
             found,
-            span(source_path.clone()),
+            span(source_path),
         ));
     }
 
@@ -2713,13 +2713,13 @@ fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
     let diagnostics = vec![
         CompilerDiagnostic::invalid_path(
             PathKind::WhitespaceMustBeQuoted,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::type_mismatch(
             type_environment.builtins().int,
             type_environment.builtins().string,
             TypeMismatchContext::Declaration,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_assignment_target(
             InvalidAssignmentTargetReason::ImmutableBinding,
@@ -2728,19 +2728,19 @@ fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
             None,
             None,
             None,
-            span(source_path.clone()),
+            span(source_path),
         ),
-        CompilerDiagnostic::missing_import_target(import_path, span(source_path.clone())),
+        CompilerDiagnostic::missing_import_target(import_path, span(source_path)),
         borrow_conflict_diagnostic(
             DiagnosticPlace::Local(value_name),
             BorrowAccessKind::Shared,
             BorrowAccessKind::Mutable,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::invalid_config_reason(
             Some(config_key),
             InvalidConfigReason::UnsupportedScalarValue,
-            span(source_path.clone()),
+            span(source_path),
         ),
         CompilerDiagnostic::deferred_feature(feature_name, span(source_path)),
     ];
@@ -2836,7 +2836,7 @@ fn render_invalid_call_shape(
 #[test]
 fn mutable_access_required_renders_explicit_marker_guidance() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let parameter = string_table.intern("value");
     let message = render_invalid_call_shape(
         &mut string_table,
@@ -2861,7 +2861,7 @@ fn mutable_access_required_renders_explicit_marker_guidance() {
 #[test]
 fn immutable_place_mutable_access_renders_binding_name_for_missing_marker() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let parameter = string_table.intern("values");
     let binding = string_table.intern("values");
     let message = render_invalid_call_shape(
@@ -2888,7 +2888,7 @@ fn immutable_place_mutable_access_renders_binding_name_for_missing_marker() {
 #[test]
 fn immutable_place_mutable_access_renders_authored_marker_with_binding_name() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let parameter = string_table.intern("value");
     let binding = string_table.intern("x");
     let message = render_invalid_call_shape(
@@ -2911,7 +2911,7 @@ fn immutable_place_mutable_access_renders_authored_marker_with_binding_name() {
 #[test]
 fn immutable_place_mutable_access_uses_generic_fallback_without_binding_name() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let parameter = string_table.intern("value");
     let missing_marker = render_invalid_call_shape(
         &mut string_table,
@@ -2966,7 +2966,7 @@ fn immutable_place_mutable_access_uses_generic_fallback_without_binding_name() {
 #[test]
 fn mutable_access_on_non_place_renders_fresh_value_guidance() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let parameter = string_table.intern("value");
     let message = render_invalid_call_shape(
         &mut string_table,
@@ -3009,7 +3009,7 @@ fn mutable_access_on_non_place_renders_fresh_value_guidance() {
 #[test]
 fn unnamed_parameter_renders_one_based_position_without_internal_slot() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_call_shape(
         &mut string_table,
         InvalidCallShapeReason::MutableAccessRequired {
@@ -3036,7 +3036,7 @@ fn unnamed_parameter_renders_one_based_position_without_internal_slot() {
 #[test]
 fn mutable_access_not_allowed_tells_author_to_remove_authored_marker() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let parameter = string_table.intern("value");
     let message = render_invalid_call_shape(
         &mut string_table,
@@ -3087,7 +3087,7 @@ fn invalid_call_shape_remap_updates_binding_name_and_parameter_name() {
     let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
     let mut merged_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let remap = merged_table.merge_from(&local_table);
     bag.remap_string_ids(&remap);
 
@@ -3138,7 +3138,7 @@ fn render_invalid_receiver_call(
 #[test]
 fn source_method_missing_marker_renders_named_receiver_example() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::MutableReceiverMissingMarker,
@@ -3160,7 +3160,7 @@ fn source_method_missing_marker_renders_named_receiver_example() {
 #[test]
 fn source_method_missing_marker_omits_example_without_binding_name() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::MutableReceiverMissingMarker,
@@ -3183,7 +3183,7 @@ fn source_method_missing_marker_omits_example_without_binding_name() {
 #[test]
 fn source_method_immutable_receiver_names_binding_to_declare_mutable() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::ImmutableReceiverMutableMethod,
@@ -3202,7 +3202,7 @@ fn source_method_immutable_receiver_names_binding_to_declare_mutable() {
 #[test]
 fn source_method_non_place_receiver_requires_mutable_place() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::NonPlaceReceiverMutableMethod,
@@ -3223,7 +3223,7 @@ fn source_method_non_place_receiver_requires_mutable_place() {
 #[test]
 fn collection_missing_marker_names_kind_and_explicit_access() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::MutableReceiverMissingMarker,
@@ -3245,7 +3245,7 @@ fn collection_missing_marker_names_kind_and_explicit_access() {
 #[test]
 fn collection_immutable_receiver_names_binding_to_declare_mutable() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::ImmutableReceiverMutableMethod,
@@ -3267,7 +3267,7 @@ fn collection_immutable_receiver_names_binding_to_declare_mutable() {
 #[test]
 fn collection_non_place_receiver_requires_mutable_binding() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::NonPlaceReceiverMutableMethod,
@@ -3290,7 +3290,7 @@ fn collection_non_place_receiver_requires_mutable_binding() {
 #[test]
 fn map_immutable_receiver_names_kind_and_binding() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::ImmutableReceiverMutableMethod,
@@ -3312,7 +3312,7 @@ fn map_immutable_receiver_names_kind_and_binding() {
 #[test]
 fn authored_marker_on_immutable_receiver_keeps_marker_wording() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::MutableMarkerOnImmutableReceiver,
@@ -3335,7 +3335,7 @@ fn authored_marker_on_immutable_receiver_keeps_marker_wording() {
 #[test]
 fn authored_marker_on_non_place_receiver_explains_temporary() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::MutableMarkerOnNonPlaceReceiver,
@@ -3358,7 +3358,7 @@ fn authored_marker_on_non_place_receiver_explains_temporary() {
 #[test]
 fn unneeded_mutable_marker_tells_author_to_remove_it() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::UnneededMutableAccessMarker,
@@ -3380,7 +3380,7 @@ fn unneeded_mutable_marker_tells_author_to_remove_it() {
 #[test]
 fn const_record_runtime_call_renders_current_source_term() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let message = render_invalid_receiver_call(
         &mut string_table,
         InvalidReceiverCallReason::ConstRecordNoRuntimeCalls,
@@ -3418,7 +3418,7 @@ fn invalid_receiver_call_remap_updates_receiver_binding_name() {
     let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
     let mut merged_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let remap = merged_table.merge_from(&local_table);
     bag.remap_string_ids(&remap);
 
@@ -3472,7 +3472,7 @@ fn generic_instantiation_rendering_resolves_type_name() {
     use crate::compiler_frontend::symbols::string_interning::StringTable;
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
     let span = None;
 
@@ -3503,7 +3503,7 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
     use crate::compiler_frontend::symbols::string_interning::StringTable;
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let path_fork = PathInternerFork::empty();
     let function_name = string_table.intern("first");
     let parameter_name = string_table.intern("T");
     let span = None;
@@ -3542,7 +3542,7 @@ fn builtin_cast_shape_diagnostic_preserves_stable_code_and_rendering() {
     use crate::compiler_frontend::compiler_messages::InvalidBuiltinCallReason;
 
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let int_name = string_table.intern("Int");
 
     let diagnostic = CompilerDiagnostic::invalid_builtin_call(
@@ -3564,7 +3564,7 @@ fn builtin_cast_shape_diagnostic_preserves_stable_code_and_rendering() {
 #[test]
 fn token_diagnostics_render_source_spelling_not_token_debug_names() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let name = string_table.intern("item");
     let span = None;
 
@@ -3595,7 +3595,7 @@ fn token_diagnostics_render_source_spelling_not_token_debug_names() {
 #[test]
 fn borrow_conflict_rendering_hides_payload_debug_names() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let value_name = string_table.intern("value");
     let span = None;
 
@@ -3631,7 +3631,7 @@ fn borrow_labels_preserve_order_and_exact_source_spans() {
     let primary = exact_span(primary_source, 40, 8, &mut builder);
     let related = exact_span(related_source, 11, 7, &mut builder);
     let mut strings = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let value_name = strings.intern("value");
 
     let diagnostic = CompilerDiagnostic::multiple_mutable_borrows(
@@ -3657,7 +3657,7 @@ fn borrow_labels_preserve_order_and_exact_source_spans() {
 #[test]
 fn remapping_diagnostic_strings_leaves_source_spans_unchanged() {
     let mut local_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     let name = local_table.intern("Button");
     let label_text = local_table.intern("previous declaration");
     let primary_source = SourceId::from_index(3);
@@ -3674,7 +3674,7 @@ fn remapping_diagnostic_strings_leaves_source_spans_unchanged() {
     let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
     let mut merged_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let _path_fork = PathInternerFork::empty();
     merged_table.intern("preexisting string");
     let remap = merged_table.merge_from(&local_table);
     bag.remap_string_ids(&remap);
