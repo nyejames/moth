@@ -928,12 +928,12 @@ facts from the prepared result; semantic compilation consumes the prepared resul
 storage is dropped or moved into an existing later owner such as persistent generic materialisation.
 Never a second tokenization and never a second store.
 
-- [ ] **3E1 — prepared-source store:** evolve `FileFrontendPrepareOutput` into one move-owned
+- [x] **3E1 — prepared-source store:** evolve `FileFrontendPrepareOutput` into one move-owned
   `PreparedSource` slot per selected `SourceId`; it owns the source token store and syntax
   preparation exactly once. Stage 0 borrows structural facts from the prepared result; semantic
   compilation then consumes the prepared record, and the record's storage is dropped or moved into
-  an existing later owner (such as persistent generic materialisation) — without per-source `Arc`
-  or cloning and without a second tokenization or store
+  an existing later owner (such as persistent generic materialisation) — without per-source
+  `Arc` or cloning and without a second tokenization or store
 - [x] **3E2 — structural reachability reuse:** make prepared dependency shells expose final
   local-source `SourceId` edges plus typed provider request records; Stage 0 traverses those facts
   without reading token stores or rendered path text; keep provider mutation/resolution on its
@@ -945,10 +945,15 @@ facts through indexed source and provider resolution, while provider mutation re
 owner; semantic binding validates every retained local identity against the resolved prepared
 source path. Dependency spans retain their prepared-file ownership check.
 
-- [ ] **3E3 — consolidate retained preparation:** preserve the current exactly-once
+- [x] **3E3 — consolidate retained preparation:** preserve the current exactly-once
   load/tokenize/prepare path while moving both directory-token and synthetic-prepared variants into
   the same build-lifetime `PreparedSource` store; module aggregation consumes the prepared result
   once and never re-tokenizes, re-parses or adds a second store or cache
+
+Slice 3E3 decision (2026-09-14): complete synthetic Moth and Moth-template outputs now share one
+`MothPrepared` handoff variant; template detection reads the authoritative `SourceDatabase` kind,
+and ordered `PreparedSourceSlots` values are consumed once at aggregation. Existing selected-text
+and synthetic local-source caches remain until their later lifetime/source-slot slices.
 - [ ] **3E4 — contiguous retained syntax:** add half-open `TokenRange { source, start, end }`,
   replace contiguous `Header::tokens` bodies with ranges, remove repeated `Header::source_file` and
   change function/template body capture to record boundaries instead of cloning tokens

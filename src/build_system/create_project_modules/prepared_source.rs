@@ -4,9 +4,9 @@
 //!       `PreparedSource` slot value per selected `SourceId` and the `PreparedSourceSlots`
 //!       store that retains those values in deterministic input order. Directory Moth inputs
 //!       carry their final `SourceId` and retained tokens for the one header-preparation pass;
-//!       synthetic Moth and Moth-template inputs carry the complete file output produced during
-//!       discovery. PlainMarkdown carries only its final `SourceId`; paths and snapshots come
-//!       from the authoritative `SourceDatabase`.
+//!       synthetic Moth and Moth-template inputs carry one complete prepared output produced
+//!       during discovery. PlainMarkdown carries only its final `SourceId`; paths and snapshots
+//!       come from the authoritative `SourceDatabase`.
 //! WHY: the variant makes source-kind ownership explicit. A directory Moth source cannot reach
 //!      header preparation without its retained `FileTokens`, while synthetic inputs cannot be
 //!      prepared again after their complete outputs have been retained. The slot owner makes the
@@ -28,9 +28,9 @@ use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 ///
 /// Construct this only from Stage 0 source preparation. Directory Moth files have already been
 /// tokenized once; their retained `FileTokens` are carried here so header preparation never lexes
-/// the same source again. Synthetic Moth and Moth-template files carry the corresponding prepared
-/// variants because their complete header output was already produced while discovering the
-/// source closure.
+/// the same source again. Synthetic Moth and Moth-template files carry one complete prepared
+/// output because their complete header output was already produced while discovering the source
+/// closure.
 ///
 /// Source paths and snapshots belong to the final `SourceDatabase`. The source ID is the only
 /// identity carried by this transient handoff, so consumers resolve paths and retained text from
@@ -43,12 +43,8 @@ pub(crate) struct PreparedSourceInput {
 pub(crate) enum PreparedSourceKind {
     /// A Moth module source with tokens from its single lexical pass.
     Moth { tokens: Box<FileTokens> },
-    /// Complete Moth syntax retained by private synthetic discovery.
+    /// Complete Moth or Moth-template syntax retained by private synthetic discovery.
     MothPrepared {
-        output: Box<FileFrontendPrepareOutput>,
-    },
-    /// Complete Moth-template syntax retained by private synthetic discovery.
-    MothTemplatePrepared {
         output: Box<FileFrontendPrepareOutput>,
     },
     /// A Moth-template body awaiting its one template-body preparation pass.
@@ -61,25 +57,17 @@ impl PreparedSourceInput {
     pub(crate) fn source_id(&self) -> SourceId {
         self.source_id
     }
-
-    /// Whether this selected source is a Moth template body.
-    pub(crate) fn is_moth_template(&self) -> bool {
-        matches!(
-            &self.source,
-            PreparedSourceKind::MothTemplate | PreparedSourceKind::MothTemplatePrepared { .. }
-        )
-    }
 }
 
 /// One move-owned preparation result for a selected source identity.
 ///
-/// WHAT: pairs the preparing source's final `SourceId` with the one
-///       `FileFrontendPrepareOutput` produced for it.
-/// WHY: the slot makes source identity explicit at the exactly-once ownership boundary.
-///      A stamped `file_id` that disagrees with the slot owner is a compiler error; an
-///      occupied or unfilled slot means the same source was prepared twice or not at all.
+/// WHAT: owns the one `FileFrontendPrepareOutput` whose stamped identity was validated against
+///       the selected source ID at construction.
+/// WHY: the slot makes source identity explicit at the exactly-once ownership boundary. A
+///      stamped `file_id` that disagrees with the slot owner is rejected before the output can be
+///      retained; an occupied or unfilled slot means the same source was prepared twice or not at
+///      all.
 pub(crate) struct PreparedSource {
-    pub(crate) source_id: SourceId,
     pub(crate) output: FileFrontendPrepareOutput,
 }
 
@@ -96,24 +84,11 @@ impl PreparedSource {
             )));
         }
 
-        Ok(Self { source_id, output })
+        Ok(Self { output })
     }
 
-    fn check_identity(&self) -> Result<(), CompilerError> {
-        if self.output.file_id != self.source_id {
-            return Err(CompilerError::compiler_error(format!(
-                "prepared source identity {} does not match its slot owner {}",
-                self.output.file_id.index(),
-                self.source_id.index(),
-            )));
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn into_output(self) -> Result<FileFrontendPrepareOutput, CompilerError> {
-        self.check_identity()?;
-        Ok(self.output)
+    pub(crate) fn into_output(self) -> FileFrontendPrepareOutput {
+        self.output
     }
 }
 
@@ -140,7 +115,6 @@ impl PreparedSourceSlots {
         self.slots.len()
     }
 
-
     pub(crate) fn insert(
         &mut self,
         file_index: usize,
@@ -165,28 +139,26 @@ impl PreparedSourceSlots {
         Ok(())
     }
 
-    pub(crate) fn into_ordered_outputs(self) -> Result<Vec<PreparedSource>, CompilerError> {
-        self.slots
-            .into_iter()
-            .enumerate()
-            .map(|(file_index, slot)| {
-                slot.ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "file preparation left file index {file_index} unfilled; every \
-                         selected source must be prepared exactly once",
-                    ))
-                })
-            })
-            .collect()
+    /// Verify that every slot is occupied before a caller that requires a complete module
+    /// preparation consumes the store.
+    pub(crate) fn ensure_filled(&self) -> Result<(), CompilerError> {
+        for (file_index, slot) in self.slots.iter().enumerate() {
+            if slot.is_none() {
+                return Err(CompilerError::compiler_error(format!(
+                    "file preparation left file index {file_index} unfilled; every \
+                     selected source must be prepared exactly once",
+                )));
+            }
+        }
+        Ok(())
     }
 
-    pub(crate) fn into_selected_outputs(
-        self,
-    ) -> Result<Vec<FileFrontendPrepareOutput>, CompilerError> {
-        self.slots
-            .into_iter()
-            .flatten()
-            .map(|slot| slot.into_output())
-            .collect()
+    /// Consume occupied prepared sources in their deterministic input order.
+    ///
+    /// Directory reachability may leave candidate slots unfilled because candidates include files
+    /// that were not reached. Callers with a complete fixed-size preparation set must invoke
+    /// `ensure_filled` before consuming this handoff.
+    pub(crate) fn into_ordered_outputs(self) -> Vec<PreparedSource> {
+        self.slots.into_iter().flatten().collect()
     }
 }

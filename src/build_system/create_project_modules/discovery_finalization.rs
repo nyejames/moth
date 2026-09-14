@@ -469,13 +469,9 @@ pub(super) fn finalize_reachable_files(
                 )?;
                 output.freeze_path_syntax(string_table, path_fork)?;
                 match source_kind {
-                    SourceKind::Compiler(SourceFileKind::Moth) => {
+                    SourceKind::Compiler(SourceFileKind::Moth)
+                    | SourceKind::Compiler(SourceFileKind::MothTemplate) => {
                         PreparedSourceKind::MothPrepared {
-                            output: Box::new(output),
-                        }
-                    }
-                    SourceKind::Compiler(SourceFileKind::MothTemplate) => {
-                        PreparedSourceKind::MothTemplatePrepared {
                             output: Box::new(output),
                         }
                     }

@@ -10,6 +10,7 @@
 //! This module stops at prepared syntax. Interface binding, declaration ordering, AST, HIR, borrow
 //! validation and generated completion belong to `compiler_frontend::module_compilation`.
 
+use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
@@ -28,7 +29,7 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpanBuilders,
+    ExtendedSpanBuilder, SourceDatabase, SourceId, SourceKind, SourceSpanBuilders,
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -213,6 +214,13 @@ fn source_path_for_id(
         })
 }
 
+fn source_is_moth_template(source_files: &SourceDatabase, source_id: SourceId) -> bool {
+    matches!(
+        source_files.get(source_id).and_then(|record| record.kind),
+        Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
+    )
+}
+
 /// Resolve the identity the boundary already assigned to a canonical path.
 ///
 /// WHY: the active root arrives as a path from module discovery, and preparation validates it
@@ -377,9 +385,9 @@ impl ModulePreparationContext<'_> {
     /// WHAT: prepares every source file against local string-table forks, merges chunk-local
     ///       string tables in deterministic input order and runs `prepare_header_syntax` to
     ///       produce the retained `PreparedHeaderSyntax`. Directory Moth inputs consume retained
-    ///       token streams, synthetic Moth inputs consume complete outputs retained during
-    ///       discovery and single-file compilation retains its own synthetic origin table.
-    ///       Preparation stops before provider-dependent binding.
+    ///       token streams, synthetic Moth and Moth-template inputs consume one complete output
+    ///       retained during discovery and single-file compilation retains its own synthetic
+    ///       origin table. Preparation stops before provider-dependent binding.
     /// WHY: the compiler design overview requires `PreparedHeaderSyntax` to be produced before the
     ///      provider graph is compiled. This context owns no provider-interface values, so
     ///      preparation cannot reach provider state. Retaining the syntax, string-table context,
@@ -417,16 +425,18 @@ impl ModulePreparationContext<'_> {
             .collect::<Vec<_>>();
 
         let module_file_count = module.len();
-        let contains_moth_template = module.iter().any(PreparedSourceInput::is_moth_template);
-
+        let contains_moth_template = module
+            .iter()
+            .any(|source| source_is_moth_template(self.source_files, source.source_id()));
         // Entry identity and root semantics are separate. The stable module origin owns whether
         // the active file is a normal runtime-capable root or an API-only support/facade root.
         let active_root_role = stable_origin.role();
 
-        // 1. Prepare all selected files against one local string-table per worker chunk. Directory
-        //    Moth files parse retained Stage 0 tokens, synthetic Moth files consume their complete
-        //    retained output, Moth templates tokenize their body once and plain Markdown bypasses
-        //    tokenization. Merge/remap once before aggregating header syntax.
+        // 1. Prepare all selected files against one local string-table fork per worker chunk.
+        //    Directory Moth inputs parse retained tokens, synthetic Moth and Moth-template inputs
+        //    consume complete outputs retained during discovery, pending MothTemplate inputs
+        //    tokenize their body once and plain Markdown bypasses tokenization. Merge/remap once
+        //    before aggregating header syntax.
         let (prepared_header_syntax, file_warnings) = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             timing_context,
@@ -719,14 +729,6 @@ impl ModulePreparationContext<'_> {
             for prepared_file in chunk.results {
                 match prepared_file.result {
                     Ok(mut output) => {
-                        if output.file_id != prepared_file.source_id {
-                            return Err(CompilerError::compiler_error(format!(
-                                "prepared source identity {} does not match its slot owner {}",
-                                output.file_id.index(),
-                                prepared_file.source_id.index(),
-                            ))
-                            .into());
-                        }
                         if output.const_template_count > 0 {
                             const_fragment_source_count += 1;
                         }
@@ -822,14 +824,12 @@ impl ModulePreparationContext<'_> {
             batch.prepend_diagnostics(warnings);
             return Err(PremergeFailure::Diagnosed(batch));
         }
-        let ordered_slots = prepared_outputs
-            .into_ordered_outputs()
-            .map_err(PremergeFailure::Infrastructure)?;
+        prepared_outputs.ensure_filled().map_err(PremergeFailure::Infrastructure)?;
+        let ordered_slots = prepared_outputs.into_ordered_outputs();
         let mut filled_outputs: Vec<FileFrontendPrepareOutput> = ordered_slots
             .into_iter()
             .map(|slot| slot.into_output())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(PremergeFailure::Infrastructure)?;
+            .collect();
 
         record_successful_prepared_outputs(&filled_outputs);
         let prepared = match prepare_header_syntax(
@@ -974,8 +974,7 @@ impl ModulePreparationContext<'_> {
         for (file_index, (file, span_builder)) in module {
             let PreparedSourceInput { source_id, source } = file;
             let (string_domain, delta) = match source {
-                PreparedSourceKind::MothPrepared { output }
-                | PreparedSourceKind::MothTemplatePrepared { output } => (
+                PreparedSourceKind::MothPrepared { output } => (
                     PreparedFileStringDomain::AlreadyGlobal,
                     SourcePreparationDelta {
                         file_id: source_id,
@@ -1101,7 +1100,6 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         if matches!(
             &source.source,
             PreparedSourceKind::MothPrepared { .. }
-                | PreparedSourceKind::MothTemplatePrepared { .. }
         ) {
             return Err(CompilerError::compiler_error(
                 "indexed module syntax discovery received an already-prepared synthetic source",
@@ -1115,7 +1113,8 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             source_id,
             Some(self.selected_source_texts),
         )?;
-        self.contains_moth_template |= source.is_moth_template();
+        self.contains_moth_template |=
+            source_is_moth_template(self.context.source_files, source_id);
         let entry_file_id =
             source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
         let options = HeaderParseOptions {
@@ -1205,9 +1204,12 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         self.prepared_outputs.insert(source_order, expected, output)
     }
 
-    /// Freeze the selected source outputs into the one retained module preparation payload.
     pub(super) fn finish(mut self) -> Result<PreparedModule, PremergeFailure> {
-        let mut prepared_outputs = self.prepared_outputs.into_selected_outputs()?;
+        let ordered_slots = self.prepared_outputs.into_ordered_outputs();
+        let mut prepared_outputs: Vec<FileFrontendPrepareOutput> = ordered_slots
+            .into_iter()
+            .map(|slot| slot.into_output())
+            .collect();
         for output in &mut prepared_outputs {
             output.freeze_path_syntax(&self.string_table, &mut self.path_fork)?;
         }
@@ -1302,8 +1304,7 @@ fn frontend_source<'a>(
             source_code: retained_source_text(sources, source_id, selected_source_texts)?,
             source_path,
         },
-        PreparedSourceKind::MothPrepared { .. }
-        | PreparedSourceKind::MothTemplatePrepared { .. } => {
+        PreparedSourceKind::MothPrepared { .. } => {
             unreachable!("retained syntax bypasses frontend source conversion")
         }
     })

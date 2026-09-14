@@ -1867,12 +1867,7 @@ fn merge_rejects_out_of_range_file_index() {
 #[test]
 fn merge_rejects_source_identity_mismatch() {
     let mut chunk = dummy_preparation_chunk(0, vec![0]);
-    match &mut chunk.results[0].result {
-        Ok(output) => {
-            output.file_id = crate::compiler_frontend::source::SourceId::from_index(1);
-        }
-        Err(_) => unreachable!("dummy chunk should prepare successfully"),
-    }
+    chunk.results[0].source_id = crate::compiler_frontend::source::SourceId::from_index(1);
 
     assert_malformed_chunks_rejected(vec![chunk], 1, "does not match its slot owner");
 }
