@@ -962,10 +962,15 @@ Slice 3E4 decision (2026-09-14): contiguous header and function/template bodies 
 remain separate, while segmented `start` syntax and persistent generic materialisation remain
 explicitly transitional for 3E5 and 3E7. Plain Markdown keeps its empty range and no-token path,
 using only checked source identity and frozen empty path-syntax adapters for its synthetic constant.
-- [ ] **3E5 — segmented start-body syntax:** add `TokenSequenceId` into a source-local range-list
+- [x] **3E5 — segmented start-body syntax:** add `TokenSequenceId` into a source-local range-list
   store whose entries are 8-byte `{ start, end }` token-index pairs and whose owner stores
   `SourceId` once; expose one `TokenSequenceView` so contiguous and segmented bodies use the same
   `TokenCursor`; never add a copied start stream or parallel parser path
+
+Slice 3E5 decision (2026-09-14): canonical `SourceTokens` now owns one checked sequence store per
+source, with 8-byte start/end entries and one-based checked IDs. `TokenSequenceView` and the
+shared `TokenCursor` traverse contiguous and segmented half-open syntax, including merged start
+runs and retained EOF, while parser compatibility materialization remains bounded and ephemeral.
 - [ ] **3E6 — source-kind adapters:** represent non-tokenized adapter payloads directly, preserve
   plain Markdown's no-token path and keep declaration-shell parsing single-owner through
   token/sequence views

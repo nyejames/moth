@@ -1,32 +1,41 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-fn prepared_header_body_tokens<'a>(
-    prepared: &'a PreparedHeaderSyntax,
-    header: &'a Header,
-) -> &'a [Token] {
-    if let Some(tokens) = header.transitional_tokens.as_ref() {
-        return &tokens.tokens;
-    }
+fn prepared_header_body_tokens(
+    prepared: &PreparedHeaderSyntax,
+    header: &Header,
+) -> Vec<Token> {
     let source = prepared
         .source_token_streams
         .get(&header.tokens.source())
         .expect("header body range has no prepared source token owner");
-    &source.tokens[header.tokens.start().index()..header.tokens.end().index()]
+    if let Some(sequence) = header.token_sequence {
+        return source
+            .materialize_token_sequence(sequence)
+            .expect("header sequence should resolve through its source owner");
+    }
+    source
+        .materialize_token_range(header.tokens)
+        .expect("header range should resolve through its source owner")
 }
 
-fn output_header_body_tokens<'a>(
-    output: &'a FileFrontendPrepareOutput,
-    header: &'a Header,
-) -> &'a [Token] {
-    if let Some(tokens) = header.transitional_tokens.as_ref() {
-        return &tokens.tokens;
-    }
+
+fn output_header_body_tokens(
+    output: &FileFrontendPrepareOutput,
+    header: &Header,
+) -> Vec<Token> {
     let source = output
         .source_token_stream
         .as_ref()
         .expect("prepared source retains its token owner");
-    &source.tokens[header.tokens.start().index()..header.tokens.end().index()]
+    if let Some(sequence) = header.token_sequence {
+        return source
+            .materialize_token_sequence(sequence)
+            .expect("header sequence should resolve through its source owner");
+    }
+    source
+        .materialize_token_range(header.tokens)
+        .expect("header range should resolve through its source owner")
 }
 
 /// Extended token spans keep their source-owned table through aggregation. Later span producers
@@ -55,7 +64,7 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let literal = prepared
         .headers
         .iter()
-        .flat_map(|header| prepared_header_body_tokens(&prepared, header).iter())
+        .flat_map(|header| prepared_header_body_tokens(&prepared, header).into_iter())
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("the retained header must keep its long string literal");
     let resolved = literal.span.resolve_with(resolver);
@@ -90,7 +99,7 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     let literal_span = output
         .headers
         .iter()
-        .flat_map(|header| output_header_body_tokens(output, header).iter())
+        .flat_map(|header| output_header_body_tokens(output, header).into_iter())
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("the function body should retain its long literal")
         .span;

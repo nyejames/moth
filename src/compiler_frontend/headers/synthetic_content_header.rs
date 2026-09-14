@@ -84,7 +84,7 @@ pub(crate) fn synthetic_content_header(
         name_span: None,
         tokens: header_tokens,
         declaration_path: header_path,
-        transitional_tokens: None,
+        token_sequence: None,
         capacity_references: Vec::new(),
     })
 }

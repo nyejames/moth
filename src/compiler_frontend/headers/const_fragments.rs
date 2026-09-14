@@ -154,7 +154,7 @@ pub(super) fn create_top_level_const_template(
         name_span: Some(name_span),
         tokens: template_range,
         declaration_path: full_name,
-        transitional_tokens: None,
+        token_sequence: None,
         capacity_references: Vec::new(),
     })
 }

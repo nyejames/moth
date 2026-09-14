@@ -198,7 +198,7 @@ impl ConstantResolutionSession {
             .get(&header.tokens.source());
         let fallback_path_syntax = if source_owner.is_none() {
             let path_free_synthetic_initializer = header.tokens.is_empty()
-                && header.transitional_tokens.is_none()
+                && header.token_sequence.is_none()
                 && header.name_span.is_none()
                 && declaration
                     .initializer_tokens

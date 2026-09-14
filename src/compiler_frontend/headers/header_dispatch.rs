@@ -64,14 +64,14 @@ use std::collections::HashSet;
 type HeaderDispatchResult<T> = Result<T, HeaderParseFailure>;
 
 // WHAT: classifies one top-level declaration by its leading token and builds the concrete header
-// payload (kind + body token slice + dependency set) that later AST passes consume.
+// payload (kind + body source range + dependency set) that later AST passes consume.
 //
 // WHY: every declaration kind (function, struct, choice/union, constant) has a different leading
 // token pattern. This function dispatches on that token and delegates to kind-specific helpers
-// where they exist, or captures body tokens directly for simpler cases.
+// where they exist, or captures body source ranges directly for simpler cases.
 //
 // Dispatch summary:
-//   `|`  (TypeParameterBracket)  → function signature + body token capture
+//   `|`  (TypeParameterBracket)  → function signature + body range capture
 //   `=`  (Assign)                → struct `= |fields|`
 //   `::`  (DoubleColon)          → choice/union variant list
 //   `#`  (Hash)                  → compile-time constant binding `#=` / `#Type`
@@ -138,7 +138,7 @@ pub(super) fn create_header(
             name_span: Some(name_span),
             tokens: body_range,
             declaration_path: conformance_id,
-            transitional_tokens: None,
+            token_sequence: None,
             capacity_references,
         });
     }
@@ -256,7 +256,7 @@ pub(super) fn create_header(
             name_span: Some(name_span),
             tokens: body_range,
             declaration_path: header_id,
-            transitional_tokens: None,
+            token_sequence: None,
             capacity_references,
         });
     }
@@ -311,7 +311,7 @@ pub(super) fn create_header(
                 )?;
             }
 
-            body_range = capture_function_body_tokens(
+            body_range = capture_function_body_range(
                 token_stream,
                 context.string_table,
             )?;
@@ -535,7 +535,7 @@ pub(super) fn create_header(
         name_span: Some(name_span),
         tokens: body_range,
         declaration_path: header_id,
-        transitional_tokens: None,
+        token_sequence: None,
         capacity_references,
     })
 }
@@ -618,14 +618,6 @@ fn collect_type_ordering_hints(
     Ok(())
 }
 
-// WHAT: collects all tokens that make up a function body (`:` … `;`) into `body`,
-// tracking scope depth to handle nested scopes (inner `if`/`loop`/etc.) correctly.
-//
-// WHY: extracted from `create_header` to reduce its length and make the scope-balancing
-// contract explicit. The token stream must already be positioned on the first body token
-// (i.e. `FunctionSignature::new` has already consumed the signature).
-// Local declaration-ordering hints are derived from the signature only; body tokens are captured but
-// not scanned for dependency clauses — that is AST's responsibility at body-lowering time.
 fn empty_token_range(token_stream: &FileTokens) -> HeaderDispatchResult<TokenRange> {
     let index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
@@ -640,8 +632,16 @@ fn empty_token_range(token_stream: &FileTokens) -> HeaderDispatchResult<TokenRan
         ))
     })
 }
+// WHAT: finds the source range containing a function body (`:` … `;`), tracking scope depth to
+// handle nested scopes (inner `if`/`loop`/etc.) correctly.
+//
+// WHY: extracted from `create_header` to reduce its length and make the scope-balancing
+// contract explicit. The token stream must already be positioned on the first body token
+// (i.e. `FunctionSignature::new` has already consumed the signature).
+// Local declaration-ordering hints are derived from the signature only; body ranges are captured
+// but not scanned for dependency clauses — that is AST's responsibility at body-lowering time.
 
-fn capture_function_body_tokens(
+fn capture_function_body_range(
     token_stream: &mut FileTokens,
     string_table: &mut StringTable,
 ) -> HeaderDispatchResult<TokenRange> {
@@ -677,7 +677,7 @@ fn capture_function_body_tokens(
             }
 
             _ => {}
-            }
+        }
 
         token_stream.advance();
     }

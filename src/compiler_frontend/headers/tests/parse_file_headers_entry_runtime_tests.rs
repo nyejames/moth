@@ -67,3 +67,56 @@ fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
         "runtime_fragment_count must be 0 when the file is not the active root"
     );
 }
+
+#[test]
+fn start_function_retains_segmented_source_runs_in_order_with_eof() {
+    let (headers, string_table) =
+        parse_single_file_headers_with_table("before = 1\nanswer #= 2\nafter = 3\n");
+    let start_header = start_function_header(&headers);
+    assert!(
+        start_header.tokens.is_empty(),
+        "start syntax should be retained by its sequence handle, not a contiguous body range"
+    );
+    let sequence = start_header
+        .token_sequence
+        .expect("active start function should retain a source sequence");
+    let source = headers
+        .source_token_streams
+        .get(&start_header.tokens.source())
+        .expect("start sequence should retain its canonical source owner");
+    let view = source
+        .source_tokens()
+        .expect("start source owner should expose canonical tokens")
+        .token_sequence(sequence)
+        .expect("start sequence handle should resolve");
+    let ranges = view.ranges().collect::<Vec<_>>();
+    assert_eq!(
+        ranges.len(),
+        2,
+        "the compile-time header should split the two start-body runs"
+    );
+    assert!(ranges[0].end() < ranges[1].start());
+
+    let body = header_body_tokens(&headers, start_header);
+    let symbols = body
+        .iter()
+        .filter_map(|token| match &token.kind {
+            TokenKind::Symbol(symbol) => Some(string_table.resolve(*symbol).to_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(symbols, ["before", "after"]);
+    assert!(
+        !body.iter().any(|token| {
+            matches!(
+                &token.kind,
+                TokenKind::Symbol(symbol) if string_table.resolve(*symbol) == "answer"
+            )
+        }),
+        "the constant declaration must not leak into the start body"
+    );
+    assert!(
+        matches!(body.last().map(|token| &token.kind), Some(TokenKind::Eof)),
+        "segmented start syntax must retain the source EOF sentinel"
+    );
+}

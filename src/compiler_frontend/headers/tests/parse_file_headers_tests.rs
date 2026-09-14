@@ -527,17 +527,21 @@ fn non_start_header_names(headers: &BoundModuleHeaders, string_table: &StringTab
 
 /// Return the retained body tokens for a header from its prepared source owner.
 ///
-/// Start bodies still use the explicit transitional segmented stream; all contiguous header
-/// bodies are sliced from the one source owner using their source-qualified token range.
-fn header_body_tokens<'a>(headers: &'a BoundModuleHeaders, header: &'a Header) -> &'a [Token] {
-    if let Some(tokens) = header.transitional_tokens.as_ref() {
-        return &tokens.tokens;
-    }
+/// Segmented start syntax is materialized only for this test assertion through the canonical
+/// source owner; production headers retain the checked sequence ID instead of a token vector.
+fn header_body_tokens(headers: &BoundModuleHeaders, header: &Header) -> Vec<Token> {
     let source = headers
         .source_token_streams
         .get(&header.tokens.source())
         .expect("header body range has no prepared source token owner");
-    &source.tokens[header.tokens.start().index()..header.tokens.end().index()]
+    if let Some(sequence) = header.token_sequence {
+        return source
+            .materialize_token_sequence(sequence)
+            .expect("header sequence should resolve through its source owner");
+    }
+    source
+        .materialize_token_range(header.tokens)
+        .expect("header range should resolve through its source owner")
 }
 
 fn symbol_tokens_in_header_body(

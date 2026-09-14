@@ -22,7 +22,7 @@ use crate::compiler_frontend::headers::hash_items::handle_hash_item;
 use crate::compiler_frontend::headers::header_dispatch::create_header;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::parse_file_headers::find_config_qualifier_marker_in_header;
-use crate::compiler_frontend::headers::start_capture::push_runtime_template_tokens_to_start_function;
+use crate::compiler_frontend::headers::start_capture::capture_runtime_template_range;
 use crate::compiler_frontend::headers::symbol_collection::is_receiver_method_candidate;
 use crate::compiler_frontend::headers::top_level_classifier::{
     HeaderFileItem, classify_current_item, classify_export_block_item,
@@ -78,6 +78,7 @@ fn parse_headers_in_file_inner(
     state: &mut HeaderFileParseState,
 ) -> FileParserResult<()> {
     loop {
+        let current_index = token_stream.index;
         let current_token = token_stream.current_token();
         let current_span = token_stream.current_span();
         token_stream.advance();
@@ -136,16 +137,16 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::RuntimeTemplate => {
-                handle_runtime_template_item(token_stream, state, context, current_token)?;
+                handle_runtime_template_item(token_stream, state, context)?;
             }
 
             HeaderFileItem::Eof => {
-                state.push_start_body_token(current_token);
+                state.record_start_body_token(token_stream.file_id, current_index, &current_token)?;
                 break;
             }
 
             HeaderFileItem::StartBodyToken => {
-                state.push_start_body_token(current_token);
+                state.record_start_body_token(token_stream.file_id, current_index, &current_token)?;
             }
         }
     }
@@ -383,7 +384,8 @@ fn handle_symbol_item(
     name_id: StringId,
     current_span: SourceSpan,
 ) -> FileParserResult<()> {
-    let import_index = token_stream.index.saturating_sub(1);
+    let current_index = token_stream.index.saturating_sub(1);
+    let import_index = current_index;
     if let Some(start) =
         recognize_legacy_dependency_start(&token_stream.tokens, import_index, context.string_table)
     {
@@ -403,6 +405,7 @@ fn handle_symbol_item(
         current_token,
         name_id,
         current_span,
+        current_index,
         export_mode,
     )
 }
@@ -601,6 +604,7 @@ fn handle_symbol_item_with_export_mode(
     current_token: Token,
     name_id: StringId,
     current_span: SourceSpan,
+    current_index: usize,
     export_mode: HeaderExportMode,
 ) -> FileParserResult<()> {
     if export_mode.is_public() && !starts_duplicate_top_level_header_declaration(token_stream) {
@@ -630,7 +634,11 @@ fn handle_symbol_item_with_export_mode(
         }
 
         if !is_conformance_declaration {
-            state.push_start_body_token(current_token);
+            state.record_start_body_token(
+                token_stream.file_id,
+                current_index,
+                &current_token,
+            )?;
             // Body-level symbol/dependency resolution belongs to AST passes. Header parsing only validates
             // duplicate top-level declaration starts at this stage.
             return Ok(());
@@ -642,7 +650,11 @@ fn handle_symbol_item_with_export_mode(
     if state.start_body_symbols.contains(&name_id)
         && !starts_duplicate_top_level_header_declaration(token_stream)
     {
-        state.push_start_body_token(current_token);
+        state.record_start_body_token(
+            token_stream.file_id,
+            current_index,
+            &current_token,
+        )?;
         return Ok(());
     }
 
@@ -698,7 +710,11 @@ fn handle_symbol_item_with_export_mode(
 
     match &header.kind {
         HeaderKind::StartFunction => {
-            state.push_start_body_token(current_token);
+            state.record_start_body_token(
+                token_stream.file_id,
+                current_index,
+                &current_token,
+            )?;
             state.register_start_body_symbol(name_id);
         }
         HeaderKind::TraitConformance { .. } | HeaderKind::TraitIncompatibility { .. } => {
@@ -738,17 +754,21 @@ fn handle_runtime_template_item(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    current_token: Token,
 ) -> FileParserResult<()> {
     // Runtime top-level templates stay in the start-function body and are evaluated in source
     // order by entry start(). The runtime fragment count lets later const fragments record their
     // insertion point relative to already-seen runtime fragments.
-    push_runtime_template_tokens_to_start_function(
-        current_token,
+    let opening_index = token_stream.index.checked_sub(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "runtime template opening preceded the source token index",
+        ))
+    })?;
+    let range = capture_runtime_template_range(
+        opening_index,
         token_stream,
-        &mut state.start_function_body,
         context.string_table,
     )?;
+    state.record_start_body_source_range(range, token_stream)?;
 
     if context.file_role == FileRole::ActiveModuleRoot {
         state.runtime_fragment_count += 1;
@@ -756,20 +776,48 @@ fn handle_runtime_template_item(
 
     Ok(())
 }
+fn find_config_marker_in_start_ranges(
+    state: &HeaderFileParseState,
+    token_stream: &FileTokens,
+    string_table: &StringTable,
+    span_builder: &crate::compiler_frontend::source::ExtendedSpanBuilder,
+) -> Result<Option<(SourceSpan, bool)>, CompilerError> {
+    for range in &state.start_body_ranges {
+        if range.source() != token_stream.file_id {
+            return Err(CompilerError::compiler_error(
+                "start-body config scan encountered a foreign source range",
+            ));
+        }
+        let tokens = token_stream
+            .tokens
+            .get(range.start().index()..range.end().index())
+            .ok_or_else(|| {
+                CompilerError::compiler_error("start-body config scan exceeded source token bounds")
+            })?;
+        if let Some(marker) =
+            find_config_qualifier_marker(tokens, string_table, token_stream.file_id, span_builder)
+        {
+            return Ok(Some(marker));
+        }
+    }
+    Ok(None)
+}
+
 
 fn finish_file_output(
     token_stream: &mut FileTokens,
-    file_id: SourceId,
+    _file_id: SourceId,
     context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     if context.file_role == FileRole::ImportedModuleRoot
-        && let Some((marker_span, adjacent)) = find_config_qualifier_marker(
-            &state.start_function_body,
+        && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
+            &state,
+            token_stream,
             context.string_table,
-            file_id,
             context.span_builder,
         )
+        .map_err(FileFrontendPrepareFailure::Infrastructure)?
     {
         let diagnostic = if adjacent {
             CompilerDiagnostic::invalid_config_reason(
@@ -806,7 +854,7 @@ fn finish_file_output(
     ) && state.has_non_trivial_start_body()
     {
         let span = state
-            .first_executable_start_body_span(file_id)
+            .first_executable_start_body_span()
             .expect("non-trivial start body has an executable token span");
         return Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
             CompilerDiagnostic::invalid_top_level_runtime_statement(Some(span)),
@@ -872,33 +920,26 @@ fn attach_structural_file_facts(
             &header.kind,
             HeaderKind::Constant { declaration } if declaration.config_qualifier.is_some()
         );
-        let body_tokens = if let Some(tokens) = header.transitional_tokens.as_ref() {
-            &tokens.tokens
+        let body_tokens = if let Some(sequence) = header.token_sequence {
+            source_tokens.materialize_token_sequence(sequence)?
         } else if header.tokens.is_empty() {
-            &[][..]
+            Vec::new()
         } else if header.tokens.source() != source_tokens.file_id {
             return Err(CompilerError::compiler_error(
                 "retained header range does not match its source token owner",
             ));
         } else {
-            source_tokens
-                .tokens
-                .get(header.tokens.start().index()..header.tokens.end().index())
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "retained header range exceeds its source token owner",
-                    )
-                })?
+            source_tokens.materialize_token_range(header.tokens)?
         };
         if is_config_file
             || (!declaration_owned_marker
-                && find_config_qualifier_marker_in_header(header, string_table, body_tokens)
+                && find_config_qualifier_marker_in_header(header, string_table, &body_tokens)
                     .is_none())
         {
             continue;
         }
 
-        append_path_ids(body_tokens);
+        append_path_ids(&body_tokens);
         match &header.kind {
             HeaderKind::Constant { declaration } => {
                 append_path_ids(&declaration.initializer_tokens);

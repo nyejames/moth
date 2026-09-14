@@ -43,11 +43,293 @@ fn cursor_observes_half_open_boundaries_and_stable_eof() {
     assert_eq!(cursor.position().raw(), 2);
 }
 
+fn mutable_file_tokens() -> FileTokens {
+    let source = SourceId::COMPILATION_ROOT;
+    FileTokens::new(
+        PathId::ROOT,
+        source,
+        vec![
+            Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
+            Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
+            Token::new(TokenKind::BoolLiteral(false), LocalSpan::source_start()),
+            Token::new(TokenKind::Eof, LocalSpan::source_start()),
+        ],
+    )
+}
+
+fn token_range(source: SourceId, start: u32, end: u32) -> TokenRange {
+    TokenRange::from_raw(source, start, end).expect("fixture token range should be ordered")
+}
+
+#[test]
+fn segmented_cursor_matches_contiguous_and_respects_segment_boundaries() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut file_tokens = mutable_file_tokens();
+    let segments = [token_range(source, 0, 2), token_range(source, 2, 4)];
+    let sequence = file_tokens
+        .try_register_token_sequence(&segments)
+        .expect("ordered adjacent ranges should register");
+    let owner = file_tokens
+        .source_tokens()
+        .expect("file fixture should own canonical source tokens");
+    let view = owner
+        .token_sequence(sequence)
+        .expect("registered sequence should resolve");
+
+    assert_eq!(
+        view.ranges().collect::<Vec<_>>(),
+        segments,
+        "the view must preserve every source-local segment"
+    );
+    assert_eq!(view.len(), 4);
+
+    let mut segmented = view.cursor().expect("segmented cursor should construct");
+    assert_eq!(segmented.range(), segments[0]);
+    assert_eq!(segmented.peek_next().unwrap().index().raw(), 1);
+    assert_eq!(segmented.advance().unwrap().index().raw(), 0);
+    assert!(
+        segmented.peek_next().is_none(),
+        "peek_next must not cross a segment boundary"
+    );
+    assert_eq!(segmented.advance().unwrap().index().raw(), 1);
+    assert_eq!(segmented.range(), segments[1]);
+    assert_eq!(segmented.peek().unwrap().index().raw(), 2);
+
+    let segmented_indexes = {
+        let mut segmented_all = view.cursor().expect("segmented cursor should construct");
+        let mut indexes = Vec::new();
+        while let Some(token) = segmented_all.advance() {
+            indexes.push(token.index().raw());
+            if token.is_eof() {
+                break;
+            }
+        }
+        indexes
+    };
+    let mut contiguous = owner
+        .cursor(owner.full_range().expect("full range should fit"))
+        .expect("contiguous cursor should construct");
+    let mut contiguous_indexes = Vec::new();
+    while let Some(token) = contiguous.advance() {
+        contiguous_indexes.push(token.index().raw());
+        if token.is_eof() {
+            break;
+        }
+    }
+    assert_eq!(
+        segmented_indexes, contiguous_indexes,
+        "segmented traversal must match the equivalent contiguous view"
+    );
+
+    assert_eq!(segmented.advance().unwrap().index().raw(), 2);
+    let eof_position = segmented.position();
+    let eof_index = segmented
+        .advance()
+        .expect("EOF should remain reachable")
+        .index();
+    assert_eq!(eof_index.raw(), 3);
+    assert!(segmented.is_eof());
+    assert_eq!(segmented.advance().unwrap().index(), eof_index);
+    assert_eq!(
+        segmented.position(),
+        eof_position,
+        "repeated EOF advance must not move the cursor"
+    );
+}
+
+#[test]
+fn segmented_cursor_skips_empty_ranges_and_reaches_eof() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut file_tokens = mutable_file_tokens();
+    let segments = [
+        token_range(source, 0, 1),
+        token_range(source, 2, 2),
+        token_range(source, 3, 4),
+    ];
+    let sequence = file_tokens
+        .try_register_token_sequence(&segments)
+        .expect("ordered ranges with an empty middle segment should register");
+    let owner = file_tokens
+        .source_tokens()
+        .expect("file fixture should own canonical source tokens");
+    let view = owner
+        .token_sequence(sequence)
+        .expect("registered sequence should resolve");
+    let mut cursor = view.cursor().expect("segmented cursor should construct");
+
+    assert_eq!(cursor.range(), segments[0]);
+    assert_eq!(cursor.advance().unwrap().index().raw(), 0);
+    assert_eq!(
+        cursor.range(),
+        segments[2],
+        "the empty middle segment must be skipped"
+    );
+    assert_eq!(cursor.position(), segments[2].start());
+    assert!(!cursor.is_at_end());
+
+    let mut indexes = vec![0];
+    while let Some(token) = cursor.advance() {
+        indexes.push(token.index().raw());
+        if token.is_eof() {
+            break;
+        }
+    }
+    assert_eq!(indexes, vec![0, 3]);
+    assert!(cursor.is_eof());
+
+    let eof_position = cursor.position();
+    let eof_index = cursor
+        .advance()
+        .expect("EOF should remain reachable")
+        .index();
+    assert_eq!(eof_index.raw(), 3);
+    assert_eq!(
+        cursor.position(),
+        eof_position,
+        "repeated EOF advance must not move the segmented cursor"
+    );
+    assert!(!cursor.is_at_end(), "stable EOF remains the current token");
+}
+
+#[test]
+fn segmented_cursor_exhaustion_and_nested_ranges_are_bounded() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut file_tokens = mutable_file_tokens();
+    let segments = [token_range(source, 0, 2), token_range(source, 2, 3)];
+    let sequence = file_tokens
+        .try_register_token_sequence(&segments)
+        .expect("ordered ranges should register");
+    let owner = file_tokens.source_tokens().unwrap();
+    let view = owner.token_sequence(sequence).unwrap();
+    let mut cursor = view.cursor().unwrap();
+
+    assert!(cursor.nested(token_range(source, 0, 1)).is_ok());
+    assert!(
+        cursor.nested(token_range(source, 1, 3)).is_err(),
+        "a nested range crossing a segment boundary must be rejected"
+    );
+    while cursor.advance().is_some() {}
+    assert!(cursor.is_at_end());
+    assert!(cursor.peek().is_none());
+    assert_eq!(
+        cursor.range(),
+        token_range(source, 3, 3),
+        "an exhausted segmented cursor must expose a zero-width current range"
+    );
+    assert!(
+        cursor.nested(token_range(source, 0, 1)).is_err(),
+        "nested ranges must not fall back to the first segment after exhaustion"
+    );
+}
+
+#[test]
+fn sequence_store_rejects_invalid_ranges_and_handles_without_panicking() {
+    let source = SourceId::COMPILATION_ROOT;
+    let foreign = SourceId::from_index(11);
+    let mut store = TokenSequenceStore::new(source, 4);
+    assert_eq!(std::mem::size_of::<TokenSequenceRange>(), 8);
+
+    let reversed = TokenRange {
+        source,
+        start: TokenIndex::try_from_raw(2).unwrap(),
+        end: TokenIndex::try_from_raw(1).unwrap(),
+    };
+    assert!(matches!(
+        store.try_push(&[reversed]),
+        Err(TokenSequenceError::Reversed { .. })
+    ));
+    assert!(matches!(
+        store.try_push(&[token_range(source, 0, 2), token_range(source, 1, 3)]),
+        Err(TokenSequenceError::Overlapping { .. })
+    ));
+    assert!(matches!(
+        store.try_push(&[token_range(source, 2, 3), token_range(source, 0, 1)]),
+        Err(TokenSequenceError::Unordered { .. })
+    ));
+    assert!(matches!(
+        store.try_push(&[token_range(foreign, 0, 1)]),
+        Err(TokenSequenceError::ForeignSource { .. })
+    ));
+    assert!(matches!(
+        store.try_push(&[token_range(source, 0, 5)]),
+        Err(TokenSequenceError::OutOfBounds { .. })
+    ));
+
+    let id = store
+        .try_push(&[token_range(source, 0, 1)])
+        .expect("valid sequence should register");
+    assert_eq!(store.ranges(id).unwrap().len(), 1);
+    assert!(matches!(
+        store.ranges(TokenSequenceId::NONE),
+        Err(TokenSequenceError::Absent)
+    ));
+    let malformed = TokenSequenceId::try_from_raw(u32::MAX).unwrap();
+    assert!(matches!(
+        store.ranges(malformed),
+        Err(TokenSequenceError::OutOfRange { .. })
+    ));
+    let tokens = static_tokens();
+    assert!(matches!(
+        tokens.token_sequence(TokenSequenceId::NONE),
+        Err(TokenSequenceError::Absent)
+    ));
+    assert!(matches!(
+        tokens.token_sequence(malformed),
+        Err(TokenSequenceError::OutOfRange { .. })
+    ));
+    store.freeze();
+    let mut adapter = FileTokens::new_deferred_with_identity(
+        PathId::ROOT,
+        source,
+        None,
+        vec![Token::new(TokenKind::Eof, LocalSpan::source_start())],
+    );
+    assert!(matches!(
+        adapter.try_register_token_sequence(&[]),
+        Err(TokenSequenceError::NoCanonicalOwner)
+    ));
+
+    assert!(matches!(
+        store.try_push(&[token_range(source, 1, 2)]),
+        Err(TokenSequenceError::Frozen)
+    ));
+}
+
+#[test]
+fn sequence_store_rebinds_one_source_owner_without_rewriting_ranges() {
+    let source = SourceId::COMPILATION_ROOT;
+    let rebound = SourceId::from_index(12);
+    let mut store = TokenSequenceStore::new(source, 4);
+    let sequence = store
+        .try_push(&[token_range(source, 1, 3)])
+        .expect("initial source range should register");
+
+    store.rebind_source_identity(rebound);
+    assert_eq!(store.source(), rebound);
+    assert!(
+        store.ranges(sequence).is_ok(),
+        "source-less range entries remain valid after owner rebinding"
+    );
+    assert!(matches!(
+        store.try_push(&[token_range(source, 0, 1)]),
+        Err(TokenSequenceError::ForeignSource { .. })
+    ));
+    assert!(
+        store.try_push(&[token_range(rebound, 3, 4)]).is_ok(),
+        "new ranges must use the rebound owner identity"
+    );
+    store.freeze();
+    assert!(matches!(
+        store.try_push(&[token_range(rebound, 0, 1)]),
+        Err(TokenSequenceError::Frozen)
+    ));
+}
+
 #[test]
 fn nested_ranges_and_malformed_handles_are_checked() {
     let tokens = static_tokens();
     let full = tokens.full_range().expect("fixture length fits u32");
-    let mut cursor = tokens.cursor(full).expect("full range should fit");
+    let cursor = tokens.cursor(full).expect("full range should fit");
     let nested = TokenRange::new(
         SourceId::COMPILATION_ROOT,
         TokenIndex::try_from_raw(1).unwrap(),
@@ -228,7 +510,7 @@ fn deferred_adapter_retains_numeric_lifecycle_without_canonical_shapes() {
     let src_path = path_fork
         .try_intern_portable_path("deferred-numeric.moth", &mut strings)
         .expect("test path fits");
-    let mut deferred = FileTokens::new_deferred_with_identity(
+    let deferred = FileTokens::new_deferred_with_identity(
         src_path,
         source,
         None,

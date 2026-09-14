@@ -338,7 +338,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // canonical token stream. Every tokenized header must retain its source owner; allowing
         // the module identity map to cover those headers would hide a broken ownership handoff.
         let ownerless_synthetic_constant = header.tokens.is_empty()
-            && header.transitional_tokens.is_none()
+            && header.token_sequence.is_none()
             && header.name_span.is_none()
             && matches!(
                 &header.kind,
@@ -366,8 +366,20 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     }
 
     fn body_parser_stream(&self, header: &Header) -> Result<FileTokens, CompilerError> {
-        if let Some(tokens) = header.transitional_tokens.as_ref() {
-            return Ok(tokens.clone());
+        if let Some(sequence) = header.token_sequence {
+            let source = self
+                .source_token_streams
+                .get(&header.tokens.source())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "header body sequence has no canonical prepared source stream",
+                    )
+                })?;
+            return FileTokens::new_bounded_sequence_substream(
+                source,
+                sequence,
+                header.declaration_path,
+            );
         }
         let source = self
             .source_token_streams

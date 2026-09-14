@@ -24,8 +24,10 @@ pub(super) fn handle_hash_item(
     current_span: SourceSpan,
     at_statement_boundary: bool,
 ) -> Result<(), HeaderParseFailure> {
+    let current_index = token_stream.index.saturating_sub(1);
+
     if !at_statement_boundary {
-        state.push_start_body_token(current_token);
+        state.record_start_body_token(token_stream.file_id, current_index, &current_token)?;
         return Ok(());
     }
 
@@ -39,7 +41,7 @@ pub(super) fn handle_hash_item(
         }
 
         _ => {
-            state.push_start_body_token(current_token);
+            state.record_start_body_token(token_stream.file_id, current_index, &current_token)?;
             Ok(())
         }
     }
@@ -62,18 +64,23 @@ fn handle_top_level_const_template(
     }
 
     if context.file_role == FileRole::ImportedModuleRoot {
-        let template_token = token_stream.current_token();
+        let template_index = token_stream.index;
         token_stream.advance();
-        let mut discarded_body = Vec::new();
-
-        crate::compiler_frontend::headers::start_capture::push_runtime_template_tokens_to_start_function(
-            template_token,
+        let range = crate::compiler_frontend::headers::start_capture::capture_runtime_template_range(
+            template_index,
             token_stream,
-            &mut discarded_body,
             context.string_table,
         )?;
+        let body_tokens = token_stream
+            .tokens
+            .get(range.start().index()..range.end().index())
+            .ok_or_else(|| {
+                HeaderParseFailure::Infrastructure(crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "discarded template range exceeds its source token owner",
+                ))
+            })?;
         if let Some((marker_span, adjacent)) = find_config_qualifier_marker(
-            &discarded_body,
+            body_tokens,
             context.string_table,
             token_stream.file_id,
             context.span_builder,

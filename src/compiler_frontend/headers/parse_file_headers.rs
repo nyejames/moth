@@ -323,8 +323,9 @@ pub fn prepare_header_syntax(
 /// Find retained parameter/field defaults and body tokens carrying `#Config`.
 ///
 /// Header preparation has already parsed declaration shells for signatures and record payloads,
-/// while function/start bodies remain token slices. Inspecting both retained representations keeps
-/// illegal nested placements ahead of AST without adding a recursive expression walk.
+/// while function bodies retain source ranges and the start body retains a source sequence.
+/// Callers provide bounded ephemeral token materializations so illegal nested placements stay
+/// ahead of AST without adding a recursive expression walk or a durable copied stream.
 pub(super) fn find_config_qualifier_marker_in_header(
     header: &Header,
     string_table: &StringTable,
@@ -428,7 +429,7 @@ fn collect_source_build_config_contracts(
             };
 
             if let Some((location, adjacent)) =
-                find_config_qualifier_marker_in_header(header, string_table, body_tokens)
+                find_config_qualifier_marker_in_header(header, string_table, &body_tokens)
             {
                 let mut diagnostic = report_marker(location, adjacent);
                 capture(output.file_id, &mut diagnostic)

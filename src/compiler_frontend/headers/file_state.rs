@@ -1,7 +1,7 @@
 //! Per-file header parser state and output assembly.
 //!
 //! WHAT: owns the accumulators used while one token stream is split into declaration headers,
-//! dependency records, const-fragment metadata, and implicit start-body tokens.
+//! dependency records, const-fragment metadata, and source ranges for the implicit start body.
 //! WHY: keeping mutable file-local state behind one owner lets `file_parser` read as the
 //! high-level header-state machine instead of a long list of unrelated vectors and counters.
 
@@ -32,7 +32,10 @@ pub(super) struct HeaderFileParseState {
     pub(super) headers: Vec<Header>,
     pub(super) encountered_symbols: HashMap<StringId, SourceSpan>,
     pub(super) start_body_symbols: HashSet<StringId>,
-    pub(super) start_function_body: Vec<Token>,
+    /// Source-local token runs retained for the active root's implicit `start` body.
+    pub(super) start_body_ranges: Vec<TokenRange>,
+    has_non_trivial_start_body: bool,
+    first_executable_start_body_span: Option<SourceSpan>,
     pub(super) file_dependency_clauses: Vec<RetainedDependencyClause>,
     pub(super) dependency_selections: Vec<DependencySelection>,
     /// Ordinal of the next authored dependency clause in this file.
@@ -64,7 +67,9 @@ impl HeaderFileParseState {
                 MINIMUM_LIKELY_DECLARATIONS + (token_count / TOKEN_TO_DECLARATION_RATIO),
             ),
             start_body_symbols: HashSet::new(),
-            start_function_body: Vec::new(),
+            start_body_ranges: Vec::new(),
+            has_non_trivial_start_body: false,
+            first_executable_start_body_span: None,
             file_dependency_clauses: Vec::new(),
             dependency_selections: Vec::new(),
             dependency_clause_count: 0,
@@ -78,8 +83,85 @@ impl HeaderFileParseState {
         }
     }
 
-    pub(super) fn push_start_body_token(&mut self, token: Token) {
-        self.start_function_body.push(token);
+    pub(super) fn record_start_body_token(
+        &mut self,
+        file_id: SourceId,
+        index: usize,
+        token: &Token,
+    ) -> Result<(), CompilerError> {
+        let end = index.checked_add(1).ok_or_else(|| {
+            CompilerError::compiler_error("start-body token index overflowed its source range")
+        })?;
+        let start = TokenIndex::try_from_index(index).ok_or_else(|| {
+            CompilerError::compiler_error("start-body token index exceeded its checked domain")
+        })?;
+        let end = TokenIndex::try_from_index(end).ok_or_else(|| {
+            CompilerError::compiler_error("start-body token end exceeded its checked domain")
+        })?;
+        let range = TokenRange::new(file_id, start, end).ok_or_else(|| {
+            CompilerError::compiler_error("start-body token range was reversed")
+        })?;
+        self.record_start_body_range(range);
+        self.observe_start_body_token(file_id, token);
+        Ok(())
+    }
+
+    pub(super) fn record_start_body_range(
+        &mut self,
+        range: TokenRange,
+    ) {
+        if let Some(previous) = self.start_body_ranges.last_mut()
+            && previous.source() == range.source()
+            && previous.end() == range.start()
+        {
+            *previous = TokenRange::new(previous.source(), previous.start(), range.end())
+                .expect("merged ordered token ranges remain valid");
+        } else {
+            self.start_body_ranges.push(range);
+        }
+    }
+    pub(super) fn record_start_body_source_range(
+        &mut self,
+        range: TokenRange,
+        source: &FileTokens,
+    ) -> Result<(), CompilerError> {
+        if range.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "start-body range does not match its source token owner",
+            ));
+        }
+        let tokens = source
+            .tokens
+            .get(range.start().index()..range.end().index())
+            .ok_or_else(|| {
+                CompilerError::compiler_error("start-body range exceeds its source token owner")
+            })?;
+        self.record_start_body_range(range);
+        for token in tokens {
+            self.observe_start_body_token(source.file_id, token);
+        }
+        Ok(())
+    }
+
+
+    pub(super) fn observe_start_body_token(&mut self, file_id: SourceId, token: &Token) {
+        if !matches!(
+            token.kind,
+            TokenKind::Eof | TokenKind::Newline | TokenKind::ModuleStart
+        ) {
+            self.has_non_trivial_start_body = true;
+            if self.first_executable_start_body_span.is_none() {
+                self.first_executable_start_body_span = Some(SourceSpan::new(file_id, token.span));
+            }
+        }
+    }
+
+    pub(super) fn has_non_trivial_start_body(&self) -> bool {
+        self.has_non_trivial_start_body
+    }
+
+    pub(super) fn first_executable_start_body_span(&self) -> Option<SourceSpan> {
+        self.first_executable_start_body_span
     }
 
     pub(super) fn register_start_body_symbol(&mut self, name_id: StringId) {
@@ -99,26 +181,6 @@ impl HeaderFileParseState {
         self.headers.push(header);
     }
 
-    pub(super) fn has_non_trivial_start_body(&self) -> bool {
-        self.start_function_body.iter().any(|token| {
-            !matches!(
-                token.kind,
-                TokenKind::Eof | TokenKind::Newline | TokenKind::ModuleStart
-            )
-        })
-    }
-
-    pub(super) fn first_executable_start_body_span(&self, file_id: SourceId) -> Option<SourceSpan> {
-        self.start_function_body
-            .iter()
-            .find(|token| {
-                !matches!(
-                    token.kind,
-                    TokenKind::Eof | TokenKind::Newline | TokenKind::ModuleStart
-                )
-            })
-            .map(|token| SourceSpan::new(file_id, token.span))
-    }
 
     pub(super) fn into_non_entry_output(
         self,
@@ -159,16 +221,9 @@ impl HeaderFileParseState {
         let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
-        // Active module root: build the start function header for later AST body parsing.
+        // Active module root: publish the source-owned start sequence for later AST body parsing.
         // `start` is never a dependency-graph participant, so this header keeps no graph edges.
-        // Start-body segmentation remains transitional until 3E5; the bounded legacy adapter
-        // owns only the already-captured start-body tokens while the retained range stays empty.
-        let start_tokens = FileTokens::new_substream(
-            token_stream,
-            token_stream.src_path.to_owned(),
-            file_id,
-            self.start_function_body,
-        );
+        let token_sequence = token_stream.register_token_sequence(&self.start_body_ranges)?;
         let start_index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
             CompilerError::compiler_error("start header token range exceeded index space")
         })?;
@@ -183,7 +238,7 @@ impl HeaderFileParseState {
             name_span: None,
             tokens: start_range,
             declaration_path: token_stream.src_path,
-            transitional_tokens: Some(start_tokens),
+            token_sequence: Some(token_sequence),
             capacity_references: Vec::new(),
         });
 
