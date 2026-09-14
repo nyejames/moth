@@ -41,7 +41,7 @@ use crate::compiler_frontend::{
 use crate::timed_stage_attributed;
 
 use super::prepared_module::PreparedModule;
-use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
+use super::prepared_source::{PreparedSourceInput, PreparedSourceKind, PreparedSourceSlots};
 use super::source_loading::SelectedSourceTextMap;
 
 use rayon::prelude::*;
@@ -98,6 +98,7 @@ struct FilePreparationChunk {
 
 struct PreparedFileResult {
     file_index: usize,
+    source_id: SourceId,
     string_domain: PreparedFileStringDomain,
     result: Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure>,
 }
@@ -302,7 +303,7 @@ pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
     /// Module-local path delta forked from the boundary builder. Discovery interns no
     /// `PathId`s in this slice; the fork travels to the merge tail after the string delta.
     path_fork: PathInternerFork,
-    prepared_outputs: Vec<Option<FileFrontendPrepareOutput>>,
+    prepared_outputs: PreparedSourceSlots,
     resolved_file_references: ResolvedFileReferenceTable,
     warnings: Vec<CompilerDiagnostic>,
     source_byte_count: usize,
@@ -346,8 +347,7 @@ impl ModulePreparationContext<'_> {
         Self::validate_path_fork_base(&path_fork, self.source_files)?;
 
         let candidate_source_ids = registered_sources.candidate_source_ids;
-        let mut prepared_outputs = Vec::new();
-        prepared_outputs.resize_with(candidate_source_ids.len(), || None);
+        let prepared_outputs = PreparedSourceSlots::new(candidate_source_ids.len());
 
         Ok(ModuleSyntaxDiscovery {
             context: self,
@@ -678,8 +678,7 @@ impl ModulePreparationContext<'_> {
                 ));
             }
         }
-        let mut prepared_outputs = Vec::with_capacity(module_file_count);
-        prepared_outputs.resize_with(module_file_count, || None);
+        let mut prepared_outputs = PreparedSourceSlots::new(module_file_count);
         let mut warnings = Vec::new();
         let mut diagnostics = Vec::new();
         let mut const_fragment_source_count = 0usize;
@@ -720,19 +719,11 @@ impl ModulePreparationContext<'_> {
             for prepared_file in chunk.results {
                 match prepared_file.result {
                     Ok(mut output) => {
-                        if prepared_file.file_index >= module_file_count {
+                        if output.file_id != prepared_file.source_id {
                             return Err(CompilerError::compiler_error(format!(
-                                "file preparation record carries file index {} but the module \
-                                 has only {module_file_count} files",
-                                prepared_file.file_index,
-                            ))
-                            .into());
-                        }
-
-                        if prepared_outputs[prepared_file.file_index].is_some() {
-                            return Err(CompilerError::compiler_error(format!(
-                                "file preparation record occupies file index {} more than once",
-                                prepared_file.file_index,
+                                "prepared source identity {} does not match its slot owner {}",
+                                output.file_id.index(),
+                                prepared_file.source_id.index(),
                             ))
                             .into());
                         }
@@ -772,7 +763,9 @@ impl ModulePreparationContext<'_> {
                             }
                         }
                         warnings.append(&mut output.warnings);
-                        prepared_outputs[prepared_file.file_index] = Some(output);
+                        prepared_outputs
+                            .insert(prepared_file.file_index, prepared_file.source_id, output)
+                            .map_err(PremergeFailure::Infrastructure)?;
                     }
                     Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
                         if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal {
@@ -829,19 +822,14 @@ impl ModulePreparationContext<'_> {
             batch.prepend_diagnostics(warnings);
             return Err(PremergeFailure::Diagnosed(batch));
         }
-        let mut filled_outputs = Vec::with_capacity(module_file_count);
-        for (file_index, slot) in prepared_outputs.into_iter().enumerate() {
-            match slot {
-                Some(output) => filled_outputs.push(output),
-                None => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "file preparation left file index {file_index} unfilled; every \
-                         selected source must be prepared exactly once"
-                    ))
-                    .into());
-                }
-            }
-        }
+        let ordered_slots = prepared_outputs
+            .into_ordered_outputs()
+            .map_err(PremergeFailure::Infrastructure)?;
+        let mut filled_outputs: Vec<FileFrontendPrepareOutput> = ordered_slots
+            .into_iter()
+            .map(|slot| slot.into_output())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(PremergeFailure::Infrastructure)?;
 
         record_successful_prepared_outputs(&filled_outputs);
         let prepared = match prepare_header_syntax(
@@ -1031,6 +1019,7 @@ impl ModulePreparationContext<'_> {
             span_builders.push((file_id, span_builder));
             results.push(PreparedFileResult {
                 file_index,
+                source_id,
                 string_domain,
                 result,
             });
@@ -1207,30 +1196,18 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         source_order: usize,
         output: FileFrontendPrepareOutput,
     ) -> Result<(), CompilerError> {
-        if source_order >= self.prepared_outputs.len() {
-            return Err(CompilerError::compiler_error(format!(
+        let expected = self.candidate_source_ids.get(source_order).copied().ok_or_else(|| {
+            CompilerError::compiler_error(format!(
                 "prepared output order {source_order} is outside the candidate source slot count {}",
                 self.prepared_outputs.len(),
-            )));
-        }
-
-        if self.prepared_outputs[source_order].is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "prepared output occupies candidate source order {source_order} more than once"
-            )));
-        }
-
-        self.prepared_outputs[source_order] = Some(output);
-        Ok(())
+            ))
+        })?;
+        self.prepared_outputs.insert(source_order, expected, output)
     }
 
     /// Freeze the selected source outputs into the one retained module preparation payload.
     pub(super) fn finish(mut self) -> Result<PreparedModule, PremergeFailure> {
-        let mut prepared_outputs = self
-            .prepared_outputs
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+        let mut prepared_outputs = self.prepared_outputs.into_selected_outputs()?;
         for output in &mut prepared_outputs {
             output.freeze_path_syntax(&self.string_table, &mut self.path_fork)?;
         }

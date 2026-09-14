@@ -1793,8 +1793,10 @@ fn dummy_preparation_chunk(
                 SourceId::COMPILATION_ROOT,
             );
             span_builders.push((SourceId::COMPILATION_ROOT, builder));
+            let source_id = output.file_id;
             super::PreparedFileResult {
                 file_index,
+                source_id,
                 string_domain: super::PreparedFileStringDomain::ChunkLocal,
                 result: Ok(output),
             }
@@ -1860,6 +1862,19 @@ fn merge_rejects_out_of_range_file_index() {
     let chunk = dummy_preparation_chunk(0, vec![4]);
 
     assert_malformed_chunks_rejected(vec![chunk], 4, "has only 4 files");
+}
+
+#[test]
+fn merge_rejects_source_identity_mismatch() {
+    let mut chunk = dummy_preparation_chunk(0, vec![0]);
+    match &mut chunk.results[0].result {
+        Ok(output) => {
+            output.file_id = crate::compiler_frontend::source::SourceId::from_index(1);
+        }
+        Err(_) => unreachable!("dummy chunk should prepare successfully"),
+    }
+
+    assert_malformed_chunks_rejected(vec![chunk], 1, "does not match its slot owner");
 }
 
 #[test]
@@ -2052,6 +2067,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
         local_path_fork: first_path_fork,
         results: vec![super::PreparedFileResult {
             file_index: 0,
+            source_id: first_output.file_id,
             string_domain: super::PreparedFileStringDomain::ChunkLocal,
             result: Ok(first_output),
         }],
@@ -2064,11 +2080,13 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
         results: vec![
             super::PreparedFileResult {
                 file_index: 1,
+                source_id: synthetic_output.file_id,
                 string_domain: super::PreparedFileStringDomain::AlreadyGlobal,
                 result: Ok(synthetic_output),
             },
             super::PreparedFileResult {
                 file_index: 2,
+                source_id: second_output.file_id,
                 string_domain: super::PreparedFileStringDomain::ChunkLocal,
                 result: Ok(second_output),
             },
