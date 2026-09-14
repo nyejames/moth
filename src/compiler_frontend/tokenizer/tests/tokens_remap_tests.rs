@@ -73,6 +73,67 @@ fn flat_token_kinds_remap_correctly() {
         "non-string-bearing numeric token kind should remap both source_text and normalized_text"
     );
 }
+#[test]
+fn lexer_numeric_tokens_carry_checked_side_store_handles() {
+    use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+    use crate::compiler_frontend::tokenizer::lexer::tokenize;
+    use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
+
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork
+        .try_intern_portable_path("numeric.moth", &mut strings)
+        .expect("test path fits");
+    let source = SourceId::COMPILATION_ROOT;
+    let mut spans = crate::compiler_frontend::source::ExtendedSpanBuilder::new();
+    let file_tokens = tokenize(
+        "value = 42 + 3.5\n",
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source,
+        &mut spans,
+    )
+    .expect("numeric source should tokenize");
+
+    let numeric_positions = file_tokens
+        .tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| matches!(token.kind, TokenKind::NumericLiteral(_)))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    assert_eq!(numeric_positions.len(), 2);
+    assert_eq!(file_tokens.numeric_literal_store().len(), 2);
+    assert_eq!(
+        file_tokens.numeric_literal_store().owner_source(),
+        Some(source)
+    );
+    for (expected_row, token_index) in numeric_positions.iter().enumerate() {
+        let handle = file_tokens
+            .numeric_literal_id_at(*token_index)
+            .expect("numeric token must carry a side-store handle");
+        assert_eq!(handle.index(), Some(expected_row));
+        let stored = file_tokens
+            .numeric_literal_store()
+            .try_get(handle)
+            .expect("handle must address a staged row");
+        let TokenKind::NumericLiteral(token) = &file_tokens.tokens[*token_index].kind else {
+            panic!("expected a numeric token");
+        };
+        assert_eq!(stored.source_text, token.source_text);
+        assert_eq!(stored.normalized_text, token.normalized_text);
+        assert_eq!(stored.kind, token.kind);
+    }
+    let non_numeric = file_tokens
+        .tokens
+        .iter()
+        .position(|token| matches!(token.kind, TokenKind::Symbol(_)))
+        .expect("symbol token");
+    assert_eq!(file_tokens.numeric_literal_id_at(non_numeric), None);
+}
 
 #[test]
 fn path_syntax_rows_remap_all_fields() {
@@ -104,7 +165,7 @@ fn path_syntax_rows_remap_all_fields() {
         path_strings(&global_paths, path.root, &global_table),
         vec!["components", "Button"]
     );
-    assert_eq!(path.span.source(), SourceId::COMPILATION_ROOT);
+    assert_eq!(path_syntax.owner_source(), Some(SourceId::COMPILATION_ROOT));
 }
 
 #[test]
@@ -306,16 +367,83 @@ fn rebind_source_identity_updates_source_spans_without_changing_paths() {
         assert_eq!(token.span, LocalSpan::source_start());
     }
 
-    // Path table spans are rebound but the root payload is unchanged.
+    // The path table keeps local locations and rebinds its one source owner.
     let path = file_tokens
         .path_syntax
         .try_path(helper_util)
         .expect("valid path handle");
-    assert_eq!(path.span.source(), file_id);
+    assert_eq!(file_tokens.path_syntax.owner_source(), Some(file_id));
     assert_eq!(
         path_strings(&path_fork, path.root, &table),
         vec!["helper", "util"]
     );
+}
+
+#[test]
+fn rebind_file_identity_restamps_numeric_owner_and_preserves_rows() {
+    use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+    let mut table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork
+        .try_intern_portable_path("numeric.moth", &mut table)
+        .expect("test path fits");
+    let tokens = vec![make_token(
+        TokenKind::NumericLiteral(NumericLiteralToken::test_new("7", &mut table)),
+        scope,
+    )];
+    let mut file_tokens = FileTokens::new_with_identity(
+        scope,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        PathSyntaxTable::new(),
+    );
+    let handle = file_tokens
+        .numeric_literal_id_at(0)
+        .expect("numeric token must carry a handle");
+    let rebound = SourceId::from_index(11);
+    file_tokens.rebind_file_identity(scope, rebound, None);
+    assert_eq!(
+        file_tokens.numeric_literal_store().owner_source(),
+        Some(rebound)
+    );
+    file_tokens
+        .numeric_literal_store()
+        .try_get(handle)
+        .expect("source-local numeric row must survive rebinding");
+    file_tokens
+        .numeric_literal_store()
+        .try_get_for_source(handle, rebound)
+        .expect("rebound owner must read its numeric row");
+}
+
+#[test]
+fn frozen_numeric_store_rejects_post_publication_remap() {
+    use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+    let mut local = StringTable::new();
+    let mut global = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork
+        .try_intern_portable_path("numeric.moth", &mut local)
+        .expect("test path fits");
+    let tokens = vec![make_token(
+        TokenKind::NumericLiteral(NumericLiteralToken::test_new("7", &mut local)),
+        scope,
+    )];
+    let mut file_tokens = FileTokens::new_with_identity(
+        scope,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        PathSyntaxTable::new(),
+    );
+    file_tokens.freeze_numeric_literals();
+    global.intern("preexisting");
+    let remap = global.merge_from(&local);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        file_tokens.remap_string_ids(&remap);
+    }));
+    assert!(result.is_err(), "post-freeze remap must not silently mutate");
 }
 
 #[test]

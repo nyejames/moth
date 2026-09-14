@@ -823,6 +823,17 @@ separate 8-byte projection over the same `TokenTag` and descriptor payload facts
 are extracted only at that projection boundary. Lexical spelling ownership remains in
 `keywords.rs` until later consumer migration.
 
+**Slice 3C cold stores (2026-09-14):** `NumericLiteralStore` in
+`src/compiler_frontend/numeric_text/store.rs` retains numeric lexical records outside the fixed
+token word and reuses the shared `numeric_text` grammar. Its one-based `NumericLiteralId` and the
+existing `PathSyntaxTable`'s one-based `PathSyntaxId` reject zero, out-of-range and foreign
+ownership at checked boundaries. Path rows now keep `PathId` plus `LocalSpan`, with one source
+identity on the table; the canonical path tag carries only that dense handle. Symbols, strings,
+booleans and scalar characters use validated direct `TokenShape` payloads. Numeric/path stores
+remap at their owner boundary, freeze at ordinary prepared-source publication, and persistent
+generic capture/materialisation uses deterministic compact path and independent numeric subsets.
+`TokenKind`/`Vec<Token>` compatibility and parser cursor migration remain later 3D/3F work.
+
 ### Token references and ranges
 
 ```rust
@@ -869,7 +880,7 @@ pub struct PathSyntaxTable {
 #[repr(C)]
 pub struct PathSyntax {
     root: PathId,
-    location: LocalSpan,
+    span: LocalSpan,
 }
 ```
 

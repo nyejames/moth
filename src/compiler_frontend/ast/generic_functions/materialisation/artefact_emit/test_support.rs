@@ -36,6 +36,8 @@ impl ModuleMaterialisationContext {
                     frozen_identity_handle: frozen_identity_handle.clone(),
                     pool: Box::new([]),
                     tokens: Box::new([]),
+                    numeric_literals: Default::default(),
+                    numeric_literal_ids: Box::new([]),
                     path_syntax: PathSyntaxTable::default(),
                     resolved_file_references: Box::new([]),
                 },

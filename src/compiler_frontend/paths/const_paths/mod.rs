@@ -9,7 +9,9 @@
 //! never part of a path row.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, PathKind, SourceSpanCapacityResource,
+};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -95,10 +97,28 @@ fn mint_path_token(
     _path_fork: &mut PathInternerFork,
 ) -> TokenizeResult<Token> {
     let mut token = mint_token(stream, TokenKind::Path(PathSyntaxId::NONE))?;
-    let source_span = crate::compiler_frontend::source::SourceSpan::new(stream.file_id, token.span);
-    let id = stream.path_syntax.push(root, source_span);
-    token.kind = TokenKind::Path(id);
-    Ok(token)
+    let push_error = match stream
+        .path_syntax
+        .try_push_for_source(root, stream.file_id, token.span)
+    {
+        Ok(id) => {
+            token.kind = TokenKind::Path(id);
+            return Ok(token);
+        }
+        Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Capacity(_)) => {
+            CompilerDiagnostic::source_table_capacity(SourceSpanCapacityResource::PathSyntax).into()
+        }
+        Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Frozen) => {
+            CompilerError::compiler_error("path syntax table was frozen during tokenization").into()
+        }
+        Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::ForeignSource {
+            ..
+        }) => CompilerError::compiler_error(
+            "path syntax table received a path row from another source",
+        )
+        .into(),
+    };
+    Err(push_error)
 }
 
 /// WHAT: Parses the path components of one path token.

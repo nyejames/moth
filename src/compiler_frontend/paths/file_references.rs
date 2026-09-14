@@ -100,7 +100,7 @@ pub(crate) fn classify_prepared_file_references(
         references.push(PreparedFileReference {
             source_file,
             path_syntax: path_id,
-            span: row.span,
+            span: SourceSpan::new(source_file, row.span),
             class: classify_authored_path(row.root, path_fork, string_table),
         });
     }

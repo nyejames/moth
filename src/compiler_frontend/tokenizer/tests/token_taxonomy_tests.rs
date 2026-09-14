@@ -1,7 +1,7 @@
 use super::*;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralToken};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 fn all_token_kinds() -> Vec<TokenKind> {
     vec![
@@ -152,6 +152,88 @@ fn unknown_tags_and_reserved_flags_are_rejected() {
     assert!(TokenShape::new(TokenTag::SYMBOL, 1, 7).is_none());
 }
 
+#[test]
+fn shape_payload_decoding_validates_packed_handles_and_scalars() {
+    let mut strings = StringTable::new();
+    let symbol = strings.intern("alpha");
+    let path_id = PathSyntaxId::try_from_raw(3).expect("checked path handle");
+    let numeric_id = crate::compiler_frontend::numeric_text::store::NumericLiteralId::try_from_raw(2)
+        .expect("checked numeric handle");
+    let numeric_token = NumericLiteralToken::test_new("1.5", &mut strings);
+
+    let symbol_shape = TokenShape::from_token_kind(&TokenKind::Symbol(symbol))
+        .expect("symbol shape should pack");
+    assert_eq!(symbol_shape.string_id(), Some(symbol));
+    assert_eq!(symbol_shape.path_syntax_id(), None);
+    assert_eq!(symbol_shape.numeric_literal_id(), None);
+    assert_eq!(symbol_shape.bool_value_checked(), None);
+    assert_eq!(symbol_shape.char_value_checked(), None);
+
+    let path_shape = TokenShape::from_token_kind(&TokenKind::Path(path_id))
+        .expect("path shape should pack");
+    assert_eq!(path_shape.path_syntax_id(), Some(path_id));
+    assert_eq!(path_shape.string_id(), None);
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::PATH.raw(), 0, 0),
+        None,
+        "absent path marker must not decode"
+    );
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::PATH.raw(), 1, path_id.raw()),
+        None,
+        "path shapes carry no flags"
+    );
+    let numeric_shape =
+        TokenShape::from_token_kind_with_numeric_id(&TokenKind::NumericLiteral(numeric_token.clone()), numeric_id)
+            .expect("numeric shape should pack");
+    assert_eq!(numeric_shape.numeric_literal_id(), Some(numeric_id));
+    assert_eq!(numeric_shape.numeric_kind(), Some(NumericLiteralKind::DecimalPoint));
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::NUMERIC_LITERAL.raw(), 0, 0),
+        None,
+        "absent numeric marker must not decode"
+    );
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::NUMERIC_LITERAL.raw(), 3, numeric_id.raw()),
+        None,
+        "numeric kind flags above two must not decode"
+    );
+    assert_eq!(
+        TokenShape::from_token_kind_with_numeric_id(
+            &TokenKind::NumericLiteral(numeric_token.clone()),
+            crate::compiler_frontend::numeric_text::store::NumericLiteralId::NONE,
+        ),
+        None,
+        "absent numeric handle must not pack"
+    );
+    assert_eq!(
+        TokenShape::from_token_kind(&TokenKind::Path(PathSyntaxId::NONE)),
+        None,
+        "absent path handle must not pack"
+    );
+    let bool_shape = TokenShape::from_token_kind(&TokenKind::BoolLiteral(true))
+        .expect("bool shape should pack");
+    assert_eq!(bool_shape.bool_value_checked(), Some(true));
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::BOOL_LITERAL.raw(), 0, 2),
+        None,
+        "bool payloads are only 0 or 1"
+    );
+
+    let char_shape = TokenShape::from_token_kind(&TokenKind::CharLiteral('x'))
+        .expect("char shape should pack");
+    assert_eq!(char_shape.char_value_checked(), Some('x'));
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::CHAR_LITERAL.raw(), 0, 0xD800),
+        None,
+        "surrogate scalars must not decode"
+    );
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::MODULE_START.raw(), 0, 1),
+        None,
+        "static shapes carry no payload"
+    );
+}
 #[test]
 fn schema_classifications_match_frontend_semantics() {
     for kind in [

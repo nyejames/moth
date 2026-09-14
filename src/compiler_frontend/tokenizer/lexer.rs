@@ -582,8 +582,15 @@ pub fn tokenize(
         &mut stream.path_syntax,
         crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
     );
-    let mut file_tokens =
-        FileTokens::new_with_identity(src_path, file_id, None, tokens, path_syntax);
+    let numeric_literals = std::mem::take(&mut stream.numeric_literals);
+    let mut file_tokens = FileTokens::new_with_identity_and_numeric_store(
+        src_path,
+        file_id,
+        None,
+        tokens,
+        path_syntax,
+        numeric_literals,
+    );
     file_tokens.token_stats = token_stats;
     Ok(file_tokens)
 }

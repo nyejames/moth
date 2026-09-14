@@ -6,7 +6,10 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::numeric_text::store::{NumericLiteralId, NumericLiteralStore};
+use crate::compiler_frontend::numeric_text::token::{
+    NumericLiteralKind, NumericLiteralToken,
+};
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
@@ -130,7 +133,8 @@ impl FilePathSyntax {
         Self::Preparing(Arc::new(table))
     }
 
-    fn shared(table: PathSyntaxTable) -> Self {
+    fn shared(mut table: PathSyntaxTable) -> Self {
+        table.freeze();
         Self::Shared(Arc::new(table))
     }
 
@@ -243,30 +247,18 @@ impl Deref for FilePathSyntax {
 pub struct FileTokens {
     pub tokens: Vec<Token>,
     /// File-owned authored path trees referenced by `TokenKind::Path` handles.
-    ///
-    /// WHAT: the one file-owned path table lifecycle shared by retained token substreams.
     pub path_syntax: FilePathSyntax,
+    /// Source-owned numeric lexical records. `TokenKind::NumericLiteral` remains a transient
+    /// compatibility adapter until parser consumers migrate to these handles.
+    pub(crate) numeric_literals: NumericLiteralStore,
+    /// Numeric side-store handle for each token position, when that token is numeric.
+    pub(crate) numeric_literal_ids: Vec<Option<NumericLiteralId>>,
     /// Complete logical identity of the owning source file in the active path table.
-    ///
-    /// WHAT: the `PathId` interned for this stream's file through the owning
-    ///       `PathInternerFork`. Path rows in `path_syntax` address the same fork.
-    /// WHY: tokenizer and dependency owners share one compact path domain; filesystem
-    ///      `canonical_os_path` remains the only `PathBuf` identity for IO.
     pub src_path: PathId,
     /// Required owning source identity for every token stream, including materialised generics.
-    ///
-    /// WHAT: the exact `SourceId` that owns this stream's token spans and path-table rows.
-    /// WHY: materialised generic bodies retain their donor identity with an explicit owner
-    ///      (`StableBodySyntax::donor_file_id` + frozen facts owner) instead of detaching to
-    ///      `None`. Spans therefore never silently remap a donor range onto a requester
-    ///      call-site source, and no magic identity is fabricated. Cross-database remap waits
-    ///      for the final `FrozenIdentityContext` migration.
     pub file_id: SourceId,
     /// Canonical filesystem source path for IO/path-resolution-only logic.
     pub canonical_os_path: Option<PathBuf>,
-    // WHAT: Cheap token classification gathered during lexing.
-    // WHY: stats travel with the token stream so header preparation can carry them into the
-    //      module-wide aggregation without a second token traversal.
     pub(crate) token_stats: TokenStats,
     pub index: usize,
     pub length: usize,
@@ -278,7 +270,7 @@ impl FileTokens {
         Self::new_with_identity(src_path, file_id, None, tokens, PathSyntaxTable::new())
     }
 
-    /// Construct the sole mutable path-table owner for a newly tokenized source file.
+    /// Construct the sole mutable path/numeric-store owner for a newly tokenized source file.
     pub fn new_with_identity(
         src_path: PathId,
         file_id: SourceId,
@@ -295,13 +287,28 @@ impl FileTokens {
         )
     }
 
+    /// Source-boundary constructor used by the lexer after numeric staging has completed.
+    pub(crate) fn new_with_identity_and_numeric_store(
+        src_path: PathId,
+        file_id: SourceId,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+        path_syntax: PathSyntaxTable,
+        numeric_literals: NumericLiteralStore,
+    ) -> FileTokens {
+        let numeric_literal_ids = numeric_ids_for_staged_store(&tokens, &numeric_literals);
+        Self::with_path_syntax_and_numeric_store(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            FilePathSyntax::preparing(path_syntax),
+            numeric_literals,
+            numeric_literal_ids,
+        )
+    }
+
     /// Construct a stream from an already-frozen table owned by a generated persistent artefact.
-    ///
-    /// This is deliberately separate from source construction: generated generic materialisation
-    /// is the only path that receives an independently captured table rather than the prepared
-    /// source's immutable shared table. The caller supplies the retained donor/owner identity
-    /// captured in `StableBodySyntax`; materialisation never fabricates a magic identity, uses
-    /// `None`, or remaps the donor range onto the requester call-site source.
     pub(crate) fn new_frozen(
         src_path: PathId,
         file_id: SourceId,
@@ -309,12 +316,35 @@ impl FileTokens {
         tokens: Vec<Token>,
         path_syntax: PathSyntaxTable,
     ) -> FileTokens {
-        Self::with_path_syntax(
+        let mut stream = Self::with_path_syntax(
             src_path,
             file_id,
             canonical_os_path,
             tokens,
             FilePathSyntax::shared(path_syntax),
+        );
+        stream.freeze_numeric_literals();
+        stream
+    }
+
+    pub(crate) fn new_frozen_with_numeric_store(
+        src_path: PathId,
+        file_id: SourceId,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+        path_syntax: PathSyntaxTable,
+        mut numeric_literals: NumericLiteralStore,
+        numeric_literal_ids: Vec<Option<NumericLiteralId>>,
+    ) -> FileTokens {
+        numeric_literals.freeze();
+        Self::with_path_syntax_and_numeric_store(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            FilePathSyntax::shared(path_syntax),
+            numeric_literals,
+            numeric_literal_ids,
         )
     }
 
@@ -342,9 +372,38 @@ impl FileTokens {
         tokens: Vec<Token>,
         path_syntax: FilePathSyntax,
     ) -> FileTokens {
+        let (numeric_literals, numeric_literal_ids) =
+            numeric_store_from_tokens(file_id, &tokens);
+        Self::with_path_syntax_and_numeric_store(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            path_syntax,
+            numeric_literals,
+            numeric_literal_ids,
+        )
+    }
+
+    fn with_path_syntax_and_numeric_store(
+        src_path: PathId,
+        file_id: SourceId,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+        path_syntax: FilePathSyntax,
+        numeric_literals: NumericLiteralStore,
+        numeric_literal_ids: Vec<Option<NumericLiteralId>>,
+    ) -> FileTokens {
+        debug_assert_eq!(
+            tokens.len(),
+            numeric_literal_ids.len(),
+            "numeric side-store handles must align with token positions"
+        );
         FileTokens {
             length: tokens.len(),
             path_syntax,
+            numeric_literals,
+            numeric_literal_ids,
             src_path,
             file_id,
             canonical_os_path,
@@ -353,7 +412,6 @@ impl FileTokens {
             index: 0,
         }
     }
-
     /// Build a permanent sub-stream over a token slice.
     ///
     /// Header bodies defer the path-table attachment until the prepared-file owner freezes.
@@ -401,7 +459,9 @@ impl FileTokens {
     /// AST consumers use this for defaults, declaration initializers and loop headers. The table
     /// handle is cloned, while path rows and their dense IDs remain owned by the prepared source.
     /// The caller supplies the owning `SourceId` (for generated bodies, the retained donor/owner
-    /// identity); no `None` or magic identity is accepted.
+    /// identity); no `None` or magic identity is accepted. The rebuilt source-local numeric
+    /// store is frozen eagerly because the source table is already immutable: there is no
+    /// later owner-boundary remap for these transient parser streams.
     pub fn new_from_slice(
         src_path: PathId,
         file_id: SourceId,
@@ -409,18 +469,31 @@ impl FileTokens {
         tokens: Vec<Token>,
         source_path_syntax: &FilePathSyntax,
     ) -> Result<FileTokens, CompilerError> {
-        Ok(Self::with_path_syntax(
+        let mut stream = Self::with_path_syntax(
             src_path,
             file_id,
             canonical_os_path,
             tokens,
             source_path_syntax.frozen_substream()?,
-        ))
+        );
+        stream.freeze_numeric_literals();
+        Ok(stream)
     }
-
     /// Return the canonical path table once the stream has reached a readable lifecycle state.
     pub fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
         self.path_syntax.table()
+    }
+    /// Return the source-owned numeric cold store after construction.
+    pub(crate) fn numeric_literal_store(&self) -> &NumericLiteralStore {
+        &self.numeric_literals
+    }
+
+    pub(crate) fn numeric_literal_ids(&self) -> &[Option<NumericLiteralId>] {
+        &self.numeric_literal_ids
+    }
+
+    pub(crate) fn numeric_literal_id_at(&self, token_index: usize) -> Option<NumericLiteralId> {
+        self.numeric_literal_ids.get(token_index).copied().flatten()
     }
 
     /// Move the sole mutable path-table owner into a prepared-file output.
@@ -452,6 +525,15 @@ impl FileTokens {
         self.path_syntax.attach_preflighted_shared(path_syntax);
     }
 
+    /// Freeze the ordinary source-owned numeric store at publication.
+    ///
+    /// The caller must complete all construction-time string remaps first. Generic
+    /// materialisation's remapped clone finishes frozen through its own checked owner
+    /// boundary and never calls this on an already-frozen store.
+    pub(crate) fn freeze_numeric_literals(&mut self) {
+        self.numeric_literals.freeze();
+    }
+
     /// Freeze a standalone token stream used by an AST-focused unit test.
     ///
     /// Production preparation moves the mutable table into `FileFrontendPrepareOutput`, validates
@@ -462,13 +544,18 @@ impl FileTokens {
     pub(crate) fn freeze_path_syntax_for_test(&mut self) {
         let path_syntax = std::mem::replace(&mut self.path_syntax, FilePathSyntax::Deferred);
         self.path_syntax = match path_syntax {
-            FilePathSyntax::Preparing(path_syntax) | FilePathSyntax::Shared(path_syntax) => {
+            FilePathSyntax::Preparing(mut path_syntax)
+            | FilePathSyntax::Shared(mut path_syntax) => {
+                Arc::get_mut(&mut path_syntax)
+                    .expect("test path table unexpectedly had another owner")
+                    .freeze();
                 FilePathSyntax::Shared(path_syntax)
             }
             FilePathSyntax::Deferred => {
                 panic!("test token stream did not retain a file-owned path table to freeze")
             }
         };
+        self.freeze_numeric_literals();
     }
 
     pub fn current_token_kind(&self) -> &TokenKind {
@@ -541,8 +628,11 @@ impl FileTokens {
     // This is wired when file-level frontend outputs are merged before module-wide header
     // aggregation. Keeping it beside token remapping makes the traversal owner explicit.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if self.numeric_literals.is_frozen() {
+            panic!("numeric literal remapping was requested after the source publication freeze");
+        }
+        self.numeric_literals.remap_string_ids(remap);
         self.remap_token_payload_string_ids(remap);
-
         // Path tokens carry dense handles. The prepared-file output owns the single path-table
         // remap, so substreams remap only their local token and semantic-path payloads here.
     }
@@ -573,6 +663,12 @@ impl FileTokens {
         // Validate the mutable lifecycle before changing any token payload. The second access is
         // safe because the first borrow ends before the payload traversal begins.
         self.path_syntax.preparing_table_mut()?;
+        if self.numeric_literals.is_frozen() {
+            return Err(CompilerError::compiler_error(
+                "numeric literal remapping was requested after the source publication freeze",
+            ));
+        }
+        self.numeric_literals.remap_string_ids(remap);
         self.remap_token_payload_string_ids(remap);
         Ok(())
     }
@@ -614,6 +710,8 @@ impl FileTokens {
     ///
     /// Token spans are source-local and therefore remain unchanged. The owner identity is stored
     /// once on `FileTokens`; path rows are restamped by `rebind_source_identity` before publication.
+    /// The numeric cold store keeps source-local rows and only its owner is restamped, mirroring
+    /// the path table.
     pub fn rebind_file_identity(
         &mut self,
         _logical_path: PathId,
@@ -622,7 +720,55 @@ impl FileTokens {
     ) {
         self.file_id = file_id;
         self.canonical_os_path = canonical_os_path;
+        self.numeric_literals.rebind_source_identity(file_id);
     }
+}
+
+fn numeric_store_from_tokens(
+    source: SourceId,
+    tokens: &[Token],
+) -> (NumericLiteralStore, Vec<Option<NumericLiteralId>>) {
+    let mut store = NumericLiteralStore::with_source(source);
+    let mut ids = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        let id = match &token.kind {
+            TokenKind::NumericLiteral(literal) => Some(
+                store
+                    .try_push_for_source(source, literal.clone())
+                    .expect("test/retained numeric literal row must fit its checked handle domain"),
+            ),
+            _ => None,
+        };
+        ids.push(id);
+    }
+    (store, ids)
+}
+
+/// Align one handle per numeric position from a lexer-staged numeric store.
+///
+/// The staged store was pushed once per numeric token in lexer order, so handles are assigned
+/// positionally without re-reading token payloads. Any length mismatch is a lifecycle violation.
+fn numeric_ids_for_staged_store(
+    tokens: &[Token],
+    store: &NumericLiteralStore,
+) -> Vec<Option<NumericLiteralId>> {
+    let mut ids = Vec::with_capacity(tokens.len());
+    let mut next = 0usize;
+    for token in tokens {
+        if !matches!(token.kind, TokenKind::NumericLiteral(_)) {
+            ids.push(None);
+            continue;
+        }
+        let id = NumericLiteralId::try_from_index(next)
+            .expect("lexer-staged numeric literal row must fit its checked handle domain");
+        debug_assert!(
+            id.index().is_some_and(|index| index < store.len()),
+            "lexer-staged numeric handle must address a staged row"
+        );
+        ids.push(Some(id));
+        next = next.saturating_add(1);
+    }
+    ids
 }
 
 pub struct TokenStream<'a> {
@@ -630,7 +776,6 @@ pub struct TokenStream<'a> {
     pub chars: Peekable<Chars<'a>>,
     /// Byte offset of the next character to consume.
     pub byte_offset: u32,
-    /// Byte offset where the current token's authored text begins.
     pub start_byte_offset: u32,
     /// Byte offset of the character most recently consumed.
     ///
@@ -646,6 +791,8 @@ pub struct TokenStream<'a> {
     /// Path syntax rows built while lexing; moved into `FileTokens` when tokenization
     /// completes.
     pub path_syntax: PathSyntaxTable,
+    /// Numeric literal records staged during lexing and moved into `FileTokens` at completion.
+    pub numeric_literals: NumericLiteralStore,
     /// One mutable extended-span builder borrowed from the caller for every token encoded by
     /// this source stream.
     ///
@@ -713,7 +860,8 @@ impl<'a> TokenStream<'a> {
             last_char_start: 0,
             mode,
             template_mode_stack: vec![TemplateModeFrame::initial(mode, initial_close_policy)],
-            path_syntax: PathSyntaxTable::new(),
+            path_syntax: PathSyntaxTable::with_source(file_id),
+            numeric_literals: NumericLiteralStore::with_source(file_id),
             extended_span_builder,
         }
     }
@@ -912,6 +1060,7 @@ pub(crate) enum TokenDescriptorPayload {
     CharLiteral = 5,
     RawStringLiteral = 6,
     BoolLiteral = 7,
+    Path = 8,
 }
 
 /// Static metadata for one stable token tag.
@@ -1351,7 +1500,7 @@ token_schema! {
         TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
         None
     ),
-    (TokenKind::Path(_), PATH, 10, "path", Static, 0, TOKEN_CLASS_OPERAND_START, None),
+    (TokenKind::Path(_), PATH, 10, "path", Path, 0, TOKEN_CLASS_OPERAND_START, None),
     (
         TokenKind::NumericLiteral(_),
         NUMERIC_LITERAL,
@@ -1953,6 +2102,9 @@ token_schema! {
 
 impl TokenShape {
     /// Construct a shape only when its flags are valid for the selected token tag.
+    ///
+    /// Payload validation is performed by [`Self::from_raw_parts`] and the typed accessors. This
+    /// constructor remains a low-level packing primitive for taxonomy tests and source adapters.
     pub(crate) const fn new(tag: TokenTag, flags: u16, data: u32) -> Option<Self> {
         if tag.flags_are_valid(flags) {
             Some(Self { tag, flags, data })
@@ -1961,11 +2113,124 @@ impl TokenShape {
         }
     }
 
-    /// Decode a raw shape while rejecting unknown tags and reserved flag bits.
-    pub(crate) const fn from_raw_parts(raw_tag: u16, flags: u16, data: u32) -> Option<Self> {
-        match TokenTag::from_raw(raw_tag) {
-            Some(tag) => Self::new(tag, flags, data),
-            None => None,
+    /// Decode a raw shape while rejecting unknown tags, reserved flags and malformed payloads.
+    pub(crate) fn from_raw_parts(raw_tag: u16, flags: u16, data: u32) -> Option<Self> {
+        let tag = TokenTag::from_raw(raw_tag)?;
+        if !tag.flags_are_valid(flags) || !Self::payload_is_valid(tag, flags, data) {
+            return None;
+        }
+        Some(Self { tag, flags, data })
+    }
+
+    fn payload_is_valid(tag: TokenTag, flags: u16, data: u32) -> bool {
+        match tag.descriptor().payload() {
+            TokenDescriptorPayload::Static => flags == 0 && data == 0,
+            TokenDescriptorPayload::Path => {
+                flags == 0 && PathSyntaxId::try_from_raw(data).is_some()
+            }
+            TokenDescriptorPayload::NumericLiteral => {
+                flags <= 2 && NumericLiteralId::try_from_raw(data).is_some()
+            }
+            TokenDescriptorPayload::BoolLiteral => flags == 0 && data <= 1,
+            TokenDescriptorPayload::CharLiteral => {
+                flags == 0 && char::from_u32(data).is_some()
+            }
+            TokenDescriptorPayload::Symbol
+            | TokenDescriptorPayload::StyleDirective
+            | TokenDescriptorPayload::StringLiteral
+            | TokenDescriptorPayload::RawStringLiteral => flags == 0,
+        }
+    }
+
+    /// Build the compact shape for a transient `TokenKind` adapter.
+    pub(crate) fn from_token_kind(kind: &TokenKind) -> Option<Self> {
+        Self::from_token_kind_with_numeric_id(kind, NumericLiteralId::NONE)
+    }
+
+    /// Build a shape while supplying the source-owned numeric side-store handle.
+    ///
+    /// Absent path and numeric handles are malformed payloads and return `None`, so
+    /// round-trip validation holds through `from_raw_parts` and the typed accessors.
+    pub(crate) fn from_token_kind_with_numeric_id(
+        kind: &TokenKind,
+        numeric_id: NumericLiteralId,
+    ) -> Option<Self> {
+        let tag = kind.token_tag();
+        let (flags, data) = match kind {
+            TokenKind::Symbol(value)
+            | TokenKind::StyleDirective(value)
+            | TokenKind::StringSliceLiteral(value)
+            | TokenKind::RawStringLiteral(value) => (0, value.index()),
+            TokenKind::Path(value) => (0, value.raw()),
+            TokenKind::NumericLiteral(value) => (numeric_kind_flags(value.kind), numeric_id.raw()),
+            TokenKind::CharLiteral(value) => (0, *value as u32),
+            TokenKind::BoolLiteral(value) => (0, u32::from(*value)),
+            _ => (0, 0),
+        };
+        Self::from_raw_parts(tag.raw(), flags, data)
+    }
+
+    pub(crate) fn numeric_kind(self) -> Option<NumericLiteralKind> {
+        if self.tag != TokenTag::NUMERIC_LITERAL || self.flags > 2 {
+            return None;
+        }
+        Some(match self.flags {
+            0 => NumericLiteralKind::WholeNumber,
+            1 => NumericLiteralKind::DecimalPoint,
+            2 => NumericLiteralKind::Exponent,
+            _ => unreachable!("numeric flags were checked above"),
+        })
+    }
+
+    pub(crate) fn numeric_literal_id(self) -> Option<NumericLiteralId> {
+        if self.numeric_kind().is_some() {
+            NumericLiteralId::try_from_raw(self.data)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn path_syntax_id(self) -> Option<PathSyntaxId> {
+        if self.tag == TokenTag::PATH && self.flags == 0 {
+            PathSyntaxId::try_from_raw(self.data)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn string_id(self) -> Option<StringId> {
+        let payload = self.tag.descriptor().payload();
+        if matches!(
+            payload,
+            TokenDescriptorPayload::Symbol
+                | TokenDescriptorPayload::StyleDirective
+                | TokenDescriptorPayload::StringLiteral
+                | TokenDescriptorPayload::RawStringLiteral
+        ) && self.flags == 0
+        {
+            Some(StringId::from_index(self.data))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn bool_value_checked(self) -> Option<bool> {
+        if self.tag == TokenTag::BOOL_LITERAL && self.flags == 0 {
+            match self.data {
+                0 => Some(false),
+                1 => Some(true),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn char_value_checked(self) -> Option<char> {
+        if self.tag == TokenTag::CHAR_LITERAL && self.flags == 0 {
+            char::from_u32(self.data)
+        } else {
+            None
         }
     }
 
@@ -1979,6 +2244,14 @@ impl TokenShape {
 
     pub(crate) const fn data(self) -> u32 {
         self.data
+    }
+}
+
+const fn numeric_kind_flags(kind: NumericLiteralKind) -> u16 {
+    match kind {
+        NumericLiteralKind::WholeNumber => 0,
+        NumericLiteralKind::DecimalPoint => 1,
+        NumericLiteralKind::Exponent => 2,
     }
 }
 

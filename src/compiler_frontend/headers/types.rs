@@ -1433,6 +1433,9 @@ impl PreparedFilePathSyntax {
             unreachable!("prepared-file path table was preflighted as preparing before freeze")
         };
 
+        Arc::get_mut(table)
+            .expect("prepared-file path table gained a shared view before freeze")
+            .freeze();
         let table = Arc::clone(table);
         *self = Self::Frozen(Arc::clone(&table));
         table
@@ -1690,12 +1693,15 @@ impl FileFrontendPrepareOutput {
 
         // The invariant pass above proves every stream remains deferred. From this point onward
         // the transition has no fallible steps: freeze the sole owner, then attach that immutable
-        // allocation to every already-validated retained header.
+        // allocation to every already-validated retained header. Ordinary numeric stores freeze
+        // at the same owner boundary after all construction-time remaps; the frozen generic
+        // materialisation path finishes its own remapped clone frozen instead.
         let path_syntax = self.path_syntax.freeze_preflighted();
         for header in &mut self.headers {
             header
                 .tokens
                 .attach_preflighted_shared_path_syntax(Arc::clone(&path_syntax));
+            header.tokens.freeze_numeric_literals();
         }
         Ok(())
     }
@@ -1912,6 +1918,7 @@ fn validate_header(
     }
     validate_source_span(header.name_span, file_id, "header name")?;
     validate_tokens(&header.tokens.tokens, file_id, path_syntax, "header body")?;
+    validate_header_numeric_store(header, file_id)?;
     for hint in &header.local_ordering_hints {
         if hint.origin() == LocalDeclarationOrderingHintOrigin::SourceOwned
             && !path_fork.starts_with(hint.path(), source_file)
@@ -2156,6 +2163,48 @@ fn validate_tokens(
     role: &str,
 ) -> Result<(), CompilerError> {
     path_syntax.validate_file_tokens(tokens, file_id, role)
+}
+
+fn validate_header_numeric_store(header: &Header, file_id: SourceId) -> Result<(), CompilerError> {
+    use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+    let store = header.tokens.numeric_literal_store();
+    if let Some(owner) = store.owner_source()
+        && owner != file_id
+    {
+        return Err(CompilerError::compiler_error(
+            "retained header numeric store does not match the prepared file identity",
+        ));
+    }
+    let ids = header.tokens.numeric_literal_ids();
+    if ids.len() != header.tokens.tokens.len() {
+        return Err(CompilerError::compiler_error(
+            "retained header numeric handles do not align with the retained token slice",
+        ));
+    }
+    for (token, id) in header.tokens.tokens.iter().zip(ids.iter()) {
+        let is_numeric = matches!(token.kind, TokenKind::NumericLiteral(_));
+        match (is_numeric, id) {
+            (true, Some(handle)) => {
+                store.try_get(*handle).map_err(|_| {
+                    CompilerError::compiler_error(
+                        "retained header numeric handle does not address a retained numeric row",
+                    )
+                })?;
+            }
+            (true, None) => {
+                return Err(CompilerError::compiler_error(
+                    "retained header numeric token is missing its side-store handle",
+                ));
+            }
+            (false, Some(_)) => {
+                return Err(CompilerError::compiler_error(
+                    "retained header non-numeric token carries a numeric handle",
+                ));
+            }
+            (false, None) => {}
+        }
+    }
+    Ok(())
 }
 
 fn validate_source_span(

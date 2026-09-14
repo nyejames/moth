@@ -7,13 +7,14 @@ use super::frozen_file_references::StableResolvedFileReference;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::numeric_text::store::{NumericLiteralId, NumericLiteralStore};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathIdRemap, PathInternerFork,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use std::sync::Arc;
 
 /// Owned frozen token buffer retained by one generic declaration artefact.
@@ -49,6 +50,9 @@ pub(super) struct StableBodySyntax {
     pub(super) frozen_identity_handle: FrozenIdentityHandle,
     pub(super) pool: Box<[String]>,
     pub(super) tokens: Box<[Token]>,
+    /// Persistent numeric side-store rows and compact handles owned by this body.
+    pub(super) numeric_literals: NumericLiteralStore,
+    pub(super) numeric_literal_ids: Box<[Option<NumericLiteralId>]>,
     /// Canonical table vocabulary retained only for the path rows referenced by this body.
     /// Its StringIds index `pool` until materialisation remaps the whole table in place.
     pub(super) path_syntax: PathSyntaxTable,
@@ -113,11 +117,34 @@ impl StableBodySyntax {
             tokens.file_id,
             "generic body capture",
         )?;
-
+        if let Some(owner) = tokens.numeric_literal_store().owner_source()
+            && owner != tokens.file_id
+        {
+            return Err(CompilerError::compiler_error(
+                "generic body numeric store does not match its enclosing source identity",
+            ));
+        }
         let mut pool = FrozenStringPool::default();
         let mut frozen_tokens = tokens.tokens.clone();
         let (path_syntax, path_syntax_map) =
             source_path_syntax.capture_persistent_generic_subset(&mut frozen_tokens)?;
+        let numeric_ids = tokens.numeric_literal_ids.iter().flatten().copied();
+        validate_capture_numeric_ids(tokens, numeric_ids.clone())?;
+        let (mut numeric_literals, numeric_id_map) = tokens
+            .numeric_literal_store()
+            .compact_subset(numeric_ids)
+            .map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "persistent generic numeric literal subset is invalid: {error:?}"
+                ))
+            })?;
+        let mut frozen_numeric_ids = tokens.numeric_literal_ids.clone();
+        for id in &mut frozen_numeric_ids {
+            if let Some(old_id) = id {
+                *id = numeric_id_map.get(old_id).copied();
+            }
+        }
+        validate_compact_numeric_ids(&frozen_tokens, &frozen_numeric_ids, &numeric_literals)?;
         let mut path_syntax_map = path_syntax_map.into_iter().collect::<Vec<_>>();
         path_syntax_map.sort_by_key(|(_, compact_id)| *compact_id);
 
@@ -151,6 +178,16 @@ impl StableBodySyntax {
                 Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
             })?;
         }
+        numeric_literals
+            .try_remap_string_ids(&mut |id| {
+                Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
+            })
+            .map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "persistent generic numeric literal remap failed: {error:?}"
+                ))
+            })?;
+        numeric_literals.freeze();
         // Path rows already use the build-wide path identity domain; only token string payloads
         // enter the frozen pool here.
 
@@ -159,8 +196,10 @@ impl StableBodySyntax {
             donor_file_id: tokens.file_id,
             frozen_identity_handle,
             pool: pool.finish(),
-            path_syntax,
             tokens: frozen_tokens.into_boxed_slice(),
+            numeric_literals,
+            numeric_literal_ids: frozen_numeric_ids.into_boxed_slice(),
+            path_syntax,
             resolved_file_references: resolved_file_references.into_boxed_slice(),
         })
     }
@@ -195,9 +234,33 @@ impl StableBodySyntax {
             })?;
             tokens.push(materialised);
         }
+        let mut numeric_literals = self.numeric_literals.clone_for_materialisation();
+        numeric_literals
+            .try_remap_string_ids(&mut |id| {
+                let index = id.index() as usize;
+                remap.get(index).copied().ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "frozen numeric literal payload references out-of-range pool entry {index}"
+                    ))
+                })
+            })
+            .map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "frozen numeric literal materialisation failed: {error:?}"
+                ))
+            })?;
+        numeric_literals.freeze();
         let path_syntax = self.path_syntax.clone();
         path_syntax.validate_file_owned_locations(self.donor_file_id)?;
         path_syntax.validate_file_tokens(&tokens, self.donor_file_id, "frozen generic body")?;
+        validate_numeric_ids(&numeric_literals, &self.numeric_literal_ids, tokens.len())?;
+        if let Some(owner) = numeric_literals.owner_source()
+            && owner != self.donor_file_id
+        {
+            return Err(CompilerError::compiler_error(
+                "frozen numeric literal store does not match its donor source identity",
+            ));
+        }
 
         let resolved_file_references = self
             .resolved_file_references
@@ -214,12 +277,14 @@ impl StableBodySyntax {
         // ranges stay distinct from the requester call-site source without any rebinding, magic
         // identity or `None` fallback.
         Ok(MaterialisedBody {
-            file_tokens: FileTokens::new_frozen(
+            file_tokens: FileTokens::new_frozen_with_numeric_store(
                 declaration_path,
                 self.donor_file_id,
                 None,
                 tokens,
                 path_syntax,
+                numeric_literals,
+                self.numeric_literal_ids.to_vec(),
             ),
             resolution_facts,
             frozen_identity_handle: self.frozen_identity_handle.clone(),
@@ -227,8 +292,101 @@ impl StableBodySyntax {
     }
 }
 
+/// Validate frozen numeric handles without aliasing the donor store.
+///
+/// The artefact owns a compact copy; handles must align with the materialised tokens and
+/// address rows in that copy. Any stale donor handle is retained-state corruption.
+fn validate_numeric_ids(
+    store: &NumericLiteralStore,
+    ids: &[Option<NumericLiteralId>],
+    token_len: usize,
+) -> Result<(), CompilerError> {
+    if ids.len() != token_len {
+        return Err(CompilerError::compiler_error(
+            "frozen numeric literal handles do not align with the retained token slice",
+        ));
+    }
+    for id in ids.iter().flatten() {
+        store.try_get(*id).map_err(|_| {
+            CompilerError::compiler_error(
+                "frozen numeric literal handle does not address a retained numeric row",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// The donor handles captured for one persistent body must align with its tokens and address
+/// rows in the donor store. A non-numeric position must never carry a handle, and a dropped
+/// numeric handle would silently detach a literal from its lexical record.
+fn validate_capture_numeric_ids(
+    tokens: &FileTokens,
+    ids: impl Iterator<Item = NumericLiteralId> + Clone,
+) -> Result<(), CompilerError> {
+    let referenced = ids.clone().count();
+    let mut numeric_positions = 0usize;
+    for (token, id) in tokens.tokens.iter().zip(tokens.numeric_literal_ids.iter()) {
+        let is_numeric = matches!(token.kind, TokenKind::NumericLiteral(_));
+        match (is_numeric, id) {
+            (true, Some(handle)) => {
+                numeric_positions += 1;
+                tokens.numeric_literal_store().try_get(*handle).map_err(|_| {
+                    CompilerError::compiler_error(
+                        "persistent generic numeric handle does not address a donor numeric row",
+                    )
+                })?;
+            }
+            (true, None) => {
+                return Err(CompilerError::compiler_error(
+                    "persistent generic numeric token is missing its side-store handle",
+                ));
+            }
+            (false, Some(_)) => {
+                return Err(CompilerError::compiler_error(
+                    "persistent generic non-numeric token carries a numeric handle",
+                ));
+            }
+            (false, None) => {}
+        }
+    }
+    if referenced != numeric_positions {
+        return Err(CompilerError::compiler_error(
+            "persistent generic numeric handle slice does not align with its tokens",
+        ));
+    }
+    Ok(())
+}
+
+/// The compact copy must carry exactly the handles referenced by the retained tokens: every
+/// numeric position resolves inside the copy and no stale donor handle survives.
+fn validate_compact_numeric_ids(
+    tokens: &[Token],
+    ids: &[Option<NumericLiteralId>],
+    store: &NumericLiteralStore,
+) -> Result<(), CompilerError> {
+    validate_numeric_ids(store, ids, tokens.len())?;
+    for (token, id) in tokens.iter().zip(ids.iter()) {
+        let is_numeric = matches!(token.kind, TokenKind::NumericLiteral(_));
+        match (is_numeric, id) {
+            (true, Some(_)) | (false, None) => {}
+            (true, None) => {
+                return Err(CompilerError::compiler_error(
+                    "persistent generic numeric token lost its compact handle",
+                ));
+            }
+            (false, Some(_)) => {
+                return Err(CompilerError::compiler_error(
+                    "persistent generic non-numeric token carries a compact numeric handle",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 // Path IDs are build-wide identities. The frozen artefact retains them directly rather than
 // rendering to text and interning a second logical path tree at materialisation time.
+
 
 #[derive(Default)]
 pub(super) struct FrozenStringPool {

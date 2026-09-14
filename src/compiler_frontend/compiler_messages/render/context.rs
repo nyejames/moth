@@ -614,7 +614,9 @@ pub(crate) fn token_kind_name(
     let descriptor = token.tag().descriptor();
 
     match descriptor.payload() {
-        TokenDescriptorPayload::Static => descriptor.text().to_owned(),
+        TokenDescriptorPayload::Static | TokenDescriptorPayload::Path => {
+            descriptor.text().to_owned()
+        }
         TokenDescriptorPayload::Symbol => {
             format!(
                 "{} `{}`",

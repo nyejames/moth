@@ -1892,6 +1892,8 @@ fn invalid_frozen_token_index_returns_compiler_error() {
             TokenKind::Symbol(StringId::from_index(0)),
             LocalSpan::source_start(),
         )]),
+        numeric_literals: Default::default(),
+        numeric_literal_ids: Box::new([]),
         path_syntax: Default::default(),
         resolved_file_references: Box::new([]),
     };

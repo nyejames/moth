@@ -94,6 +94,47 @@ fn quoted_path_component_retains_whitespace() {
 }
 
 #[test]
+fn path_table_freeze_rejects_checked_push_and_rejects_foreign_source() {
+    use crate::compiler_frontend::paths::path_syntax::{PathSyntaxError, PathSyntaxTable};
+
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let root = path_fork
+        .try_intern_components(&[strings.intern("core"), strings.intern("math")])
+        .expect("test path fits");
+    let mut table = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
+    assert_eq!(table.owner_source(), Some(SourceId::COMPILATION_ROOT));
+    assert!(!table.is_frozen());
+    let id = table
+        .try_push_for_source(
+            root,
+            SourceId::COMPILATION_ROOT,
+            crate::compiler_frontend::source::LocalSpan::source_start(),
+        )
+        .expect("owner push should succeed");
+    assert_eq!(id.index(), Some(0));
+    assert!(!id.is_none());
+    let foreign = SourceId::from_index(7);
+    assert!(matches!(
+        table.try_push_for_source(
+            root,
+            foreign,
+            crate::compiler_frontend::source::LocalSpan::source_start()
+        ),
+        Err(PathSyntaxError::ForeignSource { .. })
+    ));
+    table.freeze();
+    assert!(table.is_frozen());
+    assert!(
+        matches!(
+            table.try_push_local(root, crate::compiler_frontend::source::LocalSpan::source_start()),
+            Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Frozen)
+        ),
+        "a frozen source-owned table must reject another authored row on its frozen lane"
+    );
+}
+
+#[test]
 fn try_path_for_token_rejects_wrong_table_and_span_mismatch() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let (tokens, _, _) = tokenize_source("@core/math\n", &mut span_builder);
@@ -231,12 +272,7 @@ fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
         .path_syntax
         .try_path_for_token(path_id, SourceSpan::new(tokens.file_id, token.span))
         .expect("owned path");
-    assert_eq!(
-        spans.len(),
-        1,
-        "the path token and row share one overflow row"
-    );
-    assert_eq!(row.span.local(), token.span);
+    assert_eq!(row.span, token.span);
 
     let mut captured_tokens = vec![token.clone()];
     let (subset, _) = tokens
@@ -248,9 +284,9 @@ fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
     };
     let captured = subset.try_path(captured_id).expect("captured path row");
     assert_eq!(captured.span, row.span);
-    assert_eq!(captured_tokens[0].span, row.span.local());
+    assert_eq!(captured_tokens[0].span, captured.span);
 
-    let retained_span = captured.span;
+    let retained_span = SourceSpan::new(tokens.file_id, captured.span);
     let mut database = SourceDatabaseBuilder::new(sources);
     database
         .sources_mut()

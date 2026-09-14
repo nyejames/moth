@@ -903,14 +903,10 @@ fn synthetic_prepared_identity_snapshot(
                     header.tokens.canonical_os_path.as_deref(),
                     identity.canonical_os_path.as_deref()
                 );
-                assert!(
-                    header
-                        .tokens
-                        .path_syntax
-                        .paths()
-                        .iter()
-                        .all(|path| path.span.source() == file_id),
-                    "header path spans must use the final source identity"
+                assert_eq!(
+                    header.tokens.path_syntax.owner_source(),
+                    Some(file_id),
+                    "header path rows must use the final source identity"
                 );
             }
             let clauses = module_symbols

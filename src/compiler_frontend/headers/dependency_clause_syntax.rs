@@ -153,8 +153,7 @@ pub(crate) fn parse_dependency_clause(
         )
         .into());
     };
-    let path_row = path_syntax.try_path(*path_id)?;
-    let path_span = SourceSpan::new(path_row.span.source(), path_token.span);
+    let path_span = SourceSpan::new(source_id, path_token.span);
     let path_syntax_row = path_syntax.try_path_for_token(*path_id, path_span)?;
     let source_id = path_span.source();
     let mut index = start_index + 1;

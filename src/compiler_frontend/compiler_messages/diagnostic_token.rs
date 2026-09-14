@@ -90,9 +90,10 @@ impl From<TokenKind> for DiagnosticToken {
 
         // The tag and payload kind come from the shared tokenizer schema. This match is retained
         // only at the projection boundary because dynamic values need typed extraction before
-        // they can fit the diagnostic's one `u32` data word.
         match tag.descriptor().payload() {
-            TokenDescriptorPayload::Static => Self::static_token(tag),
+            TokenDescriptorPayload::Static | TokenDescriptorPayload::Path => {
+                Self::static_token(tag)
+            }
             TokenDescriptorPayload::Symbol => match token_kind {
                 TokenKind::Symbol(value) => Self::string_token(tag, value),
                 _ => unreachable!("token schema symbol payload does not match TokenKind"),

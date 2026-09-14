@@ -573,6 +573,14 @@ fn source_span_capacity_message(
             "This project needs more than {length} source files in its compact source identity \
              table; the four-byte identity table cannot address another source."
         ),
+        SourceSpanCapacityResource::PathSyntax => format!(
+            "This source contains more than {length} authored path syntax rows; the compact \
+             source-owned path table cannot address another row."
+        ),
+        SourceSpanCapacityResource::NumericLiteral => format!(
+            "This source contains more than {length} retained numeric literals; the compact \
+             numeric side store cannot address another row."
+        ),
     }
 }
 

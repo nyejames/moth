@@ -880,14 +880,26 @@ Evolve the existing file-owned `PathSyntaxTable` into the final source-owned tok
 invent a generic path store. Path tokens use the canonical `TokenTag` plus a dense `PathSyntaxId` —
 one representation only.
 
-- [ ] move numeric literal retained data into a numeric store while reusing `numeric_text` parsing
-- [ ] evolve the existing file-owned `PathSyntaxTable` in place into the source-owned cold store;
+- [x] move numeric literal retained data into a numeric store while reusing `numeric_text` parsing
+- [x] evolve the existing file-owned `PathSyntaxTable` in place into the source-owned cold store;
   path tokens carry canonical `TokenTag` plus `PathSyntaxId` with the row's `PathId` and
   `LocalSpan`; keep dependency aliases under their retained clause owner and migrate only their
   locations
-- [ ] encode symbol, string, bool and char payloads directly when they fit the token word
-- [ ] use checked `u32` indexes and typed capacity failures
-- [ ] add remap/freeze tests for every cold store
+- [x] encode symbol, string, bool and char payloads directly when they fit the token word
+- [x] use checked `u32` indexes and typed capacity failures
+- [x] add remap/freeze tests for every cold store
+
+Slice 3C decision (2026-09-14): `NumericLiteralStore` in
+`src/compiler_frontend/numeric_text/store.rs` owns staged numeric lexical records and checked
+one-based `NumericLiteralId` handles while reusing the existing `numeric_text` grammar. The
+existing `PathSyntaxTable` now stores `PathId` plus `LocalSpan` rows and owns the source identity
+once; path tokens use only the canonical path tag plus a checked `PathSyntaxId`. `TokenShape`
+adapters validate direct symbol/string/bool/char payloads and typed path/numeric handles against
+the fixed 8-byte shape. Numeric and path rows remap once at their owning boundary, reject
+capacity/foreign/absent state, and freeze at ordinary prepared-source publication; persistent
+generic capture retains deterministic compact subsets and materialisation uses independent frozen
+numeric rows. `TokenKind` and `Vec<Token>` remain compatibility adapters for the later 3D/3F
+migration, while durable diagnostic records remain 3G work.
 
 ### Slice 3D — Separate immutable storage from parser cursor
 
