@@ -877,6 +877,8 @@ fn malformed_direct_selection_clause(range: DependencySelectionRange) -> Retaine
         path: PathId::ROOT,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
+        provider_target: None,
+        local_source_id: None,
         dependency_shell_id: DependencyShellId::new(SourceId::COMPILATION_ROOT, 0),
     };
     RetainedDependencyClause {

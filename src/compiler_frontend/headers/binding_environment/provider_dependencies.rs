@@ -10,9 +10,9 @@ use super::{
     BindingEnvironmentBuilder, BindingEnvironmentError, FileVisibility, VisibleNameRegistry,
 };
 use crate::builder_surface::external_import_providers::provider::ResolvedExternalImport;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
-use crate::compiler_frontend::headers::dependency_target::decode_dependency_target;
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencySelection;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -175,14 +175,18 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         source_file: &PathId,
         dependency: &crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath,
     ) -> ProviderDependencyResult<Option<(ResolvedExternalImport, Vec<StringId>)>> {
-        let Some(decoded) =
-            decode_dependency_target(
-                dependency.path,
-                &dependency.target,
-                &*self.path_fork,
-                self.string_table,
-            )?
-        else {
+        let Some(provider_target) = dependency.provider_target.as_ref() else {
+            if matches!(
+                dependency.target,
+                crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::ExternalProvider {
+                    ..
+                }
+            ) {
+                return Err(CompilerError::compiler_error(
+                    "external provider dependency is missing its checked target fact",
+                )
+                .into());
+            }
             return Ok(None);
         };
 
@@ -190,21 +194,17 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let source_str = self
             .path_fork
             .render_portable(*source_file, self.string_table, &mut scratch);
-        let prefix_str = self
-            .path_fork
-            .render_portable(decoded.prefix_path_id(), self.string_table, &mut scratch);
         let Some(entry) = self
             .external_dependency_resolution_table
-            .get(&source_str, &prefix_str)
+            .get(&source_str, provider_target.raw_prefix())
         else {
             return Ok(None);
         };
         Ok(Some((
             entry.clone(),
-            decoded.remaining_components().to_vec(),
+            provider_target.remaining_components().to_vec(),
         )))
     }
-
     /// Look up an external symbol ID by name within a provider-created package.
     fn lookup_external_symbol_id_by_name(
         &self,

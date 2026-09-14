@@ -12,7 +12,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::{
 };
 use crate::compiler_frontend::headers::dependency_paths::validate_dependency_path;
 use crate::compiler_frontend::headers::dependency_target::{
-    DependencyTargetKind, classify_dependency_target,
+    DependencyTargetKind, checked_provider_target, classify_dependency_target,
 };
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::types::{
@@ -151,13 +151,14 @@ fn parse_and_record_dependency_clause(
         export_mode,
         context.string_table,
         &*context.path_fork,
-    );
+    )?;
 
     token_stream.index = next_index;
     Ok(())
 }
 
-/// Convert one scanned clause into the file-owned retained tables.
+/// Convert one scanned clause into the file-owned retained tables, including its checked provider
+/// structure while the worker-local symbol stores are still available.
 fn retain_scanned_clause(
     state: &mut HeaderFileParseState,
     clause_shell_id: DependencyShellId,
@@ -166,7 +167,7 @@ fn retain_scanned_clause(
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
-) {
+) -> Result<(), HeaderParseFailure> {
     let binding = match scanned.binding {
         ScannedDependencyBinding::Namespace { alias } => {
             DependencyBindingSyntax::Namespace { alias }
@@ -195,11 +196,19 @@ fn retain_scanned_clause(
         }
     };
 
+    let provider_target = checked_provider_target(
+        scanned.provider.path,
+        &target,
+        path_fork,
+        string_table,
+    )?;
     let dependency = RetainedDependencyPath {
         dependency_shell_id: clause_shell_id,
         path: scanned.provider.path,
         path_syntax: scanned.provider.path_syntax,
         target,
+        provider_target,
+        local_source_id: None,
         span: scanned.provider.path_span,
     };
 
@@ -208,7 +217,6 @@ fn retain_scanned_clause(
         binding,
         export_mode,
     };
-
     if let Some(name) =
         retained_clause.effective_namespace_local_name(string_table, path_fork)
         && let Some(span) = retained_clause.namespace_binding_span()
@@ -217,4 +225,5 @@ fn retain_scanned_clause(
     }
 
     state.file_dependency_clauses.push(retained_clause);
+    Ok(())
 }

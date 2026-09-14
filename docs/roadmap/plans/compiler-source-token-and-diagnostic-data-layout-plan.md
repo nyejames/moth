@@ -934,10 +934,17 @@ Never a second tokenization and never a second store.
   compilation then consumes the prepared record, and the record's storage is dropped or moved into
   an existing later owner (such as persistent generic materialisation) — without per-source `Arc`
   or cloning and without a second tokenization or store
-- [ ] **3E2 — structural reachability reuse:** make prepared dependency shells expose final
+- [x] **3E2 — structural reachability reuse:** make prepared dependency shells expose final
   local-source `SourceId` edges plus typed provider request records; Stage 0 traverses those facts
   without reading token stores or rendered path text; keep provider mutation/resolution on its
   serial owner after workers return structural references
+
+Slice 3E2 decision (2026-09-14): retained dependency paths now own checked provider prefix, suffix,
+extension and raw-prefix facts plus final same-module `SourceId` edges. Stage 0 consumes those
+facts through indexed source and provider resolution, while provider mutation remains on its serial
+owner; semantic binding validates every retained local identity against the resolved prepared
+source path. Dependency spans retain their prepared-file ownership check.
+
 - [ ] **3E3 — consolidate retained preparation:** preserve the current exactly-once
   load/tokenize/prepare path while moving both directory-token and synthetic-prepared variants into
   the same build-lifetime `PreparedSource` store; module aggregation consumes the prepared result

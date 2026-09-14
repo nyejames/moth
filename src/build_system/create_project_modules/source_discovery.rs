@@ -25,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::dependency_target::{
-    DependencyTargetKind, decode_dependency_target,
+    CheckedExternalProviderTarget, DependencyTargetKind,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, SourcePreparationDelta,

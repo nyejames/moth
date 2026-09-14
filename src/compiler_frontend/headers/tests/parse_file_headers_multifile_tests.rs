@@ -342,6 +342,13 @@ fn retained_js_provider_path_records_external_target() {
         }
         other => panic!("expected an external provider target, got {other:?}"),
     }
+    let provider_target = output.file_dependency_clauses[0]
+        .dependency
+        .provider_target
+        .as_ref()
+        .expect("provider classification should retain a checked target fact");
+    assert_eq!(provider_target.raw_prefix(), "drawing.js");
+    assert!(provider_target.remaining_components().is_empty());
 }
 
 #[test]

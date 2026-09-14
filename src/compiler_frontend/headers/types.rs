@@ -22,7 +22,7 @@ use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnviron
 use crate::compiler_frontend::headers::dependency_clause_syntax::{
     DependencyAlias, RetainedDependencyPath,
 };
-use crate::compiler_frontend::headers::dependency_target::decode_dependency_target;
+use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable;
@@ -1866,7 +1866,27 @@ fn validate_dependency_path(
             "retained dependency clause has an empty path",
         ));
     }
-    decode_dependency_target(dependency.path, &dependency.target, path_fork, string_table)?;
+    match (&dependency.target, dependency.provider_target.as_ref()) {
+        (DependencyTargetKind::Source, None) => {}
+        (DependencyTargetKind::Source, Some(_)) => {
+            return Err(CompilerError::compiler_error(
+                "source dependency retained an external provider fact",
+            ));
+        }
+        (DependencyTargetKind::ExternalProvider { .. }, Some(provider_target)) => {
+            provider_target.validate(
+                dependency.path,
+                &dependency.target,
+                path_fork,
+                string_table,
+            )?;
+        }
+        (DependencyTargetKind::ExternalProvider { .. }, None) => {
+            return Err(CompilerError::compiler_error(
+                "external provider dependency is missing its checked target fact",
+            ));
+        }
+    }
     validate_source_span(Some(dependency.span), file_id, "dependency path")?;
     if dependency.dependency_shell_id.source == file_id {
         Ok(())

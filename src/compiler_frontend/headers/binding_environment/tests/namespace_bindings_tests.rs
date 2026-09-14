@@ -91,6 +91,8 @@ fn test_dependency(header_path: PathId) -> RetainedDependencyClause {
         path: header_path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
+        provider_target: None,
+        local_source_id: None,
         dependency_shell_id: DependencyShellId::new(SourceId::COMPILATION_ROOT, 0),
     };
     RetainedDependencyClause {
@@ -1161,6 +1163,8 @@ fn explicit_external_symbol_binding_retains_authored_span() {
         path: intern_path(&["test", "explicit_symbols"], &mut string_table, &mut path_fork),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
+        provider_target: None,
+        local_source_id: None,
         dependency_shell_id: DependencyShellId::new(SourceId::COMPILATION_ROOT, 1),
     };
     let dependency_selections = vec![
@@ -1348,12 +1352,13 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
     let mut path_fork = PathInternerFork::empty();
     let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["test", "prelude_ns"], &mut string_table, &mut path_fork);
-
     let provider = RetainedDependencyPath {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         path: dependency_path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
+        provider_target: None,
+        local_source_id: None,
         dependency_shell_id: DependencyShellId::new(SourceId::COMPILATION_ROOT, 2),
     };
     let dependency = RetainedDependencyClause {
@@ -2740,5 +2745,117 @@ fn occupied_agreement_insertion_borrows_without_cloning() {
         clones.load(Ordering::Relaxed),
         1,
         "disagreement must not clone the candidate either"
+    );
+}
+
+#[test]
+fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let dependency_path = intern_path(&["helper"], &mut string_table, &mut path_fork);
+    let mut dependency = test_dependency(dependency_path);
+    dependency.dependency.local_source_id = Some(SourceId::from_index(1));
+
+    let mut module_symbols = ModuleSymbols::empty();
+    module_symbols.module_file_paths.insert(source_file);
+    module_symbols
+        .file_dependency_clauses_by_source
+        .insert(source_file, vec![dependency]);
+
+    let messages = prepare_binding_environment(BindingEnvironmentInput {
+        module_symbols: &mut module_symbols,
+        external_package_registry: &ExternalPackageRegistry::new(),
+        external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
+        string_table: &mut string_table,
+        path_fork: &mut path_fork,
+    })
+    .expect_err("a retained local edge with no source slot must fail closed");
+
+    let error = messages
+        .infrastructure_error()
+        .expect("missing retained source identity should be an infrastructure error");
+    assert!(
+        error.msg.contains("missing source identity"),
+        "unexpected retained-edge validation error: {error:?}"
+    );
+}
+
+#[test]
+fn retained_local_source_edge_rejects_wrong_valid_in_module_identity() {
+    let page_path = std::path::PathBuf::from("/project/src/@page.moth");
+    let helper_path = std::path::PathBuf::from("/project/src/helper.moth");
+    let other_path = std::path::PathBuf::from("/project/src/other.moth");
+    let mut string_table = StringTable::new();
+    let source_files = SourceDatabase::build(
+        [&page_path, &helper_path, &other_path],
+        &page_path,
+        None,
+        &mut string_table,
+    )
+    .expect("test compiler sources should register");
+    let page_id = source_files
+        .get_by_canonical_path(&page_path)
+        .expect("page source should register")
+        .id;
+    let helper_id = source_files
+        .get_by_canonical_path(&helper_path)
+        .expect("helper source should register")
+        .id;
+    let other_id = source_files
+        .get_by_canonical_path(&other_path)
+        .expect("other source should register")
+        .id;
+
+    let mut path_fork = PathInternerFork::empty();
+    let page_source = source_files
+        .logical_path_in_fork(page_id, &mut path_fork)
+        .expect("page source path should re-intern");
+    let helper_source = source_files
+        .logical_path_in_fork(helper_id, &mut path_fork)
+        .expect("helper source path should re-intern");
+    let other_source = source_files
+        .logical_path_in_fork(other_id, &mut path_fork)
+        .expect("other source path should re-intern");
+    let dependency_path = intern_path(&["helper"], &mut string_table, &mut path_fork);
+    let mut dependency = test_dependency(dependency_path);
+    dependency.dependency.local_source_id = Some(other_id);
+
+    let mut module_symbols = ModuleSymbols::empty();
+    for (source_path, source_id) in [
+        (page_source, page_id),
+        (helper_source, helper_id),
+        (other_source, other_id),
+    ] {
+        module_symbols.module_file_paths.insert(source_path);
+        module_symbols
+            .source_ids_by_source
+            .insert(source_path, source_id);
+    }
+    module_symbols
+        .file_dependency_clauses_by_source
+        .insert(page_source, vec![dependency]);
+
+    let messages = prepare_binding_environment(BindingEnvironmentInput {
+        module_symbols: &mut module_symbols,
+        external_package_registry: &ExternalPackageRegistry::new(),
+        external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_dependencies: &Default::default(),
+        source_files: &source_files,
+        string_table: &mut string_table,
+        path_fork: &mut path_fork,
+    })
+    .expect_err("a wrong but valid in-module local edge must fail closed");
+
+    let error = messages
+        .infrastructure_error()
+        .expect("contradictory local source identity should be an infrastructure error");
+    assert!(
+        error
+            .msg
+            .contains("disagrees with its resolved source path"),
+        "unexpected wrong-edge validation error: {error:?}"
     );
 }

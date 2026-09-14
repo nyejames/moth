@@ -611,6 +611,22 @@ fn compiler_source_ids_for_indices(
         })
         .collect()
 }
+fn compiler_source_id_for_index(
+    source_index: SourceRecordIndex,
+    source_tree_index: &SourceTreeIndex,
+    source_files: &SourceDatabase,
+) -> Result<CompilerSourceId, CompilerError> {
+    let canonical_path = source_tree_index.source(source_index).canonical_path();
+    source_files
+        .get_by_canonical_path(canonical_path)
+        .map(|source_record| source_record.id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "module inventory: source row {} is absent from the boundary source file table",
+                source_index.index(),
+            ))
+        })
+}
 /// Prepare one owned, unselected Moth source as an isolated transient semantic unit.
 ///
 /// The source table retains the canonical candidate identities so indexed file-reference
@@ -760,9 +776,9 @@ fn prepare_check_only_module(
         })?;
         // `prepare_source` already returns the premerge lane, so propagate directly without
         // building an intermediate vessel.
-        let prepared_output = syntax.prepare_source(input, source_spans)?;
-        for dependency in &prepared_output.file_dependency_clauses {
-            let provider = &dependency.dependency;
+        let mut prepared_output = syntax.prepare_source(input, source_spans)?;
+        for dependency in &mut prepared_output.file_dependency_clauses {
+            let provider = &mut dependency.dependency;
             let action = {
                 let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
                     syntax.source_preparation_inputs_and_path_fork_mut();
@@ -810,6 +826,13 @@ fn prepare_check_only_module(
                                 .to_owned(),
                         ));
                     }
+                    provider.local_source_id = Some(
+                        compiler_source_id_for_index(
+                            target_source_index,
+                            source_tree_index,
+                            preparation_context.source_files,
+                        )?,
+                    );
                     add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
                     if queued_module_sources.insert(target_source_index) {
                         pending_module_sources.push_back(target_source_index);
@@ -1269,9 +1292,9 @@ fn discover_modules_serial_provider_capable(
                 }
             };
             // Already in the premerge lane; propagate without an intermediate vessel.
-            let prepared_output = syntax.prepare_source(input, source_spans)?;
-            for dependency in &prepared_output.file_dependency_clauses {
-                let provider = &dependency.dependency;
+            let mut prepared_output = syntax.prepare_source(input, source_spans)?;
+            for dependency in &mut prepared_output.file_dependency_clauses {
+                let provider = &mut dependency.dependency;
                 let action = {
                     let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
                         syntax.source_preparation_inputs_and_path_fork_mut();
@@ -1319,6 +1342,11 @@ fn discover_modules_serial_provider_capable(
                                 "Same-module dependency resolved to another module".to_owned(),
                             ));
                         }
+                        provider.local_source_id = Some(compiler_source_id_for_index(
+                            target_source_index,
+                            source_tree_index,
+                            source_files,
+                        )?);
                         let inserted = queued.insert(target_source_index);
                         if inserted {
                             queue.push_back(target_source_index);

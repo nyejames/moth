@@ -9,7 +9,9 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason,
 };
-use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
+use crate::compiler_frontend::headers::dependency_target::{
+    CheckedExternalProviderTarget, DependencyTargetKind,
+};
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -78,22 +80,32 @@ pub struct RetainedDependencyPath {
     pub path: PathId,
     pub path_syntax: PathSyntaxId,
     pub target: DependencyTargetKind,
+    /// Checked provider structure retained while the worker-local stores are available.
+    pub provider_target: Option<CheckedExternalProviderTarget>,
+    /// Final compiler identity for a same-module source edge, when Stage 0 has resolved it.
+    pub local_source_id: Option<SourceId>,
     pub span: SourceSpan,
 }
 
 impl RetainedDependencyPath {
-    /// Remap the target extension into a merged string table.
+    /// Remap the target extension and checked suffix identities into a merged string table.
     ///
-    /// The complete-path identity remaps separately through `remap_path_ids` after the
-    /// string delta merges, mirroring the file-owned path-table order (strings first,
+    /// The complete-path identity and provider prefix remap separately through `remap_path_ids`
+    /// after the string delta merges, mirroring the file-owned path-table order (strings first,
     /// then paths).
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.target.remap_string_ids(remap);
+        if let Some(provider_target) = &mut self.provider_target {
+            provider_target.remap_string_ids(remap);
+        }
     }
 
-    /// Remap the complete-path identity after its path fork merges.
+    /// Remap the complete-path identity and checked provider prefix after its path fork merges.
     pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.path = remap.get(self.path);
+        if let Some(provider_target) = &mut self.provider_target {
+            provider_target.remap_path_ids(remap);
+        }
     }
 
     /// Commit the final source identity while preserving module-root-relative paths.

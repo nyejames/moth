@@ -34,6 +34,7 @@ pub(crate) fn resolve_structural_provider_reference(
             dependency_span: Some(provider.span),
             clause_kind,
             target: &provider.target,
+            provider_target: provider.provider_target.as_ref(),
             canonical_file,
             project_path_resolver,
             path_fork,
@@ -77,6 +78,7 @@ struct ProviderCapableDependencyInput<'a> {
     dependency_span: Option<SourceSpan>,
     clause_kind: DependencyClauseKind,
     target: &'a DependencyTargetKind,
+    provider_target: Option<&'a CheckedExternalProviderTarget>,
     canonical_file: &'a Path,
     project_path_resolver: &'a ProjectPathResolver,
     path_fork: &'a mut PathInternerFork,
@@ -406,6 +408,7 @@ fn walk_reachable_sources(
                 dependency_span: Some(provider.span),
                 clause_kind: clause.binding.clause_kind(),
                 target: &provider.target,
+                provider_target: provider.provider_target.as_ref(),
                 canonical_file: &canonical_file,
                 project_path_resolver,
                 path_fork: &mut *path_fork,
@@ -704,6 +707,7 @@ fn handle_provider_capable_dependency(
         dependency_span,
         clause_kind,
         target,
+        provider_target,
         canonical_file,
         project_path_resolver,
         path_fork,
@@ -761,17 +765,18 @@ fn handle_provider_capable_dependency(
         return Err(SourceDiscoveryError::from(
             unsupported_builder_package_error(package_path, dependency_span, string_table),
         ));
-    }
-
-    // Consume the retained provider classification. Header syntax already identified the
-    // first explicit non-source extension, so Stage 0 must not rescan path components.
-    if let Some(decoded) =
-        decode_dependency_target(dependency_path, target, path_fork, string_table)
+}
+    if matches!(target, DependencyTargetKind::ExternalProvider { .. }) {
+        let checked = provider_target.ok_or_else(|| {
+            SourceDiscoveryError::Infrastructure(CompilerError::compiler_error(
+                "retained provider classification is missing its checked target fact",
+            ))
+        })?;
+        let prefix_path = checked.prefix_path_id();
+        let extension = checked
+            .extension_spelling(string_table)
             .map_err(SourceDiscoveryError::from)?
-    {
-        let prefix_path = decoded.prefix_path_id();
-        let prefix_str = path_fork.render_portable(prefix_path, string_table, &mut Vec::new());
-        let extension = decoded.extension_spelling().to_owned();
+            .to_owned();
         if let Some(provider) = external_imports.providers.find_by_extension(&extension) {
             // Directory projects resolve provider-owned targets through the same boundary-aware
             // namespace as compiler-semantic dependencies; the scoped immutable reborrow finishes
@@ -793,7 +798,7 @@ fn handle_provider_capable_dependency(
                 import_path: dependency_path,
                 source_span: dependency_span,
                 prefix_path,
-                raw_prefix: &prefix_str,
+                raw_prefix: checked.raw_prefix(),
                 provider,
                 project_path_resolver,
                 path_fork,
