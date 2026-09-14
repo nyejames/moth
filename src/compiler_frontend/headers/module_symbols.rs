@@ -212,6 +212,11 @@ pub(crate) struct ModuleSymbols {
     pub(crate) module_file_paths: FxHashSet<PathId>,
     pub(crate) file_roles_by_source: FxHashMap<PathId, FileRole>,
     pub(crate) source_ids_by_source: FxHashMap<PathId, SourceId>,
+    /// Canonical logical source path for each prepared token source.
+    ///
+    /// Header body ranges carry only `SourceId`; this map is the single source-path identity
+    /// lookup used by later semantic passes instead of repeating the path on every header.
+    pub(crate) source_paths_by_source_id: FxHashMap<SourceId, PathId>,
     pub(crate) file_dependency_clauses_by_source:
         FxHashMap<PathId, Vec<RetainedDependencyClause>>,
     // One flat selection table per prepared source file. Clause ranges index this table.
@@ -299,6 +304,12 @@ impl ModuleSymbols {
         let source_id = *self.source_ids_by_source.get(source_file)?;
         source_files.get(source_id)
     }
+    /// Resolve the source path for a header body range through the prepared source identity map.
+    pub(crate) fn source_path_for_header(&self, header: &Header) -> Option<PathId> {
+        self.source_paths_by_source_id
+            .get(&header.tokens.source())
+            .copied()
+    }
 
     pub(crate) fn empty() -> Self {
         Self {
@@ -310,6 +321,7 @@ impl ModuleSymbols {
             module_file_paths: FxHashSet::default(),
             file_roles_by_source: FxHashMap::default(),
             source_ids_by_source: FxHashMap::default(),
+            source_paths_by_source_id: FxHashMap::default(),
             file_dependency_clauses_by_source: FxHashMap::default(),
             dependency_selections_by_source: FxHashMap::default(),
             dependency_bindable_source_symbol_paths: FxHashSet::default(),
@@ -360,11 +372,23 @@ impl ModuleSymbols {
                             self.ordered_semantic_declarations.len(),
                         ),
                         header_index,
-                        path: header.tokens.src_path,
+                        path: header.declaration_path,
                         kind,
-                        declaration: declaration_from_header(header, string_table, path_fork),
+                        declaration: declaration_from_header(
+                            header,
+                            self.source_path_for_header(header)
+                                .expect("header body range has no prepared source-path identity"),
+                            string_table,
+                            path_fork,
+                        ),
                     });
-            } else if let Some(declaration) = declaration_from_header(header, string_table, path_fork) {
+            } else if let Some(declaration) = declaration_from_header(
+                header,
+                self.source_path_for_header(header)
+                    .expect("header body range has no prepared source-path identity"),
+                string_table,
+                path_fork,
+            ) {
                 self.compiler_owned_declarations.push(declaration);
             }
         }
@@ -394,12 +418,13 @@ fn ordered_semantic_declaration_kind(
 
 fn declaration_from_header(
     header: &Header,
+    source_file: PathId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Option<Declaration> {
     match &header.kind {
         HeaderKind::Function { .. } => Some(Declaration {
-            id: header.tokens.src_path.to_owned(),
+            id: header.declaration_path.to_owned(),
             value: {
                 let data_type = DataType::Function(Box::new(None), FunctionSignature::default());
                 Expression::new(
@@ -414,15 +439,15 @@ fn declaration_from_header(
             config_qualifier: None,
         }),
         HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
-            &header.tokens.src_path,
+            &header.declaration_path,
             declaration,
             header.name_span,
         )),
         HeaderKind::Struct { .. } => Some(Declaration {
-            id: header.tokens.src_path.to_owned(),
+            id: header.declaration_path.to_owned(),
             value: {
                 let data_type = DataType::runtime_struct(
-                    header.tokens.src_path.to_owned(),
+                    header.declaration_path.to_owned(),
                     builtin_type_ids::NONE,
                 );
                 Expression::new(
@@ -437,10 +462,10 @@ fn declaration_from_header(
             config_qualifier: None,
         }),
         HeaderKind::Choice { .. } => Some(Declaration {
-            id: header.tokens.src_path.to_owned(),
+            id: header.declaration_path.to_owned(),
             value: {
                 let data_type = DataType::Choices {
-                    nominal_path: header.tokens.src_path.to_owned(),
+                    nominal_path: header.declaration_path.to_owned(),
                     type_id: builtin_type_ids::NONE,
                     generic_instance_key: None,
                 };
@@ -460,7 +485,7 @@ fn declaration_from_header(
             // the entry source file.
             let start_name = path_fork
                 .try_intern_child(
-                    header.source_file,
+                    source_file,
                     string_table.intern(IMPLICIT_START_FUNC_NAME),
                 )
                 .expect("path table exhausted while interning implicit start path");

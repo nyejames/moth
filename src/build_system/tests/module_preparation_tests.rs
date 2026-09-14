@@ -15,8 +15,8 @@ use crate::builder_surface::SourceFileKindRegistry;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    parse_file_headers_with_table, prepare_header_syntax, FileFrontendPrepareOutput, HeaderKind,
-    HeaderParseOptions, PreparedHeaderSyntax, SourcePreparationDelta,
+    parse_file_headers_with_table, prepare_header_syntax, FileFrontendPrepareOutput, Header,
+    HeaderKind, HeaderParseOptions, PreparedHeaderSyntax, SourcePreparationDelta,
 };
 use crate::compiler_frontend::module_compilation::{
     compile_module, ModuleCompilationContext, ModuleCompilationOutcome,
@@ -202,6 +202,27 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
     }
 }
 
+fn source_path_for_header(headers: &PreparedHeaderSyntax, header: &Header) -> PathId {
+    headers
+        .module_symbols
+        .source_paths_by_source_id
+        .get(&header.tokens.source())
+        .copied()
+        .expect("every retained header should have a source-path owner")
+}
+
+fn token_slice_for_header<'a>(
+    headers: &'a PreparedHeaderSyntax,
+    header: &Header,
+) -> &'a [crate::compiler_frontend::tokenizer::tokens::Token] {
+    let source = headers
+        .source_token_streams
+        .get(&header.tokens.source())
+        .expect("every retained header should have a token owner");
+    let range = header.tokens;
+    &source.tokens[range.start().index()..range.end().index()]
+}
+
 fn header_source_file_names(
     headers: &PreparedHeaderSyntax,
     string_table: &StringTable,
@@ -212,7 +233,11 @@ fn header_source_file_names(
         .iter()
         .map(|header| {
             path_fork
-                .render_native(header.source_file, string_table, &mut Vec::new())
+                .render_native(
+                    source_path_for_header(headers, header),
+                    string_table,
+                    &mut Vec::new(),
+                )
                 .file_name()
                 .expect("test logical source path should have a file name")
                 .to_string_lossy()
@@ -422,7 +447,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let beta_header = headers.headers.iter().find(|h| {
         frontend
             .path_fork
-            .component(h.tokens.src_path)
+            .component(h.declaration_path)
             .map(|id| frontend.string_table.resolve(id))
             == Some("beta")
     });
@@ -440,7 +465,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         const_template_header.is_some(),
         "const template header should exist"
     );
-    let const_template_name = const_template_header.unwrap().tokens.src_path;
+    let const_template_name = const_template_header.unwrap().declaration_path;
     let const_template_name = frontend
         .path_fork
         .component(const_template_name)
@@ -452,10 +477,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     );
 
     // Verify token symbols inside the const template also resolve.
-    let hello_token = const_template_header
-        .unwrap()
-        .tokens
-        .tokens
+    let hello_token = token_slice_for_header(&headers, const_template_header.unwrap())
         .iter()
         .find_map(|t| match &t.kind {
             TokenKind::Symbol(id) if frontend.string_table.resolve(*id) == "hello" => Some(*id),
@@ -470,11 +492,11 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     // non-identity remapping occurred for at least one file's local suffix.
     let beta_id = frontend
         .path_fork
-        .component(beta_header.unwrap().tokens.src_path)
+        .component(beta_header.unwrap().declaration_path)
         .expect("beta should have a name ID");
     let const_template_id = frontend
         .path_fork
-        .component(const_template_header.unwrap().tokens.src_path)
+        .component(const_template_header.unwrap().declaration_path)
         .expect("const template should have a name ID");
     assert_ne!(
         beta_id, const_template_id,
@@ -624,8 +646,10 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         .prepared_header_syntax
         .headers
         .iter()
-        .filter(|header| matches!(header.kind, HeaderKind::Function { .. }))
-        .flat_map(|header| &header.tokens.tokens)
+        .flat_map(|header| token_slice_for_header(
+            &prepared.semantic.prepared_header_syntax,
+            header,
+        ))
         .find_map(|token| match token.kind {
             TokenKind::Symbol(id)
                 if prepared.semantic.string_table.resolve(id) == parameter_name =>
@@ -1150,19 +1174,8 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     );
 
     // Verify deterministic header ordering: input order is preserved before aggregation.
-    let header_source_names: Vec<_> = headers
-        .headers
-        .iter()
-        .map(|h| {
-            preparation_path_fork
-                .render_native(h.source_file, &frontend.string_table, &mut Vec::new())
-                .file_name()
-                .expect("test logical source path should have a file name")
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-
+    let header_source_names =
+        header_source_file_names(&headers, &frontend.string_table, &preparation_path_fork);
     let last_a = header_source_names
         .iter()
         .rposition(|name| name == "a.moth")
@@ -1183,7 +1196,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     // Verify headers from all files exist and strings resolve.
     let beta_header = headers.headers.iter().find(|h| {
         preparation_path_fork
-            .component(h.tokens.src_path)
+            .component(h.declaration_path)
             .map(|id| frontend.string_table.resolve(id))
             == Some("Beta")
     });
@@ -1191,7 +1204,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
 
     let gamma_header = headers.headers.iter().find(|h| {
         preparation_path_fork
-            .component(h.tokens.src_path)
+            .component(h.declaration_path)
             .map(|id| frontend.string_table.resolve(id))
             == Some("Gamma")
     });
@@ -1205,7 +1218,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         const_template_header.is_some(),
         "const template header should exist"
     );
-    let const_template_path = const_template_header.unwrap().tokens.src_path;
+    let const_template_path = const_template_header.unwrap().declaration_path;
     let const_template_name = preparation_path_fork
         .component(const_template_path)
         .map(|id| frontend.string_table.resolve(id))
@@ -1216,10 +1229,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     );
 
     // Verify token symbols inside the const template resolve.
-    let hello_token = const_template_header
-        .unwrap()
-        .tokens
-        .tokens
+    let hello_token = token_slice_for_header(&headers, const_template_header.unwrap())
         .iter()
         .find_map(|t| match &t.kind {
             TokenKind::Symbol(id) if frontend.string_table.resolve(*id) == "hello" => Some(*id),
@@ -1262,10 +1272,10 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     // Verify non-identity remapping: Beta and the const template should have different
     // global IDs, proving at least one file's local suffix was remapped.
     let beta_id = preparation_path_fork
-        .component(beta_header.unwrap().tokens.src_path)
+        .component(beta_header.unwrap().declaration_path)
         .expect("Beta should have a name ID");
     let const_template_id = preparation_path_fork
-        .component(const_template_header.unwrap().tokens.src_path)
+        .component(const_template_header.unwrap().declaration_path)
         .expect("const template should have a name ID");
     assert_ne!(
         beta_id, const_template_id,
@@ -1396,19 +1406,8 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
 
     assert!(warnings.is_empty(), "test declarations should not warn");
 
-    let header_source_names: Vec<_> = headers
-        .headers
-        .iter()
-        .map(|h| {
-            preparation_path_fork
-                .render_native(h.source_file, &frontend.string_table, &mut Vec::new())
-                .file_name()
-                .expect("test logical source path should have a file name")
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-
+    let header_source_names =
+        header_source_file_names(&headers, &frontend.string_table, &preparation_path_fork);
     let mut previous_file_last_header = None;
     for index in 0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT {
         let expected_name = format!("{index}.moth");
@@ -1553,7 +1552,7 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
         .iter()
         .filter_map(|header| {
             preparation_path_fork
-                .component(header.tokens.src_path)
+                .component(header.declaration_path)
                 .map(|id| fixture.frontend.string_table.resolve(id).to_owned())
         })
         .collect();

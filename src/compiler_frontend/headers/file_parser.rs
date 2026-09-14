@@ -822,7 +822,16 @@ fn finish_file_output(
             .into_non_entry_output(token_stream, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
-    attach_structural_file_facts(&mut output, context.string_table, context.path_fork)
+    let source_token_stream = token_stream.take_for_prepared_source();
+    attach_structural_file_facts(
+        &mut output,
+        &source_token_stream,
+        context.string_table,
+        context.path_fork,
+    )
+    .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+    output
+        .install_source_token_stream(source_token_stream)
         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     Ok(output)
 }
@@ -838,6 +847,7 @@ fn finish_file_output(
 ///       succeeds, so an invalid default cannot affect Stage 0 source discovery.
 fn attach_structural_file_facts(
     output: &mut FileFrontendPrepareOutput,
+    source_tokens: &FileTokens,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
@@ -862,14 +872,33 @@ fn attach_structural_file_facts(
             &header.kind,
             HeaderKind::Constant { declaration } if declaration.config_qualifier.is_some()
         );
+        let body_tokens = if let Some(tokens) = header.transitional_tokens.as_ref() {
+            &tokens.tokens
+        } else if header.tokens.is_empty() {
+            &[][..]
+        } else if header.tokens.source() != source_tokens.file_id {
+            return Err(CompilerError::compiler_error(
+                "retained header range does not match its source token owner",
+            ));
+        } else {
+            source_tokens
+                .tokens
+                .get(header.tokens.start().index()..header.tokens.end().index())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "retained header range exceeds its source token owner",
+                    )
+                })?
+        };
         if is_config_file
             || (!declaration_owned_marker
-                && find_config_qualifier_marker_in_header(header, string_table).is_none())
+                && find_config_qualifier_marker_in_header(header, string_table, body_tokens)
+                    .is_none())
         {
             continue;
         }
 
-        append_path_ids(&header.tokens.tokens);
+        append_path_ids(body_tokens);
         match &header.kind {
             HeaderKind::Constant { declaration } => {
                 append_path_ids(&declaration.initializer_tokens);
@@ -922,6 +951,7 @@ fn attach_structural_file_facts(
 
     collect_content_source_ordering_hints(
         &mut output.headers,
+        source_tokens,
         &output.structural_file_references,
         output.path_syntax.table(),
         string_table,

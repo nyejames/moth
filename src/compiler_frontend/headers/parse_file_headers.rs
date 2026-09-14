@@ -47,7 +47,8 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use rustc_hash::FxHashMap;
 use std::mem;
 use std::path::Path;
 
@@ -278,8 +279,8 @@ pub fn prepare_header_syntax(
         collect_source_build_config_contracts(prepared_files, string_table, capture, path_fork)?;
     let module_symbols =
         build_module_symbols(prepared_files, string_table, capture, path_fork)?;
-
     let mut headers: Vec<Header> = Vec::new();
+    let mut source_token_streams = FxHashMap::default();
     let mut top_level_const_fragments = Vec::new();
     let mut runtime_fragment_count = 0usize;
     let mut has_non_trivial_root_body = false;
@@ -287,6 +288,15 @@ pub fn prepare_header_syntax(
 
     for output in prepared_files {
         token_stats.add(&output.token_stats);
+        if let Some(stream) = output.source_token_stream.take()
+            && source_token_streams.insert(output.file_id, stream).is_some()
+        {
+            return Err(HeaderPreparationFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "multiple canonical source token streams were prepared for one SourceId",
+                ),
+            ));
+        }
         headers.extend(mem::take(&mut output.headers));
         top_level_const_fragments.extend(mem::take(&mut output.top_level_const_fragments));
         runtime_fragment_count += output.runtime_fragment_count;
@@ -298,6 +308,7 @@ pub fn prepare_header_syntax(
 
     Ok(PreparedHeaderSyntax {
         headers,
+        source_token_streams,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count: runtime_fragment_count,
@@ -317,6 +328,7 @@ pub fn prepare_header_syntax(
 pub(super) fn find_config_qualifier_marker_in_header(
     header: &Header,
     string_table: &StringTable,
+    body_tokens: &[Token],
 ) -> Option<(SourceSpan, bool)> {
     fn marker_in_tokens(
         tokens: &[crate::compiler_frontend::tokenizer::tokens::Token],
@@ -339,13 +351,13 @@ pub(super) fn find_config_qualifier_marker_in_header(
 
     let marker = match &header.kind {
         HeaderKind::Constant { declaration } => {
-            marker_in_tokens(&declaration.initializer_tokens, header.tokens.file_id, string_table)
+            marker_in_tokens(&declaration.initializer_tokens, header.tokens.source(), string_table)
         }
         HeaderKind::Function { signature, .. } => signature.parameters.iter().find_map(|parameter| {
-            marker_in_tokens(&parameter.default_tokens, header.tokens.file_id, string_table)
+            marker_in_tokens(&parameter.default_tokens, header.tokens.source(), string_table)
         }),
         HeaderKind::Struct { fields, .. } => fields.iter().find_map(|field| {
-            marker_in_tokens(&field.default_tokens, header.tokens.file_id, string_table)
+            marker_in_tokens(&field.default_tokens, header.tokens.source(), string_table)
         }),
         HeaderKind::Choice { variants, .. } => variants.iter().find_map(|variant| {
             let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
@@ -355,7 +367,7 @@ pub(super) fn find_config_qualifier_marker_in_header(
                 return None;
             };
             fields.iter().find_map(|field| {
-                marker_in_tokens(&field.default_tokens, header.tokens.file_id, string_table)
+                marker_in_tokens(&field.default_tokens, header.tokens.source(), string_table)
             })
         }),
         HeaderKind::Trait { declaration } => declaration
@@ -363,13 +375,13 @@ pub(super) fn find_config_qualifier_marker_in_header(
             .iter()
             .flat_map(|requirement| requirement.signature.parameters.iter())
             .find_map(|parameter| {
-                marker_in_tokens(&parameter.default_tokens, header.tokens.file_id, string_table)
+                marker_in_tokens(&parameter.default_tokens, header.tokens.source(), string_table)
             }),
         _ => None,
     };
 
     marker
-        .or_else(|| marker_in_tokens(&header.tokens.tokens, header.tokens.file_id, string_table))
+        .or_else(|| marker_in_tokens(body_tokens, header.tokens.source(), string_table))
         .map(|span| (span, true))
 }
 
@@ -397,10 +409,13 @@ fn collect_source_build_config_contracts(
         }
 
         for header in &output.headers {
+            let body_tokens = output
+                .body_tokens(header)
+                .map_err(HeaderPreparationFailure::Infrastructure)?;
             let report_marker = |span: SourceSpan, adjacent: bool| {
                 if adjacent {
                     CompilerDiagnostic::invalid_config_reason(
-                        path_fork.component(header.tokens.src_path),
+                        path_fork.component(header.declaration_path),
                         InvalidConfigReason::ConfigQualifierInvalidPlacement,
                         Some(span),
                     )
@@ -413,7 +428,7 @@ fn collect_source_build_config_contracts(
             };
 
             if let Some((location, adjacent)) =
-                find_config_qualifier_marker_in_header(header, string_table)
+                find_config_qualifier_marker_in_header(header, string_table, body_tokens)
             {
                 let mut diagnostic = report_marker(location, adjacent);
                 capture(output.file_id, &mut diagnostic)
@@ -428,7 +443,7 @@ fn collect_source_build_config_contracts(
             let Some(qualifier) = &declaration.config_qualifier else {
                 continue;
             };
-            let Some(name) = path_fork.component(header.tokens.src_path) else {
+            let Some(name) = path_fork.component(header.declaration_path) else {
                 let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                     None,
                     InvalidConfigReason::ConfigContractNameInvalid,
@@ -493,6 +508,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 ) -> Result<BoundModuleHeaders, HeaderPreparationFailure> {
     let PreparedHeaderSyntax {
         mut headers,
+        source_token_streams,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
@@ -502,7 +518,6 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         header_stats,
         mut module_symbols,
     } = prepared;
-
     validate_prelude_declaration_shells(
         &headers,
         external_package_registry,
@@ -553,6 +568,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
     canonicalize_local_ordering_hints(
         &mut headers,
         &binding_environment,
+        &module_symbols.source_paths_by_source_id,
         &module_symbols.file_dependency_clauses_by_source,
         &module_symbols.dependency_selections_by_source,
         string_table,
@@ -569,6 +585,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 
     Ok(BoundModuleHeaders {
         headers,
+        source_token_streams,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
@@ -595,7 +612,7 @@ fn validate_prelude_declaration_shells(
 ) -> Result<(), DiagnosticBag> {
     let mut collision_bag = DiagnosticBag::new();
     for header in headers {
-        if let Some(name) = path_fork.component(header.tokens.src_path)
+        if let Some(name) = path_fork.component(header.declaration_path)
             && external_package_registry.is_prelude_function(string_table.resolve(name))
         {
             collision_bag.push(CompilerDiagnostic::reserved_builtin_name(

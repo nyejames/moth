@@ -47,9 +47,12 @@ use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -57,6 +60,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+fn frozen_empty_path_syntax(source: SourceId) -> Result<FilePathSyntax, CompilerError> {
+    let mut table = PathSyntaxTable::with_source(source);
+    table.validate_file_owned_locations(source)?;
+    table.freeze();
+    Ok(FilePathSyntax::Shared(Arc::new(table)))
+}
 /// The module view every constant in the pass reads.
 ///
 /// WHY: separating this from the per-constant call keeps the session constructor honest about
@@ -77,6 +86,8 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub template_ir_store: Rc<RefCell<TemplateIrStore>>,
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
     pub file_value_resolution: Option<Rc<FileValueResolutionServices>>,
+    /// Canonical source owners used to supply path syntax to the bounded legacy resolver.
+    pub source_token_streams: FxHashMap<crate::compiler_frontend::source::SourceId, Arc<FileTokens>>,
     pub build_profile: FrontendBuildProfile,
     pub template_const_loop_iteration_limit: usize,
 }
@@ -95,6 +106,12 @@ pub(crate) struct ConstantHeaderInput<'a> {
     pub resolved_struct_fields_by_path: Rc<FxHashMap<PathId, Vec<Declaration>>>,
     pub choice_variant_shells_by_path: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
     pub file_visibility: &'a Arc<FileVisibility>,
+    /// Canonical logical source path for this header's owning prepared file.
+    ///
+    /// Synthetic Markdown content headers have a declaration path below this source (`content`);
+    /// callers therefore supply the prepared source identity rather than deriving it from the
+    /// declaration path.
+    pub source_file_scope: PathId,
     pub type_environment: &'a mut TypeEnvironment,
     pub warnings: &'a mut Vec<CompilerDiagnostic>,
     pub path_fork: &'a mut PathInternerFork,
@@ -108,6 +125,7 @@ struct ConstantHeaderScopeInput<'a> {
     resolved_struct_fields_by_path: Rc<FxHashMap<PathId, Vec<Declaration>>>,
     choice_variant_shells_by_path: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
     file_visibility: &'a Arc<FileVisibility>,
+    source_file_scope: PathId,
 }
 
 /// One session for a single dependency-ordered Stage 3 declaration walk.
@@ -146,6 +164,7 @@ impl ConstantResolutionSession {
             resolved_struct_fields_by_path,
             choice_variant_shells_by_path,
             file_visibility,
+            source_file_scope,
             type_environment,
             warnings,
             path_fork,
@@ -167,16 +186,43 @@ impl ConstantResolutionSession {
                 resolved_struct_fields_by_path,
                 choice_variant_shells_by_path,
                 file_visibility,
+                source_file_scope,
             },
         );
 
         let mut type_interner =
             AstTypeInterner::new(type_environment, &mut self.compatibility_cache);
+        let source_owner = self
+            .module_view
+            .source_token_streams
+            .get(&header.tokens.source());
+        let fallback_path_syntax = if source_owner.is_none() {
+            let path_free_synthetic_initializer = header.tokens.is_empty()
+                && header.transitional_tokens.is_none()
+                && header.name_span.is_none()
+                && declaration
+                    .initializer_tokens
+                    .iter()
+                    .all(|token| !matches!(token.kind, TokenKind::Path(_)));
+            if !path_free_synthetic_initializer {
+                return Err(CompilerError::compiler_error(
+                    "constant header has no canonical source token owner for its retained syntax",
+                )
+                .into());
+            }
+            Some(frozen_empty_path_syntax(header.tokens.source())?)
+        } else {
+            None
+        };
+        let path_syntax = source_owner
+            .map(|owner| &owner.path_syntax)
+            .or_else(|| fallback_path_syntax.as_ref())
+            .expect("constant header path syntax fallback must be present");
 
         let declaration_result = resolve_declaration_syntax(
             declaration.clone(),
-            header.tokens.src_path.to_owned(),
-            &header.tokens.path_syntax,
+            header.declaration_path.to_owned(),
+            path_syntax,
             &mut scope_context,
             &mut type_interner,
             string_table,
@@ -247,6 +293,7 @@ impl ConstantResolutionSession {
             resolved_struct_fields_by_path,
             choice_variant_shells_by_path,
             file_visibility,
+            source_file_scope,
         } = input;
 
         increment_ast_counter(AstCounter::ConstantResolutionContextsCreated);
@@ -255,7 +302,7 @@ impl ConstantResolutionSession {
 
         let mut context = ScopeContext::new(
             ContextKind::ConstantHeader,
-            header.tokens.src_path.to_owned(),
+            header.declaration_path.to_owned(),
             top_level_declarations,
             Arc::clone(&module_view.external_package_registry),
             vec![],
@@ -269,8 +316,8 @@ impl ConstantResolutionSession {
         // through the header-built visibility package so namespace bindings and aliases behave
         // exactly like they do in function/start body contexts.
         .with_file_visibility(Arc::clone(file_visibility))
-        .with_source_file_scope(header.source_file)
-        .with_declaring_file_id(header.tokens.file_id)
+        .with_source_file_scope(source_file_scope)
+        .with_declaring_file_id(header.tokens.source())
         .with_resolved_type_aliases(resolved_type_aliases)
         .with_resolved_module_constants(resolved_constants)
         .with_generic_declarations(Rc::clone(&module_view.generic_declarations_by_path))

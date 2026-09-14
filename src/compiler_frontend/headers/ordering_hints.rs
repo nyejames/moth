@@ -26,7 +26,7 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind, TokenRange};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
@@ -194,6 +194,7 @@ pub(super) fn dependency_path_for_local_name(
 /// path handles and their prepared classification without parsing any expression.
 pub(super) fn collect_content_source_ordering_hints(
     headers: &mut [Header],
+    source_tokens: &FileTokens,
     file_references: &PreparedFileReferenceTable,
     path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
@@ -205,7 +206,7 @@ pub(super) fn collect_content_source_ordering_hints(
     for header in headers {
         let Header {
             kind,
-            tokens,
+            tokens: token_range,
             local_ordering_hints,
             ..
         } = header;
@@ -224,11 +225,12 @@ pub(super) fn collect_content_source_ordering_hints(
             // Const-template tokens cover both the template head and body, including the
             // top-level compile-time fragments folded before body emission.
             HeaderKind::ConstTemplate { .. } => {
-                scan_tokens_for_content_sources(
-                    &tokens.tokens,
+                scan_token_range_for_content_sources(
+                    *token_range,
+                    source_tokens,
                     &content_targets,
                     local_ordering_hints,
-                );
+                )?;
             }
 
             HeaderKind::Function { signature, .. } => {
@@ -303,6 +305,32 @@ fn content_source_targets(
     }
 
     Ok(targets)
+}
+
+fn scan_token_range_for_content_sources(
+    range: TokenRange,
+    source_tokens: &FileTokens,
+    content_targets: &FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>,
+    hints: &mut HashSet<LocalDeclarationOrderingHint>,
+) -> Result<(), CompilerError> {
+    if range.source() != source_tokens.file_id {
+        return Err(CompilerError::compiler_error(
+            "content ordering range belongs to a different source token owner",
+        ));
+    }
+    let start = range.start().index();
+    let end = range.end().index();
+    if end > source_tokens.tokens.len() {
+        return Err(CompilerError::compiler_error(
+            "content ordering range exceeds its source token owner",
+        ));
+    }
+    scan_tokens_for_content_sources(
+        &source_tokens.tokens[start..end],
+        content_targets,
+        hints,
+    );
+    Ok(())
 }
 
 /// Insert one content hint for every path token in the slice whose row is a content source.

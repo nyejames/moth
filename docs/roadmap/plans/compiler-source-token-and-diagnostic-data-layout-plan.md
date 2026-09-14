@@ -954,9 +954,14 @@ Slice 3E3 decision (2026-09-14): complete synthetic Moth and Moth-template outpu
 `MothPrepared` handoff variant; template detection reads the authoritative `SourceDatabase` kind,
 and ordered `PreparedSourceSlots` values are consumed once at aggregation. Existing selected-text
 and synthetic local-source caches remain until their later lifetime/source-slot slices.
-- [ ] **3E4 — contiguous retained syntax:** add half-open `TokenRange { source, start, end }`,
+- [x] **3E4 — contiguous retained syntax:** add half-open `TokenRange { source, start, end }`,
   replace contiguous `Header::tokens` bodies with ranges, remove repeated `Header::source_file` and
   change function/template body capture to record boundaries instead of cloning tokens
+Slice 3E4 decision (2026-09-14): contiguous header and function/template bodies now retain checked
+`TokenRange` views over one canonical `Arc<FileTokens>` owner per tokenized source; declaration paths
+remain separate, while segmented `start` syntax and persistent generic materialisation remain
+explicitly transitional for 3E5 and 3E7. Plain Markdown keeps its empty range and no-token path,
+using only checked source identity and frozen empty path-syntax adapters for its synthetic constant.
 - [ ] **3E5 — segmented start-body syntax:** add `TokenSequenceId` into a source-local range-list
   store whose entries are 8-byte `{ start, end }` token-index pairs and whose owner stores
   `SourceId` once; expose one `TokenSequenceView` so contiguous and segmented bodies use the same

@@ -464,7 +464,13 @@ where
             crate::timing::TimingMetric::FrontendGeneratedAstEmit,
             phase_context.timing_context
         );
-        AstEmitter::new(phase_context, &mut environment, 1, path_fork)
+        AstEmitter::new(
+            phase_context,
+            &mut environment,
+            1,
+            path_fork,
+            FxHashMap::default(),
+        )
             .with_generic_call_site_identity_handle(
                 requester_context.frozen_identity_handle.clone(),
             )

@@ -411,7 +411,7 @@ Generic of A must {trait_name}\n"
                         }
                     }
                     generated_header_names.push(path_fork.render_portable(
-                        header.tokens.src_path,
+                        header.declaration_path,
                         table,
                         &mut path_scratch,
                     ));
@@ -426,7 +426,7 @@ Generic of A must {trait_name}\n"
                 HeaderKind::TraitIncompatibility { incompatibility } => {
                     header_counts[2] += 1;
                     generated_header_names.push(path_fork.render_portable(
-                        header.tokens.src_path,
+                        header.declaration_path,
                         table,
                         &mut path_scratch,
                     ));

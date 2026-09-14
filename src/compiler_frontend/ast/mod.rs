@@ -175,6 +175,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -304,6 +305,8 @@ pub struct AstBuildResult {
 /// WHY: `Ast::new` should receive one named contract, not a loose list of parameters.
 pub(in crate::compiler_frontend) struct AstBuildInput {
     pub headers: Vec<Header>,
+    pub source_token_streams:
+        FxHashMap<SourceId, Arc<crate::compiler_frontend::tokenizer::tokens::FileTokens>>,
     pub module_symbols: ModuleSymbols,
     pub binding_environment: HeaderBindingEnvironment,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
@@ -337,13 +340,14 @@ impl Ast {
     ) -> Result<AstBuildResult, CompilerMessages> {
         let AstBuildInput {
             headers,
+            source_token_streams,
             module_symbols,
             binding_environment,
             top_level_const_fragments,
             source_build_config_contract_names,
         } = input;
-
         reset_ast_counters();
+
 
         let header_count = headers.len();
         let ast_header_counts = AstHeaderCounterSnapshot::from_headers(&headers);
@@ -361,6 +365,7 @@ impl Ast {
             AstEnvironmentInput {
                 module_symbols,
                 binding_environment,
+                source_token_streams: source_token_streams.clone(),
             },
             string_table,
         )?;
@@ -373,11 +378,16 @@ impl Ast {
                 phase_context.timing_metric_family.emit(),
                 phase_context.timing_context
             );
-            AstEmitter::new(&phase_context, &mut environment, header_count, path_fork)
-                .emit(headers, string_table)?
+            AstEmitter::new(
+                &phase_context,
+                &mut environment,
+                header_count,
+                path_fork,
+                source_token_streams,
+            )
+            .emit(headers, string_table)?
         };
         let generic_instance_count = emitted.generic_instance_count;
-
         let build_result = {
             timing_scope_attributed!(
                 timing_guard,

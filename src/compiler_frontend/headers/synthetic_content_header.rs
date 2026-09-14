@@ -16,7 +16,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenRange};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -65,13 +65,8 @@ pub(crate) fn synthetic_content_header(
 ) -> Result<Header, CompilerError> {
     let header_path = content_constant_path(input.source_file, path_fork, string_table)?;
 
-    let header_tokens = FileTokens::new_deferred_with_identity(
-        header_path,
-        input.file_id,
-        input.canonical_os_path,
-        Vec::new(),
-    );
-
+    let header_tokens =
+        TokenRange::from_raw(input.file_id, 0, 0).expect("empty synthetic header range is valid");
     let declaration = DeclarationSyntax {
         binding_mode: BindingMode::CompileTimeConstant,
         type_annotation: ParsedTypeRef::BuiltinString { span: None },
@@ -88,7 +83,8 @@ pub(crate) fn synthetic_content_header(
         local_ordering_hints: HashSet::new(),
         name_span: None,
         tokens: header_tokens,
-        source_file: input.source_file,
+        declaration_path: header_path,
+        transitional_tokens: None,
         capacity_references: Vec::new(),
     })
 }

@@ -164,12 +164,12 @@ pub(crate) fn build_resolved_public_trait_roots(
 
     for header in sorted_headers {
         let is_reexported_trait = matches!(header.kind, HeaderKind::Trait { .. })
-            && reexport_target_paths.contains(&header.tokens.src_path);
+            && reexport_target_paths.contains(&header.declaration_path);
         if !(is_active_root_public_trait_declaration(header) || is_reexported_trait) {
             continue;
         }
 
-        let path = &header.tokens.src_path;
+        let path = &header.declaration_path;
         trait_roots.push(build_trait_root(path, trait_environment, string_table)?);
     }
 

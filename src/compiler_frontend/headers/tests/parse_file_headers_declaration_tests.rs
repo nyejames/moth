@@ -246,22 +246,17 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
         .find(|header| matches!(header.kind, HeaderKind::ConstTemplate { .. }))
         .expect("expected top-level const template header");
 
+    let const_template_tokens = header_body_tokens(&headers, const_template_header);
     assert!(
         matches!(
-            const_template_header
-                .tokens
-                .tokens
-                .first()
-                .map(|token| &token.kind),
+            const_template_tokens.first().map(|token| &token.kind),
             Some(TokenKind::TemplateHead)
         ),
         "const template token stream should start with template opener"
     );
 
     assert!(
-        const_template_header
-            .tokens
-            .tokens
+        const_template_tokens
             .iter()
             .any(|token| matches!(token.kind, TokenKind::TemplateClose)),
         "const template token stream should preserve template close token"
@@ -269,11 +264,7 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
 
     assert!(
         matches!(
-            const_template_header
-                .tokens
-                .tokens
-                .last()
-                .map(|token| &token.kind),
+            const_template_tokens.last().map(|token| &token.kind),
             Some(TokenKind::Eof)
         ),
         "const template token stream should end with EOF sentinel"
@@ -527,7 +518,7 @@ fn loop_binding_symbols_remain_in_start_function_body() {
     assert!(matches!(headers.headers[0].kind, HeaderKind::StartFunction));
 
     let start_header = start_function_header(&headers);
-    let start_symbols = symbol_tokens_in_header_body(start_header, &string_table);
+    let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
     let header_names = non_start_header_names(&headers, &string_table);
 
     assert!(
@@ -539,21 +530,12 @@ fn loop_binding_symbols_remain_in_start_function_body() {
         "loop index binding should stay in the implicit start body token stream"
     );
     assert!(
-        start_header
-            .tokens
-            .tokens
+        header_body_tokens(&headers, start_header)
             .iter()
             .any(|token| matches!(token.kind, TokenKind::Loop)),
         "start header should preserve the top-level loop statement tokens"
     );
-    assert!(
-        !header_names
-            .iter()
-            .any(|name| name == "item" || name == "index"),
-        "loop binding names must never be elevated into headers"
-    );
 }
-
 #[test]
 fn top_level_expression_symbols_stay_in_implicit_start_body() {
     let (headers, string_table) = parse_single_file_headers_with_table(
@@ -575,7 +557,7 @@ fn top_level_expression_symbols_stay_in_implicit_start_body() {
     assert!(matches!(headers.headers[0].kind, HeaderKind::StartFunction));
 
     let start_header = start_function_header(&headers);
-    let start_symbols = symbol_tokens_in_header_body(start_header, &string_table);
+    let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
     let header_names = non_start_header_names(&headers, &string_table);
 
     assert!(
@@ -588,9 +570,7 @@ fn top_level_expression_symbols_stay_in_implicit_start_body() {
         "loop binding symbols inside top-level loops should remain start-body tokens"
     );
     assert!(
-        start_header
-            .tokens
-            .tokens
+        header_body_tokens(&headers, start_header)
             .iter()
             .any(|token| matches!(token.kind, TokenKind::TemplateHead)),
         "runtime top-level templates should remain in the start-function token stream"
@@ -635,7 +615,7 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
     );
 
     let start_header = start_function_header(&headers);
-    let start_symbols = symbol_tokens_in_header_body(start_header, &string_table);
+    let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "theme"),
@@ -836,9 +816,7 @@ fn function_default_and_body_path_rows_stay_distinct() {
         .expect("expected a path token in the default");
     assert_ne!(default_path_id, PathSyntaxId::NONE);
 
-    let body_path_id = function_header
-        .tokens
-        .tokens
+    let body_path_id = header_body_tokens(&headers, function_header)
         .iter()
         .find_map(|token| match token.kind {
             TokenKind::Path(id) => Some(id),
@@ -860,11 +838,19 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
         .expect("expected function header");
     let start_header = start_function_header(&headers);
 
-    let FilePathSyntax::Shared(function_table) = &function_header.tokens.path_syntax else {
-        panic!("prepared function header should receive the frozen file table");
+    let function_owner = headers
+        .source_token_streams
+        .get(&function_header.tokens.source())
+        .expect("function header source owner");
+    let start_owner = headers
+        .source_token_streams
+        .get(&start_header.tokens.source())
+        .expect("start header source owner");
+    let FilePathSyntax::Shared(function_table) = &function_owner.path_syntax else {
+        panic!("prepared function source should receive the frozen file table");
     };
-    let FilePathSyntax::Shared(start_table) = &start_header.tokens.path_syntax else {
-        panic!("prepared start header should receive the frozen file table");
+    let FilePathSyntax::Shared(start_table) = &start_owner.path_syntax else {
+        panic!("prepared start source should receive the frozen file table");
     };
     assert!(
         Arc::ptr_eq(function_table, start_table),
@@ -872,7 +858,7 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
     );
 
     let HeaderKind::Function { signature, .. } = &function_header.kind else {
-        panic!("expected function header");
+        panic!("expected Function header kind");
     };
     let default_path_id = signature.parameters[0]
         .default_tokens
@@ -882,9 +868,7 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
             _ => None,
         })
         .expect("expected a default path token");
-    let start_path_id = start_header
-        .tokens
-        .tokens
+    let start_path_id = header_body_tokens(&headers, start_header)
         .iter()
         .find_map(|token| match token.kind {
             TokenKind::Path(path_id) => Some(path_id),

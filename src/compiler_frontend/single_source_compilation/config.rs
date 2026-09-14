@@ -281,8 +281,11 @@ fn compile_prepared_config_source(
 
     // Preserve key-name spans before AST consumes the headers. The full header path becomes the
     // declaration ID, so every folded declaration can carry its exact authored name span.
-    let authored_key_name_provenance =
-        collect_authored_config_key_name_provenance(&sorted.headers, authored_scope);
+    let authored_key_name_provenance = collect_authored_config_key_name_provenance(
+        &sorted.headers,
+        authored_scope,
+        &sorted.module_symbols.source_paths_by_source_id,
+    );
 
     // Fold the ordered declarations. Config stops here: no HIR, borrow facts or interface.
     let config_resolution = ConfigResolutionServices::new(
@@ -293,6 +296,7 @@ fn compile_prepared_config_source(
     let ast = Ast::new(
         AstBuildInput {
             headers: sorted.headers,
+            source_token_streams: sorted.source_token_streams,
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
@@ -737,20 +741,24 @@ fn prepare_config_file(
 
 /// Collect authored key-name spans for config key-identity diagnostics.
 ///
-/// Imported support declarations are excluded because they are not config entries.
 fn collect_authored_config_key_name_provenance(
     headers: &[Header],
     authored_scope: PathId,
+    source_paths_by_source_id: &rustc_hash::FxHashMap<SourceId, PathId>,
 ) -> HashMap<PathId, Option<SourceSpan>> {
     let mut key_name_provenance = HashMap::new();
     for header in headers {
         let HeaderKind::Constant { .. } = &header.kind else {
             continue;
         };
-        if header.source_file != authored_scope {
+        if source_paths_by_source_id
+            .get(&header.tokens.source())
+            .copied()
+            != Some(authored_scope)
+        {
             continue;
         }
-        key_name_provenance.insert(header.tokens.src_path, header.name_span);
+        key_name_provenance.insert(header.declaration_path, header.name_span);
     }
     key_name_provenance
 }
@@ -800,7 +808,7 @@ fn validate_authored_config_surface(
 
         if let Some(reason) = reason {
             errors.push(config_diagnostic(
-                path_fork.component(header.tokens.src_path),
+                path_fork.component(header.declaration_path),
                 reason,
                 header.name_span,
             ));

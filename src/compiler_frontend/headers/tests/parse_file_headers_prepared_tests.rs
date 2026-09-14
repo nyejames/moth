@@ -1,6 +1,34 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
+fn prepared_header_body_tokens<'a>(
+    prepared: &'a PreparedHeaderSyntax,
+    header: &'a Header,
+) -> &'a [Token] {
+    if let Some(tokens) = header.transitional_tokens.as_ref() {
+        return &tokens.tokens;
+    }
+    let source = prepared
+        .source_token_streams
+        .get(&header.tokens.source())
+        .expect("header body range has no prepared source token owner");
+    &source.tokens[header.tokens.start().index()..header.tokens.end().index()]
+}
+
+fn output_header_body_tokens<'a>(
+    output: &'a FileFrontendPrepareOutput,
+    header: &'a Header,
+) -> &'a [Token] {
+    if let Some(tokens) = header.transitional_tokens.as_ref() {
+        return &tokens.tokens;
+    }
+    let source = output
+        .source_token_stream
+        .as_ref()
+        .expect("prepared source retains its token owner");
+    &source.tokens[header.tokens.start().index()..header.tokens.end().index()]
+}
+
 /// Extended token spans keep their source-owned table through aggregation. Later span producers
 /// may append to that same builder without invalidating the retained header's earlier handles.
 #[test]
@@ -27,7 +55,7 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let literal = prepared
         .headers
         .iter()
-        .flat_map(|header| header.tokens.tokens.iter())
+        .flat_map(|header| prepared_header_body_tokens(&prepared, header).iter())
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("the retained header must keep its long string literal");
     let resolved = literal.span.resolve_with(resolver);
@@ -58,10 +86,11 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     .expect("tokenization should succeed");
     let mut outputs = [prepare_file_from_tokens(file_tokens, &file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
     .expect("preparation should succeed")];
-    let literal_span = outputs[0]
+    let output = &outputs[0];
+    let literal_span = output
         .headers
         .iter()
-        .flat_map(|header| header.tokens.tokens.iter())
+        .flat_map(|header| output_header_body_tokens(output, header).iter())
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("the function body should retain its long literal")
         .span;

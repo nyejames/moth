@@ -176,27 +176,33 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
 
     let reachable_path =
         fs::canonicalize(src.join("reachable.moth")).expect("reachable source should canonicalize");
-    let reachable_header = module
+    let prepared_header_syntax = &module
         .prepared
         .semantic
-        .prepared_header_syntax
+        .prepared_header_syntax;
+    let reachable_header = prepared_header_syntax
         .headers
         .iter()
-        .find(|header| header.tokens.canonical_os_path.as_deref() == Some(reachable_path.as_path()))
+        .find(|header| {
+            prepared_header_syntax
+                .source_token_streams
+                .get(&header.tokens.source())
+                .and_then(|owner| owner.canonical_os_path.as_deref())
+                == Some(reachable_path.as_path())
+        })
         .expect("reachable source should retain one header stream");
+    let reachable_owner = prepared_header_syntax
+        .source_token_streams
+        .get(&reachable_header.tokens.source())
+        .expect("reachable source should retain its token owner");
     assert!(
-        reachable_header
-            .tokens
-            .path_syntax
-            .paths()
-            .iter()
-            .any(|path| {
-                module.prepared.semantic.path_fork.render_portable(
-                    path.root,
-                    &module.prepared.semantic.string_table,
-                    &mut Vec::new(),
-                ) == "leaf"
-            }),
+        reachable_owner.path_syntax.paths().iter().any(|path| {
+            module.prepared.semantic.path_fork.render_portable(
+                path.root,
+                &module.prepared.semantic.string_table,
+                &mut Vec::new(),
+            ) == "leaf"
+        }),
         "reachable dependency path should survive the non-identity string remap"
     );
 }

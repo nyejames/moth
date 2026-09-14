@@ -34,12 +34,13 @@ use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenRange};
 use crate::compiler_frontend::traits::syntax::{
     TraitConformanceSyntax, TraitDeclarationSyntax, TraitIncompatibilitySyntax,
 };
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use std::collections::HashSet;
+use rustc_hash::FxHashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -56,6 +57,11 @@ use std::sync::Arc;
 /// header parsing. `declarations` inside it is empty until dependency sorting completes.
 pub struct PreparedHeaderSyntax {
     pub headers: Vec<Header>,
+    /// One shared transitional source stream per tokenized `SourceId`.
+    ///
+    /// The stream owns the sole canonical `SourceTokens` allocation and remains available only
+    /// so pre-3F consumers can construct bounded parser adapters from retained ranges.
+    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<FileTokens>>,
     /// Provider-independent source `#Config` declarations, normalized from top-level constant
     /// shells before any provider binding or AST expression resolution.
     ///
@@ -106,6 +112,8 @@ pub struct PreparedHeaderSyntax {
 /// before the provider graph has compiled.
 pub struct BoundModuleHeaders {
     pub headers: Vec<Header>,
+    /// The same one-owner source streams carried through provider binding for AST body adapters.
+    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<FileTokens>>,
     /// Provider-independent source `#Config` declarations retained through binding for the
     /// module-local static-value projection in AST construction.
     pub source_build_config_contracts: Vec<SourceBuildConfigContract>,
@@ -472,10 +480,14 @@ pub struct Header {
     /// Exact authored declaration-name span; synthetic headers use `None`.
     pub name_span: Option<SourceSpan>,
 
-    // Token Body (for functions / templates) and info about canonical_os_path
-    pub tokens: FileTokens,
-
-    pub source_file: PathId,
+    // Contiguous retained body syntax is a source-qualified range. The source token owner lives
+    // once in `PreparedHeaderSyntax::source_token_streams`.
+    pub tokens: TokenRange,
+    /// Complete declaration path (the former `FileTokens::src_path` field).
+    pub declaration_path: PathId,
+    /// Explicit pre-3F escape hatch for the segmented implicit `start` body. This is intentionally
+    /// absent for contiguous function/template bodies and will be replaced by 3E5.
+    pub(crate) transitional_tokens: Option<FileTokens>,
     /// Bare fixed-capacity constant references discovered in type annotations on this header.
     ///
     /// WHAT: value-namespace references from fixed-collection capacity annotations.
@@ -483,7 +495,6 @@ pub struct Header {
     ///      uses them, even when the declaration itself is not a constant.
     pub capacity_references: Vec<InitializerReference>,
 }
-
 impl Display for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Header kind: {:#?}", self.kind)
@@ -491,7 +502,6 @@ impl Display for Header {
 }
 
 impl TopLevelConstFragment {
-    /// Remap the complete path identity after its path fork merges.
     pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.header_path = remap.get(self.header_path);
     }
@@ -962,6 +972,9 @@ fn rebind_declaration_source_identity(
 
 impl Header {
     /// Remap every interned string owned by this header into the merged global string table.
+    ///
+    /// A `TokenRange` has no string payload. The explicit transitional start adapter remains
+    /// mutable until the prepared-file publication boundary and is remapped here.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.kind.remap_string_ids(remap);
         let hints = std::mem::take(&mut self.local_ordering_hints);
@@ -972,7 +985,9 @@ impl Header {
                 hint
             })
             .collect();
-        self.tokens.remap_string_ids(remap);
+        if let Some(tokens) = &mut self.transitional_tokens {
+            tokens.remap_string_ids(remap);
+        }
         for reference in &mut self.capacity_references {
             reference.remap_string_ids(remap);
         }
@@ -988,8 +1003,10 @@ impl Header {
                 hint
             })
             .collect();
-        self.tokens.remap_path_ids(remap);
-        self.source_file = remap.get(self.source_file);
+        self.declaration_path = remap.get(self.declaration_path);
+        if let Some(tokens) = &mut self.transitional_tokens {
+            tokens.remap_path_ids(remap);
+        }
     }
 
     fn validate_required_source_prefixes(
@@ -997,7 +1014,7 @@ impl Header {
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
     ) -> Result<(), CompilerError> {
-        if !path_fork.starts_with(self.tokens.src_path, provisional_source_file) {
+        if !path_fork.starts_with(self.declaration_path, provisional_source_file) {
             return Err(CompilerError::compiler_error(
                 "source-owned retained path is missing its provisional source prefix",
             ));
@@ -1012,11 +1029,11 @@ impl Header {
     pub fn rebind_source_identity(
         &mut self,
         file_id: SourceId,
+        provisional_source_file: PathId,
         logical_path: PathId,
         canonical_os_path: std::path::PathBuf,
         path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerError> {
-        let provisional_source_file = self.source_file;
         self.validate_required_source_prefixes(provisional_source_file, path_fork)?;
         self.kind.rebind_source_identity(
             file_id,
@@ -1039,16 +1056,20 @@ impl Header {
         if let Some(name_span) = self.name_span {
             self.name_span = Some(SourceSpan::new(file_id, name_span.local()));
         }
-        let rebound_header_path = rebind_required_path(
-            self.tokens.src_path,
+        self.declaration_path = rebind_required_path(
+            self.declaration_path,
             provisional_source_file,
             logical_path,
             path_fork,
         )?;
-        self.tokens
-            .rebind_file_identity(logical_path, file_id, Some(canonical_os_path));
-        self.tokens.src_path = rebound_header_path;
-        self.source_file = logical_path;
+        self.tokens = self.tokens.rebind_source(file_id);
+        if let Some(tokens) = &mut self.transitional_tokens {
+            tokens.rebind_source_owner_identity(
+                logical_path,
+                file_id,
+                Some(canonical_os_path),
+            );
+        }
         Ok(())
     }
 }
@@ -1356,6 +1377,9 @@ pub struct FileFrontendPrepareOutput {
     pub canonical_os_path: Option<std::path::PathBuf>,
     pub headers: Vec<Header>,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
+    /// The moved source stream retains the one canonical `SourceTokens` owner for this file.
+    /// It is shared at module scope only so pre-3F consumers can build bounded adapters.
+    pub(crate) source_token_stream: Option<Arc<FileTokens>>,
     /// Number of const templates parsed in this file.
     ///
     /// WHY: const-template synthetic names must remain unique across the module while per-file
@@ -1416,7 +1440,13 @@ impl PreparedFilePathSyntax {
         })
     }
 
-    fn validate_header_stream(&self, header_tokens: &FileTokens) -> Result<(), CompilerError> {
+    fn validate_header_stream(
+        &self,
+        header_tokens: Option<&FileTokens>,
+    ) -> Result<(), CompilerError> {
+        let Some(header_tokens) = header_tokens else {
+            return Ok(());
+        };
         match self {
             Self::Preparing(_) => header_tokens.require_deferred_path_syntax(),
             Self::Frozen(table) => header_tokens.require_shared_path_syntax(table),
@@ -1558,6 +1588,15 @@ impl FileFrontendPrepareOutput {
             return Ok(());
         }
 
+        if let Some(stream) = self.source_token_stream.as_mut() {
+            Arc::get_mut(stream)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "prepared source token stream was shared before string remapping",
+                    )
+                })?
+                .remap_string_ids(remap);
+        }
         for clause in &mut self.file_dependency_clauses {
             clause.remap_string_ids(remap);
         }
@@ -1598,6 +1637,15 @@ impl FileFrontendPrepareOutput {
         if remap.is_identity() {
             return Ok(());
         }
+        if let Some(stream) = self.source_token_stream.as_mut() {
+            Arc::get_mut(stream)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "prepared source token stream was shared before path remapping",
+                    )
+                })?
+                .remap_path_ids(remap);
+        }
         self.source_file = remap.get(self.source_file);
         for clause in &mut self.file_dependency_clauses {
             clause.remap_path_ids(remap);
@@ -1636,6 +1684,19 @@ impl FileFrontendPrepareOutput {
         self.source_file = final_logical_path;
         self.file_id = final_file_id;
         self.canonical_os_path = Some(canonical_os_path.clone());
+        if let Some(stream) = self.source_token_stream.as_mut() {
+            Arc::get_mut(stream)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "prepared source token stream was shared before source rebinding",
+                    )
+                })?
+                .rebind_source_owner_identity(
+                    final_logical_path,
+                    final_file_id,
+                    Some(canonical_os_path.clone()),
+                );
+        }
 
         for clause in &mut self.file_dependency_clauses {
             clause.commit_source_rebinding(final_file_id, final_logical_path);
@@ -1648,6 +1709,7 @@ impl FileFrontendPrepareOutput {
         for header in &mut self.headers {
             header.rebind_source_identity(
                 final_file_id,
+                provisional_source_file,
                 final_logical_path,
                 canonical_os_path.clone(),
                 path_fork,
@@ -1697,14 +1759,64 @@ impl FileFrontendPrepareOutput {
         // at the same owner boundary after all construction-time remaps; the frozen generic
         // materialisation path finishes its own remapped clone frozen instead.
         let path_syntax = self.path_syntax.freeze_preflighted();
-        for header in &mut self.headers {
-            header
-                .tokens
+        if let Some(stream) = self.source_token_stream.as_mut() {
+            Arc::get_mut(stream)
+                .expect("prepared source token stream gained a shared view before freeze")
                 .attach_preflighted_shared_path_syntax(Arc::clone(&path_syntax));
-            header.tokens.freeze_numeric_literals();
+            Arc::get_mut(stream)
+                .expect("prepared source token stream gained a shared view before numeric freeze")
+                .freeze_numeric_literals();
+        }
+        for header in &mut self.headers {
+            if let Some(tokens) = header.transitional_tokens.as_mut() {
+                tokens.attach_preflighted_shared_path_syntax(Arc::clone(&path_syntax));
+                tokens.freeze_numeric_literals();
+            }
         }
         Ok(())
     }
+    /// Install the one moved source stream after parsing has finished.
+    pub(crate) fn install_source_token_stream(
+        &mut self,
+        stream: FileTokens,
+    ) -> Result<(), CompilerError> {
+        if stream.file_id != self.file_id {
+            return Err(CompilerError::compiler_error(
+                "prepared source token stream identity does not match its file output",
+            ));
+        }
+        self.source_token_stream = Some(Arc::new(stream));
+        Ok(())
+    }
+
+    /// Return the bounded legacy token slice represented by one retained header range.
+    pub(crate) fn body_tokens<'a>(
+        &'a self,
+        header: &'a Header,
+    ) -> Result<&'a [Token], CompilerError> {
+        if let Some(tokens) = header.transitional_tokens.as_ref() {
+            return Ok(&tokens.tokens);
+        }
+        if header.tokens.is_empty() {
+            return Ok(&[]);
+        }
+        let source = self.source_token_stream.as_ref().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "non-empty retained token range has no prepared source stream",
+            )
+        })?;
+        if header.tokens.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "retained token range does not match its prepared source stream",
+            ));
+        }
+        let start = header.tokens.start().index();
+        let end = header.tokens.end().index();
+        source.tokens.get(start..end).ok_or_else(|| {
+            CompilerError::compiler_error("retained token range is outside its source stream")
+        })
+    }
+
 
     /// Confirm an output crossed its whole-file validation and freeze boundary earlier.
     ///
@@ -1760,13 +1872,15 @@ impl FileFrontendPrepareOutput {
         )?;
 
         for header in &self.headers {
-            self.path_syntax.validate_header_stream(&header.tokens)?;
+            self.path_syntax
+                .validate_header_stream(header.transitional_tokens.as_ref())?;
             validate_header(
                 header,
                 self.file_id,
                 self.source_file,
                 path_syntax,
                 path_fork,
+                self.source_token_stream.as_deref(),
             )?;
         }
 
@@ -1913,25 +2027,41 @@ fn validate_header(
     source_file: PathId,
     path_syntax: &PathSyntaxTable,
     path_fork: &PathInternerFork,
+    source_stream: Option<&FileTokens>,
 ) -> Result<(), CompilerError> {
-    if header.source_file != source_file {
+    if header.tokens.source() != file_id {
         return Err(CompilerError::compiler_error(
-            "retained header source file does not match its prepared-file identity",
+            "retained header token range does not match the prepared file identity",
         ));
     }
-    if !path_fork.starts_with(header.tokens.src_path, source_file) {
+    if !path_fork.starts_with(header.declaration_path, source_file) {
         return Err(CompilerError::compiler_error(
             "retained header path does not use the prepared file's final source prefix",
         ));
     }
-    if header.tokens.file_id != file_id {
+    if let Some(stream) = source_stream {
+        if stream.file_id != file_id {
+            return Err(CompilerError::compiler_error(
+                "prepared source token stream does not match its file identity",
+            ));
+        }
+        stream
+            .source_tokens()?
+            .range(header.tokens.start(), header.tokens.end())
+            .map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "retained header token range is invalid: {error:?}"
+                ))
+            })?;
+    } else if !header.tokens.is_empty() {
         return Err(CompilerError::compiler_error(
-            "retained header token stream does not match the prepared file identity",
+            "synthetic header retained a non-empty range without a source token stream",
         ));
     }
     validate_source_span(header.name_span, file_id, "header name")?;
-    validate_tokens(&header.tokens.tokens, file_id, path_syntax, "header body")?;
-    validate_header_numeric_store(header, file_id)?;
+    if let Some(tokens) = header.transitional_tokens.as_ref() {
+        validate_header_numeric_store(tokens, file_id)?;
+    }
     for hint in &header.local_ordering_hints {
         if hint.origin() == LocalDeclarationOrderingHintOrigin::SourceOwned
             && !path_fork.starts_with(hint.path(), source_file)
@@ -2178,9 +2308,12 @@ fn validate_tokens(
     path_syntax.validate_file_tokens(tokens, file_id, role)
 }
 
-fn validate_header_numeric_store(header: &Header, file_id: SourceId) -> Result<(), CompilerError> {
+fn validate_header_numeric_store(
+    tokens: &FileTokens,
+    file_id: SourceId,
+) -> Result<(), CompilerError> {
     use crate::compiler_frontend::tokenizer::tokens::TokenKind;
-    let store = header.tokens.numeric_literal_store();
+    let store = tokens.numeric_literal_store();
     if let Some(owner) = store.owner_source()
         && owner != file_id
     {
@@ -2188,13 +2321,13 @@ fn validate_header_numeric_store(header: &Header, file_id: SourceId) -> Result<(
             "retained header numeric store does not match the prepared file identity",
         ));
     }
-    let ids = header.tokens.numeric_literal_ids();
-    if ids.len() != header.tokens.tokens.len() {
+    let ids = tokens.numeric_literal_ids();
+    if ids.len() != tokens.tokens.len() {
         return Err(CompilerError::compiler_error(
             "retained header numeric handles do not align with the retained token slice",
         ));
     }
-    for (token, id) in header.tokens.tokens.iter().zip(ids.iter()) {
+    for (token, id) in tokens.tokens.iter().zip(ids.iter()) {
         let is_numeric = matches!(token.kind, TokenKind::NumericLiteral(_));
         match (is_numeric, id) {
             (true, Some(handle)) => {

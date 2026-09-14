@@ -90,11 +90,13 @@ pub(crate) fn add_constant_initializer_dependencies(
     for (header_index, header) in headers.iter().enumerate() {
         match &header.kind {
             HeaderKind::Constant { .. } => {
-                let path = header.tokens.src_path;
+                let path = header.declaration_path;
                 constant_positions.insert(
                     path,
                     ConstantPosition {
-                        source_file: header.source_file,
+                        source_file: module_symbols
+                            .source_path_for_header(header)
+                            .expect("header body range has no prepared source-path identity"),
                         header_index,
                     },
                 );
@@ -103,7 +105,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                 }
             }
             HeaderKind::Struct { .. } | HeaderKind::Choice { .. } => {
-                struct_or_choice_paths.insert(header.tokens.src_path);
+                struct_or_choice_paths.insert(header.declaration_path);
             }
             HeaderKind::ConstTemplate { .. } => {}
             _ => {}
@@ -134,12 +136,16 @@ pub(crate) fn add_constant_initializer_dependencies(
             continue;
         }
 
-        let visibility = match binding_environment.visibility_for(&header.source_file) {
+        let visibility = match binding_environment.visibility_for(
+            &module_symbols
+                .source_path_for_header(header)
+                .expect("header body range has no prepared source-path identity"),
+        ) {
             Ok(v) => v,
             Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error)),
         };
 
-        let current_path = header.tokens.src_path;
+        let current_path = header.declaration_path;
 
         let all_refs = initializer_refs.iter().chain(&header.capacity_references);
         for reference in all_refs {
@@ -169,7 +175,9 @@ pub(crate) fn add_constant_initializer_dependencies(
                             missing_constant_position_error(&path, path_fork, string_table),
                         ));
                     };
-                    let current_source_file = header.source_file;
+                    let current_source_file = module_symbols
+                        .source_path_for_header(header)
+                        .expect("header body range has no prepared source-path identity");
                     if position.source_file == current_source_file {
                         if position.header_index > reference_header_index {
                             diagnostic_bag.push(same_file_forward_reference_error(

@@ -62,7 +62,7 @@ fn generated_header_path_ends_with_content() {
 
     let header = &output.headers[0];
     let terminal_component = path_fork
-        .try_component(header.tokens.src_path)
+        .try_component(header.declaration_path)
         .expect("generated header path must have a terminal component");
     let header_component = string_table.resolve(terminal_component);
     assert_eq!(

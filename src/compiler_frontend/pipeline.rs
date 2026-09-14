@@ -456,6 +456,7 @@ impl<'a> CompilerFrontend<'a> {
                         .collect(),
                 ),
                 headers: sorted.headers,
+                source_token_streams: sorted.source_token_streams,
                 module_symbols: sorted.module_symbols,
                 binding_environment: sorted.binding_environment,
                 top_level_const_fragments: sorted.top_level_const_fragments,

@@ -18,7 +18,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenRange};
 use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, TraitVisibility};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::syntax::TraitDeclarationSyntax;
@@ -34,6 +34,10 @@ fn trait_header(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Header {
+    let declaration_path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
+    let token_index = TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind: HeaderKind::Trait {
             declaration: TraitDeclarationSyntax {
@@ -48,12 +52,10 @@ fn trait_header(
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: Some(root_span()),
-        tokens: FileTokens::new(
-            path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
-            SourceId::COMPILATION_ROOT,
-            Vec::new(),
-        ),
-        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
+        tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
+            .expect("equal token indexes always form a valid range"),
+        declaration_path,
+        transitional_tokens: None,
         capacity_references: Vec::new(),
     }
 }
@@ -65,6 +67,10 @@ fn function_header(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Header {
+    let declaration_path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
+    let token_index = TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind: HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -74,15 +80,14 @@ fn function_header(
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: Some(root_span()),
-        tokens: FileTokens::new(
-            path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
-            SourceId::COMPILATION_ROOT,
-            Vec::new(),
-        ),
-        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
+        tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
+            .expect("equal token indexes always form a valid range"),
+        declaration_path,
+        transitional_tokens: None,
         capacity_references: Vec::new(),
     }
 }
+
 
 fn this_type(env: &mut TypeEnvironment, string_table: &mut StringTable) -> TypeId {
     env.register_synthetic_generic_parameter(string_table.intern("This"))
@@ -302,9 +307,9 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
         &mut path_fork,
     )];
     // Core definitions use the root path as their canonical path, so point this synthetic
-    // header at the same production-owned path after constructing its source metadata through
-    // the caller-owned fork.
-    headers[0].tokens.src_path = PathId::ROOT;
+    // header at the same production-owned declaration path after constructing its source
+    // metadata through the caller-owned fork.
+    headers[0].declaration_path = PathId::ROOT;
 
     let result = build_resolved_public_trait_roots(
         &headers,

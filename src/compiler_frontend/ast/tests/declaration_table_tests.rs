@@ -21,7 +21,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenRange};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
@@ -811,16 +811,18 @@ fn ordered_declaration(
     }
 }
 
-fn semantic_header(kind: HeaderKind, path: PathId, string_table: &mut StringTable) -> Header {
-    let mut path_fork = PathInternerFork::empty();
+fn semantic_header(kind: HeaderKind, path: PathId, _string_table: &mut StringTable) -> Header {
+    let token_index = TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind,
         file_role: FileRole::Normal,
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: Default::default(),
         name_span: None,
-        tokens: FileTokens::new(path, SourceId::COMPILATION_ROOT, Vec::new()),
-        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
+        tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
+            .expect("equal token indexes always form a valid range"),
+        declaration_path: path,
+        transitional_tokens: None,
         capacity_references: Vec::new(),
     }
 }

@@ -23,6 +23,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::collect_symbol_references;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 
@@ -41,7 +42,7 @@ pub(crate) fn prepare_moth_template_file(
     let token_count = file_tokens.length;
     let token_stats = file_tokens.token_stats;
     let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
-    let context = MothTemplatePrepareContext::new(file_tokens, file_id, string_table);
+    let context = MothTemplatePrepareContext::new(&file_tokens, file_id, string_table);
     let content_header = context.content_header(string_table, path_fork)?;
     let config_owned_path_syntax_ids = match &content_header.kind {
         HeaderKind::Constant { declaration }
@@ -76,6 +77,7 @@ pub(crate) fn prepare_moth_template_file(
     // body takes the same token-level content ordering facts as authored shells.
     collect_content_source_ordering_hints(
         &mut headers,
+        &file_tokens,
         &structural_file_references,
         path_syntax.table(),
         string_table,
@@ -95,6 +97,7 @@ pub(crate) fn prepare_moth_template_file(
         canonical_os_path: context.canonical_os_path,
         headers,
         top_level_const_fragments: Vec::new(),
+        source_token_stream: Some(Arc::new(file_tokens)),
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,
@@ -115,19 +118,20 @@ struct MothTemplatePrepareContext {
 }
 
 impl MothTemplatePrepareContext {
-    fn new(file_tokens: FileTokens, file_id: SourceId, string_table: &mut StringTable) -> Self {
+    fn new(file_tokens: &FileTokens, file_id: SourceId, string_table: &mut StringTable) -> Self {
         let markdown_directive = string_table.intern(MOTH_TEMPLATE_MARKDOWN_DIRECTIVE);
 
         let body_tokens = file_tokens
             .tokens
-            .into_iter()
+            .iter()
             .filter(|token| !matches!(token.kind, TokenKind::ModuleStart | TokenKind::Eof))
+            .cloned()
             .collect();
 
         Self {
             source_file: file_tokens.src_path,
             file_id,
-            canonical_os_path: file_tokens.canonical_os_path,
+            canonical_os_path: file_tokens.canonical_os_path.clone(),
             body_tokens,
             markdown_directive,
         }

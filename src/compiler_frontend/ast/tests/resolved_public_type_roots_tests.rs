@@ -39,7 +39,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenRange};
 use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, TraitVisibility};
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -56,17 +56,20 @@ fn header(
     src_path: PathId,
     file_role: FileRole,
     export_mode: HeaderExportMode,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
+    _string_table: &mut StringTable,
+    _path_fork: &mut PathInternerFork,
 ) -> Header {
+    let token_index = TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind,
         file_role,
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: None,
-        tokens: FileTokens::new(src_path, SourceId::COMPILATION_ROOT, Vec::new()),
-        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
+        tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
+            .expect("equal token indexes always form a valid range"),
+        declaration_path: src_path,
+        transitional_tokens: None,
         capacity_references: Vec::new(),
     }
 }

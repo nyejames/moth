@@ -114,7 +114,7 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
         .expect("the synthetic test file should be in the source file table")
         .id;
     for header in &mut headers.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
         header.name_span = header
             .name_span
             .map(|span| SourceSpan::new(file_id, span.local()));
@@ -215,8 +215,11 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
             .get_by_canonical_path(path)
             .expect("every prepared projection source should have a file identity")
             .id;
+        module_symbols
+            .source_paths_by_source_id
+            .insert(file_id, source_file);
         for mut header in output.headers {
-            header.tokens.file_id = file_id;
+            header.tokens = header.tokens.rebind_source(file_id);
             header.name_span = header
                 .name_span
                 .map(|span| SourceSpan::new(file_id, span.local()));
@@ -245,7 +248,7 @@ fn header_named<'a>(
         .iter()
         .find(|header| {
             path_fork
-                .try_component(header.tokens.src_path)
+                .try_component(header.declaration_path)
                 .map(|component| string_table.resolve(component) == name)
                 .unwrap_or(false)
         })
@@ -382,8 +385,13 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
     );
     let target_header =
         header_named(&fixture.headers, "value", &fixture.string_table, &fixture.path_fork);
-    let target_path = target_header.tokens.src_path;
-    let target_source = target_header.source_file;
+    let target_path = target_header.declaration_path;
+    let target_source = fixture
+        .module_symbols
+        .source_paths_by_source_id
+        .get(&target_header.tokens.source())
+        .copied()
+        .expect("target header source path should be prepared");
     let expected_span = target_header.name_span;
 
     fixture
@@ -612,7 +620,7 @@ fn active_origin_missing_from_table_fails_internally() {
         .expect("file should be in source file table")
         .id;
     for header in &mut headers.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
     }
 
     // Build a table where every file maps to None (simulating a source-package file outside the
@@ -667,7 +675,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
         .expect("file should be in source file table")
         .id;
     for header in &mut headers.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
     }
 
     let module_origin = StableModuleOriginIdentity::from_portable_path(
@@ -754,11 +762,11 @@ fn conflicting_public_header_ownership_fails_internally() {
     let mut constant_index = 0usize;
     for header in &mut headers.headers {
         if matches!(header.kind, HeaderKind::Constant { .. }) {
-            header.tokens.file_id = if constant_index == 1 {
+            header.tokens = header.tokens.rebind_source(if constant_index == 1 {
                 other_file_id
             } else {
                 active_file_id
-            };
+            });
             constant_index += 1;
         }
     }
@@ -854,11 +862,11 @@ fn struct_header_path(
     for header in headers {
         if matches!(header.kind, HeaderKind::Struct { .. })
             && path_fork
-                .try_component(header.tokens.src_path)
+                .try_component(header.declaration_path)
                 .map(|component| string_table.resolve(component) == name)
                 .unwrap_or(false)
         {
-            return header.tokens.src_path;
+            return header.declaration_path;
         }
     }
     panic!("no public struct header named `{name}` in test headers")
@@ -874,11 +882,11 @@ fn trait_header_path(
     for header in headers {
         if matches!(header.kind, HeaderKind::Trait { .. })
             && path_fork
-                .try_component(header.tokens.src_path)
+                .try_component(header.declaration_path)
                 .map(|component| string_table.resolve(component) == name)
                 .unwrap_or(false)
         {
-            return header.tokens.src_path;
+            return header.declaration_path;
         }
     }
     panic!("no trait header named `{name}` in test headers")
@@ -974,11 +982,11 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in imported_output.headers {
-        header.tokens.file_id = imported_file_id;
+        header.tokens = header.tokens.rebind_source(imported_file_id);
         headers.push(header);
     }
 
@@ -1080,13 +1088,13 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in imported_output.headers {
         // Deliberately retain the compilation-root identity from the unregistered preparation
         // stream.
-        header.tokens.file_id = SourceId::COMPILATION_ROOT;
+        header.tokens = header.tokens.rebind_source(SourceId::COMPILATION_ROOT);
         headers.push(header);
     }
 
@@ -1151,11 +1159,11 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in package_output.headers {
-        header.tokens.file_id = package_file_id;
+        header.tokens = header.tokens.rebind_source(package_file_id);
         headers.push(header);
     }
 
@@ -1230,11 +1238,11 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in impl_output.headers {
-        header.tokens.file_id = impl_file_id;
+        header.tokens = header.tokens.rebind_source(impl_file_id);
         headers.push(header);
     }
 
@@ -1307,11 +1315,11 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in impl_output.headers {
-        header.tokens.file_id = impl_file_id;
+        header.tokens = header.tokens.rebind_source(impl_file_id);
         headers.push(header);
     }
 
@@ -1374,7 +1382,7 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
         .expect("active root file should be present")
         .id;
     for header in &mut headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
     }
 
     let active_origin = StableModuleOriginIdentity::from_portable_path(
@@ -1450,11 +1458,11 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in imported_output.headers {
-        header.tokens.file_id = imported_file_id;
+        header.tokens = header.tokens.rebind_source(imported_file_id);
         headers.push(header);
     }
 
@@ -1520,11 +1528,11 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in impl_output.headers {
-        header.tokens.file_id = impl_file_id;
+        header.tokens = header.tokens.rebind_source(impl_file_id);
         headers.push(header);
     }
 
@@ -1580,7 +1588,7 @@ fn public_source_trait_origin_index_excludes_unexported_private_trait() {
         .id;
     let mut headers: Vec<Header> = Vec::new();
     for mut header in output.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
         headers.push(header);
     }
 
@@ -1635,7 +1643,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in output.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
         headers.push(header);
     }
 
@@ -1700,7 +1708,7 @@ fn public_source_trait_origin_index_rejects_unowned_source_identity() {
 
     for source in [SourceId::COMPILATION_ROOT] {
         for header in &mut headers {
-            header.tokens.file_id = source;
+            header.tokens = header.tokens.rebind_source(source);
         }
         let error = build_public_source_trait_origin_index(
             &source_module_origins,

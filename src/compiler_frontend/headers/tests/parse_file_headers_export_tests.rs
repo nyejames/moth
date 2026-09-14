@@ -317,7 +317,7 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
         .headers
         .iter()
         .find(|h| {
-            matches!(h.kind, HeaderKind::Function { .. }) && h.tokens.src_path != PathId::ROOT
+            matches!(h.kind, HeaderKind::Function { .. }) && h.declaration_path != PathId::ROOT
         })
         .expect("make header should exist");
 

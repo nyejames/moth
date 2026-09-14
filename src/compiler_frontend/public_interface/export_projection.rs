@@ -366,7 +366,7 @@ fn resolve_active_module_origin(
             continue;
         }
 
-        let file_id = header.tokens.file_id;
+        let file_id = header.tokens.source();
 
         let header_origin = source_module_origins
             .origin_for(file_id)?
@@ -412,10 +412,10 @@ fn index_public_nominal_type_origins(
         // A directly-defined public declaration always has a defining name: the header parser
         // records one for every authored declaration shell. A missing name here is an impossible
         // metadata gap, not an intentional exclusion, so it must surface as an internal failure
-        let Some(name) = path_name(header.tokens.src_path, path_fork, string_table) else {
+        let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a directly-defined public nominal type header has no resolvable defining name (path: {:?})",
-                header.tokens.src_path
+                header.declaration_path
             )));
         };
 
@@ -434,7 +434,7 @@ fn index_public_nominal_type_origins(
         let belongs_to_active_module = match active_module_root {
             Some(active_module_root) => module_symbols
                 .canonical_source_by_symbol_path
-                .get(&header.tokens.src_path)
+                .get(&header.declaration_path)
                 .and_then(|source| module_symbols.file_module_membership.get(source))
                 .is_some_and(|module_root| module_root == active_module_root),
             None => is_directly_defined_public_export(header),
@@ -443,7 +443,7 @@ fn index_public_nominal_type_origins(
             continue;
         }
 
-        nominal_type_origins.insert(header.tokens.src_path, origin);
+        nominal_type_origins.insert(header.declaration_path, origin);
     }
 
     Ok(nominal_type_origins)
@@ -500,10 +500,10 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
 
         // A public export-targeted declaration always carries a defining name recorded by the
         // header parser. A missing name is an impossible metadata gap that must not silently
-        let Some(name) = path_name(header.tokens.src_path, path_fork, string_table) else {
+        let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a public export-targeted nominal type header has no resolvable defining name (path: {:?})",
-                header.tokens.src_path
+                header.declaration_path
             )));
         };
 
@@ -513,7 +513,7 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
             _ => continue,
         };
 
-        let file_id = header.tokens.file_id;
+        let file_id = header.tokens.source();
 
         let Some(module_origin) = source_module_origins.origin_for(file_id)? else {
             continue;
@@ -521,13 +521,13 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
 
         let origin = OriginTypeId::new(module_origin.clone(), name.to_owned(), category);
 
-        if let Some(existing) = origins.get(&header.tokens.src_path) {
+        if let Some(existing) = origins.get(&header.declaration_path) {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a duplicate canonical nominal path resolves to conflicting origins (path: {:?}; existing {:?}, new {:?})",
-                header.tokens.src_path, existing, origin
+                header.declaration_path, existing, origin
             )));
         }
-            origins.insert(header.tokens.src_path, origin);
+            origins.insert(header.declaration_path, origin);
     }
 
     Ok(origins)
@@ -563,14 +563,14 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
         if !is_public_export_targeted_trait_declaration(header, module_symbols) {
             continue;
         }
-        let Some(name) = path_name(header.tokens.src_path, path_fork, string_table) else {
+        let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a public export-targeted trait header has no resolvable defining name (path: {:?})",
-                header.tokens.src_path
+                header.declaration_path
             )));
         };
 
-        let file_id = header.tokens.file_id;
+        let file_id = header.tokens.source();
 
         let Some(module_origin) = source_module_origins.origin_for(file_id)? else {
             continue;
@@ -578,13 +578,13 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
 
         let origin = OriginTraitId::new(module_origin.clone(), name.to_owned());
 
-        if let Some(existing) = origins.get(&header.tokens.src_path) {
+        if let Some(existing) = origins.get(&header.declaration_path) {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a duplicate canonical trait path resolves to conflicting origins (path: {:?}; existing {:?}, new {:?})",
-                header.tokens.src_path, existing, origin
+                header.declaration_path, existing, origin
             )));
         }
-            origins.insert(header.tokens.src_path, origin);
+            origins.insert(header.declaration_path, origin);
     }
 
     Ok(origins)
@@ -609,7 +609,7 @@ fn is_public_export_targeted_nominal_declaration(
     matches!(
         &header.kind,
         HeaderKind::Struct { .. } | HeaderKind::Choice { .. }
-    ) && any_retained_public_export_targets_source_path(module_symbols, header.tokens.src_path)
+    ) && any_retained_public_export_targets_source_path(module_symbols, header.declaration_path)
 }
 
 /// Whether a header is a trait declaration whose canonical source path is targeted by a
@@ -624,7 +624,7 @@ fn is_public_export_targeted_trait_declaration(
     module_symbols: &ModuleSymbols,
 ) -> bool {
     matches!(&header.kind, HeaderKind::Trait { .. })
-        && any_retained_public_export_targets_source_path(module_symbols, header.tokens.src_path)
+        && any_retained_public_export_targets_source_path(module_symbols, header.declaration_path)
 }
 
 /// Whether any retained module-root or source-package public export entry targets the given
@@ -688,10 +688,10 @@ fn collect_free_export_bindings(
         // A directly-defined public authored declaration always has a defining name. A missing
         // name is an impossible metadata gap that must not silently omit a public export from the
         // seed.
-        let Some(name) = path_name(header.tokens.src_path, path_fork, string_table) else {
+        let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
             return Err(CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a directly-defined public declaration header has no resolvable defining name (path: {:?})",
-                header.tokens.src_path
+                header.declaration_path
             )));
         };
 
@@ -782,7 +782,7 @@ fn collect_reexport_bindings(
     // declaration header without iterating the full header list for each entry.
     let mut header_by_path: FxHashMap<&PathId, &Header> = FxHashMap::default();
     for header in sorted_headers {
-        header_by_path.insert(&header.tokens.src_path, header);
+        header_by_path.insert(&header.declaration_path, header);
     }
 
     let mut bindings = Vec::new();
@@ -950,7 +950,7 @@ fn collect_one_reexport_binding<'a>(
     // is not sufficient here because the retained header set also contains ordinary private files
     // from imported provider modules. Provider declarations remain references to provider
     // interfaces; they must never become consumer-owned direct bindings.
-    let file_id = header.tokens.file_id;
+    let file_id = header.tokens.source();
     let Some(target_origin) = context.source_module_origins.origin_for(file_id)? else {
         return Ok(());
     };
@@ -959,7 +959,7 @@ fn collect_one_reexport_binding<'a>(
     }
     let Some(name) = context
         .path_fork
-        .component(header.tokens.src_path)
+        .component(header.declaration_path)
         .map(|component| context.string_table.resolve(component))
     else {
         return Err(CompilerError::compiler_error(format!(
@@ -1022,7 +1022,7 @@ fn reexport_declaration_origin(
         | HeaderKind::TraitConformance { .. }
         | HeaderKind::TraitIncompatibility { .. } => Err(CompilerError::compiler_error(format!(
             "re-export binding construction: a re-export target is a non-declaration header kind (path: {:?})",
-            header.tokens.src_path
+            header.declaration_path
         ))),
     }
 }
@@ -1050,7 +1050,7 @@ fn free_export_declaration_origin(
             // surface instead.
             if module_symbols
                 .receiver_method_paths
-                .contains(&header.tokens.src_path)
+                .contains(&header.declaration_path)
             {
                 None
             } else {

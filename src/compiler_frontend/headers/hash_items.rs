@@ -127,7 +127,7 @@ fn handle_top_level_const_template(
 
     // Record placement metadata: runtime_insertion_index is the count of runtime fragments
     // seen before this const fragment in source order.
-    let fragment_path = header.tokens.src_path;
+    let fragment_path = header.declaration_path;
     let fragment = TopLevelConstFragment {
         runtime_insertion_index: context.runtime_fragment_offset + state.runtime_fragment_count,
         span: header

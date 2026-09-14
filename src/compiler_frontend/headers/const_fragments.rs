@@ -15,7 +15,7 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanJoinError,
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenIndex, TokenKind, TokenRange};
 use crate::compiler_frontend::utilities::token_scan::{
     InitializerReference, NestingDepth, collect_symbol_references,
 };
@@ -36,8 +36,13 @@ pub(super) fn create_top_level_const_template(
     let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
     let mut selection_error = None;
 
-    // Keep the full template token stream (including open/close) so AST template parsing
-    // can treat const templates exactly like regular templates.
+    // Keep a bounded temporary scan buffer for dependency facts only; the retained template body
+    // is represented by a source-qualified range below.
+    let body_start = token_stream.index.checked_sub(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "const-template opening token precedes the source token index",
+        ))
+    })?;
     let mut body = Vec::with_capacity(10);
     body.push(opening_template_token);
     let start_span = SourceSpan::new(
@@ -76,9 +81,7 @@ pub(super) fn create_top_level_const_template(
         return Err(error.into());
     }
 
-    let eof_anchor = token_stream.current_token();
-    let end_span = SourceSpan::new(token_stream.file_id, eof_anchor.span);
-    body.push(Token::new(TokenKind::Eof, eof_anchor.span));
+    let end_span = SourceSpan::new(token_stream.file_id, token_stream.current_span().local());
     let condition_references =
         collect_template_if_condition_references(&body, token_stream.file_id);
 
@@ -106,9 +109,40 @@ pub(super) fn create_top_level_const_template(
             ),
         })?;
 
-    let template_id = full_name;
-    let template_tokens =
-        FileTokens::new_substream(token_stream, template_id, token_stream.file_id, body);
+    let start = TokenIndex::try_from_index(body_start).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "const-template body start exceeded the source token index space",
+        ))
+    })?;
+    let mut body_end = token_stream.index;
+    // Preserve the source EOF sentinel when this template is the final top-level item. The
+    // parser adapter still receives only this contiguous source window; templates followed by
+    // another declaration stop at the first post-close token instead of consuming that item.
+    if matches!(token_stream.current_token_kind(), TokenKind::Eof) {
+        body_end = body_end.checked_add(1).ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "const-template body end exceeded the source token index space",
+            ))
+        })?;
+    } else if matches!(token_stream.current_token_kind(), TokenKind::Newline)
+        && matches!(token_stream.peek_next_token(), Some(TokenKind::Eof))
+    {
+        body_end = body_end.checked_add(2).ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "const-template body end exceeded the source token index space",
+            ))
+        })?;
+    }
+    let end = TokenIndex::try_from_index(body_end).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "const-template body end exceeded the source token index space",
+        ))
+    })?;
+    let template_range = TokenRange::new(token_stream.file_id, start, end).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "const-template body range was reversed",
+        ))
+    })?;
 
     Ok(Header {
         kind: HeaderKind::ConstTemplate {
@@ -118,8 +152,9 @@ pub(super) fn create_top_level_const_template(
         export_mode: HeaderExportMode::Private,
         local_ordering_hints,
         name_span: Some(name_span),
-        tokens: template_tokens,
-        source_file: context.source_file.to_owned(),
+        tokens: template_range,
+        declaration_path: full_name,
+        transitional_tokens: None,
         capacity_references: Vec::new(),
     })
 }

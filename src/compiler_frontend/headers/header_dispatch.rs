@@ -43,7 +43,9 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, Token, TokenIndex, TokenKind, TokenRange,
+};
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
 };
@@ -95,11 +97,11 @@ pub(super) fn create_header(
         .into());
     };
     // Conservative local declaration-ordering hints; binding and Stage 3 resolve them.
-    let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
     let mut kind: HeaderKind = HeaderKind::StartFunction;
-    let mut body = Vec::new();
     let mut capacity_references: Vec<InitializerReference> = Vec::new();
+    let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
     let generic_parameters = parse_optional_generic_parameters(token_stream, context)?;
+    let mut body_range = empty_token_range(token_stream)?;
 
     if token_stream.current_token_kind() == &TokenKind::Of {
         if !generic_parameters.is_empty() {
@@ -128,17 +130,15 @@ pub(super) fn create_header(
             context.path_fork,
             context.string_table,
         )?;
-        let header_tokens =
-            FileTokens::new_substream(token_stream, conformance_id, token_stream.file_id, body);
-
         return Ok(Header {
             kind,
             file_role: context.file_role,
             export_mode,
             local_ordering_hints,
             name_span: Some(name_span),
-            tokens: header_tokens,
-            source_file: context.source_file.to_owned(),
+            tokens: body_range,
+            declaration_path: conformance_id,
+            transitional_tokens: None,
             capacity_references,
         });
     }
@@ -248,17 +248,15 @@ pub(super) fn create_header(
             )?,
             _ => full_name,
         };
-        let header_tokens =
-            FileTokens::new_substream(token_stream, header_id, token_stream.file_id, body);
-
         return Ok(Header {
             kind,
             file_role: context.file_role,
             export_mode,
             local_ordering_hints,
             name_span: Some(name_span),
-            tokens: header_tokens,
-            source_file: context.source_file.to_owned(),
+            tokens: body_range,
+            declaration_path: header_id,
+            transitional_tokens: None,
             capacity_references,
         });
     }
@@ -313,7 +311,10 @@ pub(super) fn create_header(
                 )?;
             }
 
-            capture_function_body_tokens(token_stream, &mut body, context.string_table)?;
+            body_range = capture_function_body_tokens(
+                token_stream,
+                context.string_table,
+            )?;
 
             kind = HeaderKind::Function {
                 generic_parameters,
@@ -526,16 +527,15 @@ pub(super) fn create_header(
     }
 
     let header_id = full_name;
-    let header_tokens =
-        FileTokens::new_substream(token_stream, header_id, token_stream.file_id, body);
     Ok(Header {
         kind,
         file_role: context.file_role,
         export_mode,
         local_ordering_hints,
         name_span: Some(name_span),
-        tokens: header_tokens,
-        source_file: context.source_file.to_owned(),
+        tokens: body_range,
+        declaration_path: header_id,
+        transitional_tokens: None,
         capacity_references,
     })
 }
@@ -626,11 +626,26 @@ fn collect_type_ordering_hints(
 // (i.e. `FunctionSignature::new` has already consumed the signature).
 // Local declaration-ordering hints are derived from the signature only; body tokens are captured but
 // not scanned for dependency clauses — that is AST's responsibility at body-lowering time.
+fn empty_token_range(token_stream: &FileTokens) -> HeaderDispatchResult<TokenRange> {
+    let index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Header token range exceeded the source token index space.",
+            Some(token_stream.current_span()),
+        ))
+    })?;
+    TokenRange::new(token_stream.file_id, index, index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Empty header token range was invalid.",
+            Some(token_stream.current_span()),
+        ))
+    })
+}
+
 fn capture_function_body_tokens(
     token_stream: &mut FileTokens,
-    body: &mut Vec<crate::compiler_frontend::tokenizer::tokens::Token>,
     string_table: &mut StringTable,
-) -> HeaderDispatchResult<()> {
+) -> HeaderDispatchResult<TokenRange> {
+    let body_start = token_stream.index;
     let mut scopes_opened = 1;
     let mut scopes_closed = 0;
 
@@ -640,9 +655,6 @@ fn capture_function_body_tokens(
         match token_stream.current_token_kind() {
             TokenKind::End => {
                 scopes_closed += 1;
-                if scopes_opened > scopes_closed {
-                    body.push(token_stream.current_token());
-                }
             }
 
             // Colons used in templates parse into a different token (StartTemplateBody),
@@ -650,14 +662,9 @@ fn capture_function_body_tokens(
             // All other language constructs follow the invariant: every `:` is closed by `;`.
             TokenKind::Colon => {
                 scopes_opened += 1;
-                body.push(token_stream.current_token());
             }
 
-            // `::` is an expression/operator token (e.g. `Choice::Variant`) and must not
-            // affect function-scope depth balancing.
-            TokenKind::DoubleColon => {
-                body.push(token_stream.current_token());
-            }
+            TokenKind::DoubleColon => {}
 
             TokenKind::Eof => {
                 // Diagnostic payloads carry the expected delimiter as a StringId so they can be
@@ -669,15 +676,36 @@ fn capture_function_body_tokens(
                 .into());
             }
 
-            _ => {
-                body.push(token_stream.current_token());
+            _ => {}
             }
-        }
 
         token_stream.advance();
     }
 
-    Ok(())
+    let body_end = token_stream.index.checked_sub(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Function body token range underflowed while closing the body.",
+            Some(token_stream.current_span()),
+        ))
+    })?;
+    let start = TokenIndex::try_from_index(body_start).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Function body token range start exceeded the source token index space.",
+            Some(token_stream.current_span()),
+        ))
+    })?;
+    let end = TokenIndex::try_from_index(body_end).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Function body token range end exceeded the source token index space.",
+            Some(token_stream.current_span()),
+        ))
+    })?;
+    TokenRange::new(token_stream.file_id, start, end).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Function body token range was invalid.",
+            Some(token_stream.current_span()),
+        ))
+    })
 }
 
 fn create_constant_header_payload(

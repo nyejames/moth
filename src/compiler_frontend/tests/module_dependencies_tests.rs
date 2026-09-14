@@ -96,7 +96,7 @@ fn header_name(
     path_fork: &PathInternerFork,
 ) -> String {
     let name = path_fork
-        .component(header.tokens.src_path)
+        .component(header.declaration_path)
         .expect("header path should contain a declaration name");
     string_table.resolve(name).to_owned()
 }
@@ -139,7 +139,7 @@ fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last(
         .filter(|header| matches!(header.kind, HeaderKind::StartFunction))
         .map(|header| {
             let mut scratch = Vec::new();
-            path_fork.render_portable(header.source_file, &string_table, &mut scratch)
+            path_fork.render_portable(header.declaration_path, &string_table, &mut scratch)
         })
         .collect::<Vec<_>>();
 
@@ -1098,7 +1098,7 @@ fn sorted_header_index(
         .iter()
         .position(|header| {
             let mut scratch = Vec::new();
-            path_fork.render_portable(header.tokens.src_path, string_table, &mut scratch) == path_text
+            path_fork.render_portable(header.declaration_path, string_table, &mut scratch) == path_text
         })
         .unwrap_or_else(|| panic!("expected a sorted header at {path_text}"))
 }
@@ -1168,6 +1168,7 @@ fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
         &module_symbols.source_package_public_exports,
         &binding_environment.imported_declarations_by_local_path,
         &content_source_targets,
+        &module_symbols.source_paths_by_source_id,
     );
     let consumer = graph
         .headers_by_path

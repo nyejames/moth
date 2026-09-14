@@ -201,6 +201,19 @@ impl TokenRange {
     pub const fn len(self) -> u32 {
         self.end.0 - self.start.0
     }
+
+    /// Restamp this range with the final build-lifetime source identity.
+    ///
+    /// Token indexes are source-local and therefore remain unchanged across the preparation
+    /// rebinding boundary. Callers must validate the returned range against the final owner
+    /// before publishing it.
+    pub const fn rebind_source(self, source: SourceId) -> Self {
+        Self {
+            source,
+            start: self.start,
+            end: self.end,
+        }
+    }
 }
 
 /// Failures at the checked token range/index boundary.
@@ -1327,6 +1340,67 @@ impl FileTokens {
         stream.freeze_numeric_literals();
         Ok(stream)
     }
+    /// Build a short-lived legacy parser adapter for one checked contiguous body range.
+    ///
+    /// The source stream remains the sole canonical owner. Only the bounded token window is
+    /// copied into the adapter because the existing 3F parser still consumes `Vec<Token>`.
+    pub(crate) fn new_bounded_substream(
+        source: &FileTokens,
+        range: TokenRange,
+        declaration_path: PathId,
+    ) -> Result<FileTokens, CompilerError> {
+        if range.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "retained token range does not match its source stream identity",
+            ));
+        }
+        let start = range.start().index();
+        let end = range.end().index();
+        if start > end || end > source.tokens.len() {
+            return Err(CompilerError::compiler_error(
+                "retained token range is outside its source stream bounds",
+            ));
+        }
+        Self::new_from_slice(
+            declaration_path,
+            source.file_id,
+            source.canonical_os_path.clone(),
+            source.tokens[start..end].to_vec(),
+            &source.path_syntax,
+        )
+    }
+
+    /// Move this source stream into the prepared-source owner.
+    ///
+    /// The replacement is an empty adapter used only to leave the caller's mutable slot in a
+    /// valid state. The moved stream retains the one canonical `SourceTokens` owner.
+    pub(crate) fn take_for_prepared_source(&mut self) -> FileTokens {
+        let replacement = Self::new_deferred_with_identity(
+            self.src_path,
+            self.file_id,
+            self.canonical_os_path.clone(),
+            Vec::new(),
+        );
+        std::mem::replace(self, replacement)
+    }
+
+    /// Restamp the source owner while its path table is held by the prepared-file lifecycle owner.
+    ///
+    /// Unlike `rebind_source_identity`, this intentionally does not touch `FilePathSyntax`: the
+    /// source table is deferred while the output owns the mutable path table and will receive the
+    /// frozen shared handle at publication.
+    pub(crate) fn rebind_source_owner_identity(
+        &mut self,
+        logical_path: PathId,
+        file_id: SourceId,
+        canonical_os_path: Option<PathBuf>,
+    ) {
+        self.src_path = logical_path;
+        self.file_id = file_id;
+        self.canonical_os_path = canonical_os_path;
+        self.token_owner.rebind_owner_identity(file_id);
+    }
+
     /// Return the canonical path table once the stream has reached a readable lifecycle state.
     pub fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
         self.path_syntax.table()

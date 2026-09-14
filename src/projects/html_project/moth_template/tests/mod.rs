@@ -1048,20 +1048,29 @@ fn template_bundle_source_and_header_paths_survive_success_finalization() {
         .chain(bundle.prepared_content_sources.iter())
     {
         prepared_paths.push(prepared.source_file);
+        let source_owner = prepared
+            .source_token_stream
+            .as_ref()
+            .expect("prepared Moth source should retain its token owner");
         for header in &prepared.headers {
             header_count += 1;
             assert_eq!(
-                header.source_file, prepared.source_file,
-                "header source identity should match its prepared file",
+                header.tokens.source(),
+                prepared.file_id,
+                "header token range should use its prepared source identity",
+            );
+            assert_eq!(
+                source_owner.file_id, prepared.file_id,
+                "prepared token owner should use its prepared source identity",
             );
             assert!(
                 source_table
                     .paths()
-                    .starts_with(header.tokens.src_path, prepared.source_file),
+                    .starts_with(source_owner.src_path, prepared.source_file),
                 "header token source path should remain rooted at its prepared file",
             );
-            prepared_paths.push(header.source_file);
-            prepared_paths.push(header.tokens.src_path);
+            prepared_paths.push(source_owner.src_path);
+            prepared_paths.push(header.declaration_path);
         }
         prepared_paths.extend(
             prepared

@@ -898,15 +898,27 @@ fn synthetic_prepared_identity_snapshot(
                 .prepared_header_syntax
                 .headers
                 .iter()
-                .filter(|header| header.source_file == logical_path)
+                .filter(|header| {
+                    module_symbols
+                        .source_paths_by_source_id
+                        .get(&header.tokens.source())
+                        .copied()
+                        == Some(logical_path)
+                })
             {
-                assert_eq!(header.tokens.file_id, file_id);
+                assert_eq!(header.tokens.source(), file_id);
+                let source_owner = prepared
+                    .semantic
+                    .prepared_header_syntax
+                    .source_token_streams
+                    .get(&header.tokens.source())
+                    .expect("header should have its source token owner");
                 assert_eq!(
-                    header.tokens.canonical_os_path.as_deref(),
+                    source_owner.canonical_os_path.as_deref(),
                     identity.canonical_os_path.as_deref()
                 );
                 assert_eq!(
-                    header.tokens.path_syntax.owner_source(),
+                    source_owner.path_syntax.owner_source(),
                     Some(file_id),
                     "header path rows must use the final source identity"
                 );

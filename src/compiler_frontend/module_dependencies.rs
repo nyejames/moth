@@ -35,8 +35,10 @@ use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::header_log;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 
 /// Dependency-sorted module headers with a finalized symbol package.
 ///
@@ -46,6 +48,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// without re-sorting or re-packaging the top-level symbol data.
 #[derive(Debug)]
 pub(crate) struct SortedHeaders {
+    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<FileTokens>>,
     pub(crate) headers: Vec<Header>,
     pub(crate) source_build_config_contracts:
         Vec<crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract>,
@@ -53,6 +56,8 @@ pub(crate) struct SortedHeaders {
     pub(crate) entry_runtime_fragment_count: usize,
     pub(crate) const_fragment_count: usize,
     pub(crate) has_non_trivial_root_body: bool,
+    pub(crate) token_stats: crate::compiler_frontend::arena::TokenStats,
+    pub(crate) header_stats: crate::compiler_frontend::arena::HeaderStats,
     pub(crate) module_symbols: ModuleSymbols,
     pub(crate) binding_environment: HeaderBindingEnvironment,
 }
@@ -175,6 +180,7 @@ struct DependencyGraph<'a> {
     source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
     provider_interface_paths: &'a FxHashMap<PathId, OriginDeclarationId>,
     content_source_targets: &'a ContentSourceTargets,
+    source_paths_by_source_id: &'a FxHashMap<SourceId, PathId>,
 }
 
 impl<'a> DependencyGraph<'a> {
@@ -183,6 +189,7 @@ impl<'a> DependencyGraph<'a> {
         source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
         provider_interface_paths: &'a FxHashMap<PathId, OriginDeclarationId>,
         content_source_targets: &'a ContentSourceTargets,
+        source_paths_by_source_id: &'a FxHashMap<SourceId, PathId>,
     ) -> Self {
         let mut headers_by_path: FxHashMap<PathId, Header> =
             FxHashMap::with_capacity_and_hasher(headers.len(), Default::default());
@@ -193,7 +200,7 @@ impl<'a> DependencyGraph<'a> {
         for header in headers {
             header_log!(header);
 
-            let path = header.tokens.src_path;
+            let path = header.declaration_path;
             source_order_by_path.insert(path, ordered_paths.len());
             ordered_paths.push(path);
             headers_by_path.insert(path, header);
@@ -206,6 +213,7 @@ impl<'a> DependencyGraph<'a> {
             source_package_public_exports,
             provider_interface_paths,
             content_source_targets,
+            source_paths_by_source_id,
         }
     }
 
@@ -267,7 +275,7 @@ impl<'a> DependencyGraph<'a> {
         string_table: &StringTable,
         path_fork: &PathInternerFork,
     ) -> Result<Vec<ResolvedDependencyEdge>, CompilerError> {
-        let source = header.tokens.file_id;
+        let source = header.tokens.source();
 
         // Hints retain every authored occurrence for diagnostics and Stage 0 handoff, but graph
         // traversal needs one edge per resolved target. In particular, repeated file-value paths
@@ -369,7 +377,14 @@ impl<'a> DependencyGraph<'a> {
                 source_order,
                 kind: DependencyEdgeKind::ProviderInterface,
             },
-            None if self.is_same_file_symbol_hint(requested_path, header.source_file, path_fork) => {
+            None if self.is_same_file_symbol_hint(
+                requested_path,
+                *self
+                    .source_paths_by_source_id
+                    .get(&header.tokens.source())
+                    .expect("header body range has no prepared source-path identity"),
+                path_fork,
+            ) => {
                 ResolvedDependencyEdge {
                     requested_path,
                     resolved_path: None,
@@ -495,14 +510,16 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
 ) -> Result<SortedHeaders, PremergeFailure> {
     let BoundModuleHeaders {
         headers,
+        source_token_streams,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,
         has_non_trivial_root_body,
+        token_stats,
+        header_stats,
         mut module_symbols,
         binding_environment,
-        ..
     } = parsed;
 
     // Partition: StartFunction headers are appended last, not sorted.
@@ -533,9 +550,9 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
             &module_symbols.source_package_public_exports,
             &binding_environment.imported_declarations_by_local_path,
             content_source_targets,
+            &module_symbols.source_paths_by_source_id,
         );
         let mut diagnostic_bag = DiagnosticBag::new();
-
         // Resolve retained hints and topologically sort the resulting dependency edges.
         let mut tracker = DependencyTracker::new(graph.len());
         let mut sorted: Vec<Header> = Vec::with_capacity(graph.len());
@@ -602,12 +619,15 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     );
 
     Ok(SortedHeaders {
+        source_token_streams,
         headers: sorted,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,
         has_non_trivial_root_body,
+        token_stats,
+        header_stats,
         module_symbols,
         binding_environment,
     })

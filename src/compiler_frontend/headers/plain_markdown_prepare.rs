@@ -69,7 +69,7 @@ pub(crate) fn prepare_plain_markdown_file(
     )?;
 
     Ok(FileFrontendPrepareOutput {
-        source_file: content_header.source_file,
+        source_file: input.source_file,
         file_id: input.file_id,
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
@@ -81,6 +81,7 @@ pub(crate) fn prepare_plain_markdown_file(
         canonical_os_path,
         headers: vec![content_header],
         top_level_const_fragments: Vec::new(),
+        source_token_stream: None,
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,

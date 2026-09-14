@@ -181,7 +181,7 @@ fn source_config_contracts_stay_out_of_header_topology_and_provider_symbols() {
         !prepared
             .module_symbols
             .dependency_bindable_source_symbol_paths
-            .contains(&header.tokens.src_path),
+            .contains(&header.declaration_path),
         "contract shell must not enter provider-bindable source symbols"
     );
 }

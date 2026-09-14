@@ -14,7 +14,9 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, Token, TokenIndex, TokenKind, TokenRange,
+};
 use crate::projects::settings::{
     MINIMUM_LIKELY_DECLARATIONS, TOKEN_TO_DECLARATION_RATIO, TOKEN_TO_HEADER_RATIO,
 };
@@ -140,6 +142,7 @@ impl HeaderFileParseState {
             canonical_os_path: token_stream.canonical_os_path.clone(),
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
+            source_token_stream: None,
             const_template_count: self.const_template_count,
             runtime_fragment_count: self.runtime_fragment_count,
             has_non_trivial_root_body,
@@ -158,12 +161,19 @@ impl HeaderFileParseState {
 
         // Active module root: build the start function header for later AST body parsing.
         // `start` is never a dependency-graph participant, so this header keeps no graph edges.
+        // Start-body segmentation remains transitional until 3E5; the bounded legacy adapter
+        // owns only the already-captured start-body tokens while the retained range stays empty.
         let start_tokens = FileTokens::new_substream(
             token_stream,
             token_stream.src_path.to_owned(),
             file_id,
             self.start_function_body,
         );
+        let start_index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+            CompilerError::compiler_error("start header token range exceeded index space")
+        })?;
+        let start_range = TokenRange::new(file_id, start_index, start_index)
+            .expect("equal token indexes always form a valid empty range");
 
         self.headers.push(Header {
             kind: HeaderKind::StartFunction,
@@ -171,8 +181,9 @@ impl HeaderFileParseState {
             export_mode: HeaderExportMode::Private,
             local_ordering_hints: HashSet::new(),
             name_span: None,
-            tokens: start_tokens,
-            source_file: token_stream.src_path.to_owned(),
+            tokens: start_range,
+            declaration_path: token_stream.src_path,
+            transitional_tokens: Some(start_tokens),
             capacity_references: Vec::new(),
         });
 
@@ -183,6 +194,7 @@ impl HeaderFileParseState {
             file_id,
             path_syntax,
             token_count: self.token_count,
+            source_token_stream: None,
             token_stats: token_stream.token_stats,
             file_role,
             file_dependency_clauses: self.file_dependency_clauses,

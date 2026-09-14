@@ -268,7 +268,7 @@ fn struct_field_resource_default_records_no_content_hint() {
         struct_header.local_ordering_hints.is_empty(),
         "a resource-only field default needs no content ordering edge, got {:?} in {:?}",
         struct_header.local_ordering_hints,
-        struct_header.tokens.src_path
+        struct_header.declaration_path
     );
 }
 
@@ -284,7 +284,7 @@ fn dependency_clause_rows_record_no_content_hint() {
             header.local_ordering_hints.is_empty(),
             "clause-consumed and resource rows must record no hints, got {:?} on {:?}",
             header.local_ordering_hints,
-            header.tokens.src_path
+            header.declaration_path
         );
     }
 }
@@ -303,8 +303,14 @@ fn recollecting_content_hints_deduplicates_into_the_hint_set() {
         .iter()
         .map(|header| header.local_ordering_hints.len())
         .collect();
+    let source_tokens = output
+        .source_token_stream
+        .as_ref()
+        .expect("prepared source retains its token owner")
+        .clone();
     collect_content_source_ordering_hints(
         &mut output.headers,
+        &source_tokens,
         &output.structural_file_references,
         output.path_syntax.table(),
         &mut strings,

@@ -369,7 +369,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let generic_parameter_scope = self.generic_parameter_scope(
             &this_parameters,
             Some(&registered_this.canonical_by_local),
-            Some(header.tokens.file_id),
+            Some(header.tokens.source()),
             &visibility,
             string_table,
         )?;
@@ -411,7 +411,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             self.validate_exported_trait_surface(
                 declaration.name,
                 &requirements,
-                &header.source_file,
+                &self.header_source_path(header),
                 trait_environment,
                 string_table,
             )?;
@@ -420,8 +420,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(ResolvedTraitDefinition {
             id: trait_environment.next_trait_id(),
             name: declaration.name,
-            canonical_path: header.tokens.src_path.to_owned(),
-            source_file: header.source_file,
+            canonical_path: header.declaration_path.to_owned(),
+            source_file: self.header_source_path(header),
             this_type,
             requirements,
             declaration_span: source_span(header, declaration.name_span),
@@ -461,11 +461,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let path_fork = self.path_fork as *const PathInternerFork;
         let mut type_resolution_context = self.type_resolution_context_for(
             &visibility,
-            header.tokens.file_id,
+            header.tokens.source(),
             generic_parameter_scope,
         );
         let resolved_signature = resolve_function_signature(
-            &header.tokens.src_path,
+            &header.declaration_path,
             &unresolved_signature,
             None,
             &mut type_resolution_context,
@@ -554,12 +554,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .environment_header_scope(header, string_table)
             .with_file_visibility(Arc::clone(visibility));
 
+        let header_path_syntax = self.header_path_syntax(header).clone();
         let mut compatibility_cache = TypeCompatibilityCache::new();
         let mut type_interner =
             AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
         let signature = function_signature_from_syntax_with_unresolved_types(
             signature_syntax,
-            &header.tokens.path_syntax,
+            &header_path_syntax,
             &signature_context,
             &mut type_interner,
             string_table,
@@ -642,7 +643,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )?;
             if trait_reference_is_forward(
-                header,
+                self.header_source_path(header),
                 subject_id,
                 incompatibility.source_order,
                 source_order_by_trait_id,
@@ -669,7 +670,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     string_table,
                 )?;
                 if trait_reference_is_forward(
-                    header,
+                    self.header_source_path(header),
                     incompatible_id,
                     incompatibility.source_order,
                     source_order_by_trait_id,
@@ -849,7 +850,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     }
 }
 fn trait_reference_is_forward(
-    header: &Header,
+    header_source_path: PathId,
     trait_id: TraitId,
     relation_source_order: usize,
     source_order_by_trait_id: &FxHashMap<TraitId, usize>,
@@ -859,7 +860,7 @@ fn trait_reference_is_forward(
         return false;
     };
 
-    definition.source_file == header.source_file
+    definition.source_file == header_source_path
         && source_order_by_trait_id
             .get(&trait_id)
             .is_some_and(|order| *order > relation_source_order)

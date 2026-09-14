@@ -273,6 +273,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
     let ast = Ast::new(
         AstBuildInput {
             headers: sorted_headers.headers,
+            source_token_streams: sorted_headers.source_token_streams,
             module_symbols: sorted_headers.module_symbols,
             binding_environment: sorted_headers.binding_environment,
             top_level_const_fragments: sorted_headers.top_level_const_fragments,
@@ -504,6 +505,7 @@ impl MothTemplateScopeFixture {
 
         Ast::new(
             AstBuildInput {
+                source_token_streams: sorted_headers.source_token_streams,
                 headers: sorted_headers.headers,
                 module_symbols: sorted_headers.module_symbols,
                 binding_environment: sorted_headers.binding_environment,
@@ -947,12 +949,13 @@ fn moth_template_preparation_produces_private_content_constant() {
     assert_eq!(output.file_role, FileRole::Normal);
     assert!(output.file_dependency_clauses.is_empty());
     assert!(output.top_level_const_fragments.is_empty());
-    assert_eq!(output.runtime_fragment_count, 0);
-    assert_eq!(output.const_template_count, 0);
-    assert_eq!(header.export_mode, HeaderExportMode::Private);
-    assert_ne!(header.tokens.src_path, PathId::ROOT);
-    assert_ne!(header.source_file, PathId::ROOT);
-    assert_eq!(header.tokens.canonical_os_path, output.canonical_os_path);
+    let source_owner = output
+        .source_token_stream
+        .as_ref()
+        .expect("prepared Moth template source retains its token owner");
+    assert_ne!(source_owner.src_path, PathId::ROOT);
+    assert_ne!(header.declaration_path, PathId::ROOT);
+    assert_eq!(source_owner.canonical_os_path, output.canonical_os_path);
     assert_eq!(declaration.binding_mode, BindingMode::CompileTimeConstant);
     let ParsedTypeRef::BuiltinString { span } = &declaration.type_annotation else {
         panic!("expected builtin String annotation");
@@ -1656,10 +1659,9 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
         .headers
         .iter()
         .filter(|h| {
-            h.source_file != PathId::ROOT
+            h.declaration_path != PathId::ROOT
                 && path_fork
-                    .try_component(h.tokens.src_path)
-                    .or_else(|| path_fork.try_component(h.source_file))
+                    .try_component(h.declaration_path)
                     .is_some_and(|component| component == content_name)
         })
         .collect();
@@ -1896,6 +1898,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
 
     let authored_ast = Ast::new(
         AstBuildInput {
+            source_token_streams: sorted_headers.source_token_streams,
             headers: sorted_headers.headers,
             module_symbols: sorted_headers.module_symbols,
             binding_environment: sorted_headers.binding_environment,

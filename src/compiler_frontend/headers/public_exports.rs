@@ -206,25 +206,29 @@ fn build_source_package_public_exports(
             .insert(prefix.clone(), root_file_interned);
 
         for header in headers {
-            if header.source_file != root_file_interned {
+            if module_symbols
+                .source_path_for_header(header)
+                .expect("header body range has no prepared source-path identity")
+                != root_file_interned
+            {
                 continue;
             }
 
             if !is_authored_public_export(header) {
                 continue;
             }
-            if let Some(export_name) = path_fork.component(header.tokens.src_path)
+            if let Some(export_name) = path_fork.component(header.declaration_path)
                 && let Some(name_span) = header.name_span
             {
                 reject_source_receiver_method_export(
                     module_symbols,
-                    &header.tokens.src_path,
+                    &header.declaration_path,
                     Some(name_span),
                 )?;
                 collector.insert(
                     export_name,
                     PublicExportTarget::SourceDeclaration {
-                        path: header.tokens.src_path,
+                        path: header.declaration_path,
                     },
                     Some(name_span),
                     string_table,
@@ -342,7 +346,12 @@ fn build_module_root_public_exports_pass1(
 
     for header in headers {
         let Some(canonical_path) = module_symbols
-            .source_record(&header.source_file, source_files)
+            .source_record(
+                &module_symbols
+                    .source_path_for_header(header)
+                    .expect("header body range has no prepared source-path identity"),
+                source_files,
+            )
             .and_then(|record| record.canonical_os_path.as_deref())
         else {
             continue;
@@ -356,8 +365,10 @@ fn build_module_root_public_exports_pass1(
         let is_module_root_file = resolver
             .module_root_file_for_directory(&module_root)
             .is_some_and(|root_file| canonical_path == root_file.as_path());
-        let logical = header.source_file;
-        let canonical = header.source_file;
+        let logical = module_symbols
+            .source_path_for_header(header)
+            .expect("header body range has no prepared source-path identity");
+        let canonical = logical;
 
         module_symbols
             .file_module_membership
@@ -368,12 +379,12 @@ fn build_module_root_public_exports_pass1(
 
         if is_module_root_file
             && is_authored_public_export(header)
-            && let Some(export_name) = path_fork.component(header.tokens.src_path)
+            && let Some(export_name) = path_fork.component(header.declaration_path)
             && let Some(name_span) = header.name_span
         {
             reject_source_receiver_method_export(
                 module_symbols,
-                &header.tokens.src_path,
+                &header.declaration_path,
                 Some(name_span),
             )?;
             let exports = module_symbols
@@ -383,7 +394,7 @@ fn build_module_root_public_exports_pass1(
             exports.insert(PublicExportEntry {
                 export_name,
                 target: PublicExportTarget::SourceDeclaration {
-                    path: header.tokens.src_path,
+                    path: header.declaration_path,
                 },
             });
             export_locations
