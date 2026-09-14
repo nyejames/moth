@@ -815,6 +815,14 @@ later Phase 3 benchmark evidence still owns end-to-end parser, retention and tim
 showed no repeatable material improvement at equal retained capacity, so the SoA baseline is
 preserved per the benchmark-selectable rule above.
 
+**Slice 3B taxonomy (2026-09-14):** `src/compiler_frontend/tokenizer/tokens.rs` owns the sole
+`token_schema!` row authority for the stable 94-tag vocabulary, descriptor payload kinds, allowed
+flag masks and classification facts. It supplies the checked 8-byte `TokenShape`, exhaustive
+`TokenKind` tag mapping and classification/precedence accessors. `DiagnosticToken` remains a
+separate 8-byte projection over the same `TokenTag` and descriptor payload facts; dynamic values
+are extracted only at that projection boundary. Lexical spelling ownership remains in
+`keywords.rs` until later consumer migration.
+
 ### Token references and ranges
 
 ```rust

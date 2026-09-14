@@ -564,7 +564,6 @@ impl FileTokens {
         }
     }
 
-
     #[cfg(test)]
     /// Remap a token stream while it still owns its mutable path table.
     pub(crate) fn remap_preparing_string_ids(
@@ -898,6 +897,253 @@ impl<'a> TokenStream<'a> {
     }
 }
 
+/// How a diagnostic or source-token shape obtains its user-facing spelling.
+///
+/// This metadata belongs to the tokenizer taxonomy so source-token stores and diagnostic
+/// projections cannot grow independent token-name authorities.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum TokenDescriptorPayload {
+    Static = 0,
+    Symbol = 1,
+    StyleDirective = 2,
+    StringLiteral = 3,
+    NumericLiteral = 4,
+    CharLiteral = 5,
+    RawStringLiteral = 6,
+    BoolLiteral = 7,
+}
+
+/// Static metadata for one stable token tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct TokenDescriptor {
+    text: &'static str,
+    payload: TokenDescriptorPayload,
+}
+
+impl TokenDescriptor {
+    const fn new(text: &'static str, payload: TokenDescriptorPayload) -> Self {
+        Self { text, payload }
+    }
+
+    pub(crate) const fn text(self) -> &'static str {
+        self.text
+    }
+
+    pub(crate) const fn payload(self) -> TokenDescriptorPayload {
+        self.payload
+    }
+}
+
+/// Stable compact taxonomy shared by tokenizer shapes and diagnostic projections.
+///
+/// Every value is explicit in the schema invocation below. It is deliberately independent of
+/// `TokenKind` declaration order so adding or reordering source variants cannot change retained
+/// diagnostic data.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct TokenTag(u16);
+
+/// Fixed source-token shape: one stable tag, reserved/semantic flags and one compact payload.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct TokenShape {
+    pub(crate) tag: TokenTag,
+    pub(crate) flags: u16,
+    pub(crate) data: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<TokenShape>() == 8);
+
+const TOKEN_CLASS_ASSIGNMENT: u16 = 1 << 0;
+const TOKEN_CLASS_CONTINUES_EXPRESSION: u16 = 1 << 1;
+const TOKEN_CLASS_CAN_END_EXPRESSION: u16 = 1 << 2;
+const TOKEN_CLASS_OPERAND_START: u16 = 1 << 3;
+const TOKEN_CLASS_KEYWORD: u16 = 1 << 4;
+const TOKEN_CLASS_WORD_OPERATOR: u16 = 1 << 5;
+const TOKEN_CLASS_LITERAL: u16 = 1 << 6;
+const TOKEN_CLASS_BUILTIN_TYPE: u16 = 1 << 7;
+const TOKEN_CLASS_DELIMITER: u16 = 1 << 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct TokenSchema {
+    tag: TokenTag,
+    descriptor: TokenDescriptor,
+    allowed_flags: u16,
+    classes: u16,
+    precedence: Option<u8>,
+}
+
+impl TokenSchema {
+    pub(crate) const fn tag(self) -> TokenTag {
+        self.tag
+    }
+
+    pub(crate) const fn descriptor(self) -> TokenDescriptor {
+        self.descriptor
+    }
+
+    pub(crate) const fn allowed_flags(self) -> u16 {
+        self.allowed_flags
+    }
+
+    pub(crate) const fn precedence(self) -> Option<u8> {
+        self.precedence
+    }
+
+    fn has_class(self, class: u16) -> bool {
+        self.classes & class != 0
+    }
+}
+
+macro_rules! token_schema {
+    (
+        $(
+            (
+                $pattern:pat,
+                $tag_name:ident,
+                $raw:literal,
+                $text:literal,
+                $payload:ident,
+                $allowed_flags:expr,
+                $classes:expr,
+                $precedence:expr
+            )
+        ),+ $(,)?
+    ) => {
+        impl TokenTag {
+            $(pub(crate) const $tag_name: Self = Self($raw);)+
+
+            pub(crate) const fn raw(self) -> u16 {
+                self.0
+            }
+
+            pub(crate) const fn from_raw(raw: u16) -> Option<Self> {
+                match raw {
+                    $($raw => Some(Self::$tag_name),)+
+                    _ => None,
+                }
+            }
+            /// Preserve a raw value from a packed boundary even when it is unknown to this
+            /// version of the taxonomy. Unknown values render through the descriptor fallback.
+            pub(crate) const fn from_raw_unchecked(raw: u16) -> Self {
+                Self(raw)
+            }
+
+
+            pub(crate) const fn all() -> &'static [Self] {
+                &[$(Self::$tag_name,)+]
+            }
+
+            pub(crate) const fn descriptor(self) -> TokenDescriptor {
+                match self {
+                    $(Self::$tag_name => TokenDescriptor::new(
+                        $text,
+                        TokenDescriptorPayload::$payload,
+                    ),)+
+                    _ => TokenDescriptor::new("token", TokenDescriptorPayload::Static),
+                }
+            }
+
+            pub(crate) const fn schema(self) -> Option<TokenSchema> {
+                match self {
+                    $(Self::$tag_name => Some(TokenSchema {
+                        tag: Self::$tag_name,
+                        descriptor: TokenDescriptor::new(
+                            $text,
+                            TokenDescriptorPayload::$payload,
+                        ),
+                        allowed_flags: $allowed_flags,
+                        classes: $classes,
+                        precedence: $precedence,
+                    }),)+
+                    _ => None,
+                }
+            }
+
+            pub(crate) const fn allowed_flags(self) -> u16 {
+                match self {
+                    $(Self::$tag_name => $allowed_flags,)+
+                    _ => 0,
+                }
+            }
+
+            pub(crate) const fn flags_are_valid(self, flags: u16) -> bool {
+                flags & !self.allowed_flags() == 0
+            }
+
+            pub(crate) fn is_assignment_operator(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_ASSIGNMENT)
+                })
+            }
+
+            pub(crate) fn continues_expression(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_CONTINUES_EXPRESSION)
+                })
+            }
+
+            pub(crate) fn can_end_expression(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_CAN_END_EXPRESSION)
+                })
+            }
+
+            pub(crate) fn is_operand_start(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_OPERAND_START)
+                })
+            }
+
+            pub(crate) fn is_keyword(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_KEYWORD)
+                })
+            }
+
+            pub(crate) fn is_word_operator(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_WORD_OPERATOR)
+                })
+            }
+
+            pub(crate) fn is_literal(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_LITERAL)
+                })
+            }
+
+            pub(crate) fn is_builtin_type(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_BUILTIN_TYPE)
+                })
+            }
+
+            pub(crate) fn is_delimiter(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_DELIMITER)
+                })
+            }
+
+            pub(crate) fn precedence(self) -> Option<u8> {
+                self.schema().and_then(TokenSchema::precedence)
+            }
+        }
+
+        impl TokenKind {
+            /// Return the stable taxonomy tag for this token, independent of enum ordinals.
+            pub(crate) fn token_tag(&self) -> TokenTag {
+                match self {
+                    $($pattern => TokenTag::$tag_name,)+
+                }
+            }
+        }
+    };
+}
+
+const TOKEN_NUMERIC_FLAGS: u16 = 0b11;
+
 #[derive(PartialEq, Debug, Clone)]
 pub enum TokenKind {
     // For Compiler
@@ -1068,6 +1314,673 @@ pub enum TokenKind {
     ChannelReceive, // <<
     Yield,
 }
+token_schema! {
+    (TokenKind::ModuleStart, MODULE_START, 1, "module start", Static, 0, 0, None),
+    (TokenKind::Eof, EOF, 2, "end of file", Static, 0, TOKEN_CLASS_DELIMITER, None),
+    (TokenKind::Export, EXPORT, 3, "`export`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Hash, HASH, 4, "`#`", Static, 0, 0, None),
+    (TokenKind::Reactive, REACTIVE, 5, "`$`", Static, 0, 0, None),
+    (TokenKind::Arrow, ARROW, 6, "`->`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, None),
+    (
+        TokenKind::Symbol(_),
+        SYMBOL,
+        7,
+        "name",
+        Symbol,
+        0,
+        TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::StyleDirective(_),
+        STYLE_DIRECTIVE,
+        8,
+        "style directive",
+        StyleDirective,
+        0,
+        0,
+        None
+    ),
+    (
+        TokenKind::StringSliceLiteral(_),
+        STRING_SLICE_LITERAL,
+        9,
+        "string literal",
+        StringLiteral,
+        0,
+        TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (TokenKind::Path(_), PATH, 10, "path", Static, 0, TOKEN_CLASS_OPERAND_START, None),
+    (
+        TokenKind::NumericLiteral(_),
+        NUMERIC_LITERAL,
+        11,
+        "numeric literal",
+        NumericLiteral,
+        TOKEN_NUMERIC_FLAGS,
+        TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::CharLiteral(_),
+        CHAR_LITERAL,
+        12,
+        "character literal",
+        CharLiteral,
+        0,
+        TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::RawStringLiteral(_),
+        RAW_STRING_LITERAL,
+        13,
+        "raw string literal",
+        RawStringLiteral,
+        0,
+        TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::BoolLiteral(_),
+        BOOL_LITERAL,
+        14,
+        "boolean literal",
+        BoolLiteral,
+        0,
+        TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::OpenCurly,
+        OPEN_CURLY,
+        15,
+        "`{`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::CloseCurly,
+        CLOSE_CURLY,
+        16,
+        "`}`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CAN_END_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::TypeParameterBracket,
+        TYPE_PARAMETER_BRACKET,
+        17,
+        "`|`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::Newline,
+        NEWLINE,
+        18,
+        "newline",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER,
+        None
+    ),
+    (
+        TokenKind::End,
+        END,
+        19,
+        "`;`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::StartTemplateBody,
+        START_TEMPLATE_BODY,
+        20,
+        "`:`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER,
+        None
+    ),
+    (
+        TokenKind::Comma,
+        COMMA,
+        21,
+        "`,`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (TokenKind::Dot, DOT, 22, "`.`", Static, 0, TOKEN_CLASS_DELIMITER, None),
+    (
+        TokenKind::Colon,
+        COLON,
+        23,
+        "`:`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::DoubleColon,
+        DOUBLE_COLON,
+        24,
+        "`::`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER,
+        None
+    ),
+    (
+        TokenKind::Assign,
+        ASSIGN,
+        25,
+        "`=`",
+        Static,
+        0,
+        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::This,
+        THIS,
+        26,
+        "`this`",
+        Static,
+        0,
+        TOKEN_CLASS_KEYWORD | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (TokenKind::Must, MUST, 27, "`must`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (
+        TokenKind::TraitThis,
+        TRAIT_THIS,
+        28,
+        "`This`",
+        Static,
+        0,
+        TOKEN_CLASS_KEYWORD,
+        None
+    ),
+    (
+        TokenKind::OpenParenthesis,
+        OPEN_PARENTHESIS,
+        29,
+        "`(`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::CloseParenthesis,
+        CLOSE_PARENTHESIS,
+        30,
+        "`)`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CAN_END_EXPRESSION,
+        None
+    ),
+    (TokenKind::As, AS, 31, "`as`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Type, TYPE, 32, "`type`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Of, OF, 33, "`of`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (
+        TokenKind::Variadic,
+        VARIADIC,
+        34,
+        "`..`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER,
+        None
+    ),
+    (
+        TokenKind::Mutable,
+        MUTABLE,
+        35,
+        "`~`",
+        Static,
+        0,
+        TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::DatatypeNone,
+        DATATYPE_NONE,
+        36,
+        "`None` type",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        TokenKind::NoneLiteral,
+        NONE_LITERAL,
+        37,
+        "`none`",
+        Static,
+        0,
+        TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::DatatypeInt,
+        DATATYPE_INT,
+        38,
+        "`Int`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        TokenKind::DatatypeFloat,
+        DATATYPE_FLOAT,
+        39,
+        "`Float`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        TokenKind::DatatypeBool,
+        DATATYPE_BOOL,
+        40,
+        "`Bool`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        TokenKind::DatatypeTrue,
+        DATATYPE_TRUE,
+        41,
+        "`True`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        TokenKind::DatatypeFalse,
+        DATATYPE_FALSE,
+        42,
+        "`False`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        TokenKind::DatatypeString,
+        DATATYPE_STRING,
+        43,
+        "`String`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        TokenKind::DatatypeChar,
+        DATATYPE_CHAR,
+        44,
+        "`Char`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        TokenKind::Bang,
+        BANG,
+        45,
+        "`!`",
+        Static,
+        0,
+        TOKEN_CLASS_CAN_END_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::QuestionMark,
+        QUESTION_MARK,
+        46,
+        "`?`",
+        Static,
+        0,
+        TOKEN_CLASS_CAN_END_EXPRESSION,
+        None
+    ),
+    (TokenKind::Negative, NEGATIVE, 47, "unary `-`", Static, 0, 0, Some(6)),
+    (TokenKind::Exponent, EXPONENT, 48, "`^`", Static, 0, 0, Some(5)),
+    (TokenKind::Multiply, MULTIPLY, 49, "`*`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (TokenKind::Divide, DIVIDE, 50, "`/`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (TokenKind::Modulus, MODULUS, 51, "`%`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (TokenKind::IntDivide, INT_DIVIDE, 52, "`//`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (
+        TokenKind::ExponentAssign,
+        EXPONENT_ASSIGN,
+        53,
+        "`^=`",
+        Static,
+        0,
+        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::MultiplyAssign,
+        MULTIPLY_ASSIGN,
+        54,
+        "`*=`",
+        Static,
+        0,
+        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::DivideAssign,
+        DIVIDE_ASSIGN,
+        55,
+        "`/=`",
+        Static,
+        0,
+        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::ModulusAssign,
+        MODULUS_ASSIGN,
+        56,
+        "`%=`",
+        Static,
+        0,
+        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::IntDivideAssign,
+        INT_DIVIDE_ASSIGN,
+        57,
+        "`//=`",
+        Static,
+        0,
+        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::Add,
+        ADD,
+        58,
+        "`+`",
+        Static,
+        0,
+        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        Some(3)
+    ),
+    (
+        TokenKind::Subtract,
+        SUBTRACT,
+        59,
+        "`-`",
+        Static,
+        0,
+        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        Some(3)
+    ),
+    (
+        TokenKind::AddAssign,
+        ADD_ASSIGN,
+        60,
+        "`+=`",
+        Static,
+        0,
+        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::SubtractAssign,
+        SUBTRACT_ASSIGN,
+        61,
+        "`-=`",
+        Static,
+        0,
+        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::Not,
+        NOT,
+        62,
+        "`not`",
+        Static,
+        0,
+        TOKEN_CLASS_WORD_OPERATOR,
+        Some(6)
+    ),
+    (
+        TokenKind::Is,
+        IS,
+        63,
+        "`is`",
+        Static,
+        0,
+        TOKEN_CLASS_WORD_OPERATOR | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        Some(2)
+    ),
+    (
+        TokenKind::LessThan,
+        LESS_THAN,
+        64,
+        "`<`",
+        Static,
+        0,
+        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        Some(2)
+    ),
+    (
+        TokenKind::LessThanOrEqual,
+        LESS_THAN_OR_EQUAL,
+        65,
+        "`<=`",
+        Static,
+        0,
+        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        Some(2)
+    ),
+    (
+        TokenKind::GreaterThan,
+        GREATER_THAN,
+        66,
+        "`>`",
+        Static,
+        0,
+        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        Some(2)
+    ),
+    (
+        TokenKind::GreaterThanOrEqual,
+        GREATER_THAN_OR_EQUAL,
+        67,
+        "`>=`",
+        Static,
+        0,
+        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        Some(2)
+    ),
+    (
+        TokenKind::And,
+        AND,
+        68,
+        "`and`",
+        Static,
+        0,
+        TOKEN_CLASS_WORD_OPERATOR,
+        Some(1)
+    ),
+    (TokenKind::Or, OR, 69, "`or`", Static, 0, TOKEN_CLASS_WORD_OPERATOR, Some(0)),
+    (TokenKind::If, IF, 70, "`if`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Else, ELSE, 71, "`else`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Return, RETURN, 72, "`return`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (
+        TokenKind::ReturnBang,
+        RETURN_BANG,
+        73,
+        "`return!`",
+        Static,
+        0,
+        TOKEN_CLASS_KEYWORD,
+        None
+    ),
+    (TokenKind::Catch, CATCH, 74, "`catch`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Then, THEN, 75, "`then`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Checked, CHECKED, 76, "`checked`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Async, ASYNC, 77, "`async`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Cast, CAST, 78, "`cast`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (
+        TokenKind::CastBang,
+        CAST_BANG,
+        79,
+        "`cast!`",
+        Static,
+        0,
+        TOKEN_CLASS_KEYWORD,
+        None
+    ),
+    (TokenKind::Assert, ASSERT, 80, "`assert`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Loop, LOOP, 81, "`loop`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::By, BY, 82, "`by`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (TokenKind::Break, BREAK, 83, "`break`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (
+        TokenKind::Continue,
+        CONTINUE,
+        84,
+        "`continue`",
+        Static,
+        0,
+        TOKEN_CLASS_KEYWORD,
+        None
+    ),
+    (
+        TokenKind::ExclusiveRange,
+        EXCLUSIVE_RANGE,
+        85,
+        "`to`",
+        Static,
+        0,
+        TOKEN_CLASS_KEYWORD,
+        Some(6)
+    ),
+    (TokenKind::Ampersand, AMPERSAND, 86, "`&`", Static, 0, 0, None),
+    (
+        TokenKind::FatArrow,
+        FAT_ARROW,
+        87,
+        "`=>`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER,
+        None
+    ),
+    (TokenKind::Wildcard, WILDCARD, 88, "`_`", Static, 0, 0, None),
+    (
+        TokenKind::Copy,
+        COPY,
+        89,
+        "`copy`",
+        Static,
+        0,
+        TOKEN_CLASS_KEYWORD | TOKEN_CLASS_OPERAND_START,
+        None
+    ),
+    (
+        TokenKind::TemplateClose,
+        TEMPLATE_CLOSE,
+        90,
+        "`]`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CAN_END_EXPRESSION,
+        None
+    ),
+    (
+        TokenKind::TemplateHead,
+        TEMPLATE_HEAD,
+        91,
+        "`[`",
+        Static,
+        0,
+        TOKEN_CLASS_DELIMITER,
+        None
+    ),
+    (
+        TokenKind::ChannelSend,
+        CHANNEL_SEND,
+        92,
+        "`>>`",
+        Static,
+        0,
+        0,
+        None
+    ),
+    (
+        TokenKind::ChannelReceive,
+        CHANNEL_RECEIVE,
+        93,
+        "`<<`",
+        Static,
+        0,
+        0,
+        None
+    ),
+    (TokenKind::Yield, YIELD, 94, "`yield`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+}
+
+impl TokenShape {
+    /// Construct a shape only when its flags are valid for the selected token tag.
+    pub(crate) const fn new(tag: TokenTag, flags: u16, data: u32) -> Option<Self> {
+        if tag.flags_are_valid(flags) {
+            Some(Self { tag, flags, data })
+        } else {
+            None
+        }
+    }
+
+    /// Decode a raw shape while rejecting unknown tags and reserved flag bits.
+    pub(crate) const fn from_raw_parts(raw_tag: u16, flags: u16, data: u32) -> Option<Self> {
+        match TokenTag::from_raw(raw_tag) {
+            Some(tag) => Self::new(tag, flags, data),
+            None => None,
+        }
+    }
+
+    pub(crate) const fn tag(self) -> TokenTag {
+        self.tag
+    }
+
+    pub(crate) const fn flags(self) -> u16 {
+        self.flags
+    }
+
+    pub(crate) const fn data(self) -> u32 {
+        self.data
+    }
+}
 
 impl Token {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
@@ -1203,78 +2116,59 @@ impl TokenKind {
 
     /// Returns true when this token is a supported assignment operator in statement/write position.
     pub fn is_assignment_operator(&self) -> bool {
-        matches!(
-            self,
-            TokenKind::Assign
-                | TokenKind::AddAssign
-                | TokenKind::SubtractAssign
-                | TokenKind::MultiplyAssign
-                | TokenKind::DivideAssign
-                | TokenKind::ModulusAssign
-                | TokenKind::ExponentAssign
-                | TokenKind::IntDivideAssign
-        )
+        self.token_tag().is_assignment_operator()
     }
 
-    // For figuring out when to break out of or continue expressions and statements
+    /// Returns true when this token allows a following newline to remain in the same expression.
     pub fn continues_expression(&self) -> bool {
-        matches!(
-            self,
-            // Tokens that allow any number of newlines after or before them without breaking a statement or expression,
-            TokenKind::Colon
-                | TokenKind::OpenParenthesis
-                | TokenKind::TypeParameterBracket
-                | TokenKind::Comma
-                | TokenKind::End
-                | TokenKind::Assign
-                | TokenKind::AddAssign
-                | TokenKind::SubtractAssign
-                | TokenKind::MultiplyAssign
-                | TokenKind::DivideAssign
-                | TokenKind::ModulusAssign
-                | TokenKind::ExponentAssign
-                | TokenKind::IntDivideAssign
-                | TokenKind::Add
-                | TokenKind::Subtract
-                | TokenKind::Multiply
-                | TokenKind::Divide
-                | TokenKind::Modulus
-                | TokenKind::IntDivide
-                | TokenKind::Arrow
-                | TokenKind::Is
-                | TokenKind::LessThan
-                | TokenKind::LessThanOrEqual
-                | TokenKind::GreaterThan
-                | TokenKind::GreaterThanOrEqual
-        )
+        self.token_tag().continues_expression()
     }
 
     /// Returns true when this token can be the left operand of a following symbolic operator.
-    ///
-    /// WHAT: gives the tokenizer a small, syntax-only way to classify `-` and spacing-sensitive
-    /// operators without depending on AST expression parsing.
-    /// WHY: signed numeric literals and binary-operator spacing are lexical/readability rules,
-    /// but they still need to know whether the preceding token looked like an operand.
     pub fn can_end_expression(&self) -> bool {
-        matches!(
-            self,
-            TokenKind::Symbol(_)
-                | TokenKind::This
-                | TokenKind::NumericLiteral(_)
-                | TokenKind::StringSliceLiteral(_)
-                | TokenKind::RawStringLiteral(_)
-                | TokenKind::CharLiteral(_)
-                | TokenKind::BoolLiteral(_)
-                | TokenKind::NoneLiteral
-                | TokenKind::CloseParenthesis
-                | TokenKind::CloseCurly
-                | TokenKind::TemplateClose
-                | TokenKind::Bang
-                | TokenKind::QuestionMark
-        )
+        self.token_tag().can_end_expression()
+    }
+
+    /// Returns true when this token may begin a value operand in expression dispatch.
+    pub(crate) fn is_operand_start(&self) -> bool {
+        self.token_tag().is_operand_start()
+    }
+
+    /// Returns true for source words classified as ordinary language keywords.
+    pub(crate) fn is_keyword(&self) -> bool {
+        self.token_tag().is_keyword()
+    }
+
+    /// Returns true for word operators (`not`, `is`, `and`, and `or`).
+    pub(crate) fn is_word_operator(&self) -> bool {
+        self.token_tag().is_word_operator()
+    }
+
+    /// Returns true for value literal tokens, excluding builtin type spellings.
+    pub(crate) fn is_literal(&self) -> bool {
+        self.token_tag().is_literal()
+    }
+
+    /// Returns true for builtin type spellings such as `Int` and `String`.
+    pub(crate) fn is_builtin_type(&self) -> bool {
+        self.token_tag().is_builtin_type()
+    }
+
+    /// Returns true for punctuation and structural syntax delimiters.
+    pub(crate) fn is_delimiter(&self) -> bool {
+        self.token_tag().is_delimiter()
+    }
+
+    /// Return the AST-compatible precedence for operator tokens.
+    pub(crate) fn precedence(&self) -> Option<u8> {
+        self.token_tag().precedence()
     }
 }
 
 #[cfg(test)]
 #[path = "tests/tokens_remap_tests.rs"]
 mod tokens_remap_tests;
+
+#[cfg(test)]
+#[path = "tests/token_taxonomy_tests.rs"]
+mod token_taxonomy_tests;

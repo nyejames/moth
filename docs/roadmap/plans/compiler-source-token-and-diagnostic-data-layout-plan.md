@@ -856,12 +856,23 @@ touched the repo, so there was nothing to remove; evidence is recorded in
 
 ### Slice 3B — Introduce one token taxonomy and descriptor authority
 
-- [ ] define or reuse the final explicit `TokenTag(u16)`, flags and `TokenShape { tag, flags, data }`; when Phase 1 pulled the tag foundation forward, extend it rather than declaring another taxonomy
-- [ ] declare every tag once through a small internal `token_schema!`/const-table authority containing its explicit numeric tag and static descriptor facts; do not add a procedural macro or a second hand-maintained tag list
-- [ ] generate or validate assignment, expression-continuation, operand, keyword, delimiter, literal, precedence and diagnostic-name APIs from that one authority
-- [ ] keep dynamic token values in typed payload accessors rather than descriptor data
-- [ ] preserve exact source spelling and current lexical semantics
-- [ ] add all-tag coverage and reserved-bit/layout tests
+- [x] define or reuse the final explicit `TokenTag(u16)`, flags and `TokenShape { tag, flags, data }`; when Phase 1 pulled the tag foundation forward, extend it rather than declaring another taxonomy
+- [x] declare every tag once through a small internal `token_schema!`/const-table authority containing its explicit numeric tag and static descriptor facts; do not add a procedural macro or a second hand-maintained tag list
+- [x] generate or validate assignment, expression-continuation, operand, keyword, delimiter, literal, precedence and diagnostic-name APIs from that one authority
+- [x] keep dynamic token values in typed payload accessors rather than descriptor data
+- [x] preserve exact source spelling and current lexical semantics
+- [x] add all-tag coverage and reserved-bit/layout tests
+
+Slice 3B decision (2026-09-14): `src/compiler_frontend/tokenizer/tokens.rs` now owns one
+`token_schema!` row authority for all 94 explicit tags (stable raw values 1 through 94), descriptor
+payload kinds, allowed flags and classification facts. It supplies the checked 8-byte
+`TokenShape`, TokenKind-to-tag mapping and classification/precedence accessors; existing
+`TokenKind` consumers delegate without migration. `DiagnosticToken` remains the separate 8-byte
+projection and extracts dynamic values through typed boundary matches while sharing the canonical
+tag and descriptor payload facts. All-tag mapping, unknown-tag/reserved-flag rejection,
+layout and representative semantic parity tests are in
+`src/compiler_frontend/tokenizer/tests/token_taxonomy_tests.rs`. Lexical spelling ownership stays
+in `keywords.rs`; cold stores and source-owned cursor migration remain 3C onward.
 
 ### Slice 3C — Evolve the file-owned path-syntax table into the final source-owned token cold store
 
