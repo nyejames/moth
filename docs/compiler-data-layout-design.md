@@ -799,6 +799,22 @@ slices or another immutable dense owner. An array-of-structs experiment may plac
 span together, but only if it materially outperforms the split representation and still preserves the
 8-byte/4-byte contracts.
 
+**Slice 3A layout selection (2026-09-14):** the canonical production layout remains the split
+SoA `Vec`/`Box<[TokenShape]>` plus `Vec`/`Box<[LocalSpan]>` shown above. A short-lived Rust `-O`
+probe (not a second benchmark runner; no permanent probe added) compared it against compact AoS
+`TokenRecord { shape: TokenShape, span: LocalSpan }` at the required 12-byte layout with
+N=41,331 representative tokens (`TokenShape` 8 bytes, `LocalSpan` 4 bytes, AoS record 12 bytes;
+both layouts held 495,972 capacity bytes). The probe used a parser-cursor-shaped loop with
+current shape/span reads, adjacent peek checks and advance-style indexing, plus conditional flag
+reads to exercise cache-sensitive access patterns. Five independent invocations showed SoA faster
+in every parser-cursor mode: flags=false SoA ~5.681-5.804 ms vs AoS ~6.158-6.513 ms; flags=true
+SoA ~6.692-6.884 ms vs AoS ~8.161-8.515 ms. A repeated checked range/length validation loop ran
+12,399,300 checks per layout with SoA ~1.881-1.938 ms and AoS ~1.928-1.948 ms, with zero
+failures. This is a parser/cache/validation proxy rather than a full production parser benchmark;
+later Phase 3 benchmark evidence still owns end-to-end parser, retention and timing checks. AoS
+showed no repeatable material improvement at equal retained capacity, so the SoA baseline is
+preserved per the benchmark-selectable rule above.
+
 ### Token references and ranges
 
 ```rust

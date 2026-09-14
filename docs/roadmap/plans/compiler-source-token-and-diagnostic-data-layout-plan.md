@@ -834,11 +834,25 @@ Evaluate only these production candidates:
 1. compact AoS `TokenRecord { shape: TokenShape, span: LocalSpan }` with a required 12-byte layout
 2. SoA `Vec<TokenShape>` plus `Vec<LocalSpan>`
 
-- [ ] prototype both behind benchmark-only code or short-lived branches
-- [ ] measure parser iteration, cache behaviour, retained capacity and validation overhead
-- [ ] preserve the layout authority's SoA baseline when results are materially tied
-- [ ] choose compact AoS only for a repeatable material improvement over SoA, as the authority requires
-- [ ] record the decision in the architecture document and remove the rejected implementation
+- [x] prototype both behind benchmark-only code or short-lived branches
+- [x] measure parser iteration, cache behaviour, retained capacity and validation overhead
+- [x] preserve the layout authority's SoA baseline when results are materially tied
+- [x] choose compact AoS only for a repeatable material improvement over SoA, as the authority requires
+- [x] record the decision in the architecture document and remove the rejected implementation
+
+Slice 3A decision (2026-09-14): the canonical production layout is SoA `Vec`/`Box<[TokenShape]>`
+plus `Vec`/`Box<[LocalSpan]>`. A short-lived Rust `-O` probe (N=41,331; 8-byte shape, 4-byte span,
+12-byte AoS record; 495,972 capacity bytes both layouts; five independent invocations) compared a
+parser-cursor-shaped loop with current shape/span reads, adjacent peek checks and advance-style
+indexing, with conditional flag reads as cache-sensitive modes. SoA was faster in every cursor
+mode: flags=false ~5.681-5.804 ms versus AoS ~6.158-6.513 ms; flags=true ~6.692-6.884 ms versus
+~8.161-8.515 ms. A checked range/length validation loop ran 12,399,300 checks per layout:
+SoA ~1.881-1.938 ms versus AoS ~1.928-1.948 ms, zero failures. AoS showed no repeatable
+material improvement at equal retained capacity, so the SoA baseline is preserved. The probe is a
+parser/cache/validation proxy, not a full production parser benchmark; later Phase 3 evidence
+still owns end-to-end parser, retention and timing checks. No production or rejected implementation
+touched the repo, so there was nothing to remove; evidence is recorded in
+`docs/compiler-data-layout-design.md` and `benchmarks/frontend-optimization-results.md`.
 
 ### Slice 3B — Introduce one token taxonomy and descriptor authority
 

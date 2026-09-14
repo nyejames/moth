@@ -3637,3 +3637,33 @@ vector capacity for its 39 diagnostics. Multi-module Arc-sharing coverage
 sidecars in one boundary reuse the installed table rather than retaining one deep snapshot each.
 The path-table copy counters remain useful transient-allocation evidence and are not a retained
 owner-size claim.
+
+## Data Layout Migration - Phase 3 Slice 3A Token Array Layout Selection (2026-09-14)
+
+Decision: the canonical production token layout is SoA `Vec`/`Box<[TokenShape]>` plus
+`Vec`/`Box<[LocalSpan]>`. Compact AoS `TokenRecord { shape: TokenShape, span: LocalSpan }` at the
+required 12-byte layout is rejected: at equal retained capacity it showed no repeatable material
+improvement, and the probe showed a repeatable SoA parser-cursor iteration advantage, so the
+layout authority's SoA baseline is preserved.
+
+Method: short-lived Rust `-O` probe on branch `diagnostic-data-layout-changes` (clean tree; no
+repo files added or edited for the probe; not a second benchmark runner; no permanent probe
+added). Five independent invocations, N=41,331 representative tokens. `TokenShape` 8 bytes,
+`LocalSpan` 4 bytes, AoS `TokenRecord` 12 bytes; both layouts held 495,972 capacity bytes. The
+probe's parser-cursor-shaped loop reads current shape/span values, checks an adjacent peek and
+advances by index; conditional flag modes exercise cache-sensitive access patterns without
+claiming hardware cache-counter evidence. The checked validation loop performs 12,399,300
+range/length checks per layout. This remains a parser/cache/validation proxy, not a full
+production parser benchmark; later Phase 3 evidence owns end-to-end parser, retention and
+timing checks.
+
+| Mode | SoA five-run range (ms) | AoS five-run range (ms) |
+| --- | ---: | ---: |
+| Parser cursor, flags=false | 5.681-5.804 | 6.158-6.513 |
+| Parser cursor, flags=true | 6.692-6.884 | 8.161-8.515 |
+| Checked validation | 1.881-1.938 | 1.928-1.948 |
+
+SoA was no slower in any invocation/mode (one validation pair tied at the displayed precision);
+the validation loop reported zero failures. No AoS run produced a repeatable material improvement,
+so the rejected layout has no re-entry condition beyond new representative evidence showing a
+material gain without weakening the 8-byte/4-byte contracts.
