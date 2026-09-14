@@ -1764,7 +1764,6 @@ impl FileFrontendPrepareOutput {
             validate_header(
                 header,
                 self.file_id,
-                self.canonical_os_path.as_deref(),
                 self.source_file,
                 path_syntax,
                 path_fork,
@@ -1891,7 +1890,6 @@ fn validate_dependency_selection(
 fn validate_header(
     header: &Header,
     file_id: SourceId,
-    canonical_os_path: Option<&std::path::Path>,
     source_file: PathId,
     path_syntax: &PathSyntaxTable,
     path_fork: &PathInternerFork,
@@ -1909,11 +1907,6 @@ fn validate_header(
     if header.tokens.file_id != file_id {
         return Err(CompilerError::compiler_error(
             "retained header token stream does not match the prepared file identity",
-        ));
-    }
-    if header.tokens.canonical_os_path.as_deref() != canonical_os_path {
-        return Err(CompilerError::compiler_error(
-            "retained header token stream does not match the prepared file's canonical path",
         ));
     }
     validate_source_span(header.name_span, file_id, "header name")?;

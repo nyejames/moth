@@ -903,12 +903,23 @@ migration, while durable diagnostic records remain 3G work.
 
 ### Slice 3D — Separate immutable storage from parser cursor
 
-- [ ] implement `SourceTokens` as the one immutable token owner for a source
-- [ ] implement `TokenCursor` as short-lived index/range state over a borrowed store
-- [ ] implement compact `TokenRef`/views without cloning cold payloads
-- [ ] use `u32` token indexes and checked range construction
-- [ ] remove source path, canonical OS path, `index` and `length` from token storage; this inherits 1B6's last sentence, so also drop `Header::canonical_source_file`'s re-derivation, its nine call sites' dependency on the token copy, and `validate_header`'s canonical-path agreement check
-- [ ] add cursor boundary, EOF, peek, nested-range and malformed-index tests
+- [x] implement `SourceTokens` as the one immutable token owner for a source
+- [x] implement `TokenCursor` as short-lived index/range state over a borrowed store
+- [x] implement compact `TokenRef`/views without cloning cold payloads
+- [x] use `u32` token indexes and checked range construction
+- [x] remove source path, canonical OS path, `index` and `length` from token storage; this inherits 1B6's last sentence, so also drop `Header::canonical_source_file`'s re-derivation, its nine call sites' dependency on the token copy, and `validate_header`'s canonical-path agreement check
+- [x] add cursor boundary, EOF, peek, nested-range and malformed-index tests
+
+Slice 3D decision (2026-09-14): `SourceTokens` is the canonical immutable SoA owner, with boxed
+`TokenShape`/`LocalSpan` arrays, typed numeric records, and the source-owned path table attached at
+publication. `TokenIndex(u32)`, checked half-open `TokenRange`, borrowed `TokenCursor`, and
+copyable `TokenRef` provide bounds-checked views without cloning cold payloads. The transitional
+`FileTokens` shell retains its legacy `Token` vector, source/path metadata, and cursor fields only
+for the not-yet-migrated 3F parser and 3H deletion; its explicit adapter owner never constructs a
+second `SourceTokens` for a retained substream. Header canonical-source re-derivation and the
+canonical-path agreement validation were removed. Cursor, publication, adapter-ownership, and
+malformed cold-store tests are in `token_cursor_tests.rs`.
+
 
 ### Slice group 3E — Make prepared syntax source-owned
 

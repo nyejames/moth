@@ -591,7 +591,7 @@ pub fn tokenize(
         path_syntax,
         numeric_literals,
     );
-    file_tokens.token_stats = token_stats;
+    file_tokens.set_token_stats(token_stats);
     Ok(file_tokens)
 }
 

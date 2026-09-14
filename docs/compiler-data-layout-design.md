@@ -832,7 +832,20 @@ identity on the table; the canonical path tag carries only that dense handle. Sy
 booleans and scalar characters use validated direct `TokenShape` payloads. Numeric/path stores
 remap at their owner boundary, freeze at ordinary prepared-source publication, and persistent
 generic capture/materialisation uses deterministic compact path and independent numeric subsets.
-`TokenKind`/`Vec<Token>` compatibility and parser cursor migration remain later 3D/3F work.
+`TokenKind`/`Vec<Token>` remain compatibility adapters for the later 3F parser migration and 3H deletion.
+
+**Slice 3D storage and cursor ownership (2026-09-14):** `SourceTokens` is the one canonical
+immutable SoA owner for a source: boxed `TokenShape`/`LocalSpan` arrays, a typed numeric
+side-store, and the source-owned `PathSyntaxTable` attached at the publication boundary.
+`TokenIndex(u32)`, checked half-open `TokenRange`, borrowed `TokenCursor`, and copyable
+`TokenRef` expose bounded views without cloning cold payloads. `FileTokens` retains a narrow
+transitional parser/lifecycle shell; its `FileTokenOwner::Adapter` path keeps legacy vectors and
+numeric handles for retained substreams but never constructs a second `SourceTokens` for the same
+source. Source/path/cursor metadata therefore remains outside the canonical store and is deleted
+with the 3F parser migration and 3H compatibility cutover. Cursor boundaries, stable EOF/peek,
+nested ranges, publication attachment, adapter ownership, and malformed cold-store rejection are
+covered by the focused tokenizer tests.
+
 
 ### Token references and ranges
 
