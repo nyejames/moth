@@ -1,9 +1,7 @@
 <div align="center">
-
 <img src="./docs/assets/moth-logo.webp" width="10%"/>
-
-
 <br>
+
 # Moth
 
 <p><em>
@@ -14,15 +12,19 @@
   Solve problems with code, not frameworks.
 </em></p>
 
+</div>
+
 > [!WARNING]
 > This project is in early Alpha ⚠️
 
 > [!IMPORTANT]
-> The language semantics and compiler are still stabilising. The Wasm backend and final memory model are not fully implemented.</p> 
+> The language semantics and compiler are still stabilising. The Wasm backend and final memory model are not fully implemented.
+
+<div align="center">
 
 <p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using this language and toolchain. Check it out for code examples and to familiarise yourself with the basics.</p>
-
 </div>
+
 <br>
 <br>
 
