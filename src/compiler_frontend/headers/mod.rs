@@ -32,3 +32,4 @@ mod top_level_classifier;
 mod trait_headers;
 mod types;
 pub(crate) use types::HeaderParseFailure;
+pub(crate) use types::SyntheticContentPayload;

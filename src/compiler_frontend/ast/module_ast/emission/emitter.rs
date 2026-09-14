@@ -57,10 +57,11 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::projects::settings::{self, IMPLICIT_START_FUNC_NAME};
 use rustc_hash::FxHashMap;
@@ -334,20 +335,16 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             return Ok(stream.src_path);
         }
 
-        // Plain Markdown contributes a synthetic, path-free content constant without a
-        // canonical token stream. Every tokenized header must retain its source owner; allowing
-        // the module identity map to cover those headers would hide a broken ownership handoff.
-        let ownerless_synthetic_constant = header.tokens.is_empty()
+        // Plain Markdown contributes an explicit payload without a canonical token stream.
+        // Every tokenized header must retain its source owner; allowing the module identity map
+        // to cover those headers would hide a broken ownership handoff.
+        let ownerless_synthetic_constant = matches!(
+            header.synthetic_content_payload,
+            Some(SyntheticContentPayload::RenderedHtml(_))
+        ) && header.tokens.is_empty()
             && header.token_sequence.is_none()
             && header.name_span.is_none()
-            && matches!(
-                &header.kind,
-                HeaderKind::Constant { declaration }
-                    if declaration
-                        .initializer_tokens
-                        .iter()
-                        .all(|token| !matches!(token.kind, TokenKind::Path(_)))
-            );
+            && matches!(header.kind, HeaderKind::Constant { .. });
         if !ownerless_synthetic_constant {
             return Err(CompilerError::compiler_error(
                 "header source path has no canonical prepared source token owner",

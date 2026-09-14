@@ -46,13 +46,15 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::headers::synthetic_content_header::materialize_synthetic_content_initializer;
+use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -195,16 +197,32 @@ impl ConstantResolutionSession {
         let source_owner = self
             .module_view
             .source_token_streams
-            .get(&header.tokens.source());
+            .get(&header.tokens.source())
+            .map(|owner| owner.as_ref());
+        let payload = header.synthetic_content_payload;
+        if matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_)))
+            && source_owner.is_some()
+        {
+            return Err(CompilerError::compiler_error(
+                "RenderedHtml synthetic content retained a canonical source token owner",
+            )
+            .into());
+        }
+
+        let mut declaration_for_resolution = declaration.clone();
+        if let Some(payload) = payload {
+            declaration_for_resolution.initializer_tokens =
+                materialize_synthetic_content_initializer(
+                    payload,
+                    source_owner,
+                    header.tokens,
+                    header.declaration_path,
+                )
+                .map_err(ExpressionParseError::from)?;
+        }
+
         let fallback_path_syntax = if source_owner.is_none() {
-            let path_free_synthetic_initializer = header.tokens.is_empty()
-                && header.token_sequence.is_none()
-                && header.name_span.is_none()
-                && declaration
-                    .initializer_tokens
-                    .iter()
-                    .all(|token| !matches!(token.kind, TokenKind::Path(_)));
-            if !path_free_synthetic_initializer {
+            if !matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) {
                 return Err(CompilerError::compiler_error(
                     "constant header has no canonical source token owner for its retained syntax",
                 )
@@ -220,7 +238,7 @@ impl ConstantResolutionSession {
             .expect("constant header path syntax fallback must be present");
 
         let declaration_result = resolve_declaration_syntax(
-            declaration.clone(),
+            declaration_for_resolution,
             header.declaration_path.to_owned(),
             path_syntax,
             &mut scope_context,

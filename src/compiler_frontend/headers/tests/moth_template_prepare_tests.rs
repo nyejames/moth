@@ -1,8 +1,7 @@
 //! Moth template synthetic-header preparation tests.
 //!
 //! WHAT: verifies that `.mtf` files enter the frontend as one normal private
-//! `content #String` constant with a structurally generated `$md` template initializer.
-
+//! `content #String` constant with compact directive and body-range facts.
 use super::prepare_moth_template_file;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
@@ -26,7 +25,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, HeaderPreparationFailure, SourcePreparationDelta, bind_module_headers,
     prepare_file_from_tokens, prepare_header_syntax,
 };
-use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode};
+use crate::compiler_frontend::headers::types::{
+    FileRole, HeaderExportMode, SyntheticContentPayload,
+};
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
@@ -54,7 +55,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenizerEntryMode};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -864,25 +865,30 @@ fn prepare_moth_source(
     .expect("Moth header preparation should succeed");
     (output, span_builder)
 }
+fn content_header(
+    output: &FileFrontendPrepareOutput,
+) -> &crate::compiler_frontend::headers::types::Header {
+    assert_eq!(output.headers.len(), 1);
+    &output.headers[0]
+}
 
 fn content_constant(
     output: &FileFrontendPrepareOutput,
 ) -> &crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax {
-    assert_eq!(output.headers.len(), 1);
-
-    let HeaderKind::Constant { declaration, .. } = &output.headers[0].kind else {
+    let HeaderKind::Constant { declaration, .. } = &content_header(output).kind else {
         panic!("Moth template should produce a constant header");
     };
-
     declaration
 }
 
-fn initializer_kinds(output: &FileFrontendPrepareOutput) -> Vec<&TokenKind> {
-    content_constant(output)
-        .initializer_tokens
-        .iter()
-        .map(|token| &token.kind)
-        .collect()
+fn retained_body_tokens(output: &FileFrontendPrepareOutput) -> Vec<Token> {
+    let header = content_header(output);
+    output
+        .source_token_stream
+        .as_ref()
+        .expect("Moth template should retain its canonical source owner")
+        .materialize_token_range(header.tokens)
+        .expect("retained body range should materialize")
 }
 
 /// Fold one module constant identified by its final path component.
@@ -939,12 +945,26 @@ fn folded_constant_value(
 #[test]
 fn moth_template_preparation_produces_private_content_constant() {
     let (output, _string_table, _span_builder) = prepare_directly("# Heading");
-    let header = &output.headers[0];
+    let header = content_header(&output);
     let declaration = content_constant(&output);
     assert_eq!(
         declaration.span, None,
         "the generated content declaration should not claim an authored source span"
     );
+    assert!(
+        declaration.initializer_tokens.is_empty(),
+        "Moth template declaration shells must not retain body token vectors"
+    );
+    assert!(
+        matches!(
+            header.synthetic_content_payload,
+            Some(SyntheticContentPayload::MothTemplate {
+                markdown_directive: _
+            })
+        ),
+        "Moth template header should retain compact directive payload"
+    );
+    assert!(!header.tokens.is_empty(), "non-empty body should retain a body range");
 
     assert_eq!(output.file_role, FileRole::Normal);
     assert!(output.file_dependency_clauses.is_empty());
@@ -966,9 +986,15 @@ fn moth_template_preparation_produces_private_content_constant() {
 fn simple_markdown_body_uses_original_body_token_span() {
     let source = "# Heading";
     let (output, string_table, span_builder) = prepare_directly(source);
-    let declaration = content_constant(&output);
-    let body_token = declaration
-        .initializer_tokens
+    let header = content_header(&output);
+    let source_owner = output
+        .source_token_stream
+        .as_ref()
+        .expect("Moth template should retain its canonical source owner");
+    let body_tokens = source_owner
+        .materialize_token_range(header.tokens)
+        .expect("retained body range should materialize");
+    let body_token = body_tokens
         .iter()
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("body text should be preserved as a string literal token");
@@ -986,23 +1012,29 @@ fn simple_markdown_body_uses_original_body_token_span() {
     ));
 }
 #[test]
-fn nested_templates_remain_structural_inside_markdown_initializer() {
+fn nested_templates_remain_structural_inside_retained_body_range() {
     let source = "before [:inner] after";
     let (output, _string_table, span_builder) = prepare_directly(source);
-    let declaration = content_constant(&output);
-    let template_heads = declaration
-        .initializer_tokens
+    let header = content_header(&output);
+    let source_owner = output
+        .source_token_stream
+        .as_ref()
+        .expect("Moth template should retain its canonical source owner");
+    let body_tokens = source_owner
+        .materialize_token_range(header.tokens)
+        .expect("retained body range should materialize");
+    let template_heads = body_tokens
         .iter()
         .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
         .collect::<Vec<_>>();
 
-    assert_eq!(template_heads.len(), 2);
-    let nested_range = template_heads[1]
+    assert_eq!(template_heads.len(), 1);
+    let nested_range = template_heads[0]
         .span
         .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert!(
         nested_range.start() > 0,
-        "nested template opener should keep its original body position, not the synthetic start"
+        "nested template opener should keep its original body position"
     );
 }
 
@@ -1071,28 +1103,28 @@ fn moth_template_compile_time_collection_loop_folds_inside_content_constant() {
         "folded loop content should contain both collection items, got {content:?}"
     );
 }
-
 #[test]
-fn empty_moth_template_body_generates_markdown_template_initializer() {
+fn empty_moth_template_body_retains_empty_body_range_and_directive_payload() {
     let (output, string_table, _span_builder) = prepare_directly("");
-    let kinds = initializer_kinds(&output);
+    let header = content_header(&output);
+    let declaration = content_constant(&output);
 
-    assert_eq!(kinds.len(), 4);
-    assert!(matches!(kinds[0], TokenKind::TemplateHead));
-    assert!(matches!(
-        kinds[1],
-        TokenKind::StyleDirective(id) if string_table.resolve(*id) == "md"
-    ));
-    assert!(matches!(kinds[2], TokenKind::StartTemplateBody));
-    assert!(matches!(kinds[3], TokenKind::TemplateClose));
+    assert!(header.tokens.is_empty());
+    assert!(declaration.initializer_tokens.is_empty());
+    let Some(SyntheticContentPayload::MothTemplate { markdown_directive }) =
+        header.synthetic_content_payload
+    else {
+        panic!("expected Moth template payload");
+    };
+    assert_eq!(string_table.resolve(markdown_directive), "md");
 }
 
 #[test]
 fn backslash_remains_body_text_inside_markdown_initializer() {
     let (output, string_table, _span_builder) = prepare_directly(r"before \n after");
-    let declaration = content_constant(&output);
+    let body_tokens = retained_body_tokens(&output);
 
-    assert!(declaration.initializer_tokens.iter().any(|token| matches!(
+    assert!(body_tokens.iter().any(|token| matches!(
         &token.kind,
         TokenKind::StringSliceLiteral(id) if string_table.resolve(*id) == r"before \n after"
     )));
@@ -1133,9 +1165,9 @@ fn unescaped_outer_close_diagnostic_flows_through_pipeline_preparation() {
 #[test]
 fn double_dash_remains_body_text() {
     let (output, string_table, _span_builder) = prepare_directly("alpha -- still text\nbeta");
-    let declaration = content_constant(&output);
+    let body_tokens = retained_body_tokens(&output);
 
-    assert!(declaration.initializer_tokens.iter().any(|token| matches!(
+    assert!(body_tokens.iter().any(|token| matches!(
         &token.kind,
         TokenKind::StringSliceLiteral(id)
             if string_table.resolve(*id) == "alpha -- still text\nbeta"
@@ -1147,9 +1179,10 @@ fn declaration_like_text_remains_markdown_body_text() {
     let (output, string_table, _span_builder) =
         prepare_directly("@docs/intro\ncontent #String = value");
     let declaration = content_constant(&output);
+    let body_tokens = retained_body_tokens(&output);
 
     assert!(declaration.initializer_references.is_empty());
-    assert!(declaration.initializer_tokens.iter().any(|token| matches!(
+    assert!(body_tokens.iter().any(|token| matches!(
         &token.kind,
         TokenKind::StringSliceLiteral(id)
             if string_table.resolve(*id) == "@docs/intro\ncontent #String = value"
@@ -1750,93 +1783,37 @@ fn moth_template_external_prelude_call_rejected_by_const_folding() {
 // construction path as authored `$md` templates, rather than a
 // Moth template-specific old-authority object.
 
-/// Extracts the body tokens from a synthetic markdown-template initializer,
-/// i.e. everything between `StartTemplateBody` and `TemplateClose`.
-fn synthetic_template_body_tokens(
-    output: &FileFrontendPrepareOutput,
-) -> &[crate::compiler_frontend::tokenizer::tokens::Token] {
-    let declaration = content_constant(output);
-    let start_index = declaration
-        .initializer_tokens
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::StartTemplateBody))
-        .expect("md template initializer should have StartTemplateBody");
-    let close_index = declaration
-        .initializer_tokens
-        .iter()
-        .rposition(|token| matches!(token.kind, TokenKind::TemplateClose))
-        .expect("md template initializer should have TemplateClose");
-
-    &declaration.initializer_tokens[start_index + 1..close_index]
-}
 
 #[test]
-fn moth_template_synthetic_initializer_has_normal_markdown_template_shape() {
+fn moth_template_retains_body_range_and_normal_markdown_payload() {
     let (output, string_table, _span_builder) = prepare_directly("# Heading\n\nParagraph.");
+    let header = content_header(&output);
     let declaration = content_constant(&output);
-    let kinds = initializer_kinds(&output);
+    let body_tokens = retained_body_tokens(&output);
 
     assert!(
-        kinds.len() >= 4,
-        "md template initializer should have wrapper tokens plus body tokens, got {kinds:?}"
+        declaration.initializer_tokens.is_empty(),
+        "Moth template declaration shell must not retain wrapper or body tokens"
     );
     assert!(
-        matches!(kinds[0], TokenKind::TemplateHead),
-        "first token should be TemplateHead, got {:?}",
-        kinds[0]
+        body_tokens.len() >= 1,
+        "body range should contain the original markdown tokens"
     );
+    let Some(SyntheticContentPayload::MothTemplate { markdown_directive }) =
+        header.synthetic_content_payload
+    else {
+        panic!("expected Moth template payload");
+    };
+    assert_eq!(string_table.resolve(markdown_directive), "md");
     assert!(
-        matches!(
-            kinds[1],
-            TokenKind::StyleDirective(id) if string_table.resolve(*id) == "md"
-        ),
-        "second token should be $md style directive, got {:?}",
-        kinds[1]
-    );
-    assert!(
-        matches!(kinds[2], TokenKind::StartTemplateBody),
-        "third token should be StartTemplateBody, got {:?}",
-        kinds[2]
-    );
-    assert!(
-        matches!(kinds[kinds.len() - 1], TokenKind::TemplateClose),
-        "last token should be TemplateClose, got {:?}",
-        kinds[kinds.len() - 1]
-    );
-
-    let body_tokens = synthetic_template_body_tokens(&output);
-    assert!(
-        !body_tokens.is_empty(),
-        "body should contain the original markdown tokens"
+        !body_tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::TemplateClose)),
+        "canonical body range must not include a fabricated wrapper close"
     );
     assert!(
         declaration.initializer_references.is_empty(),
         "pure markdown body should not introduce symbol references"
-    );
-}
-
-#[test]
-fn moth_template_body_tokens_are_literal_template_body_text() {
-    let source = "# Heading\n\nParagraph.";
-    let (output, string_table, _span_builder) = prepare_directly(source);
-    let body_tokens = synthetic_template_body_tokens(&output);
-
-    assert!(
-        !body_tokens.is_empty(),
-        ".mtf body should tokenize into at least one body token"
-    );
-
-    let concatenated: String = body_tokens
-        .iter()
-        .map(|token| match &token.kind {
-            TokenKind::StringSliceLiteral(id) => string_table.resolve(*id),
-            other => panic!(".mtf body token should be literal text, got {other:?}"),
-        })
-        .collect();
-
-    assert_eq!(
-        concatenated, source,
-        ".mtf body tokens should preserve the original source text as template body literals"
     );
 }
 

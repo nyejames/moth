@@ -452,6 +452,29 @@ fn rebind_required_path(
     Ok(rebound)
 }
 
+/// Explicit payload produced by a source-kind adapter for a synthetic `content #String` header.
+///
+/// Plain Markdown carries its rendered HTML directly. Moth templates keep only the directive
+/// identity here; their body syntax remains the checked `Header::tokens` range over the canonical
+/// source token owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SyntheticContentPayload {
+    RenderedHtml(StringId),
+    MothTemplate { markdown_directive: StringId },
+}
+
+impl SyntheticContentPayload {
+    /// Remap adapter-owned interned strings into the merged module string table.
+    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        match self {
+            Self::RenderedHtml(rendered_html) => *rendered_html = remap.get(*rendered_html),
+            Self::MothTemplate { markdown_directive } => {
+                *markdown_directive = remap.get(*markdown_directive);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Header {
     pub kind: HeaderKind,
@@ -479,6 +502,11 @@ pub struct Header {
     pub local_ordering_hints: HashSet<LocalDeclarationOrderingHint>,
     /// Exact authored declaration-name span; synthetic headers use `None`.
     pub name_span: Option<SourceSpan>,
+    /// Explicit source-kind adapter facts for generated `content #String` declarations.
+    ///
+    /// `None` means this header came from tokenized declaration syntax. A payload-only
+    /// `RenderedHtml` header is the sole valid header without a canonical token owner.
+    pub synthetic_content_payload: Option<SyntheticContentPayload>,
 
     // Contiguous retained body syntax is a source-qualified range. The source token owner lives
     // once in `PreparedHeaderSyntax::source_token_streams`.
@@ -978,6 +1006,9 @@ impl Header {
     /// Source-owned token ranges and sequence IDs contain no remappable payload.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.kind.remap_string_ids(remap);
+        if let Some(payload) = &mut self.synthetic_content_payload {
+            payload.remap_string_ids(remap);
+        }
         let hints = std::mem::take(&mut self.local_ordering_hints);
         self.local_ordering_hints = hints
             .into_iter()
@@ -2015,36 +2046,85 @@ fn validate_header(
             "retained header path does not use the prepared file's final source prefix",
         ));
     }
-    if let Some(stream) = source_stream {
-        if stream.file_id != file_id {
+    match source_stream {
+        Some(stream) => {
+            if matches!(
+                header.synthetic_content_payload,
+                Some(SyntheticContentPayload::RenderedHtml(_))
+            ) {
+                return Err(CompilerError::compiler_error(
+                    "RenderedHtml synthetic content retained a canonical token stream",
+                ));
+            }
+
+            if stream.file_id != file_id {
+                return Err(CompilerError::compiler_error(
+                    "prepared source token stream does not match its file identity",
+                ));
+            }
+            let source = stream.source_tokens()?;
+            if source.source() != file_id {
+                return Err(CompilerError::compiler_error(
+                    "canonical source token owner does not match its prepared file identity",
+                ));
+            }
+            source
+                .range(header.tokens.start(), header.tokens.end())
+                .map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "retained header token range is invalid: {error:?}"
+                    ))
+                })?;
+            if let Some(sequence) = header.token_sequence {
+                source.token_sequence(sequence).map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "retained header token sequence is invalid: {error:?}"
+                    ))
+                })?;
+            }
+        }
+        None => {
+            let payload_is_rendered_html = matches!(
+                header.synthetic_content_payload,
+                Some(SyntheticContentPayload::RenderedHtml(_))
+            );
+            if !payload_is_rendered_html
+                || !header.tokens.is_empty()
+                || header.token_sequence.is_some()
+            {
+                return Err(CompilerError::compiler_error(
+                    "tokenized header has no canonical source token owner",
+                ));
+            }
+
+            let HeaderKind::Constant { declaration } = &header.kind else {
+                return Err(CompilerError::compiler_error(
+                    "payload-only synthetic content header is not a constant",
+                ));
+            };
+            if !declaration.initializer_tokens.is_empty()
+                || !declaration.initializer_references.is_empty()
+            {
+                return Err(CompilerError::compiler_error(
+                    "payload-only synthetic content retained parser initializer syntax",
+                ));
+            }
+        }
+    }
+
+    if let Some(SyntheticContentPayload::MothTemplate { .. }) =
+        header.synthetic_content_payload
+    {
+        let HeaderKind::Constant { declaration } = &header.kind else {
             return Err(CompilerError::compiler_error(
-                "prepared source token stream does not match its file identity",
+                "MothTemplate synthetic payload is not attached to a constant",
+            ));
+        };
+        if !declaration.initializer_tokens.is_empty() {
+            return Err(CompilerError::compiler_error(
+                "MothTemplate synthetic content retained body tokens in its declaration shell",
             ));
         }
-        let source = stream.source_tokens()?;
-        if source.source() != file_id {
-            return Err(CompilerError::compiler_error(
-                "canonical source token owner does not match its prepared file identity",
-            ));
-        }
-        source
-            .range(header.tokens.start(), header.tokens.end())
-            .map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "retained header token range is invalid: {error:?}"
-                ))
-            })?;
-        if let Some(sequence) = header.token_sequence {
-            source.token_sequence(sequence).map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "retained header token sequence is invalid: {error:?}"
-                ))
-            })?;
-        }
-    } else if !header.tokens.is_empty() || header.token_sequence.is_some() {
-        return Err(CompilerError::compiler_error(
-            "synthetic header retained source syntax without a source token stream",
-        ));
     }
     validate_source_span(header.name_span, file_id, "header name")?;
     for hint in &header.local_ordering_hints {

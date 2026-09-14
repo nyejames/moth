@@ -1,20 +1,20 @@
 //! Plain Markdown header preparation tests.
 //!
 //! WHAT: verifies that `.md` files enter the frontend as one normal private `content #String`
-//! constant whose initializer is a single literal token holding the rendered HTML.
+//! constant whose rendered HTML is an explicit synthetic payload.
 //! WHY: Markdown must not be tokenized or parsed as Moth, so the preparation output shape
 //!      is the primary regression surface.
 
-use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
-use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode, HeaderKind};
+use crate::compiler_frontend::headers::types::{
+    FileRole, HeaderExportMode, HeaderKind, SyntheticContentPayload,
+};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 fn prepare(
     source: &str,
@@ -47,6 +47,14 @@ fn produces_exactly_one_header() {
     let (output, _string_table, _path_fork) = prepare("# Heading");
 
     assert_eq!(output.headers.len(), 1);
+    assert!(
+        output.source_token_stream.is_none(),
+        "plain Markdown must retain the no-token preparation path"
+    );
+    assert!(
+        output.path_syntax.table().paths().is_empty(),
+        "plain Markdown must not retain authored path syntax rows"
+    );
     assert_eq!(output.token_count, 0, "Markdown files are not tokenized");
     assert_eq!(output.file_role, FileRole::Normal);
     assert!(output.file_dependency_clauses.is_empty());
@@ -91,34 +99,27 @@ fn declaration_is_private_compile_time_string_constant() {
         declaration.binding_mode,
         BindingMode::CompileTimeConstant
     ));
-    let ParsedTypeRef::BuiltinString { span } = &declaration.type_annotation else {
-        panic!("expected builtin String annotation");
-    };
-    assert_eq!(
-        *span, None,
-        "the generated Markdown type annotation has no authored source span"
-    );
 }
 
 #[test]
-fn initializer_is_single_string_literal_with_rendered_html() {
+fn payload_is_rendered_html_without_initializer_tokens() {
     let (output, string_table, _path_fork) = prepare("# Heading");
 
     let header = &output.headers[0];
     let HeaderKind::Constant { declaration } = &header.kind else {
         panic!("expected constant header");
     };
-
-    assert_eq!(declaration.initializer_tokens.len(), 1);
-    let token = &declaration.initializer_tokens[0];
-    let rendered = match &token.kind {
-        TokenKind::StringSliceLiteral(id) => string_table.resolve(*id),
-        other => panic!("expected single StringSliceLiteral initializer, got {other:?}"),
+    assert!(
+        declaration.initializer_tokens.is_empty(),
+        "payload-only Markdown must not retain parser initializer tokens"
+    );
+    let Some(SyntheticContentPayload::RenderedHtml(id)) = header.synthetic_content_payload else {
+        panic!("expected explicit rendered HTML payload");
     };
-
+    let rendered = string_table.resolve(id);
     assert!(
         rendered.contains("<h1>Heading</h1>"),
-        "expected rendered HTML in literal, got: {rendered}"
+        "expected rendered HTML in payload, got: {rendered}"
     );
 }
 
@@ -148,18 +149,17 @@ fn rendered_html_is_preserved_exactly() {
     let HeaderKind::Constant { declaration } = &header.kind else {
         panic!("expected constant header");
     };
-
-    let token = &declaration.initializer_tokens[0];
-    let rendered = match &token.kind {
-        TokenKind::StringSliceLiteral(id) => string_table.resolve(*id),
-        other => panic!("expected StringSliceLiteral initializer, got {other:?}"),
+    assert!(declaration.initializer_tokens.is_empty());
+    let Some(SyntheticContentPayload::RenderedHtml(id)) = header.synthetic_content_payload else {
+        panic!("expected rendered HTML payload");
     };
+    let rendered = string_table.resolve(id);
 
     let expected =
         "<p>Text with <code>backticks</code>, \"quotes\", [brackets], and\nnewlines.</p>\n";
     assert_eq!(
         rendered, expected,
-        "rendered HTML must be preserved exactly in the literal token"
+        "rendered HTML must be preserved exactly in the payload"
     );
 }
 
@@ -176,24 +176,15 @@ fn initializer_contains_no_template_tokens() {
     let HeaderKind::Constant { declaration } = &header.kind else {
         panic!("expected constant header");
     };
-
-    assert_eq!(
-        declaration.initializer_tokens.len(),
-        1,
-        "plain Markdown must produce exactly one literal token"
-    );
-
-    let forbidden_template_token = declaration.initializer_tokens.iter().any(|token| {
-        matches!(
-            token.kind,
-            TokenKind::TemplateHead
-                | TokenKind::StartTemplateBody
-                | TokenKind::TemplateClose
-                | TokenKind::StyleDirective(_)
-        )
-    });
     assert!(
-        !forbidden_template_token,
-        "plain Markdown initializer must not contain template construction tokens"
+        declaration.initializer_tokens.is_empty(),
+        "plain Markdown must not retain parser initializer tokens"
+    );
+    assert!(
+        matches!(
+            header.synthetic_content_payload,
+            Some(SyntheticContentPayload::RenderedHtml(_))
+        ),
+        "plain Markdown must carry explicit rendered HTML payload"
     );
 }

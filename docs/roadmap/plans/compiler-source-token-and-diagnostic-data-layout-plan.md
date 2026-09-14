@@ -971,9 +971,18 @@ Slice 3E5 decision (2026-09-14): canonical `SourceTokens` now owns one checked s
 source, with 8-byte start/end entries and one-based checked IDs. `TokenSequenceView` and the
 shared `TokenCursor` traverse contiguous and segmented half-open syntax, including merged start
 runs and retained EOF, while parser compatibility materialization remains bounded and ephemeral.
-- [ ] **3E6 — source-kind adapters:** represent non-tokenized adapter payloads directly, preserve
+- [x] **3E6 — source-kind adapters:** represent non-tokenized adapter payloads directly, preserve
   plain Markdown's no-token path and keep declaration-shell parsing single-owner through
   token/sequence views
+
+Slice 3E6 decision (2026-09-15): source-kind adapters now retain explicit compact payload facts:
+plain Markdown owns only its interned rendered-HTML `StringId` and keeps the borrowed no-token
+path, while Moth templates retain one checked body `TokenRange` over the canonical `FileTokens`
+plus the interned `$md` directive. Declaration shells no longer retain adapter initializer vectors;
+AST folding materializes bounded wrapper tokens ephemerally from the canonical source owner. Header
+validation, remapping, ordering hints, constant resolution and emission use the explicit payload
+fact, preserving source-database snapshot ownership and the existing adapter output contracts.
+
 - [ ] **3E7 — persistent generic syntax:** generic templates and generated/materialised generic
   bodies retain their ranges/sequences over the canonical immutable source token store, plus donor
   identity/context, so nested and cross-package materialisation, donor diagnostics and retained

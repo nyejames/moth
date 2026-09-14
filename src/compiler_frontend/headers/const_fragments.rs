@@ -152,6 +152,7 @@ pub(super) fn create_top_level_const_template(
         export_mode: HeaderExportMode::Private,
         local_ordering_hints,
         name_span: Some(name_span),
+        synthetic_content_payload: None,
         tokens: template_range,
         declaration_path: full_name,
         token_sequence: None,

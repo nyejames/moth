@@ -236,6 +236,7 @@ impl HeaderFileParseState {
             export_mode: HeaderExportMode::Private,
             local_ordering_hints: HashSet::new(),
             name_span: None,
+            synthetic_content_payload: None,
             tokens: start_range,
             declaration_path: token_stream.src_path,
             token_sequence: Some(token_sequence),

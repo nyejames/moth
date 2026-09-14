@@ -19,6 +19,7 @@ use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyCla
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, HeaderBuildContext, HeaderKind, LocalDeclarationOrderingHint,
+    SyntheticContentPayload,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
@@ -207,6 +208,7 @@ pub(super) fn collect_content_source_ordering_hints(
         let Header {
             kind,
             tokens: token_range,
+            synthetic_content_payload,
             local_ordering_hints,
             ..
         } = header;
@@ -214,11 +216,23 @@ pub(super) fn collect_content_source_ordering_hints(
         match kind {
             HeaderKind::Constant { declaration } => {
                 if declaration.config_qualifier.is_none() {
-                    scan_tokens_for_content_sources(
-                        &declaration.initializer_tokens,
-                        &content_targets,
-                        local_ordering_hints,
-                    );
+                    if matches!(
+                        synthetic_content_payload,
+                        Some(SyntheticContentPayload::MothTemplate { .. })
+                    ) {
+                        scan_token_range_for_content_sources(
+                            *token_range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    } else {
+                        scan_tokens_for_content_sources(
+                            &declaration.initializer_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        );
+                    }
                 }
             }
 
