@@ -10,9 +10,14 @@ use crate::compiler_frontend::compiler_messages::InvalidTypeAnnotationReason;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
-use crate::compiler_frontend::source::LocalSpan;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::Token;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenKind, TokenRange, TokenRangeError,
+    TokenRef, TokenTag,
+};
 
 /// Two-lane result for type-annotation parsing.
 ///
@@ -21,6 +26,133 @@ use crate::compiler_frontend::tokenizer::tokens::Token;
 ///      successful declaration and signature parse, and infrastructure failures must abort
 ///      through the typed lane instead of becoming source diagnostics.
 type TypeParseResult<T> = Result<T, HeaderParseFailure>;
+/// A borrowed, checked canonical window used for collection/map speculation.
+///
+/// The type parser never projects a braced body into a second `Vec<Token>` stream. Every
+/// speculative side and nested parse is a bounded range over the same source-owned arrays.
+#[derive(Clone, Copy)]
+struct TypeTokenWindow<'a> {
+    source: &'a SourceTokens,
+    range: TokenRange,
+    /// Optional remapped parser lane corresponding to `range`.
+    ///
+    /// The canonical source remains authoritative for spans and range validation. The transient
+    /// lane supplies destination-domain payload IDs when a generic body crosses a package boundary.
+    compatibility_tokens: Option<&'a [Token]>,
+    compatibility_start: usize,
+}
+
+
+impl<'a> TypeTokenWindow<'a> {
+    fn new_with_compatibility(
+        source: &'a SourceTokens,
+        range: TokenRange,
+        compatibility: Option<(&'a [Token], usize)>,
+    ) -> Result<Self, TokenRangeError> {
+        source
+            .full_range()
+            .and_then(|_| TokenRange::try_new_for(source, range.start(), range.end()))
+            .and_then(|range| {
+                if let Some((tokens, start)) = compatibility {
+                    let Some(end) = start.checked_add(range.len() as usize) else {
+                        return Err(TokenRangeError::OutOfBounds {
+                            start: u32::MAX,
+                            end: u32::MAX,
+                            len: tokens.len(),
+                        });
+                    };
+                    if end > tokens.len() {
+                        return Err(TokenRangeError::OutOfBounds {
+                            start: u32::try_from(start).unwrap_or(u32::MAX),
+                            end: u32::try_from(end).unwrap_or(u32::MAX),
+                            len: tokens.len(),
+                        });
+                    }
+                }
+                Ok(Self {
+                    source,
+                    range,
+                    compatibility_tokens: compatibility.map(|(tokens, _)| tokens),
+                    compatibility_start: compatibility.map_or(0, |(_, start)| start),
+                })
+            })
+    }
+
+    fn len(self) -> usize {
+        self.range.len() as usize
+    }
+
+    fn is_empty(self) -> bool {
+        self.range.is_empty()
+    }
+
+    fn get(self, index: usize) -> Option<TokenRef<'a>> {
+        let absolute = self.range.start().index().checked_add(index)?;
+        if absolute >= self.range.end().index() {
+            return None;
+        }
+        self.source
+            .token(TokenIndex::try_from_index(absolute)?)
+            .ok()
+    }
+
+    fn compatibility_view(self) -> Option<(&'a [Token], usize)> {
+        self.compatibility_tokens
+            .map(|tokens| (tokens, self.compatibility_start))
+    }
+
+    fn token_kind_at(self, index: usize) -> Option<TokenKind> {
+        if let Some((tokens, start)) = self.compatibility_view() {
+            return tokens
+                .get(start.checked_add(index)?)
+                .map(|token| token.kind.clone());
+        }
+        self.get(index)
+            .and_then(|token| token.to_token_kind().ok())
+    }
+
+    fn token_tag_at(self, index: usize) -> Option<TokenTag> {
+        self.token_kind_at(index)
+            .map(|kind| kind.token_tag())
+            .or_else(|| self.get(index).map(TokenRef::tag))
+    }
+
+    fn token_string_id_at(self, index: usize) -> Option<StringId> {
+        match self.token_kind_at(index)? {
+            TokenKind::Symbol(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    fn token_span_at(self, index: usize) -> Option<SourceSpan> {
+        self.get(index).map(TokenRef::source_span)
+    }
+
+    fn subrange(self, start: usize, end: usize) -> Option<Self> {
+        if start > end || end > self.len() {
+            return None;
+        }
+        let absolute_start = self.range.start().index().checked_add(start)?;
+        let absolute_end = self.range.start().index().checked_add(end)?;
+        let token_start = TokenIndex::try_from_index(absolute_start)?;
+        let token_end = TokenIndex::try_from_index(absolute_end)?;
+        let range = TokenRange::try_new_for(self.source, token_start, token_end).ok()?;
+        let compatibility = self.compatibility_tokens.and_then(|tokens| {
+            self.compatibility_start
+                .checked_add(start)
+                .map(|compatibility_start| (tokens, compatibility_start))
+        });
+        Self::new_with_compatibility(self.source, range, compatibility).ok()
+    }
+
+    fn cursor(self) -> Result<TokenCursor<'a>, TokenRangeError> {
+        TokenCursor::new(self.source, self.range)
+    }
+
+    fn source_id(self) -> SourceId {
+        self.range.source()
+    }
+}
 
 // -------------------------
 //  Type annotation parsing
@@ -29,9 +161,32 @@ type TypeParseResult<T> = Result<T, HeaderParseFailure>;
 /// Parse a type annotation and return the parsed type reference.
 ///
 /// WHAT: produces `ParsedTypeRef` — unresolved parsed syntax, not semantic identity.
-/// WHY: resolution into `TypeId` or `DataType` happens later when the environment is available.
+/// Compatibility adapter for legacy test/AST streams.
+///
+/// This boundary borrows the existing canonical owner when one exists and only mirrors the
+/// consumed position back to `FileTokens`; the parser itself remains the cursor-only core above.
 pub(crate) fn parse_type_annotation(
     token_stream: &mut FileTokens,
+    context: TypeAnnotationContext,
+    string_table: &StringTable,
+) -> TypeParseResult<ParsedTypeRef> {
+    let (result, canonical_cursor) = {
+        let mut declaration_cursor =
+            DeclarationCursor::from_file_tokens(token_stream)
+                .map_err(HeaderParseFailure::Infrastructure)?;
+        let result = parse_type_annotation_cursor(&mut declaration_cursor, context, string_table);
+        (result, declaration_cursor.canonical_cursor())
+    };
+    let next_index = token_stream
+        .compatibility_index_for_cursor(canonical_cursor)
+        .map_err(HeaderParseFailure::Infrastructure)?;
+    token_stream.index = next_index;
+    result
+}
+
+/// Canonical declaration/type parser core. Callers must hand off a short-lived bounded cursor.
+pub(crate) fn parse_type_annotation_cursor(
+    token_stream: &mut DeclarationCursor<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
@@ -50,7 +205,7 @@ pub(crate) fn parse_type_annotation(
 }
 
 fn parse_required_type(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
@@ -58,7 +213,7 @@ fn parse_required_type(
 }
 
 fn parse_required_type_with_generic_application(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
     allow_generic_application: bool,
@@ -75,7 +230,7 @@ fn parse_required_type_with_generic_application(
 }
 
 fn parse_type_atom(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
@@ -166,7 +321,7 @@ fn parse_type_atom(
             ),
         )),
         TokenKind::Symbol(type_name) => {
-            let type_name = *type_name;
+            let type_name = type_name.to_owned();
             token_stream.advance();
 
             // Check for namespace-qualified type syntax: `Namespace.Type` or
@@ -247,7 +402,7 @@ fn parse_type_atom(
 }
 
 fn parse_type_postfixes(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     parsed_type: ParsedTypeRef,
     context: TypeAnnotationContext,
     string_table: &StringTable,
@@ -274,18 +429,28 @@ fn parse_type_postfixes(
 /// Capacity-only shorthand (`{N}`) is only valid for declaration targets, where the
 /// element type is inferred.
 fn parse_collection_type(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
-    let opening_token_index = token_stream.index;
     let span = current_source_span(token_stream);
     token_stream.advance(); // consume '{'
+    let compatibility_start = token_stream.compatibility_index();
 
-    let inner_tokens = collect_collection_inner_tokens(token_stream)?;
+    let inner_range = collect_collection_inner_range(token_stream)?;
+    let source_tokens = token_stream.canonical_cursor().source_tokens();
+    let compatibility = token_stream
+        .compatibility_tokens()
+        .zip(compatibility_start);
+    let inner = TypeTokenWindow::new_with_compatibility(source_tokens, inner_range, compatibility)
+        .map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "collection type inner range was invalid: {error:?}",
+        )))
+    })?;
     token_stream.advance(); // consume the outer '}'
 
-    if inner_tokens.is_empty() {
+    if inner.is_empty() {
         return Ok(ParsedTypeRef::Collection {
             element: Box::new(ParsedTypeRef::Inferred),
             span,
@@ -293,30 +458,33 @@ fn parse_collection_type(
         });
     }
 
-    if let Some(reactive_token) = inner_tokens
-        .iter()
-        .find(|token| token.kind == TokenKind::Reactive)
+    if let Some(reactive_span) = (0..inner.len())
+        .find_map(|index| {
+            inner
+                .token_tag_at(index)
+                .filter(|tag| *tag == TokenTag::REACTIVE)
+                .and_then(|_| inner.token_span_at(index))
+        })
     {
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::ReactiveAccessNotAllowed,
-                Some(SourceSpan::new(token_stream.file_id, reactive_token.span)),
+                Some(reactive_span),
             ),
         ));
     }
 
     // Map type syntax `{K = V}` takes precedence over collection capacity splitting.
-    match scan_top_level_assigns(&inner_tokens) {
+    match scan_top_level_assigns(inner) {
         TopLevelAssignScan::None => {}
         TopLevelAssignScan::One(assign_idx) => {
-            return parse_map_type_from_inner_tokens(
-                &inner_tokens,
+            return parse_map_type_from_inner_window(
+                inner,
                 assign_idx,
-                token_stream,
                 context,
                 string_table,
-                &token_stream.tokens[opening_token_index],
+                span,
             );
         }
         TopLevelAssignScan::Multiple => {
@@ -329,14 +497,14 @@ fn parse_collection_type(
         }
     }
 
-    if collection_type_slice_can_start_type(&inner_tokens, context, string_table) {
-        let parsed_slice = parse_type_slice(&inner_tokens, token_stream, context, string_table)?;
+    if collection_type_slice_can_start_type(inner, context, string_table) {
+        let parsed_slice = parse_type_slice(inner, context, string_table)?;
         if let Some(extra_token) = parsed_slice.next_token {
             return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::expected_token(
                     TokenKind::CloseCurly,
                     Some(extra_token.kind),
-                    Some(SourceSpan::new(token_stream.file_id, extra_token.span)),
+                    Some(SourceSpan::new(inner.source_id(), extra_token.span)),
                 ),
             ));
         }
@@ -350,23 +518,24 @@ fn parse_collection_type(
         });
     }
 
-    for split_idx in 1..inner_tokens.len() {
-        let type_tokens = &inner_tokens[split_idx..];
+    for split_idx in 1..inner.len() {
+        let Some(type_tokens) = inner.subrange(split_idx, inner.len()) else {
+            continue;
+        };
         if !collection_type_slice_can_start_type(type_tokens, context, string_table) {
             continue;
         }
 
         if let Some(element) =
-            parse_type_slice_exact(type_tokens, token_stream, context, string_table)
+            parse_type_slice_exact(type_tokens, context, string_table)
         {
             reject_trait_this_composition(&element, context, span)?;
             return Ok(ParsedTypeRef::Collection {
                 element: Box::new(element),
                 span,
                 fixed_capacity: parsed_capacity(
-                    &inner_tokens[..split_idx],
+                    inner.subrange(0, split_idx).expect("split range is bounded"),
                     string_table,
-                    token_stream.file_id,
                 )?,
             });
         }
@@ -376,7 +545,7 @@ fn parse_collection_type(
         return Ok(ParsedTypeRef::Collection {
             element: Box::new(ParsedTypeRef::Inferred),
             span,
-            fixed_capacity: parsed_capacity(&inner_tokens, string_table, token_stream.file_id)?,
+            fixed_capacity: parsed_capacity(inner, string_table)?,
         });
     }
 
@@ -388,27 +557,34 @@ fn parse_collection_type(
     ))
 }
 
-/// Collect all tokens inside a braced type body, tracking nested braces.
-///
-/// WHAT: gathers tokens between `{` and `}` while counting nested `{`/`}` pairs so inner
-///      collection or map types are captured as part of the body.
-/// WHY: the caller needs the full inner token slice to decide whether this is a collection,
-///      a map, or a capacity-only shorthand.
-fn collect_collection_inner_tokens(token_stream: &mut FileTokens) -> TypeParseResult<Vec<Token>> {
-    let mut inner_tokens = Vec::new();
+/// Collect the canonical range between the current opening `{` and its matching `}`.
+fn collect_collection_inner_range(
+    token_stream: &mut DeclarationCursor<'_>,
+) -> TypeParseResult<TokenRange> {
+    let start = token_stream.canonical_cursor().position();
     let mut nested_collection_depth = 0usize;
 
     loop {
         match token_stream.current_token_kind() {
-            TokenKind::CloseCurly if nested_collection_depth == 0 => break,
+            TokenKind::CloseCurly if nested_collection_depth == 0 => {
+                let end = token_stream.canonical_cursor().position();
+                return TokenRange::try_new_for(
+                    token_stream.canonical_cursor().source_tokens(),
+                    start,
+                    end,
+                )
+                .map_err(|error| {
+                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                        "collection type inner range exceeded its source owner: {error:?}",
+                    )))
+                });
+            }
             TokenKind::CloseCurly => {
-                nested_collection_depth -= 1;
-                inner_tokens.push(token_stream.current_token());
+                nested_collection_depth = nested_collection_depth.saturating_sub(1);
                 token_stream.advance();
             }
             TokenKind::OpenCurly => {
-                nested_collection_depth += 1;
-                inner_tokens.push(token_stream.current_token());
+                nested_collection_depth = nested_collection_depth.saturating_add(1);
                 token_stream.advance();
             }
             TokenKind::Eof => {
@@ -420,14 +596,9 @@ fn collect_collection_inner_tokens(token_stream: &mut FileTokens) -> TypeParseRe
                     ),
                 ));
             }
-            _ => {
-                inner_tokens.push(token_stream.current_token());
-                token_stream.advance();
-            }
+            _ => token_stream.advance(),
         }
     }
-
-    Ok(inner_tokens)
 }
 
 /// WHAT: accepts only a single integer literal or a single bare symbol token.
@@ -437,19 +608,24 @@ fn collect_collection_inner_tokens(token_stream: &mut FileTokens) -> TypeParseRe
 /// WHY: the language only allows literal-or-bare-const capacity in type position;
 ///      named constants can still hold arithmetic before they are used in type annotations.
 fn parsed_capacity(
-    tokens: &[Token],
+    tokens: TypeTokenWindow<'_>,
     string_table: &StringTable,
-    source_id: SourceId,
 ) -> TypeParseResult<Option<ParsedCollectionCapacity>> {
     if tokens.is_empty() {
         return Ok(None);
     }
 
     if tokens.len() == 1 {
-        let token_span = Some(SourceSpan::new(source_id, tokens[0].span));
-        match &tokens[0].kind {
-            TokenKind::NumericLiteral(token) => {
-                if token.kind != NumericLiteralKind::WholeNumber {
+        let token_span = tokens.token_span_at(0);
+        let kind = tokens.token_kind_at(0).ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "capacity token payload is invalid",
+            ))
+        })?;
+
+        match kind {
+            TokenKind::NumericLiteral(numeric) => {
+                if numeric.kind != NumericLiteralKind::WholeNumber {
                     return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::invalid_collection_type(
                             InvalidCollectionTypeReason::CapacityNotInt,
@@ -458,15 +634,15 @@ fn parsed_capacity(
                     ));
                 }
 
-                let value = materialize_i32(token, string_table).map_err(|reason| {
-                    CompilerDiagnostic::invalid_number_literal(
-                        token.source_text,
+                let value = materialize_i32(&numeric, string_table).map_err(|reason| {
+                    HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
+                        numeric.source_text,
                         reason,
                         token_span,
-                    )
+                    ))
                 })?;
 
-                if token.sign == NumericLiteralSign::Negative {
+                if numeric.sign == NumericLiteralSign::Negative {
                     return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::invalid_collection_type(
                             InvalidCollectionTypeReason::NegativeCapacity,
@@ -482,7 +658,7 @@ fn parsed_capacity(
             }
             TokenKind::Symbol(name) => {
                 return Ok(Some(ParsedCollectionCapacity::BareConstant {
-                    name: *name,
+                    name,
                     span: token_span,
                 }));
             }
@@ -490,10 +666,11 @@ fn parsed_capacity(
         }
     }
 
+    let span = tokens.get(0).map(TokenRef::source_span);
     Err(HeaderParseFailure::Diagnostic(
         CompilerDiagnostic::invalid_collection_type(
             InvalidCollectionTypeReason::CapacityNotConstant,
-            Some(SourceSpan::new(source_id, tokens[0].span)),
+            span,
         ),
     ))
 }
@@ -508,21 +685,20 @@ enum TopLevelAssignScan {
     Multiple,
 }
 
-/// Scan a token slice for top-level `=` tokens while tracking nested delimiters.
-///
-/// WHAT: classifies whether the slice has no outer separator, one outer separator, or several.
-/// WHY: map type syntax `{K = V}` splits only at the outermost `=`, and nested maps may contain
-///      their own separators that must not affect the enclosing type body.
-fn scan_top_level_assigns(tokens: &[Token]) -> TopLevelAssignScan {
+/// Scan a canonical range for top-level `=` tokens while tracking nested delimiters.
+fn scan_top_level_assigns(tokens: TypeTokenWindow<'_>) -> TopLevelAssignScan {
     let mut depth = 0usize;
     let mut first_assign = None;
-    for (idx, token) in tokens.iter().enumerate() {
-        match &token.kind {
-            TokenKind::OpenCurly | TokenKind::OpenParenthesis => depth += 1,
-            TokenKind::CloseCurly | TokenKind::CloseParenthesis => {
+    for idx in 0..tokens.len() {
+        let Some(tag) = tokens.token_tag_at(idx) else {
+            continue;
+        };
+        match tag {
+            TokenTag::OPEN_CURLY | TokenTag::OPEN_PARENTHESIS => depth += 1,
+            TokenTag::CLOSE_CURLY | TokenTag::CLOSE_PARENTHESIS => {
                 depth = depth.saturating_sub(1);
             }
-            TokenKind::Assign if depth == 0 => {
+            TokenTag::ASSIGN if depth == 0 => {
                 if first_assign.is_some() {
                     return TopLevelAssignScan::Multiple;
                 }
@@ -535,23 +711,20 @@ fn scan_top_level_assigns(tokens: &[Token]) -> TopLevelAssignScan {
     first_assign.map_or(TopLevelAssignScan::None, TopLevelAssignScan::One)
 }
 
-/// Parse a map type from the inner tokens collected between `{` and `}`.
-///
-/// WHAT: splits tokens at the `=` separator, validates exactly one separator, rejects empty
-///      sides, and parses both key and value as type annotations.
-/// WHY: map syntax is detected before collection syntax so `{K = V}` is never mis-parsed as
-///      a fixed collection with capacity.
-fn parse_map_type_from_inner_tokens(
-    inner_tokens: &[Token],
+/// Parse a map type from the canonical range between `{` and `}`.
+fn parse_map_type_from_inner_window(
+    inner: TypeTokenWindow<'_>,
     assign_idx: usize,
-    token_stream: &FileTokens,
     context: TypeAnnotationContext,
     string_table: &StringTable,
-    opening_token: &Token,
+    span: Option<SourceSpan>,
 ) -> TypeParseResult<ParsedTypeRef> {
-    let span = Some(SourceSpan::new(token_stream.file_id, opening_token.span));
-    let key_tokens = &inner_tokens[..assign_idx];
-    let value_tokens = &inner_tokens[assign_idx + 1..];
+    let key_tokens = inner
+        .subrange(0, assign_idx)
+        .expect("map key range is bounded by its separator");
+    let value_tokens = inner
+        .subrange(assign_idx + 1, inner.len())
+        .expect("map value range is bounded by its separator");
 
     if key_tokens.is_empty() {
         return Err(HeaderParseFailure::Diagnostic(
@@ -565,8 +738,8 @@ fn parse_map_type_from_inner_tokens(
         ));
     }
 
-    let key = try_parse_map_side(key_tokens, token_stream, context, string_table, span)?;
-    let value = try_parse_map_side(value_tokens, token_stream, context, string_table, span)?;
+    let key = try_parse_map_side(key_tokens, context, string_table, span)?;
+    let value = try_parse_map_side(value_tokens, context, string_table, span)?;
 
     reject_trait_this_composition(&key, context, span)?;
     reject_trait_this_composition(&value, context, span)?;
@@ -578,25 +751,18 @@ fn parse_map_type_from_inner_tokens(
     })
 }
 
-/// Attempt to parse one side of a map type (`K` or `V`) from a token slice.
-///
-/// WHAT: tries `parse_type_slice_exact`; on failure, detects fixed-capacity syntax and
-///      postfix capacity-like syntax and emits a targeted map diagnostic instead of a generic
-///      parse error.
-/// WHY: `{4 String = Int}`, `{String = 4 Int}`, and `{String = Int:5}` are common mistakes that
-///      deserve the "fixed capacity not allowed on maps" diagnostic.
+/// Attempt to parse one side of a map type (`K` or `V`) from a canonical range.
 fn try_parse_map_side(
-    tokens: &[Token],
-    token_stream: &FileTokens,
+    tokens: TypeTokenWindow<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
     span: Option<SourceSpan>,
 ) -> TypeParseResult<ParsedTypeRef> {
-    if let Some(parsed) = parse_type_slice_exact(tokens, token_stream, context, string_table) {
+    if let Some(parsed) = parse_type_slice_exact(tokens, context, string_table) {
         return Ok(parsed);
     }
 
-    if map_side_looks_like_fixed_capacity(tokens, token_stream, context, string_table) {
+    if map_side_looks_like_fixed_capacity(tokens, context, string_table) {
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_map_type(
                 InvalidMapTypeReason::FixedCapacityNotAllowed,
@@ -605,7 +771,7 @@ fn try_parse_map_side(
         ));
     }
 
-    if map_side_looks_like_postfix_capacity(tokens, token_stream, context, string_table) {
+    if map_side_looks_like_postfix_capacity(tokens, context, string_table) {
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_map_type(
                 InvalidMapTypeReason::FixedCapacityNotAllowed,
@@ -614,13 +780,13 @@ fn try_parse_map_side(
         ));
     }
 
-    let parsed_slice = parse_type_slice(tokens, token_stream, context, string_table)?;
+    let parsed_slice = parse_type_slice(tokens, context, string_table)?;
     if let Some(extra_token) = parsed_slice.next_token {
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::expected_token(
                 TokenKind::CloseCurly,
                 Some(extra_token.kind),
-                Some(SourceSpan::new(token_stream.file_id, extra_token.span)),
+                Some(SourceSpan::new(tokens.source_id(), extra_token.span)),
             ),
         ));
     }
@@ -629,23 +795,22 @@ fn try_parse_map_side(
 }
 
 /// Detect prefix capacity-like syntax on a map-type side.
-///
-/// WHAT: checks whether tokens begin with valid fixed-capacity syntax followed by a valid
-///      type, which would indicate the user tried to write fixed-capacity syntax inside a map.
-/// WHY: `{4 String = Int}` and similar forms should receive the targeted
-///      `FixedCapacityNotAllowed` diagnostic rather than a generic parse error.
 fn map_side_looks_like_fixed_capacity(
-    tokens: &[Token],
-    token_stream: &FileTokens,
+    tokens: TypeTokenWindow<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> bool {
     for split_idx in 1..tokens.len() {
-        let type_tokens = &tokens[split_idx..];
+        let Some(type_tokens) = tokens.subrange(split_idx, tokens.len()) else {
+            continue;
+        };
         if collection_type_slice_can_start_type(type_tokens, context, string_table)
-            && parse_type_slice_exact(type_tokens, token_stream, context, string_table).is_some()
+            && parse_type_slice_exact(type_tokens, context, string_table).is_some()
             && matches!(
-                parsed_capacity(&tokens[..split_idx], string_table, token_stream.file_id,),
+                parsed_capacity(
+                    tokens.subrange(0, split_idx).expect("capacity range is bounded"),
+                    string_table,
+                ),
                 Ok(Some(_))
             )
         {
@@ -657,29 +822,27 @@ fn map_side_looks_like_fixed_capacity(
 }
 
 /// Detect postfix capacity-like syntax on a map-type side.
-///
-/// WHAT: checks whether a valid type prefix is followed by trailing tokens that cannot continue
-///      a type expression (e.g. `:5` or `5`).
-/// WHY: `{String = Int:5}` is an old postfix capacity-like map syntax that should receive the
-///      same targeted `FixedCapacityNotAllowed` diagnostic as prefix capacity forms.
 fn map_side_looks_like_postfix_capacity(
-    tokens: &[Token],
-    token_stream: &FileTokens,
+    tokens: TypeTokenWindow<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> bool {
     for split_idx in 1..=tokens.len() {
-        let type_tokens = &tokens[..split_idx];
+        let Some(type_tokens) = tokens.subrange(0, split_idx) else {
+            continue;
+        };
         if !collection_type_slice_can_start_type(type_tokens, context, string_table) {
             continue;
         }
-        if parse_type_slice_exact(type_tokens, token_stream, context, string_table).is_some() {
-            let remaining = &tokens[split_idx..];
+        if parse_type_slice_exact(type_tokens, context, string_table).is_some() {
+            let Some(remaining) = tokens.subrange(split_idx, tokens.len()) else {
+                continue;
+            };
             if remaining.is_empty() {
                 continue;
             }
             return matches!(
-                remaining.first().map(|t| &t.kind),
+                remaining.token_kind_at(0),
                 Some(TokenKind::Colon) | Some(TokenKind::NumericLiteral(_))
             );
         }
@@ -692,27 +855,37 @@ struct ParsedTypeSlice {
     next_token: Option<Token>,
 }
 
-/// Parse a collected token slice as a type annotation.
-///
-/// WHAT: reuses the normal type parser on a temporary token stream instead of maintaining a
-///       parallel type parser for collection capacity splitting.
-/// WHY: collection syntax needs to detect the element-type suffix while keeping optional
-///      suffixes, generic applications, namespaced types, and nested collections on the same
-///      parser path as ordinary annotations.
+/// Parse a bounded canonical range as a type annotation.
 fn parse_type_slice(
-    tokens: &[Token],
-    outer_stream: &FileTokens,
+    tokens: TypeTokenWindow<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeSlice> {
-    let mut slice_tokens = tokens.to_vec();
-    slice_tokens.push(Token::new(TokenKind::Eof, LocalSpan::source_start()));
-    let mut stream = FileTokens::new_path_free_substream(
-        outer_stream.src_path,
-        outer_stream.file_id,
-        outer_stream.canonical_os_path.clone(),
-        slice_tokens,
-    );
+    let cursor = tokens.cursor().map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "type slice range was invalid: {error:?}",
+        )))
+    })?;
+    let mut stream = if let Some((compatibility_tokens, compatibility_start)) =
+        tokens.compatibility_view()
+    {
+        let compatibility_end = compatibility_start
+            .checked_add(tokens.len())
+            .ok_or_else(|| {
+                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                    "type slice compatibility range overflowed",
+                ))
+            })?;
+        DeclarationCursor::with_compatibility_bounds(
+            cursor,
+            compatibility_tokens,
+            compatibility_start,
+            compatibility_end,
+        )
+        .map_err(HeaderParseFailure::Infrastructure)?
+    } else {
+        DeclarationCursor::new(cursor).map_err(HeaderParseFailure::Infrastructure)?
+    };
     let parsed_type = parse_required_type(&mut stream, context, string_table)?;
     let next_token = if stream.current_token_kind() == &TokenKind::Eof {
         None
@@ -727,12 +900,11 @@ fn parse_type_slice(
 }
 
 fn parse_type_slice_exact(
-    tokens: &[Token],
-    outer_stream: &FileTokens,
+    tokens: TypeTokenWindow<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> Option<ParsedTypeRef> {
-    let parsed_slice = parse_type_slice(tokens, outer_stream, context, string_table).ok()?;
+    let parsed_slice = parse_type_slice(tokens, context, string_table).ok()?;
 
     parsed_slice
         .next_token
@@ -740,39 +912,36 @@ fn parse_type_slice_exact(
         .then_some(parsed_slice.parsed_type)
 }
 
-/// Heuristic check: can the leading tokens of a slice start a valid type annotation?
-///
-/// WHAT: examines the first token (and optionally a `Namespace.Type` prefix) to decide
-///      whether the remaining tokens in a braced body could be an element type.
-/// WHY: used during the left-to-right scan in `parse_collection_type` to find the boundary
-///      between fixed-capacity syntax and element type.
+/// Heuristic check: can the leading tokens of a range start a valid type annotation?
 fn collection_type_slice_can_start_type(
-    tokens: &[Token],
+    tokens: TypeTokenWindow<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> bool {
-    let Some(first) = tokens.first() else {
+    let Some(first_tag) = tokens.token_tag_at(0) else {
         return false;
     };
 
-    match &first.kind {
-        TokenKind::DatatypeInt
-        | TokenKind::DatatypeFloat
-        | TokenKind::DatatypeBool
-        | TokenKind::DatatypeString
-        | TokenKind::DatatypeChar
-        | TokenKind::OpenCurly => true,
+    match first_tag {
+        TokenTag::DATATYPE_INT
+        | TokenTag::DATATYPE_FLOAT
+        | TokenTag::DATATYPE_BOOL
+        | TokenTag::DATATYPE_STRING
+        | TokenTag::DATATYPE_CHAR
+        | TokenTag::OPEN_CURLY => true,
 
-        TokenKind::TraitThis => matches!(context, TypeAnnotationContext::TraitRequirement),
+        TokenTag::TRAIT_THIS => matches!(context, TypeAnnotationContext::TraitRequirement),
 
-        TokenKind::Symbol(name) => {
-            if tokens.get(1).map(|token| &token.kind) == Some(&TokenKind::Dot)
-                && let Some(TokenKind::Symbol(member)) = tokens.get(2).map(|token| &token.kind)
+        TokenTag::SYMBOL => {
+            if tokens.token_kind_at(1) == Some(TokenKind::Dot)
+                && let Some(TokenKind::Symbol(member)) = tokens.token_kind_at(2)
             {
-                return symbol_spelling_looks_type_name(*member, string_table);
+                return symbol_spelling_looks_type_name(member, string_table);
             }
 
-            symbol_spelling_looks_type_name(*name, string_table)
+            tokens
+                .token_string_id_at(0)
+                .is_some_and(|name| symbol_spelling_looks_type_name(name, string_table))
         }
 
         _ => false,
@@ -788,7 +957,7 @@ fn symbol_spelling_looks_type_name(name: StringId, string_table: &StringTable) -
 }
 
 fn parse_generic_arguments(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     parsed_type: ParsedTypeRef,
     context: TypeAnnotationContext,
     string_table: &StringTable,
@@ -882,7 +1051,7 @@ fn parse_generic_arguments(
 }
 
 fn parse_generic_type_argument(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
@@ -932,7 +1101,7 @@ fn nested_generic_application_error(
 }
 
 fn parse_optional_type_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     parsed_type: ParsedTypeRef,
     context: TypeAnnotationContext,
 ) -> TypeParseResult<ParsedTypeRef> {
@@ -1014,7 +1183,7 @@ fn trait_this_composition_error(
 }
 
 fn type_keyword_deferred_error(
-    token_stream: &FileTokens,
+    token_stream: &DeclarationCursor<'_>,
     context: TypeAnnotationContext,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_type_annotation(
@@ -1036,9 +1205,6 @@ fn compilation_stage(context: TypeAnnotationContext) -> &'static str {
         TypeAnnotationContext::TraitRequirement => "Trait Requirement Parsing",
     }
 }
-fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
+    token_stream.current_span()
 }

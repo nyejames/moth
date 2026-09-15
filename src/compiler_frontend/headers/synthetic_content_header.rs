@@ -69,11 +69,15 @@ pub(crate) fn synthetic_content_header(
         ));
     }
     let header_path = content_constant_path(input.source_file, path_fork, string_table)?;
+    let initializer_range = match input.payload {
+        SyntheticContentPayload::MothTemplate { .. } => Some(input.initializer_range),
+        SyntheticContentPayload::RenderedHtml(_) => None,
+    };
     let declaration = DeclarationSyntax {
         binding_mode: BindingMode::CompileTimeConstant,
         type_annotation: ParsedTypeRef::BuiltinString { span: None },
         config_qualifier: None,
-        initializer_tokens: Vec::new(),
+        initializer_range,
         initializer_references: input.initializer_references,
         span: None,
     };
@@ -104,10 +108,13 @@ pub(crate) fn materialize_synthetic_content_initializer(
     declaration_path: PathId,
 ) -> Result<Vec<Token>, CompilerError> {
     match payload {
-        SyntheticContentPayload::RenderedHtml(rendered_html) => Ok(vec![Token::new(
-            TokenKind::StringSliceLiteral(rendered_html),
-            LocalSpan::source_start(),
-        )]),
+        SyntheticContentPayload::RenderedHtml(rendered_html) => Ok(vec![
+            Token::new(
+                TokenKind::StringSliceLiteral(rendered_html),
+                LocalSpan::source_start(),
+            ),
+            Token::new(TokenKind::Eof, LocalSpan::source_start()),
+        ]),
         SyntheticContentPayload::MothTemplate { markdown_directive } => {
             let source = source.ok_or_else(|| {
                 CompilerError::compiler_error(
@@ -116,7 +123,7 @@ pub(crate) fn materialize_synthetic_content_initializer(
             })?;
             let mut body_stream =
                 FileTokens::new_bounded_substream(source, body_range, declaration_path)?;
-            let mut initializer_tokens = Vec::with_capacity(body_stream.tokens.len() + 4);
+            let mut initializer_tokens = Vec::with_capacity(body_stream.tokens.len() + 5);
             initializer_tokens.push(Token::new(TokenKind::TemplateHead, LocalSpan::source_start()));
             initializer_tokens.push(Token::new(
                 TokenKind::StyleDirective(markdown_directive),
@@ -128,6 +135,7 @@ pub(crate) fn materialize_synthetic_content_initializer(
             ));
             initializer_tokens.append(&mut body_stream.tokens);
             initializer_tokens.push(Token::new(TokenKind::TemplateClose, LocalSpan::source_start()));
+            initializer_tokens.push(Token::new(TokenKind::Eof, LocalSpan::source_start()));
             Ok(initializer_tokens)
         }
     }

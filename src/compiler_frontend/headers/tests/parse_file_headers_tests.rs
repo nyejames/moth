@@ -199,14 +199,11 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
-    let path_token = file_tokens
-        .tokens
-        .iter_mut()
-        .find(|token| matches!(token.kind, TokenKind::Path(_)))
-        .expect("expected a path token");
-    if let TokenKind::Path(id) = &mut path_token.kind {
-        *id = crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE;
-    }
+    // The canonical SourceTokens owner is authoritative for clause parsing. Corrupt its paired
+    // preparation table instead of only mutating the compatibility token vector.
+    file_tokens.path_syntax = FilePathSyntax::Preparing(std::sync::Arc::new(
+        crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
+    ));
 
     match prepare_file_from_tokens(
         file_tokens,
@@ -542,6 +539,15 @@ fn header_body_tokens(headers: &BoundModuleHeaders, header: &Header) -> Vec<Toke
     source
         .materialize_token_range(header.tokens)
         .expect("header range should resolve through its source owner")
+}
+fn default_tokens(headers: &BoundModuleHeaders, range: Option<TokenRange>) -> Vec<Token> {
+    let range = range.expect("expected a retained default-expression range");
+    headers
+        .source_token_streams
+        .get(&range.source())
+        .expect("default range has no prepared source owner")
+        .materialize_token_range(range)
+        .expect("default range should materialize")
 }
 
 fn symbol_tokens_in_header_body(

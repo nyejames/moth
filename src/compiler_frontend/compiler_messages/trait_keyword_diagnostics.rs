@@ -16,7 +16,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTraitKeywordUsageReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,10 +35,21 @@ impl ReservedTraitKeyword {
 }
 
 pub(crate) fn reserved_trait_keyword(token_kind: &TokenKind) -> Option<ReservedTraitKeyword> {
-    match token_kind {
-        TokenKind::Must => Some(ReservedTraitKeyword::Must),
-        TokenKind::TraitThis => Some(ReservedTraitKeyword::This),
-        _ => None,
+    reserved_trait_keyword_for_tag(token_kind.token_tag())
+}
+
+/// Tag-based reserved trait keyword lookup for source-view header callers.
+///
+/// WHAT: maps `must`/`This` stable tags without cloning a legacy token.
+/// WHY: the outer file walk classifies through `TokenRef`/`TokenTag` while later
+///      declaration parsers still use the `TokenKind` entry point.
+pub(crate) fn reserved_trait_keyword_for_tag(tag: TokenTag) -> Option<ReservedTraitKeyword> {
+    if tag == TokenTag::MUST {
+        Some(ReservedTraitKeyword::Must)
+    } else if tag == TokenTag::TRAIT_THIS {
+        Some(ReservedTraitKeyword::This)
+    } else {
+        None
     }
 }
 

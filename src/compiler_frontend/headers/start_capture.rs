@@ -28,13 +28,21 @@ pub(super) fn capture_runtime_template_range(
     // Mutation: EOF diagnostics for unclosed templates intern the expected closing delimiter
     // ("]") so the diagnostic payload can be remapped and rendered later.
     let closing_bracket = string_table.intern("]");
-    crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region(
-        token_stream,
-        |_token, _token_kind| {},
-        |location| CompilerDiagnostic::unexpected_end_of_file(Some(closing_bracket), Some(location)),
-    )?;
+    let post_close_index =
+        crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region_from_source(
+            token_stream,
+            opening_index,
+            |_token| {},
+            |location| {
+                HeaderParseFailure::Diagnostic(CompilerDiagnostic::unexpected_end_of_file(
+                    Some(closing_bracket),
+                    Some(location),
+                ))
+            },
+            HeaderParseFailure::Infrastructure,
+        )?;
 
-    let end = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+    let end = TokenIndex::try_from_index(post_close_index).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "runtime template end exceeded the source token index space",
         ))

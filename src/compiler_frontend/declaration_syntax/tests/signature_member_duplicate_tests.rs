@@ -12,6 +12,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
     RuleDiagnosticKind,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, parse_function_signature_syntax,
@@ -169,8 +170,15 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
     let mut warnings = Vec::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
+    let mut declaration_cursor =
+        DeclarationCursor::new(
+            token_stream
+                .canonical_cursor_from_current()
+                .expect("test token stream must expose canonical tokens"),
+        )
+            .expect("test token stream must expose canonical tokens");
     let error = parse_function_signature_syntax(
-        &mut token_stream,
+        &mut declaration_cursor,
         &mut warnings,
         &mut string_table,
         function_path,
@@ -203,8 +211,15 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
     let mut warnings = Vec::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
+    let mut declaration_cursor =
+        DeclarationCursor::new(
+            token_stream
+                .canonical_cursor_from_current()
+                .expect("test token stream must expose canonical tokens"),
+        )
+            .expect("test token stream must expose canonical tokens");
     let error = parse_record_body(
-        &mut token_stream,
+        &mut declaration_cursor,
         &mut string_table,
         &mut warnings,
         SignatureMemberContext::StructField,
@@ -238,8 +253,15 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
     let mut warnings = Vec::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "message");
+    let mut declaration_cursor =
+        DeclarationCursor::new(
+            token_stream
+                .canonical_cursor_from_current()
+                .expect("test token stream must expose canonical tokens"),
+        )
+            .expect("test token stream must expose canonical tokens");
     let error = parse_record_body(
-        &mut token_stream,
+        &mut declaration_cursor,
         &mut string_table,
         &mut warnings,
         SignatureMemberContext::ChoicePayloadField,
@@ -273,8 +295,15 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
     let mut warnings = Vec::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
+    let mut declaration_cursor =
+        DeclarationCursor::new(
+            token_stream
+                .canonical_cursor_from_current()
+                .expect("test token stream must expose canonical tokens"),
+        )
+            .expect("test token stream must expose canonical tokens");
     let error = parse_trait_requirement_signature_syntax(
-        &mut token_stream,
+        &mut declaration_cursor,
         &mut warnings,
         &mut string_table,
         method_path,
@@ -305,9 +334,15 @@ fn distinct_members_parse_successfully_through_shared_parser() {
     );
     let struct_path = owner_path(&mut path_fork, &mut string_table);
     let mut warnings = Vec::new();
-
+    let mut declaration_cursor =
+        DeclarationCursor::new(
+            token_stream
+                .canonical_cursor_from_current()
+                .expect("test token stream must expose canonical tokens"),
+        )
+            .expect("test token stream must expose canonical tokens");
     let fields = parse_record_body(
-        &mut token_stream,
+        &mut declaration_cursor,
         &mut string_table,
         &mut warnings,
         SignatureMemberContext::StructField,

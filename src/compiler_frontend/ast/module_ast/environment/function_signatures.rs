@@ -133,13 +133,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .environment_header_scope(header, string_table)
                     .with_file_visibility(Arc::clone(&visibility))
                     .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
-                let header_path_syntax = self.header_path_syntax(header).clone();
+                let source_owner = self
+                    .source_token_streams
+                    .get(&header.tokens.source())
+                    .ok_or_else(|| {
+                        self.error_messages(
+                            CompilerError::compiler_error(
+                                "function header has no prepared source token owner",
+                            ),
+                            string_table,
+                        )
+                    })?;
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
                 let signature = function_signature_from_syntax_with_unresolved_types(
                     signature,
-                    &header_path_syntax,
+                    source_owner.as_ref(),
                     &signature_context,
                     &mut type_interner,
                     string_table,

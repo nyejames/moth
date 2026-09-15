@@ -11,7 +11,10 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
-use crate::compiler_frontend::declaration_syntax::build_config_contract::starts_build_config_qualifier;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    starts_build_config_qualifier_at_source,
+};
 use crate::compiler_frontend::declaration_syntax::choice::parse_choice_shell as parse_choice_header_payload;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, parse_declaration_syntax,
@@ -22,7 +25,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::parse_funct
 use crate::compiler_frontend::declaration_syntax::r#struct::parse_struct_shell;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     ParsedNamedTypeReference, TypeAnnotationContext, collect_capacity_references_in_parsed_ref,
-    for_each_named_type_in_parsed_ref, parse_type_annotation,
+    for_each_named_type_in_parsed_ref, parse_type_annotation_cursor,
 };
 
 use super::trait_headers::{
@@ -44,7 +47,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenIndex, TokenKind, TokenRange,
+    FileTokens, Token, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
@@ -62,6 +65,110 @@ use std::collections::HashSet;
 /// WHY: delegated declaration parsers carry both lanes, so dispatch can propagate them directly
 ///      across each delegation step without converting either lane.
 type HeaderDispatchResult<T> = Result<T, HeaderParseFailure>;
+fn compatibility_cursor_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    token_stream
+        .tokens
+        .get(token_stream.index)
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+}
+
+fn source_token_at_index<'a>(
+    token_stream: &'a FileTokens,
+    index: usize,
+    owner: &'static str,
+) -> HeaderDispatchResult<TokenRef<'a>> {
+    let canonical = token_stream.source_tokens().map_err(|_| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Header dispatch is missing its source token owner.",
+            None,
+        ))
+    })?;
+    if canonical.source() != token_stream.file_id {
+        return Err(internal_header_dispatch_error(
+            "Header dispatch source token owner does not match its file identity.",
+            None,
+        )
+        .into());
+    }
+    let position = TokenIndex::try_from_index(index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            owner,
+            compatibility_cursor_span(token_stream),
+        ))
+    })?;
+    canonical.token(position).map_err(|_| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            owner,
+            compatibility_cursor_span(token_stream),
+        ))
+    })
+}
+
+fn source_tag_at_cursor(token_stream: &FileTokens) -> HeaderDispatchResult<TokenTag> {
+    Ok(source_token_at_index(
+        token_stream,
+        token_stream.index,
+        "Header dispatch token index exceeded its source owner.",
+    )?
+    .tag())
+}
+
+
+fn source_next_tag(token_stream: &FileTokens) -> HeaderDispatchResult<Option<TokenTag>> {
+    let next_index = token_stream.index.checked_add(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Header dispatch follower index overflowed its source range.",
+            compatibility_cursor_span(token_stream),
+        ))
+    })?;
+    let canonical = token_stream.source_tokens().map_err(|_| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Header dispatch is missing its source token owner.",
+            compatibility_cursor_span(token_stream),
+        ))
+    })?;
+    if canonical.source() != token_stream.file_id {
+        return Err(internal_header_dispatch_error(
+            "Header dispatch source token owner does not match its file identity.",
+            compatibility_cursor_span(token_stream),
+        )
+        .into());
+    }
+    if next_index >= canonical.len() {
+        return Ok(None);
+    }
+    Ok(Some(
+        source_token_at_index(
+            token_stream,
+            next_index,
+            "Header dispatch follower index exceeded its source owner.",
+        )?
+        .tag(),
+    ))
+}
+
+fn starts_build_config_qualifier_at_cursor(
+    token_stream: &FileTokens,
+    string_table: &StringTable,
+) -> HeaderDispatchResult<bool> {
+    let canonical = token_stream.source_tokens().map_err(|_| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Header dispatch is missing its source token owner.",
+            compatibility_cursor_span(token_stream),
+        ))
+    })?;
+    let index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Header dispatch token index exceeded its checked domain.",
+            compatibility_cursor_span(token_stream),
+        ))
+    })?;
+    Ok(starts_build_config_qualifier_at_source(
+        canonical,
+        index,
+        string_table,
+    ))
+}
 
 // WHAT: classifies one top-level declaration by its leading token and builds the concrete header
 // payload (kind + body source range + dependency set) that later AST passes consume.
@@ -72,13 +179,10 @@ type HeaderDispatchResult<T> = Result<T, HeaderParseFailure>;
 //
 // Dispatch summary:
 //   `|`  (TypeParameterBracket)  → function signature + body range capture
-//   `=`  (Assign)                → struct `= |fields|`
-//   `::`  (DoubleColon)          → choice/union variant list
-//   `#`  (Hash)                  → compile-time constant binding `#=` / `#Type`
-//   `must:`                      → trait declaration shell
-//   `must TRAIT`                 → trait conformance shell
-//   `This`                       → trait-local keyword outside a trait declaration, error
-//   anything else                → no header created (e.g. start-template body lines)
+//   `=`  (Assign)                → struct shell
+//   `::` (DoubleColon)           → choice/union variants
+//   `#`  (Hash)                  → compile-time constant binding
+//   `must:` / `must TRAIT`       → trait declaration/conformance
 pub(super) fn create_header(
     full_name: PathId,
     token_stream: &mut FileTokens,
@@ -101,9 +205,11 @@ pub(super) fn create_header(
     let mut capacity_references: Vec<InitializerReference> = Vec::new();
     let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
     let generic_parameters = parse_optional_generic_parameters(token_stream, context)?;
+    let current_tag = source_tag_at_cursor(token_stream)?;
+    let next_tag = source_next_tag(token_stream)?;
     let mut body_range = empty_token_range(token_stream)?;
 
-    if token_stream.current_token_kind() == &TokenKind::Of {
+    if current_tag == TokenTag::OF {
         if !generic_parameters.is_empty() {
             return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::invalid_declaration(
@@ -150,7 +256,7 @@ pub(super) fn create_header(
     // WHY: trait declarations, conformances, and incompatibility metadata are top-level
     //      declarations that participate in header parsing; they replace the old
     //      reserved-trait rejection path.
-    if token_stream.current_token_kind() == &TokenKind::Must {
+    if current_tag == TokenTag::MUST {
         if !generic_parameters.is_empty() {
             return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::invalid_declaration(
@@ -161,9 +267,9 @@ pub(super) fn create_header(
             ));
         }
 
-        let peek = token_stream.peek_next_token().cloned();
+        let peek = next_tag;
 
-        if peek == Some(TokenKind::Not) {
+        if peek == Some(TokenTag::NOT) {
             ensure_trait_name_is_all_caps(declaration_name, Some(name_span), context.string_table)?;
 
             // Trait incompatibility declaration: `Name must not TRAIT, TRAIT`
@@ -176,7 +282,7 @@ pub(super) fn create_header(
             let incompatibility =
                 parse_trait_incompatibility(token_stream, subject, declaration_order, context)?;
             kind = HeaderKind::TraitIncompatibility { incompatibility };
-        } else if peek == Some(TokenKind::Colon) {
+        } else if peek == Some(TokenTag::COLON) {
             ensure_trait_name_is_all_caps(declaration_name, Some(name_span), context.string_table)?;
 
             // Trait declaration: `Name must: requirements ;`
@@ -263,11 +369,9 @@ pub(super) fn create_header(
         });
     }
 
-    let current_token = token_stream.current_token_kind().to_owned();
-
-    match current_token {
+    match current_tag {
         // Function declaration: `name |params| -> return_type : body ;`
-        TokenKind::TypeParameterBracket => {
+        TokenTag::TYPE_PARAMETER_BRACKET => {
             ensure_not_keyword_shadow_identifier(
                 declaration_name,
                 Some(name_span),
@@ -280,15 +384,20 @@ pub(super) fn create_header(
                 IdentifierNamingKind::ValueLike,
                 context.string_table,
             );
-
+            let mut declaration_cursor =
+                DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
             let signature = parse_function_signature_syntax(
-                token_stream,
+                &mut declaration_cursor,
                 context.warnings,
                 context.string_table,
                 full_name,
                 context.path_fork,
                 span_builder,
             )?;
+            let next_index =
+                token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+            drop(declaration_cursor);
+            token_stream.index = next_index;
 
             // Local declaration-ordering hints: parameter + return type references only.
             for param in &signature.parameters {
@@ -325,7 +434,7 @@ pub(super) fn create_header(
         }
 
         // `This` keyword outside trait declarations is invalid.
-        TokenKind::TraitThis => {
+        TokenTag::TRAIT_THIS => {
             return Err(CompilerDiagnostic::invalid_this_usage(
                 crate::compiler_frontend::compiler_messages::InvalidThisUsageReason::OutsideTraitDeclaration,
                 Some(token_stream.current_span()),
@@ -335,8 +444,8 @@ pub(super) fn create_header(
 
         // `=` only creates a declaration header for struct shells. Runtime top-level
         // `name = value` stays in the entry start body outside `config.moth`.
-        TokenKind::Assign => {
-            if let Some(TokenKind::TypeParameterBracket) = token_stream.peek_next_token() {
+        TokenTag::ASSIGN => {
+            if next_tag == Some(TokenTag::TYPE_PARAMETER_BRACKET) {
                 ensure_not_keyword_shadow_identifier(
                     declaration_name,
                     Some(name_span),
@@ -349,18 +458,21 @@ pub(super) fn create_header(
                     IdentifierNamingKind::TypeLike,
                     context.string_table,
                 );
-
                 token_stream.advance();
-
-                // Parse field shell directly — avoids reparsing in the AST type-resolution pass.
+                let mut declaration_cursor =
+                    DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
                 let fields = parse_struct_shell(
-                    token_stream,
+                    &mut declaration_cursor,
                     context.string_table,
                     context.warnings,
                     full_name,
                     context.path_fork,
                     span_builder,
                 )?;
+                let next_index = token_stream
+                    .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+                drop(declaration_cursor);
+                token_stream.index = next_index;
 
                 // Collect strict type edges from field types only (no default-expression edges).
                 for field in &fields {
@@ -382,9 +494,9 @@ pub(super) fn create_header(
         }
 
         // `#` (Hash): compile-time constant declaration `name #= value` or `name #Type = value`.
-        TokenKind::Hash => {
+        TokenTag::HASH => {
             if !generic_parameters.is_empty()
-                && starts_build_config_qualifier(token_stream, context.string_table)
+                && starts_build_config_qualifier_at_cursor(token_stream, context.string_table)?
             {
                 return Err(CompilerDiagnostic::invalid_config_reason(
                     Some(declaration_name),
@@ -421,7 +533,7 @@ pub(super) fn create_header(
         }
 
         // `::` (DoubleColon): choice/union declaration `name :: VariantA | VariantB | ...`
-        TokenKind::DoubleColon => {
+        TokenTag::DOUBLE_COLON => {
             ensure_not_keyword_shadow_identifier(
                 declaration_name,
                 Some(name_span),
@@ -435,14 +547,20 @@ pub(super) fn create_header(
                 context.string_table,
             );
 
+            let mut declaration_cursor =
+                DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
             let choice_header = parse_choice_header_payload(
-                token_stream,
+                &mut declaration_cursor,
                 full_name,
                 context.path_fork,
                 context.string_table,
                 context.warnings,
                 span_builder,
             )?;
+            let next_index =
+                token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+            drop(declaration_cursor);
+            token_stream.index = next_index;
 
             // Collect strict type edges from payload field types.
             for variant in &choice_header {
@@ -470,7 +588,7 @@ pub(super) fn create_header(
         }
 
         // `as`: type alias declaration `Name as Type`
-        TokenKind::As => {
+        TokenTag::AS => {
             if !generic_parameters.is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::invalid_declaration(
@@ -495,11 +613,17 @@ pub(super) fn create_header(
             );
 
             token_stream.advance();
-            let target = parse_type_annotation(
-                token_stream,
+            let mut declaration_cursor =
+                DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
+            let target = parse_type_annotation_cursor(
+                &mut declaration_cursor,
                 TypeAnnotationContext::TypeAliasTarget,
                 context.string_table,
             )?;
+            let next_index =
+                token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+            drop(declaration_cursor);
+            token_stream.index = next_index;
 
             let mut selection_error = None;
 
@@ -556,12 +680,11 @@ fn emit_header_naming_warning(
         warnings.push(warning);
     }
 }
-
 fn parse_optional_generic_parameters(
     token_stream: &mut FileTokens,
     context: &mut HeaderBuildContext<'_>,
 ) -> HeaderDispatchResult<GenericParameterList> {
-    if token_stream.current_token_kind() != &TokenKind::Type {
+    if source_tag_at_cursor(token_stream)? != TokenTag::TYPE {
         return Ok(GenericParameterList::default());
     }
 
@@ -569,11 +692,19 @@ fn parse_optional_generic_parameters(
     // until the header parser has finished walking this file. File-level preparation validates
     // dependency-name collisions after all clauses and declaration shells are retained.
     let forbidden_names = FxHashSet::default();
-    parse_generic_parameter_list_after_type_keyword(
-        token_stream,
+    let mut declaration_cursor = DeclarationCursor::new(
+        token_stream.canonical_cursor_from_current()?,
+    )?;
+    let result = parse_generic_parameter_list_after_type_keyword(
+        &mut declaration_cursor,
         &forbidden_names,
         context.string_table,
-    )
+    )?;
+    let next_index =
+        token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+    drop(declaration_cursor);
+    token_stream.index = next_index;
+    Ok(result)
 }
 
 fn collect_type_ordering_hints(
@@ -639,76 +770,134 @@ fn empty_token_range(token_stream: &FileTokens) -> HeaderDispatchResult<TokenRan
 // handle nested scopes (inner `if`/`loop`/etc.) correctly.
 //
 // WHY: extracted from `create_header` to reduce its length and make the scope-balancing
-// contract explicit. The token stream must already be positioned on the first body token
-// (i.e. `FunctionSignature::new` has already consumed the signature).
-// Local declaration-ordering hints are derived from the signature only; body ranges are captured
-// but not scanned for dependency clauses — that is AST's responsibility at body-lowering time.
+// contract explicit. `parse_function_signature_syntax` leaves the compatibility cursor on the
+// first body token. This helper scans the canonical source owner, then synchronises that cursor
+// only for deferred 3F2–3F4 parser handoffs.
+// Local declaration-ordering hints are derived from the signature only. This helper captures the
+// structural body range; AST owns body syntax diagnostics, while Stage 0 records graph-active
+// file references from its own source-owned start-body ranges.
 
 fn capture_function_body_range(
     token_stream: &mut FileTokens,
     string_table: &mut StringTable,
 ) -> HeaderDispatchResult<TokenRange> {
     let body_start = token_stream.index;
-    let mut scopes_opened = 1;
-    let mut scopes_closed = 0;
+    let canonical = token_stream.source_tokens().map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "function body capture is missing its source token owner: {error:?}"
+        )))
+    })?;
+    if canonical.source() != token_stream.file_id {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "function body capture source token owner does not match its file identity",
+        )));
+    }
+    if token_stream.length != canonical.len() || token_stream.tokens.len() != canonical.len() {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "function body capture token adapter length does not match its source owner",
+        )));
+    }
 
-    // `FunctionSignature::new` stops on the first body token, so the first loop
-    // iteration must inspect the current token before advancing.
+    let body_start = TokenIndex::try_from_index(body_start).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Function body token range start exceeded the source token index space.",
+            compatibility_cursor_span(token_stream),
+        ))
+    })?;
+    let source_end = TokenIndex::try_from_index(canonical.len()).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Function body token range end exceeded the source token index space.",
+            compatibility_cursor_span(token_stream),
+        ))
+    })?;
+    let scan_range = canonical.range(body_start, source_end).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "function body capture range exceeded its source owner: {error:?}"
+        )))
+    })?;
+    let mut cursor = canonical.cursor(scan_range).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "function body capture cursor exceeded its source owner: {error:?}"
+        )))
+    })?;
+    let mut scopes_opened: usize = 1;
+    let mut scopes_closed: usize = 0;
+    let mut body_end = None;
+
+    // `parse_function_signature_syntax` stops on the first body token, so the first loop
+    // iteration must inspect the current canonical token before any deferred parser sees the
+    // compatibility cursor again.
     while scopes_opened > scopes_closed {
-        match token_stream.current_token_kind() {
-            TokenKind::End => {
-                scopes_closed += 1;
+        let current = cursor.advance().ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+                "Function body capture reached the source end before its closing delimiter.",
+                compatibility_cursor_span(token_stream),
+            ))
+        })?;
+
+        match current.tag() {
+            TokenTag::END => {
+                scopes_closed = scopes_closed.checked_add(1).ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+                        "Function body closing-delimiter depth overflowed.",
+                        Some(current.source_span()),
+                    ))
+                })?;
+                if scopes_opened == scopes_closed {
+                    body_end = Some(current.index());
+                }
             }
 
-            // Colons used in templates parse into a different token (StartTemplateBody),
-            // so there is no risk of templates creating a colon imbalance here.
-            // All other language constructs follow the invariant: every `:` is closed by `;`.
-            TokenKind::Colon => {
-                scopes_opened += 1;
+            // Colons used in templates parse into a different token (StartTemplateBody), so there
+            // is no risk of templates creating a colon imbalance here. All other language
+            // constructs follow the invariant: every `:` is closed by `;`.
+            TokenTag::COLON => {
+                scopes_opened = scopes_opened.checked_add(1).ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+                        "Function body opening-delimiter depth overflowed.",
+                        Some(current.source_span()),
+                    ))
+                })?;
             }
 
-            TokenKind::DoubleColon => {}
+            TokenTag::DOUBLE_COLON => {}
 
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 // Diagnostic payloads carry the expected delimiter as a StringId so they can be
                 // remapped and rendered through the active string table.
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     Some(string_table.intern(";")),
-                    Some(token_stream.current_span()),
+                    Some(current.source_span()),
                 )
                 .into());
             }
 
             _ => {}
         }
-
-        token_stream.advance();
     }
 
-    let body_end = token_stream.index.checked_sub(1).ok_or_else(|| {
+    let body_end = body_end.ok_or_else(|| {
         HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Function body token range underflowed while closing the body.",
-            Some(token_stream.current_span()),
+            "Function body capture did not identify its closing delimiter.",
+            compatibility_cursor_span(token_stream),
         ))
     })?;
-    let start = TokenIndex::try_from_index(body_start).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Function body token range start exceeded the source token index space.",
-            Some(token_stream.current_span()),
-        ))
+    let body_range = canonical.range(body_start, body_end).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "function body token range was invalid: {error:?}"
+        )))
     })?;
-    let end = TokenIndex::try_from_index(body_end).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Function body token range end exceeded the source token index space.",
-            Some(token_stream.current_span()),
-        ))
-    })?;
-    TokenRange::new(token_stream.file_id, start, end).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Function body token range was invalid.",
-            Some(token_stream.current_span()),
-        ))
-    })
+    let next_index = cursor.position().index();
+    if next_index > token_stream.tokens.len() {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "function body capture handoff exceeded its compatibility token adapter",
+        )));
+    }
+
+    // Canonical scanning is complete. Synchronise the compatibility index once so deferred
+    // declaration/AST/template parsers receive the established post-body position.
+    token_stream.index = next_index;
+    Ok(body_range)
 }
 
 fn create_constant_header_payload(
@@ -726,17 +915,23 @@ fn create_constant_header_payload(
         )
         .into());
     };
+    let mut declaration_cursor =
+        DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
     let declaration_syntax = parse_declaration_syntax(
-        token_stream,
+        &mut declaration_cursor,
         declaration_name,
         context.string_table,
         span_builder,
     )?;
+    let next_index =
+        token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+    drop(declaration_cursor);
+    token_stream.index = next_index;
     // A comma terminates anonymous-record fields, but it cannot terminate a top-level source
     // contract. Keep the shared declaration parser permissive for record fields and reject this
     // malformed source declaration at the header boundary.
-    if declaration_syntax.initializer_tokens.is_empty()
-        && token_stream.current_token_kind() == &TokenKind::Comma
+    if declaration_syntax.initializer_range.is_none()
+        && source_tag_at_cursor(token_stream)? == TokenTag::COMMA
         && let Some(qualifier) = &declaration_syntax.config_qualifier
     {
         return Err(CompilerDiagnostic::invalid_config_reason(

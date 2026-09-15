@@ -209,18 +209,6 @@ impl ConstantResolutionSession {
             .into());
         }
 
-        let mut declaration_for_resolution = declaration.clone();
-        if let Some(payload) = payload {
-            declaration_for_resolution.initializer_tokens =
-                materialize_synthetic_content_initializer(
-                    payload,
-                    source_owner,
-                    header.tokens,
-                    header.declaration_path,
-                )
-                .map_err(ExpressionParseError::from)?;
-        }
-
         let fallback_path_syntax = if source_owner.is_none() {
             if !matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) {
                 return Err(CompilerError::compiler_error(
@@ -237,10 +225,33 @@ impl ConstantResolutionSession {
             .or_else(|| fallback_path_syntax.as_ref())
             .expect("constant header path syntax fallback must be present");
 
+        let initializer_override = if let Some(payload) = payload {
+            let initializer_tokens = materialize_synthetic_content_initializer(
+                payload,
+                source_owner,
+                header.tokens,
+                header.declaration_path,
+            )
+            .map_err(ExpressionParseError::from)?;
+            Some(
+                FileTokens::new_from_slice(
+                    header.declaration_path,
+                    header.tokens.source(),
+                    None,
+                    initializer_tokens,
+                    path_syntax,
+                )
+                .map_err(ExpressionParseError::from)?,
+            )
+        } else {
+            None
+        };
+
         let declaration_result = resolve_declaration_syntax(
-            declaration_for_resolution,
+            declaration.clone(),
             header.declaration_path.to_owned(),
-            path_syntax,
+            source_owner,
+            initializer_override,
             &mut scope_context,
             &mut type_interner,
             string_table,

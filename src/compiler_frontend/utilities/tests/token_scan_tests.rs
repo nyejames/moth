@@ -3,9 +3,11 @@ use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, Token, TokenIndex, TokenKind, TokenRange,
+};
 use crate::compiler_frontend::utilities::token_scan::{
-    OpenConstruct, TokenScanFailure, collect_declaration_initializer_tokens,
+    OpenConstruct, TokenFactView, TokenScanFailure, collect_declaration_initializer_tokens,
     collect_symbol_references, consume_balanced_template_region, find_expression_end_index,
     has_top_level_comma_before_statement_end, innermost_open_construct,
 };
@@ -22,6 +24,29 @@ fn stream_from_kinds(kinds: Vec<TokenKind>, string_table: &mut StringTable) -> F
         SourceId::COMPILATION_ROOT,
         tokens,
     )
+}
+
+#[test]
+fn canonical_range_view_rejects_foreign_source() {
+    let mut string_table = StringTable::new();
+    let owner = stream_from_kinds(vec![TokenKind::Eof], &mut string_table);
+    let canonical = owner
+        .source_tokens()
+        .expect("test stream should own canonical source tokens");
+    let foreign = TokenRange::new(
+        SourceId::from_index(1),
+        TokenIndex::try_from_raw(0).expect("zero index is representable"),
+        TokenIndex::try_from_raw(1).expect("one index is representable"),
+    )
+    .expect("ordered foreign range should construct");
+
+    assert!(matches!(
+        TokenFactView::from_source_range(canonical, foreign),
+        Err(crate::compiler_frontend::tokenizer::tokens::TokenRangeError::ForeignSource {
+            expected,
+            actual,
+        }) if expected == canonical.source() && actual == foreign.source()
+    ));
 }
 
 #[test]

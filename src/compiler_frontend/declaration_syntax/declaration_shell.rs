@@ -15,19 +15,20 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    BuildConfigQualifierSyntax, parse_build_config_qualifier, starts_build_config_qualifier,
+    BuildConfigQualifierSyntax, parse_build_config_qualifier, starts_build_config_qualifier_at_cursor,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    TypeAnnotationContext, parse_type_annotation,
+    TypeAnnotationContext, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange};
 use crate::compiler_frontend::utilities::token_scan::{
-    TokenScanFailure, collect_declaration_initializer_tokens, collect_symbol_references,
+    TokenScanFailure, collect_declaration_initializer_range,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use super::DeclarationCursor;
 
 pub use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 
@@ -40,13 +41,15 @@ pub use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 ///      through every successful parse. Plain-diagnostic callers extract the
 ///      inline diagnostic lane at their existing boundary.
 type DeclarationShellResult<T> = Result<T, HeaderParseFailure>;
+
 #[derive(Clone, Debug)]
 pub struct DeclarationSyntax {
     pub binding_mode: BindingMode,
     pub type_annotation: ParsedTypeRef,
     /// Syntax-only `#Config of T` metadata retained for header consumers and AST resolution.
     pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
-    pub initializer_tokens: Vec<Token>,
+    /// Canonical source-owned initializer range. `None` means the declaration has no initializer.
+    pub initializer_range: Option<TokenRange>,
     pub initializer_references: Vec<InitializerReference>,
     /// Exact source-qualified span of the declaration binding anchor.
     pub span: Option<SourceSpan>,
@@ -60,6 +63,7 @@ pub struct BindingTargetSyntax {
     /// Exact source-qualified span of the binding target anchor.
     pub span: Option<SourceSpan>,
 }
+
 impl DeclarationSyntax {
     pub fn value_mode(&self) -> ValueMode {
         self.binding_mode.value_mode()
@@ -69,15 +73,13 @@ impl DeclarationSyntax {
         self.type_annotation.clone()
     }
 
-    /// Remap type names, initializer token payloads, and initializer references into a merged
-    /// string table. Source-qualified spans are identity independent and are left unchanged.
+    /// Remap type names and initializer references into a merged string table.
+    ///
+    /// Source-qualified ranges are identity independent and therefore remain unchanged.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.type_annotation.remap_string_ids(remap);
         if let Some(qualifier) = &mut self.config_qualifier {
             qualifier.remap_string_ids(remap);
-        }
-        for token in &mut self.initializer_tokens {
-            token.remap_string_ids(remap);
         }
         for reference in &mut self.initializer_references {
             reference.remap_string_ids(remap);
@@ -85,17 +87,15 @@ impl DeclarationSyntax {
     }
 }
 
+
 pub fn parse_declaration_syntax(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     name: StringId,
     string_table: &mut StringTable,
     span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> DeclarationShellResult<DeclarationSyntax> {
-    // `#Config of T` is declaration-owned syntax, not an ordinary `#` binding followed by a
-    // type named `Config`. Detect it before the generic target parser so all declaration stages
-    // retain one qualifier representation.
     let target_span = current_source_span(token_stream);
-    let config_qualifier = if starts_build_config_qualifier(token_stream, string_table) {
+    let config_qualifier = if starts_build_config_qualifier_at_cursor(token_stream, string_table) {
         Some(parse_build_config_qualifier(
             token_stream,
             string_table,
@@ -113,14 +113,11 @@ pub fn parse_declaration_syntax(
             span: qualifier.qualifier_span.or(target_span),
         }
     } else {
-        // This checks for mutability marker first (in the case of mutable methods), or whether
-        // the declaration has an explicit type.
         parse_binding_target_syntax(name, token_stream, string_table, span_builder)?
     };
 
-    // A source `#Config` declaration may intentionally omit its initializer so a later
-    // provider-independent resolution barrier can supply the required input. Ordinary constants
-    // still require `= value`; the distinction is owned by the declaration qualifier itself.
+    // A source `#Config` declaration may omit its initializer so a later provider-independent
+    // resolution barrier can supply the required input.
     if config_qualifier.is_some()
         && matches!(
             token_stream.current_token_kind(),
@@ -131,13 +128,12 @@ pub fn parse_declaration_syntax(
             binding_mode: target.binding_mode,
             type_annotation: target.type_annotation,
             config_qualifier,
-            initializer_tokens: Vec::new(),
+            initializer_range: None,
             initializer_references: Vec::new(),
             span: target.span,
         });
     }
 
-    // Require assignment for declarations.
     match token_stream.current_token_kind() {
         TokenKind::Assign => {
             token_stream.advance();
@@ -161,17 +157,17 @@ pub fn parse_declaration_syntax(
         }
     }
 
-    // Transitive mutation: the token scanner may intern EOF delimiters for diagnostics
-    // when the initializer is unclosed at end-of-file.
-    let mut initializer_tokens = collect_declaration_initializer_tokens(token_stream, string_table)
-        .map_err(|failure| match failure {
+    let (initializer_range, initializer_references) = {
+        let canonical_cursor = token_stream.canonical_cursor_mut();
+        let result = collect_declaration_initializer_range(canonical_cursor, string_table);
+        token_stream.refresh();
+        result.map_err(|failure| match failure {
             TokenScanFailure::Diagnostic(diagnostic) => HeaderParseFailure::Diagnostic(diagnostic),
             TokenScanFailure::Infrastructure(error) => HeaderParseFailure::Infrastructure(error),
-        })?;
-    if initializer_tokens.is_empty() {
-        // The author wrote `=` but supplied no initializer expression. Point at the real
-        // boundary after `=` (newline, end, EOF or comma) rather than the declaration name
-        // or target type, so the diagnostic anchors where the initializer is missing.
+        })?
+    };
+
+    if initializer_range.is_empty() {
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_declaration(
                 InvalidDeclarationReason::MissingInitializerExpression,
@@ -181,35 +177,19 @@ pub fn parse_declaration_syntax(
         ));
     }
 
-    // Retain the real boundary after an incomplete inline value-`if` tail. AST otherwise
-    // appends a synthetic EOF at the declaration location, losing both multiline context
-    // and the source location of an authored block close.
-    if matches!(
-        initializer_tokens.last().map(|token| &token.kind),
-        Some(TokenKind::Then | TokenKind::Else)
-    ) && matches!(
-        token_stream.current_token_kind(),
-        TokenKind::Newline | TokenKind::End | TokenKind::Eof | TokenKind::Comma
-    ) {
-        initializer_tokens.push(token_stream.current_token());
-    }
-
     Ok(DeclarationSyntax {
         binding_mode: target.binding_mode,
         type_annotation: target.type_annotation,
         config_qualifier,
-        initializer_references: collect_symbol_references(
-            &initializer_tokens,
-            token_stream.file_id,
-        ),
-        initializer_tokens,
+        initializer_range: Some(initializer_range),
+        initializer_references,
         span: target.span,
     })
 }
 
 pub fn parse_binding_target_syntax(
     name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     string_table: &StringTable,
     span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> DeclarationShellResult<BindingTargetSyntax> {
@@ -235,7 +215,7 @@ pub fn parse_binding_target_syntax(
         BindingMode::ImmutableRuntime
     };
 
-    let type_annotation = parse_type_annotation(
+    let type_annotation = parse_type_annotation_cursor(
         token_stream,
         TypeAnnotationContext::DeclarationTarget,
         string_table,
@@ -255,24 +235,22 @@ pub fn parse_binding_target_syntax(
 // WHY: the language requires `name #= value` and `name ~= value`, rejecting `name # = value`
 // and `name ~ = value`. Exact local byte ranges make the check independent of line/column
 // bookkeeping and UTF-8 character width.
-//
-// Returns an error when the marker is not adjacent to the next token, using the marker span as
-// the diagnostic primary span.
 pub(crate) fn require_binding_marker_adjacent(
-    token_stream: &FileTokens,
+    token_stream: &DeclarationCursor<'_>,
     mode: BindingMode,
     span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> DeclarationShellResult<()> {
-    let Some(current_token) = token_stream.tokens.get(token_stream.index) else {
+    let cursor = token_stream.canonical_cursor();
+    let Some(current_token) = cursor.current() else {
         return Ok(());
     };
-    let Some(next_token) = token_stream.tokens.get(token_stream.index + 1) else {
+    let Some(next_token) = cursor.peek_next() else {
         return Ok(());
     };
 
     let resolver = span_builder.resolver();
-    let current_range = current_token.span.resolve_with(resolver);
-    let next_range = next_token.span.resolve_with(resolver);
+    let current_range = current_token.span().resolve_with(resolver);
+    let next_range = next_token.span().resolve_with(resolver);
     let adjacent = current_range.end() == next_range.start();
 
     if !adjacent {
@@ -289,7 +267,7 @@ pub(crate) fn require_binding_marker_adjacent(
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::common_syntax_mistake(
                 reason,
-                Some(SourceSpan::new(token_stream.file_id, current_token.span)),
+                Some(current_token.source_span()),
             ),
         ));
     }
@@ -297,11 +275,8 @@ pub(crate) fn require_binding_marker_adjacent(
     Ok(())
 }
 
-fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
+    token_stream.current_span()
 }
 
 #[cfg(test)]

@@ -3,20 +3,14 @@
 //! WHAT: verifies that `DeclarationSyntax`, `InitializerReference`,
 //!      and `ParsedTypeRef::Collection` can be remapped after a string-table merge.
 //! WHY: header parsing produces declaration shells using local string tables; remapping must
-//!      preserve all names, type annotations, and initializer tokens.
+//!      preserve all names, type annotations, and initializer references.
 
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, InitializerReference,
 };
-use crate::compiler_frontend::source::LocalSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
-
-fn make_symbol_token(name: StringId) -> Token {
-    Token::new(TokenKind::Symbol(name), LocalSpan::source_start())
-}
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
 fn collection_capacity_bare_constant_remap() {
@@ -88,7 +82,6 @@ fn declaration_syntax_remaps_all_fields() {
     let mut global = StringTable::new();
 
     let type_name = local.intern("String");
-    let init_name = local.intern("init_value");
     let ref_name = local.intern("ref_value");
 
     let mut declaration = DeclarationSyntax {
@@ -99,7 +92,7 @@ fn declaration_syntax_remaps_all_fields() {
             span: None,
         },
         config_qualifier: None,
-        initializer_tokens: vec![make_symbol_token(init_name)],
+        initializer_range: None,
         initializer_references: vec![InitializerReference {
             name: ref_name,
             dot_member: None,
@@ -119,13 +112,7 @@ fn declaration_syntax_remaps_all_fields() {
         _ => panic!("expected Named type annotation"),
     }
 
-    assert_eq!(declaration.initializer_tokens.len(), 1);
-    match &declaration.initializer_tokens[0].kind {
-        TokenKind::Symbol(id) => {
-            assert_eq!(global.resolve(*id), "init_value");
-        }
-        _ => panic!("expected Symbol token"),
-    }
+    assert!(declaration.initializer_range.is_none());
 
     assert_eq!(declaration.initializer_references.len(), 1);
     assert_eq!(

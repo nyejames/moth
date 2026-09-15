@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidDeclarationReason, InvalidSignatureMemberReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
@@ -129,14 +130,20 @@ fn parse_trait_requirement(
             ))
         })?;
 
+    let mut declaration_cursor =
+        DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
     let signature = parse_trait_requirement_signature_syntax(
-        token_stream,
+        &mut declaration_cursor,
         context.warnings,
         context.string_table,
         method_path,
         context.path_fork,
         span_builder,
     )?;
+    let next_index =
+        token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+    drop(declaration_cursor);
+    token_stream.index = next_index;
 
     // Every non-empty requirement must start with `This` or `~This`.
     if let Some(first_param) = signature.parameters.first() {

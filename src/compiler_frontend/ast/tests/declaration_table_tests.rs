@@ -327,7 +327,7 @@ fn declaration_lanes_reject_missing_semantic_records() {
                 binding_mode: BindingMode::default(),
                 type_annotation: ParsedTypeRef::Inferred,
                 config_qualifier: None,
-                initializer_tokens: Vec::new(),
+                initializer_range: None,
                 initializer_references: Vec::new(),
             },
         },

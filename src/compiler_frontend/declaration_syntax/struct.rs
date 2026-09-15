@@ -24,7 +24,7 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use super::DeclarationCursor;
 /// Two-lane result for struct shell parsing.
 ///
 /// WHAT: mirrors `RecordBodyParseResult` so the thin `parse_struct_shell` wrapper
@@ -39,7 +39,7 @@ type StructShellResult = Result<Vec<SignatureMemberSyntax>, HeaderParseFailure>;
 /// advances past the closing `|`, and validates that any default values are compile-time constants.
 /// WHY: this is the single canonical struct field parser. Used by header parsing to populate
 pub fn parse_struct_shell(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     owner_path: PathId,

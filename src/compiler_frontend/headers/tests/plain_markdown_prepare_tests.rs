@@ -110,7 +110,7 @@ fn payload_is_rendered_html_without_initializer_tokens() {
         panic!("expected constant header");
     };
     assert!(
-        declaration.initializer_tokens.is_empty(),
+        declaration.initializer_range.is_none(),
         "payload-only Markdown must not retain parser initializer tokens"
     );
     let Some(SyntheticContentPayload::RenderedHtml(id)) = header.synthetic_content_payload else {
@@ -149,7 +149,7 @@ fn rendered_html_is_preserved_exactly() {
     let HeaderKind::Constant { declaration } = &header.kind else {
         panic!("expected constant header");
     };
-    assert!(declaration.initializer_tokens.is_empty());
+    assert!(declaration.initializer_range.is_none());
     let Some(SyntheticContentPayload::RenderedHtml(id)) = header.synthetic_content_payload else {
         panic!("expected rendered HTML payload");
     };
@@ -177,7 +177,7 @@ fn initializer_contains_no_template_tokens() {
         panic!("expected constant header");
     };
     assert!(
-        declaration.initializer_tokens.is_empty(),
+        declaration.initializer_range.is_none(),
         "plain Markdown must not retain parser initializer tokens"
     );
     assert!(

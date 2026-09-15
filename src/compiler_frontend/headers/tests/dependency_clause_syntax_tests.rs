@@ -4,11 +4,10 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidDependencyClauseReason, PathKind,
 };
-use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyClauseParseError;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -409,4 +408,61 @@ fn clause_terminated_without_comma_is_valid_before_declaration() {
         panic!("expected direct selections");
     };
     assert_eq!(selections.len(), 1);
+}
+
+#[test]
+fn canonical_view_agrees_with_slice_scan() {
+    let (tokens, _, _) = tokenize_source("@core/math sin, cos\n");
+    let path_index = path_token_index(&tokens);
+    let table = &tokens.path_syntax;
+    let source = tokens.file_id;
+
+    let from_slice = parse_dependency_clause(&tokens.tokens, path_index, table, source)
+        .expect("slice scan should parse");
+    let canonical = tokens
+        .source_tokens()
+        .expect("lexer output owns canonical source tokens");
+    let from_source = parse_dependency_clause_at_source(canonical, path_index, table, source)
+        .expect("canonical scan should parse");
+
+    assert_eq!(from_slice.1, from_source.1);
+    assert_eq!(
+        from_slice.0.provider.path,
+        from_source.0.provider.path,
+        "canonical scan must preserve the provider root"
+    );
+    match (&from_slice.0.binding, &from_source.0.binding) {
+        (
+            ScannedDependencyBinding::DirectSelections { selections: expected },
+            ScannedDependencyBinding::DirectSelections { selections: actual },
+        ) => assert_eq!(
+            expected.len(),
+            actual.len(),
+            "canonical scan must preserve selections"
+        ),
+        _ => panic!("expected direct selections in both scans"),
+    }
+}
+
+#[test]
+fn canonical_dependency_scan_rejects_foreign_caller_source() {
+    let (tokens, _, _) = tokenize_source("@core/math sin\n");
+    let path_index = path_token_index(&tokens);
+    let canonical = tokens
+        .source_tokens()
+        .expect("lexer output owns canonical source tokens");
+    let path_span = tokens.tokens[path_index].span;
+    let mut unowned_table = PathSyntaxTable::new();
+    unowned_table
+        .try_push_local(PathId::ROOT, path_span)
+        .expect("test path row should fit");
+
+    let error = parse_dependency_clause_at_source(
+        canonical,
+        path_index,
+        &unowned_table,
+        SourceId::from_index(1),
+    )
+    .expect_err("canonical scan must reject a mismatched caller source");
+    expect_infrastructure_error(error, "foreign caller source");
 }

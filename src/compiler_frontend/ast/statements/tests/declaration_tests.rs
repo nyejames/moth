@@ -455,8 +455,17 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             .position(|token| token.kind == TokenKind::Symbol(name))
             .unwrap()
             + 1;
-        let declaration = parse_declaration_syntax(&mut tokens, name, &mut strings, &mut builder)
-            .expect("the authored declaration must produce its shell");
+        let mut declaration_cursor =
+            crate::compiler_frontend::declaration_syntax::DeclarationCursor::new(
+                tokens
+                    .canonical_cursor_from_current()
+                    .expect("the tokenized source must expose canonical tokens"),
+            )
+            .expect("the tokenized source must expose canonical tokens");
+        let declaration =
+            parse_declaration_syntax(&mut declaration_cursor, name, &mut strings, &mut builder)
+                .expect("the authored declaration must produce its shell");
+        tokens.index = declaration_cursor.index;
         let expected_start = source.rfind("value ").unwrap() as u32 + "value ".len() as u32;
         let expected_range = (
             expected_start,
@@ -491,12 +500,11 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             .try_intern_child(source_path, name)
             .expect("declaration path should intern");
         let initializer = super::declaration_initializer_stream(
+            Some(&tokens),
+            declaration.initializer_range,
+            None,
             &declaration_path,
             declaration.span,
-            declaration.initializer_tokens,
-            &tokens.path_syntax,
-            &context,
-            &path_fork,
         )
         .expect("initializer must retain its declaration's source owner");
         let terminator = initializer.tokens.last().unwrap();

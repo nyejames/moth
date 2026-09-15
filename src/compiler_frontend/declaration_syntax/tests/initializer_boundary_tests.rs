@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidDeclarationReason,
     RuleDiagnosticKind,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
@@ -48,20 +49,28 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
-
     let name = string_table.intern("value");
     token_stream.index = 2; // skip ModuleStart and the declaration name, land on `=`
-
+    let mut declaration_cursor =
+        DeclarationCursor::new(
+            token_stream
+                .canonical_cursor_from_current()
+                .expect("tokenized test stream must expose canonical tokens"),
+        )
+            .expect("tokenized test stream must expose canonical tokens");
     let declaration_syntax = parse_declaration_syntax(
-        &mut token_stream,
+        &mut declaration_cursor,
         name,
         &mut string_table,
         &mut span_builder,
     )
     .expect("declaration shell should parse");
-
-    declaration_syntax
-        .initializer_tokens
+    let initializer_range = declaration_syntax
+        .initializer_range
+        .expect("test declaration should retain initializer range");
+    token_stream
+        .materialize_token_range(initializer_range)
+        .expect("initializer range should materialize")
         .iter()
         .map(|token| label(&token.kind))
         .collect()
@@ -262,8 +271,15 @@ fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
         tokenize_for_declaration(source, &mut span_builder);
     token_stream.index = 2; // skip ModuleStart and the declaration name
 
+    let mut declaration_cursor =
+        DeclarationCursor::new(
+            token_stream
+                .canonical_cursor_from_current()
+                .expect("tokenized test stream must expose canonical tokens"),
+        )
+            .expect("tokenized test stream must expose canonical tokens");
     let failure = parse_declaration_syntax(
-        &mut token_stream,
+        &mut declaration_cursor,
         name,
         &mut string_table,
         &mut span_builder,

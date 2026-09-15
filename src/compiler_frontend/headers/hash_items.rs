@@ -4,35 +4,88 @@
 //! WHY: the parser keeps hash-prefixed top-level forms in one place so `file_parser` can remain a
 //! high-level loop over classified items.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason,
 };
-use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::types::{
     FileRole, HeaderBuildContext, HeaderParseContext, HeaderParseFailure, TopLevelConstFragment,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenIndex, TokenTag};
+
+fn source_tag_at_cursor(token_stream: &FileTokens) -> Result<TokenTag, HeaderParseFailure> {
+    let canonical = token_stream.source_tokens().map_err(HeaderParseFailure::Infrastructure)?;
+    if canonical.source() != token_stream.file_id {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "hash item source token owner does not match its file identity",
+        )));
+    }
+    let index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "hash item token index exceeded its checked domain",
+        ))
+    })?;
+    canonical.token(index).map(|token| token.tag()).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "hash item token index exceeded its source token owner: {error:?}",
+        )))
+    })
+}
+
+fn record_start_body_token_from_source(
+    state: &mut HeaderFileParseState,
+    token_stream: &FileTokens,
+    index: usize,
+) -> Result<(), HeaderParseFailure> {
+    let source_tokens = token_stream
+        .source_tokens()
+        .map_err(HeaderParseFailure::Infrastructure)?;
+    if source_tokens.source() != token_stream.file_id {
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "hash item source token owner does not match its file identity",
+            ),
+        ));
+    }
+    let index = TokenIndex::try_from_index(index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "hash item token index exceeded its checked domain",
+        ))
+    })?;
+    let token = source_tokens.token(index).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "hash item token index exceeded its source token owner: {error:?}",
+        )))
+    })?;
+    state
+        .record_start_body_token_ref(token)
+        .map_err(HeaderParseFailure::Infrastructure)
+}
 
 pub(super) fn handle_hash_item(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    current_token: Token,
     current_span: SourceSpan,
     at_statement_boundary: bool,
 ) -> Result<(), HeaderParseFailure> {
-    let current_index = token_stream.index.saturating_sub(1);
+    let current_index = token_stream.index.checked_sub(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "hash item token preceded the source token index",
+        ))
+    })?;
 
     if !at_statement_boundary {
-        state.record_start_body_token(token_stream.file_id, current_index, &current_token)?;
+        record_start_body_token_from_source(state, token_stream, current_index)?;
         return Ok(());
     }
 
-    match token_stream.current_token_kind() {
-        TokenKind::TemplateHead => {
+    match source_tag_at_cursor(token_stream)? {
+        TokenTag::TEMPLATE_HEAD => {
             if state.export_mode.is_public() {
                 return Err(CompilerDiagnostic::invalid_export_target(Some(current_span)).into());
             }
@@ -40,10 +93,7 @@ pub(super) fn handle_hash_item(
             handle_top_level_const_template(token_stream, state, context, current_span)
         }
 
-        _ => {
-            state.record_start_body_token(token_stream.file_id, current_index, &current_token)?;
-            Ok(())
-        }
+        _ => record_start_body_token_from_source(state, token_stream, current_index),
     }
 }
 
@@ -71,18 +121,22 @@ fn handle_top_level_const_template(
             token_stream,
             context.string_table,
         )?;
-        let body_tokens = token_stream
-            .tokens
-            .get(range.start().index()..range.end().index())
-            .ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                    "discarded template range exceeds its source token owner",
-                ))
-            })?;
-        if let Some((marker_span, adjacent)) = find_config_qualifier_marker(
-            body_tokens,
+        let canonical = token_stream
+            .source_tokens()
+            .map_err(HeaderParseFailure::Infrastructure)?;
+        if canonical.source() != token_stream.file_id {
+            return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "discarded template source token owner does not match its file identity",
+            )));
+        }
+        let cursor = canonical.cursor(range).map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "discarded template range exceeds its source token owner: {error:?}",
+            )))
+        })?;
+        if let Some((marker_span, adjacent)) = find_config_qualifier_marker_in_cursor(
+            cursor,
             context.string_table,
-            token_stream.file_id,
             context.span_builder,
         ) {
             let diagnostic = if adjacent {
@@ -108,8 +162,17 @@ fn handle_top_level_const_template(
         );
     }
 
-    let template_token = token_stream.current_token();
+    let opening_index = token_stream.index;
     token_stream.advance();
+
+    let const_template_number = context
+        .const_template_offset
+        .checked_add(state.const_template_count)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "const-template number overflowed its module source range",
+            ))
+        })?;
 
     let source_file = token_stream.src_path;
     let mut build_context = HeaderBuildContext {
@@ -123,20 +186,35 @@ fn handle_top_level_const_template(
     };
     let header = create_top_level_const_template(
         source_file,
-        template_token,
-        context.const_template_offset + state.const_template_count,
+        opening_index,
+        const_template_number,
         token_stream,
         &mut build_context,
         context.span_builder,
     )?;
 
-    state.const_template_count += 1;
+    state.const_template_count = state
+        .const_template_count
+        .checked_add(1)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "const-template count overflowed its source state",
+            ))
+        })?;
 
     // Record placement metadata: runtime_insertion_index is the count of runtime fragments
     // seen before this const fragment in source order.
+    let runtime_insertion_index = context
+        .runtime_fragment_offset
+        .checked_add(state.runtime_fragment_count)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "runtime insertion index overflowed its module source range",
+            ))
+        })?;
     let fragment_path = header.declaration_path;
     let fragment = TopLevelConstFragment {
-        runtime_insertion_index: context.runtime_fragment_offset + state.runtime_fragment_count,
+        runtime_insertion_index,
         span: header
             .name_span
             .expect("authored const-template headers carry a source span"),

@@ -384,7 +384,6 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         .iter()
         .position(|token| matches!(token.kind, TokenKind::TemplateHead))
         .expect("template opener");
-    let opening_token = token_stream.tokens[opening_index].clone();
     token_stream.index = opening_index + 1;
 
     let malformed_clause = malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
@@ -400,7 +399,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     };
     let failure = create_top_level_const_template(
         scope,
-        opening_token,
+        opening_index,
         0,
         &mut token_stream,
         &mut context,
@@ -519,7 +518,6 @@ fn loop_binding_symbols_remain_in_start_function_body() {
 
     let start_header = start_function_header(&headers);
     let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
-    let header_names = non_start_header_names(&headers, &string_table);
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "item"),
@@ -693,7 +691,7 @@ fn function_parameter_default_stays_in_header_syntax_tokens() {
         ParsedTypeRef::BuiltinString { .. }
     ));
     assert!(
-        parameter.default_tokens.iter().any(|token| matches!(
+        default_tokens(&headers, parameter.default_range).iter().any(|token| matches!(
             token.kind,
             TokenKind::StringSliceLiteral(id) if string_table.resolve(id) == "item"
         )),
@@ -722,7 +720,7 @@ fn struct_field_default_stays_in_header_syntax_tokens() {
         ParsedTypeRef::BuiltinInt { .. }
     ));
     assert!(
-        field.default_tokens.iter().any(|token| matches!(
+        default_tokens(&headers, field.default_range).iter().any(|token| matches!(
             token.kind,
             TokenKind::Symbol(id) if string_table.resolve(id) == "DEFAULT_WIDTH"
         )),
@@ -749,8 +747,7 @@ fn function_parameter_default_path_rows_use_the_file_owned_table() {
         .first()
         .expect("expected one parameter shell");
 
-    let path_id = parameter
-        .default_tokens
+    let path_id = default_tokens(&headers, parameter.default_range)
         .iter()
         .find_map(|token| match token.kind {
             TokenKind::Path(id) => Some(id),
@@ -776,8 +773,7 @@ fn struct_field_default_path_rows_use_the_file_owned_table() {
     };
     let field = fields.first().expect("expected one field shell");
 
-    let path_id = field
-        .default_tokens
+    let path_id = default_tokens(&headers, field.default_range)
         .iter()
         .find_map(|token| match token.kind {
             TokenKind::Path(id) => Some(id),
@@ -806,8 +802,7 @@ fn function_default_and_body_path_rows_stay_distinct() {
         .first()
         .expect("expected one parameter shell");
 
-    let default_path_id = parameter
-        .default_tokens
+    let default_path_id = default_tokens(&headers, parameter.default_range)
         .iter()
         .find_map(|token| match token.kind {
             TokenKind::Path(id) => Some(id),
@@ -860,8 +855,7 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
     let HeaderKind::Function { signature, .. } = &function_header.kind else {
         panic!("expected Function header kind");
     };
-    let default_path_id = signature.parameters[0]
-        .default_tokens
+    let default_path_id = default_tokens(&headers, signature.parameters[0].default_range)
         .iter()
         .find_map(|token| match token.kind {
             TokenKind::Path(path_id) => Some(path_id),

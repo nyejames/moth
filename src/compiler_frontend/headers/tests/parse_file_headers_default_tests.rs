@@ -124,10 +124,11 @@ fn authored_default_expression_survives_newline_and_multiline_continuation() {
         parse_single_file_headers_with_table("label |prefix String = \"a\"\n| -> String:\n;\n");
     let signature = first_function_signature(&single_line_then_newline);
     assert!(
-        signature.parameters.iter().any(|parameter| parameter
-            .default_tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))),
+        signature.parameters.iter().any(|parameter| {
+            default_tokens(&single_line_then_newline, parameter.default_range)
+                .iter()
+                .any(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        }),
         "a default that begins before a newline should be captured"
     );
 
@@ -139,12 +140,13 @@ fn authored_default_expression_survives_newline_and_multiline_continuation() {
         multiline_signature
             .parameters
             .iter()
-            .any(|parameter| parameter
-                .default_tokens
-                .iter()
-                .filter(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-                .count()
-                == 2),
+            .any(|parameter| {
+                default_tokens(&multiline, parameter.default_range)
+                    .iter()
+                    .filter(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+                    .count()
+                    == 2
+            }),
         "an operator-continued multiline default should fold both string literals"
     );
 }

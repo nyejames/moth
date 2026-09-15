@@ -109,7 +109,7 @@ fn constant_kind() -> HeaderKind {
             binding_mode: BindingMode::default(),
             type_annotation: ParsedTypeRef::Inferred,
             config_qualifier: None,
-            initializer_tokens: Vec::new(),
+            initializer_range: None,
             initializer_references: Vec::new(),
         },
     }

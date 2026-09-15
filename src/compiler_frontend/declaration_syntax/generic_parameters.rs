@@ -16,7 +16,8 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use super::DeclarationCursor;
 use rustc_hash::FxHashSet;
 
 /// Typed failure result for generic-parameter parsing.
@@ -32,7 +33,7 @@ type GenericParameterParseResult<T> = Result<T, HeaderParseFailure>;
 /// The parser stops with the token stream positioned on the declaration delimiter
 /// (`|`, `=`, `::`, or `as`) so the owning header parser can continue normally.
 pub(crate) fn parse_generic_parameter_list_after_type_keyword(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     forbidden_names: &FxHashSet<StringId>,
     string_table: &StringTable,
 ) -> GenericParameterParseResult<GenericParameterList> {
@@ -199,7 +200,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
 }
 
 fn parse_trait_bounds_for_current_parameter(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     parameters: &mut [GenericParameter],
     string_table: &StringTable,
 ) -> GenericParameterParseResult<()> {
@@ -301,7 +302,7 @@ fn ensure_trait_bound_name_is_all_caps(
 }
 
 fn with_current_token_span(
-    token_stream: &FileTokens,
+    token_stream: &DeclarationCursor<'_>,
     diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     with_token_span(current_source_span(token_stream), diagnostic)
@@ -318,16 +319,13 @@ fn with_token_span(
 }
 
 fn with_parameter_span(
-    _token_stream: &FileTokens,
+    _token_stream: &DeclarationCursor<'_>,
     _parameter_list: &GenericParameterList,
     diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     diagnostic
 }
 
-fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
+    token_stream.current_span()
 }

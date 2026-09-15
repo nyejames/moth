@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     parse_build_config_qualifier, starts_build_config_qualifier,
 };
@@ -227,11 +228,17 @@ fn parse_record_field(
     token_stream.advance(); // past the field name
 
     let mut qualifier = if starts_build_config_qualifier(token_stream, string_table) {
-        Some(parse_build_config_qualifier(
-            token_stream,
+        let mut declaration_cursor = DeclarationCursor::from_file_tokens(token_stream)?;
+        let qualifier = parse_build_config_qualifier(
+            &mut declaration_cursor,
             string_table,
             None,
-        )?)
+        )?;
+        let next_index =
+            token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+        drop(declaration_cursor);
+        token_stream.index = next_index;
+        Some(qualifier)
     } else {
         None
     };

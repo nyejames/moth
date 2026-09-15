@@ -33,7 +33,6 @@ impl DiagnosticToken {
     fn static_token(tag: TokenTag) -> Self {
         Self::new(tag, 0, 0)
     }
-
     fn string_token(tag: TokenTag, value: StringId) -> Self {
         Self::new(tag, 0, value.index())
     }

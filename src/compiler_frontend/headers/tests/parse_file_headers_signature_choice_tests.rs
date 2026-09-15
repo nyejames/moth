@@ -200,9 +200,17 @@ fn duplicate_header_detection_ignores_qualified_match_arms() {
     );
     token_stream.index = 1;
 
+    let current_index = crate::compiler_frontend::tokenizer::tokens::TokenIndex::try_from_index(
+        token_stream.index,
+    )
+    .expect("test cursor index should fit");
+    let canonical = token_stream
+        .source_tokens()
+        .expect("test stream owns canonical source tokens");
     assert!(
-        !super::super::super::top_level_classifier::starts_duplicate_top_level_header_declaration(
-            &token_stream
+        !super::super::super::top_level_classifier::starts_duplicate_top_level_header_declaration_at_source(
+            canonical,
+            current_index,
         ),
         "qualified match arms in the start body are not choice declarations"
     );

@@ -5,6 +5,7 @@
 //! WHY: `#Config` is source syntax metadata, not a semantic type or expression category. Keeping
 //! its parser here lets source contracts and anonymous const-record fields use one grammar owner.
 
+use super::{cursor_current_span, DeclarationCursor};
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuildInputType, PrimitiveBuildInputType, PrimitiveBuildValue,
 };
@@ -13,13 +14,15 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    TypeAnnotationContext, parse_type_annotation,
+    TypeAnnotationContext, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32};
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, SourceTokens, TokenCursor, TokenIndex, TokenKind, TokenTag,
+};
 /// Syntax metadata retained for a declaration carrying `#Config of T`.
 ///
 /// The declaration's semantic type remains the parsed contract type. This value only preserves
@@ -118,7 +121,7 @@ pub(crate) fn normalize_source_build_config_contract(
     name: StringId,
     name_span: SourceSpan,
     qualifier: &BuildConfigQualifierSyntax,
-    initializer_tokens: &[Token],
+    initializer: Option<(TokenKind, SourceSpan)>,
     string_table: &mut StringTable,
 ) -> Result<SourceBuildConfigContract, CompilerDiagnostic> {
     let name_text = string_table.resolve(name).to_owned();
@@ -137,33 +140,16 @@ pub(crate) fn normalize_source_build_config_contract(
         )
     })?;
 
-    let source_id = name_span.source();
-    let token_span = |token: &Token| Some(SourceSpan::new(source_id, token.span));
-    let (required, default) = if initializer_tokens.is_empty() {
-        (!value_type.is_optional(), None)
-    } else if initializer_tokens.len() != 1 {
-        return Err(source_default_type_mismatch(
-            name,
-            value_type,
-            "non-primitive",
-            initializer_tokens
-                .first()
-                .and_then(token_span)
-                .or(qualifier.qualifier_span)
-                .or(Some(name_span)),
-            string_table,
-        ));
-    } else {
-        let token = &initializer_tokens[0];
-        let span = token_span(token);
-        match &token.kind {
+    let (required, default) = match initializer {
+        None => (!value_type.is_optional(), None),
+        Some((kind, span)) => match &kind {
             TokenKind::NoneLiteral => {
                 if !value_type.is_optional() {
                     return Err(source_default_type_mismatch(
                         name,
                         value_type,
                         "None",
-                        span,
+                        Some(span),
                         string_table,
                     ));
                 }
@@ -171,20 +157,26 @@ pub(crate) fn normalize_source_build_config_contract(
             }
             TokenKind::StringSliceLiteral(value) => {
                 let value = PrimitiveBuildValue::String(string_table.resolve(*value).to_owned());
-                validate_source_default_primitive(name, value_type, value, span, string_table)?
+                validate_source_default_primitive(
+                    name,
+                    value_type,
+                    value,
+                    Some(span),
+                    string_table,
+                )?
             }
             TokenKind::BoolLiteral(value) => validate_source_default_primitive(
                 name,
                 value_type,
                 PrimitiveBuildValue::Bool(*value),
-                span,
+                Some(span),
                 string_table,
             )?,
             TokenKind::CharLiteral(value) => validate_source_default_primitive(
                 name,
                 value_type,
                 PrimitiveBuildValue::Char(*value),
-                span,
+                Some(span),
                 string_table,
             )?,
             TokenKind::NumericLiteral(value) => {
@@ -202,13 +194,13 @@ pub(crate) fn normalize_source_build_config_contract(
                     }
                 };
                 let materialized = materialized.map_err(|reason| {
-                    CompilerDiagnostic::invalid_number_literal(value.source_text, reason, span)
+                    CompilerDiagnostic::invalid_number_literal(value.source_text, reason, Some(span))
                 })?;
                 validate_source_default_primitive(
                     name,
                     value_type,
                     materialized,
-                    span,
+                    Some(span),
                     string_table,
                 )?
             }
@@ -217,11 +209,11 @@ pub(crate) fn normalize_source_build_config_contract(
                     name,
                     value_type,
                     "non-primitive",
-                    span,
+                    Some(span),
                     string_table,
                 ));
             }
-        }
+        },
     };
 
     Ok(SourceBuildConfigContract {
@@ -270,72 +262,83 @@ fn source_default_type_mismatch(
     )
 }
 
-/// Find one `#Config` marker in a retained token slice.
+
+/// Bounded `#Config` marker scan over one source-owned cursor view.
 ///
-/// Header preparation uses this flat scan to reject body and nested placements before AST
-/// construction. It reports the marker's exact source-qualified span and whether the following
-/// `Config` token is byte-adjacent.
-pub(crate) fn find_config_qualifier_marker(
-    tokens: &[Token],
+/// WHAT: inspects adjacent pairs from a checked cursor without materializing the
+///       range or retaining adapter vectors.
+/// WHY: the outer file parser's start-body ranges and retained header ranges are
+///      source-owned; per-range vector projection would pay O(N) allocation for a
+///      two-token marker fact.
+pub(crate) fn find_config_qualifier_marker_in_cursor(
+    mut cursor: TokenCursor<'_>,
     string_table: &StringTable,
-    source_id: SourceId,
     span_builder: &ExtendedSpanBuilder,
 ) -> Option<(SourceSpan, bool)> {
     let resolver = span_builder.resolver();
-    for pair in tokens.windows(2) {
-        if pair[0].kind != TokenKind::Hash {
-            continue;
+    let mut previous = cursor.advance()?;
+    loop {
+        let crosses_segment = cursor.is_at_segment_start();
+        let current = cursor.advance()?;
+        let is_eof = current.is_eof();
+        if !crosses_segment
+            && previous.tag() == TokenTag::HASH
+            && current.tag() == TokenTag::SYMBOL
+            && current.string_id().is_some_and(|name| string_table.resolve(name) == "Config")
+        {
+            let marker = previous.source_span();
+            let marker_range = previous.span().resolve_with(resolver);
+            let config_range = current.span().resolve_with(resolver);
+            return Some((marker, marker_range.end() == config_range.start()));
         }
-        let TokenKind::Symbol(name) = pair[1].kind else {
-            continue;
-        };
-        if string_table.resolve(name) != "Config" {
-            continue;
+        if is_eof {
+            return None;
         }
-
-        let marker = SourceSpan::new(source_id, pair[0].span);
-        let marker_range = pair[0].span.resolve_with(resolver);
-        let config_range = pair[1].span.resolve_with(resolver);
-        return Some((marker, marker_range.end() == config_range.start()));
+        previous = current;
     }
-
-    None
 }
-/// Find a `#Config` marker whose tokens are separated by trivia.
+
+/// Bounded invalid-spacing scan over one checked source-owned cursor.
 ///
-/// The direct project-config AST path parses anonymous record fields without the retained
-/// preparation span builder. It therefore preflights the token stream here, while the normal
-/// declaration-shell path continues to validate adjacency at its parser cursor.
-pub(crate) fn find_invalid_config_qualifier_spacing(
-    tokens: &[Token],
+/// The direct project-config path uses this helper before header preparation. It observes exact
+/// canonical spans without materializing a token vector; the normal declaration-shell path
+/// validates adjacency at its parser cursor.
+pub(crate) fn find_invalid_config_qualifier_spacing_in_cursor(
+    mut cursor: TokenCursor<'_>,
     string_table: &StringTable,
-    source_id: SourceId,
     span_builder: &ExtendedSpanBuilder,
 ) -> Option<SourceSpan> {
     let resolver = span_builder.resolver();
-    tokens.windows(2).find_map(|pair| {
-        if pair[0].kind != TokenKind::Hash {
+    let mut previous = cursor.advance()?;
+    loop {
+        let crosses_segment = cursor.is_at_segment_start();
+        let current = cursor.advance()?;
+        let is_eof = current.is_eof();
+        if !crosses_segment
+            && previous.tag() == TokenTag::HASH
+            && current.tag() == TokenTag::SYMBOL
+            && current
+                .string_id()
+                .is_some_and(|name| string_table.resolve(name) == "Config")
+        {
+            let marker_range = previous.span().resolve_with(resolver);
+            let config_range = current.span().resolve_with(resolver);
+            if marker_range.end() != config_range.start() {
+                return Some(previous.source_span());
+            }
+        }
+        if is_eof {
             return None;
         }
-        let TokenKind::Symbol(name) = pair[1].kind else {
-            return None;
-        };
-        if string_table.resolve(name) != "Config" {
-            return None;
-        }
-
-        let marker_range = pair[0].span.resolve_with(resolver);
-        let config_range = pair[1].span.resolve_with(resolver);
-        (marker_range.end() != config_range.start())
-            .then(|| SourceSpan::new(source_id, pair[0].span))
-    })
+        previous = current;
+    }
 }
 
-/// Returns whether the cursor begins the compiler-owned `#Config` qualifier spelling.
+/// Returns whether a compatibility parser cursor begins the compiler-owned `#Config` spelling.
 ///
-/// The lookahead intentionally ignores adjacency. `# Config` must enter the qualifier parser so
-/// it can produce the dedicated qualifier-spacing diagnostic instead of ordinary `#` binding
-/// diagnostics.
+/// This remains a deliberate 3F2/3F3 parser boundary: declaration-shell and AST record parsing
+/// still consume the mutable compatibility stream, while Stage 3F1 header dispatch uses the
+/// canonical source-view helper below.
 pub(crate) fn starts_build_config_qualifier(
     token_stream: &FileTokens,
     string_table: &StringTable,
@@ -350,18 +353,56 @@ pub(crate) fn starts_build_config_qualifier(
     )
 }
 
-/// Parse the exact structural `#Config of T` qualifier.
+/// Canonical source-view entry for header-owned `#Config` dispatch.
 ///
-/// Contract types use their own required type-annotation context. In particular, an assignment or
+/// The declaration parser keeps its compatibility cursor for the deferred qualifier grammar, but
+/// this decision reads only stable source tags and the source-owned symbol payload.
+pub(crate) fn starts_build_config_qualifier_at_source(
+    source_tokens: &SourceTokens,
+    index: TokenIndex,
+    string_table: &StringTable,
+) -> bool {
+    let Some(current) = source_tokens.token(index).ok() else {
+        return false;
+    };
+    if current.tag() != TokenTag::HASH {
+        return false;
+    }
+    let Some(next_raw) = index.raw().checked_add(1) else {
+        return false;
+    };
+    let Some(next_index) = TokenIndex::try_from_raw(next_raw) else {
+        return false;
+    };
+    source_tokens
+        .token(next_index)
+        .ok()
+        .is_some_and(|token| {
+            token.tag() == TokenTag::SYMBOL
+                && token
+                    .string_id()
+                    .is_some_and(|name| string_table.resolve(name) == "Config")
+        })
+}
+
+/// Return whether a canonical cursor begins the compiler-owned `#Config` spelling.
+pub(crate) fn starts_build_config_qualifier_at_cursor(
+    cursor: &DeclarationCursor<'_>,
+    string_table: &StringTable,
+) -> bool {
+    cursor.current_token_kind() == &TokenKind::Hash
+        && cursor.peek_next_token().is_some_and(|kind| {
+            matches!(kind, TokenKind::Symbol(name) if string_table.resolve(name) == "Config")
+        })
+}
+
+/// Parse the exact structural `#Config of T` qualifier.
 pub(crate) fn parse_build_config_qualifier(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     string_table: &mut StringTable,
     span_builder: Option<&mut ExtendedSpanBuilder>,
 ) -> Result<BuildConfigQualifierSyntax, HeaderParseFailure> {
-    let qualifier_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let qualifier_span = cursor_current_span(&token_stream.canonical_cursor());
     if let Some(span_builder) = span_builder {
         require_config_marker_adjacent(token_stream, span_builder)?;
     }
@@ -373,15 +414,12 @@ pub(crate) fn parse_build_config_qualifier(
         TokenKind::Symbol(name) if string_table.resolve(*name) == "Config" => {
             token_stream.advance();
         }
-        _ => {
+        found => {
             return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::expected_token(
                     TokenKind::Symbol(string_table.intern("Config")),
-                    Some(token_stream.current_token_kind().to_owned()),
-                    Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    )),
+                    Some(found.to_owned()),
+                    token_stream.current_span(),
                 ),
             ));
         }
@@ -392,16 +430,13 @@ pub(crate) fn parse_build_config_qualifier(
             CompilerDiagnostic::expected_token(
                 TokenKind::Of,
                 Some(token_stream.current_token_kind().to_owned()),
-                Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                )),
+                token_stream.current_span(),
             ),
         ));
     }
     token_stream.advance();
 
-    let type_annotation = parse_type_annotation(
+    let type_annotation = parse_type_annotation_cursor(
         token_stream,
         TypeAnnotationContext::BuildConfigContract,
         string_table,
@@ -416,24 +451,24 @@ pub(crate) fn parse_build_config_qualifier(
 
 /// `#Config` has a qualifier-specific spacing rule, distinct from ordinary `#` bindings.
 fn require_config_marker_adjacent(
-    token_stream: &FileTokens,
+    token_stream: &DeclarationCursor<'_>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<(), HeaderParseFailure> {
-    let Some(current_token) = token_stream.tokens.get(token_stream.index) else {
+    let Some(current_token) = token_stream.canonical_cursor().current() else {
         return Ok(());
     };
-    let Some(next_token) = token_stream.tokens.get(token_stream.index + 1) else {
+    let Some(next_token) = token_stream.canonical_cursor().peek_next() else {
         return Ok(());
     };
 
     let resolver = span_builder.resolver();
-    let current_range = current_token.span.resolve_with(resolver);
-    let next_range = next_token.span.resolve_with(resolver);
+    let current_range = current_token.span().resolve_with(resolver);
+    let next_range = next_token.span().resolve_with(resolver);
     if current_range.end() != next_range.start() {
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::common_syntax_mistake(
                 CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
-                Some(SourceSpan::new(token_stream.file_id, current_token.span)),
+                Some(current_token.source_span()),
             ),
         ));
     }

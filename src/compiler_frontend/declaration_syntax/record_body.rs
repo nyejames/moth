@@ -11,7 +11,7 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use super::DeclarationCursor;
 
 /// Two-lane result for record-body parsing.
 ///
@@ -21,7 +21,7 @@ use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 type RecordBodyParseResult = Result<Vec<SignatureMemberSyntax>, HeaderParseFailure>;
 
 pub fn parse_record_body(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     member_context: SignatureMemberContext,

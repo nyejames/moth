@@ -1212,7 +1212,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Parse each field inside a temporary scope so that type-resolution errors
         // can be remapped to the appropriate diagnostic for struct defaults vs choice payloads.
         let conversion_result = (|| -> Result<Vec<Declaration>, ExpressionParseError> {
-            let header_path_syntax = self.header_path_syntax(header).clone();
+            let source_owner = self
+                .source_token_streams
+                .get(&header.tokens.source())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "member-bearing header has no prepared source token owner",
+                    )
+                })?;
             let mut compatibility_cache = TypeCompatibilityCache::new();
             let mut type_interner =
                 AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
@@ -1221,7 +1228,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             for field in fields {
                 let declaration = signature_member_to_declaration(
                     field,
-                    &header_path_syntax,
+                    source_owner.as_ref(),
                     &field_context,
                     &mut type_interner,
                     string_table,

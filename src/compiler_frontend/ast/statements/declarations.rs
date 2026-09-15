@@ -46,13 +46,14 @@ use crate::compiler_frontend::ast::expressions::anonymous_const_record::pipe_ope
 use crate::compiler_frontend::build_config::BuildInputName;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
-use crate::compiler_frontend::declaration_syntax::declaration_shell::{
-    DeclarationSyntax, parse_declaration_syntax,
+use crate::compiler_frontend::declaration_syntax::{
+    DeclarationCursor,
+    declaration_shell::{DeclarationSyntax, parse_declaration_syntax},
 };
 use crate::compiler_frontend::declaration_syntax::r#struct::{
     parse_struct_shell, validate_struct_default_values,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -60,7 +61,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenRange};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
@@ -88,6 +89,29 @@ fn capacity_only_shorthand(type_ref: &ParsedTypeRef) -> Option<&ParsedCollection
         } if matches!(element.as_ref(), ParsedTypeRef::Inferred) => Some(capacity),
         _ => None,
     }
+}
+/// Inspect the first authored initializer token without retaining a token vector on the shell.
+fn initializer_starts_with_type_parameter(
+    source: &FileTokens,
+    range: Option<TokenRange>,
+) -> Result<bool, CompilerError> {
+    let Some(range) = range else {
+        return Ok(false);
+    };
+    let canonical = source.canonical_source_tokens()?;
+    let token = canonical.token(range.start()).map_err(|error| {
+        CompilerError::compiler_error(format!(
+            "declaration initializer range could not resolve its first token: {error:?}"
+        ))
+    })?;
+    Ok(matches!(
+        token.to_token_kind().map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "declaration initializer token payload was malformed: {error:?}"
+            ))
+        })?,
+        TokenKind::TypeParameterBracket
+    ))
 }
 
 /// Classify a body-local constant initializer through the module's effective TIR views.
@@ -316,18 +340,27 @@ pub(crate) fn new_declaration(
     //  Parse declaration syntax
     // ----------------------------
     let mut span_builder = ExtendedSpanBuilder::new();
-    let declaration_syntax =
-        parse_declaration_syntax(token_stream, symbol_id, string_table, &mut span_builder)?;
+    let declaration_syntax = {
+        let mut declaration_cursor = DeclarationCursor::from_file_tokens(token_stream)?;
+        let syntax = parse_declaration_syntax(
+            &mut declaration_cursor,
+            symbol_id,
+            string_table,
+            &mut span_builder,
+        )?;
+        let next_index =
+            token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+        drop(declaration_cursor);
+        token_stream.index = next_index;
+        syntax
+    };
 
     // Heuristic: a leading type-parameter pipe after the binding marker indicates
     // a struct or generic type definition, which uses type-like naming conventions.
-    let naming_kind = if matches!(
-        declaration_syntax
-            .initializer_tokens
-            .first()
-            .map(|token| &token.kind),
-        Some(TokenKind::TypeParameterBracket)
-    ) {
+    let naming_kind = if initializer_starts_with_type_parameter(
+        token_stream,
+        declaration_syntax.initializer_range,
+    )? {
         IdentifierNamingKind::TypeLike
     } else {
         IdentifierNamingKind::ValueLike
@@ -345,7 +378,8 @@ pub(crate) fn new_declaration(
     let mut declaration = resolve_declaration_syntax(
         declaration_syntax,
         qualified_name,
-        &token_stream.path_syntax,
+        Some(token_stream),
+        None,
         &mut *context,
         type_interner,
         string_table,
@@ -393,12 +427,14 @@ fn function_signature_receiver(
 pub fn resolve_declaration_syntax(
     declaration_syntax: DeclarationSyntax,
     qualified_name: PathId,
-    path_syntax: &FilePathSyntax,
+    source_owner: Option<&FileTokens>,
+    initializer_override: Option<FileTokens>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> DeclarationResult<Declaration> {
+    let mut initializer_override = initializer_override;
     let mut span_builder = ExtendedSpanBuilder::new();
     let config_qualifier = declaration_syntax.config_qualifier.clone();
     let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
@@ -457,12 +493,11 @@ pub fn resolve_declaration_syntax(
         .map_err(|diagnostic| diagnostic.into_diagnostic())?;
 
         let mut initializer_stream = declaration_initializer_stream(
+            source_owner,
+            declaration_syntax.initializer_range,
+            initializer_override.take(),
             &qualified_name,
             declaration_syntax.span,
-            declaration_syntax.initializer_tokens.clone(),
-            path_syntax,
-            context,
-            path_fork,
         )?;
 
         // Shorthand requires an immediate collection literal initializer.
@@ -618,12 +653,11 @@ pub fn resolve_declaration_syntax(
         });
     }
     let mut initializer_stream = declaration_initializer_stream(
+        source_owner,
+        declaration_syntax.initializer_range,
+        initializer_override.take(),
         &qualified_name,
         declaration_syntax.span,
-        declaration_syntax.initializer_tokens,
-        path_syntax,
-        context,
-        path_fork,
     )?;
 
     // Check the first token before dispatching so we don't wastefully call
@@ -647,23 +681,38 @@ pub fn resolve_declaration_syntax(
                 ScopeContext::new_constant(initializer_stream.src_path.to_owned(), context);
             let mut field_warnings = Vec::new();
             let owner_path = initializer_stream.src_path.to_owned();
-            let field_syntax = parse_struct_shell(
-                &mut initializer_stream,
-                string_table,
-                &mut field_warnings,
-                owner_path,
-                path_fork,
-                &mut span_builder,
-            )?;
+            let field_syntax = {
+                let mut declaration_cursor =
+                    DeclarationCursor::from_file_tokens(&initializer_stream)?;
+                let field_syntax = parse_struct_shell(
+                    &mut declaration_cursor,
+                    string_table,
+                    &mut field_warnings,
+                    owner_path,
+                    path_fork,
+                    &mut span_builder,
+                )?;
+                let next_index = initializer_stream.compatibility_index_for_cursor(
+                    declaration_cursor.canonical_cursor(),
+                )?;
+                drop(declaration_cursor);
+                initializer_stream.index = next_index;
+                field_syntax
+            };
             for warning in field_warnings {
                 context.emit_warning(warning);
             }
+            let source_owner = source_owner.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "struct field defaults have no canonical source token owner",
+                )
+            })?;
 
             let mut params = Vec::with_capacity(field_syntax.len());
             for field in &field_syntax {
                 params.push(signature_member_to_declaration(
                     field,
-                    path_syntax,
+                    source_owner,
                     &constant_context,
                     type_interner,
                     string_table,
@@ -867,38 +916,33 @@ pub fn resolve_declaration_syntax(
     })
 }
 
-/// Wrap a declaration's initializer tokens in a stream terminated at the declaration's location.
+/// Build the explicit transient expression adapter for a source-owned initializer range.
 ///
-/// WHY the context: the initializer was lexed from the file that declared it, so the substream
-/// takes that scope's source identity rather than an identity a caller could pass wrongly.
+/// The declaration shell keeps only `initializer_range`; this boundary materializes the bounded
+/// range and appends a parser-only EOF while retaining the canonical owner's provenance.
 fn declaration_initializer_stream(
+    source_owner: Option<&FileTokens>,
+    initializer_range: Option<TokenRange>,
+    initializer_override: Option<FileTokens>,
     qualified_name: &PathId,
     declaration_span: Option<SourceSpan>,
-    mut initializer_tokens: Vec<Token>,
-    path_syntax: &FilePathSyntax,
-    context: &ScopeContext,
-    path_fork: &PathInternerFork,
 ) -> DeclarationResult<FileTokens> {
-    let Some(eof_span) = declaration_span
-        .map(SourceSpan::local)
-        .or_else(|| initializer_tokens.last().map(|token| token.span))
-    else {
-        return Err(CompilerDiagnostic::invalid_declaration(
-            InvalidDeclarationReason::MissingInitializerExpression,
-            path_fork.component(*qualified_name),
-            None,
+    if let Some(stream) = initializer_override {
+        return Ok(stream);
+    }
+    let source = source_owner.ok_or_else(|| {
+        CompilerError::compiler_error(
+            "declaration initializer range has no canonical source token owner",
         )
-        .into());
-    };
-    initializer_tokens.push(Token::new(TokenKind::Eof, eof_span));
-    FileTokens::new_from_slice(
-        *qualified_name,
-        context.shared.declaring_file_id,
-        None,
-        initializer_tokens,
-        path_syntax,
-    )
-    .map_err(ExpressionParseError::from)
+    })?;
+    let range = initializer_range.ok_or_else(|| {
+        CompilerError::compiler_error("declaration initializer range is missing")
+    })?;
+    let eof_span = declaration_span
+        .map(SourceSpan::local)
+        .unwrap_or_else(LocalSpan::source_start);
+    FileTokens::new_bounded_expression_substream(source, range, *qualified_name, eof_span)
+        .map_err(ExpressionParseError::from)
 }
 
 #[cfg(test)]

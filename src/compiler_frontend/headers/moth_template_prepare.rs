@@ -6,7 +6,7 @@
 //! should see an ordinary constant header instead of a Moth template-specific AST path
 //! or textually wrapped source.
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
@@ -19,10 +19,10 @@ use crate::compiler_frontend::paths::file_references::classify_prepared_file_ref
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenIndex, TokenKind, TokenRange,
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenIndex, TokenRange};
+use crate::compiler_frontend::utilities::token_scan::{
+    TokenFactView, collect_scanned_symbol_references,
 };
-use crate::compiler_frontend::utilities::token_scan::collect_symbol_references;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -44,30 +44,43 @@ pub(crate) fn prepare_moth_template_file(
     let token_stats = file_tokens.token_stats;
     let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
     let context = MothTemplatePrepareContext::new(&file_tokens, file_id, string_table)?;
-    let body_tokens = file_tokens
-        .tokens
-        .get(context.body_range.start().index()..context.body_range.end().index())
-        .ok_or_else(|| {
-            CompilerError::compiler_error("Moth template body range exceeds its token owner")
+    let (content_header, config_owned_path_syntax_ids) = {
+        let canonical = file_tokens.source_tokens()?;
+        if canonical.source() != file_id {
+            return Err(CompilerError::compiler_error(
+                "Moth template source token owner does not match its file identity",
+            ));
+        }
+        let body_facts =
+            TokenFactView::from_source_range(canonical, context.body_range).map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "Moth template body view is invalid: {error:?}"
+                ))
+            })?;
+        let body_cursor = canonical.cursor(context.body_range).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "Moth template body cursor is invalid: {error:?}"
+            ))
         })?;
-    let content_header = context.content_header(body_tokens, string_table, path_fork)?;
-    let config_owned_path_syntax_ids = if find_config_qualifier_marker(
-        body_tokens,
-        string_table,
-        context.file_id,
-        span_builder,
-    )
-    .is_some()
-    {
-        body_tokens
-            .iter()
-            .filter_map(|token| match token.kind {
-                TokenKind::Path(path_syntax_id) => Some(path_syntax_id),
-                _ => None,
-            })
-            .collect()
-    } else {
-        Vec::new()
+        let content_header = context.content_header(body_facts, string_table, path_fork)?;
+        let config_owned_path_syntax_ids = if find_config_qualifier_marker_in_cursor(
+            body_cursor,
+            string_table,
+            span_builder,
+        )
+        .is_some()
+        {
+            (0..body_facts.len())
+                .filter_map(|index| {
+                    body_facts
+                        .get(index)
+                        .and_then(|token| token.path_syntax_id)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (content_header, config_owned_path_syntax_ids)
     };
     let mut headers = vec![content_header];
     let structural_file_references = classify_prepared_file_references(
@@ -127,6 +140,17 @@ impl MothTemplatePrepareContext {
         file_id: SourceId,
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerError> {
+        let canonical = file_tokens.source_tokens()?;
+        if canonical.source() != file_id {
+            return Err(CompilerError::compiler_error(
+                "Moth template source token owner does not match its file identity",
+            ));
+        }
+        if file_tokens.length != canonical.len() || file_tokens.tokens.len() != canonical.len() {
+            return Err(CompilerError::compiler_error(
+                "Moth template token adapter length does not match its source owner",
+            ));
+        }
         let body_start = TokenIndex::try_from_index(1).ok_or_else(|| {
             CompilerError::compiler_error("Moth template body range start exceeded index space")
         })?;
@@ -136,14 +160,11 @@ impl MothTemplatePrepareContext {
         let body_end = TokenIndex::try_from_index(body_end_index).ok_or_else(|| {
             CompilerError::compiler_error("Moth template body range end exceeded index space")
         })?;
-        let body_range = file_tokens
-            .source_tokens()?
-            .range(body_start, body_end)
-            .map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "Moth template body range is invalid: {error:?}"
-                ))
-            })?;
+        let body_range = canonical.range(body_start, body_end).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "Moth template body range is invalid: {error:?}"
+            ))
+        })?;
         let markdown_directive = string_table.intern(MOTH_TEMPLATE_MARKDOWN_DIRECTIVE);
 
         Ok(Self {
@@ -157,11 +178,12 @@ impl MothTemplatePrepareContext {
 
     fn content_header(
         &self,
-        body_tokens: &[Token],
+        body_tokens: TokenFactView<'_>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
     ) -> Result<crate::compiler_frontend::headers::types::Header, CompilerError> {
-        let initializer_references = collect_symbol_references(body_tokens, self.file_id);
+        let initializer_references =
+            collect_scanned_symbol_references(body_tokens, self.file_id);
 
         synthetic_content_header(
             SyntheticContentHeaderInput {

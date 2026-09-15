@@ -33,6 +33,7 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     BindingTargetSyntax, parse_binding_target_syntax,
 };
@@ -234,8 +235,13 @@ fn parse_target_list(
             .into());
         };
         token_stream.advance();
+        let mut declaration_cursor = DeclarationCursor::from_file_tokens(token_stream)?;
         let target_syntax =
-            parse_binding_target_syntax(name, token_stream, string_table, &mut span_builder)?;
+            parse_binding_target_syntax(name, &mut declaration_cursor, string_table, &mut span_builder)?;
+        let next_index =
+            token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+        drop(declaration_cursor);
+        token_stream.index = next_index;
         validate_target_mutability(&target_syntax, string_table)?;
         parsed_targets.push(target_syntax);
 

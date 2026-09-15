@@ -346,13 +346,14 @@ pub(crate) fn remapped_bounded_adapter(
             )
         })?;
     }
-    Ok(FileTokens::new_remapped_adapter(
+    FileTokens::new_remapped_bounded_adapter(
+        source_owner,
+        token_range,
+        token_sequence,
         declaration_path,
-        adapter.file_id,
-        adapter.canonical_os_path.clone(),
         adapter.tokens,
         destination_path_syntax,
-    ))
+    )
 }
 impl fmt::Debug for GenericFunctionBody {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

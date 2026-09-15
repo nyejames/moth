@@ -52,6 +52,7 @@ fn source_config_contracts_reject_invalid_name_type_and_default_during_preparati
         ("BadName #Config of Bool = false\n", "name"),
         ("value #Config of Decimal = 1\n", "type"),
         ("value #Config of Int = other + 1\n", "default"),
+        ("value #Config of Int = 1 + 2\n", "default"),
     ];
 
     for (source, expected_kind) in cases {
@@ -215,6 +216,23 @@ fn source_config_initializer_paths_stay_out_of_structural_file_references() {
     assert!(
         header.local_ordering_hints.is_empty(),
         "config defaults must not add content-source ordering hints"
+    );
+}
+
+#[test]
+fn active_root_config_marker_after_declaration_gap_hides_file_value_reference() {
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let (output, _span_builder) = prepare_single_file(
+        "helper #= 1\nvalue = @assets/missing.mtf #Config of String\n",
+        &file_path,
+        &file_path,
+        &mut string_table,
+    );
+
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "a gapped start-body config marker must hide its file-value path"
     );
 }
 

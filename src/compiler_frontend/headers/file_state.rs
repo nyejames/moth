@@ -12,10 +12,10 @@ use crate::compiler_frontend::headers::types::{
     HeaderExportMode, HeaderKind, PreparedFilePathSyntax, RetainedDependencyClause,
     TopLevelConstFragment,
 };
-use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenIndex, TokenKind, TokenRange,
+    FileTokens, SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::projects::settings::{
     MINIMUM_LIKELY_DECLARATIONS, TOKEN_TO_DECLARATION_RATIO, TOKEN_TO_HEADER_RATIO,
@@ -83,33 +83,27 @@ impl HeaderFileParseState {
         }
     }
 
-    pub(super) fn record_start_body_token(
+
+    pub(super) fn record_start_body_token_ref(
         &mut self,
-        file_id: SourceId,
-        index: usize,
-        token: &Token,
+        token: TokenRef<'_>,
     ) -> Result<(), CompilerError> {
-        let end = index.checked_add(1).ok_or_else(|| {
+        let start = token.index();
+        let end = TokenIndex::try_from_index(start.index().checked_add(1).ok_or_else(|| {
             CompilerError::compiler_error("start-body token index overflowed its source range")
-        })?;
-        let start = TokenIndex::try_from_index(index).ok_or_else(|| {
-            CompilerError::compiler_error("start-body token index exceeded its checked domain")
-        })?;
-        let end = TokenIndex::try_from_index(end).ok_or_else(|| {
+        })?)
+        .ok_or_else(|| {
             CompilerError::compiler_error("start-body token end exceeded its checked domain")
         })?;
-        let range = TokenRange::new(file_id, start, end).ok_or_else(|| {
+        let range = TokenRange::new(token.source(), start, end).ok_or_else(|| {
             CompilerError::compiler_error("start-body token range was reversed")
         })?;
         self.record_start_body_range(range);
-        self.observe_start_body_token(file_id, token);
+        self.observe_start_body_token_ref(token);
         Ok(())
     }
 
-    pub(super) fn record_start_body_range(
-        &mut self,
-        range: TokenRange,
-    ) {
+    pub(super) fn record_start_body_range(&mut self, range: TokenRange) {
         if let Some(previous) = self.start_body_ranges.last_mut()
             && previous.source() == range.source()
             && previous.end() == range.start()
@@ -120,38 +114,35 @@ impl HeaderFileParseState {
             self.start_body_ranges.push(range);
         }
     }
-    pub(super) fn record_start_body_source_range(
+
+    pub(super) fn record_start_body_source_range_from_source_tokens(
         &mut self,
         range: TokenRange,
-        source: &FileTokens,
+        source: &SourceTokens,
     ) -> Result<(), CompilerError> {
-        if range.source() != source.file_id {
-            return Err(CompilerError::compiler_error(
-                "start-body range does not match its source token owner",
-            ));
-        }
-        let tokens = source
-            .tokens
-            .get(range.start().index()..range.end().index())
-            .ok_or_else(|| {
-                CompilerError::compiler_error("start-body range exceeds its source token owner")
-            })?;
+        let cursor = source.cursor(range).map_err(|_| {
+            CompilerError::compiler_error("start-body range exceeds its source token owner")
+        })?;
         self.record_start_body_range(range);
-        for token in tokens {
-            self.observe_start_body_token(source.file_id, token);
-        }
+        self.observe_start_body_cursor(cursor);
         Ok(())
     }
 
+    pub(super) fn observe_start_body_cursor(&mut self, mut cursor: TokenCursor<'_>) {
+        while let Some(token) = cursor.advance() {
+            self.observe_start_body_token_ref(token);
+            if token.is_eof() {
+                break;
+            }
+        }
+    }
 
-    pub(super) fn observe_start_body_token(&mut self, file_id: SourceId, token: &Token) {
-        if !matches!(
-            token.kind,
-            TokenKind::Eof | TokenKind::Newline | TokenKind::ModuleStart
-        ) {
+    pub(super) fn observe_start_body_token_ref(&mut self, token: TokenRef<'_>) {
+        let tag = token.tag();
+        if tag != TokenTag::EOF && tag != TokenTag::NEWLINE && tag != TokenTag::MODULE_START {
             self.has_non_trivial_start_body = true;
             if self.first_executable_start_body_span.is_none() {
-                self.first_executable_start_body_span = Some(SourceSpan::new(file_id, token.span));
+                self.first_executable_start_body_span = Some(token.source_span());
             }
         }
     }
@@ -224,10 +215,10 @@ impl HeaderFileParseState {
         // Active module root: publish the source-owned start sequence for later AST body parsing.
         // `start` is never a dependency-graph participant, so this header keeps no graph edges.
         let token_sequence = token_stream.register_token_sequence(&self.start_body_ranges)?;
-        let start_index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+        let end_index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
             CompilerError::compiler_error("start header token range exceeded index space")
         })?;
-        let start_range = TokenRange::new(file_id, start_index, start_index)
+        let start_range = TokenRange::new(file_id, end_index, end_index)
             .expect("equal token indexes always form a valid empty range");
 
         self.headers.push(Header {

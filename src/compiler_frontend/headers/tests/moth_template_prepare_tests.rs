@@ -952,7 +952,7 @@ fn moth_template_preparation_produces_private_content_constant() {
         "the generated content declaration should not claim an authored source span"
     );
     assert!(
-        declaration.initializer_tokens.is_empty(),
+        declaration.initializer_range.is_none(),
         "Moth template declaration shells must not retain body token vectors"
     );
     assert!(
@@ -1110,7 +1110,7 @@ fn empty_moth_template_body_retains_empty_body_range_and_directive_payload() {
     let declaration = content_constant(&output);
 
     assert!(header.tokens.is_empty());
-    assert!(declaration.initializer_tokens.is_empty());
+    assert!(declaration.initializer_range.is_none());
     let Some(SyntheticContentPayload::MothTemplate { markdown_directive }) =
         header.synthetic_content_payload
     else {
@@ -1792,7 +1792,7 @@ fn moth_template_retains_body_range_and_normal_markdown_payload() {
     let body_tokens = retained_body_tokens(&output);
 
     assert!(
-        declaration.initializer_tokens.is_empty(),
+        declaration.initializer_range.is_none(),
         "Moth template declaration shell must not retain wrapper or body tokens"
     );
     assert!(

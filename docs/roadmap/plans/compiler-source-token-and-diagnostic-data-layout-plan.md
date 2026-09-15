@@ -1004,10 +1004,33 @@ token store was introduced; test-only contexts use checked ranges over a canonic
 
 Each checked batch is independently accepted and must remove the old token API from its owner.
 
-- [ ] **3F1 — Stage 0 and header cursor:** structural reachability, provider-reference collection,
+- [x] **3F1 — Stage 0 and header cursor:** structural reachability, provider-reference collection,
   header splitting, dependency clauses, declaration dispatch, retained dependency-fact reads and
   source-kind preparation
-- [ ] **3F2 — declaration syntax:** signatures, declarations, types, structs, choices, traits and generic parameter parsers
+Slice 3F1 decision (2026-09-15): Stage 0 and header-owned structural consumers now read the
+canonical `SourceTokens` store through checked `TokenRef`/`TokenCursor`/`TokenFactView` views.
+Header splitting, dependency clauses, source-kind preparation, structural file-reference and
+ordering-hint scans, config-marker checks, import migration diagnostics, export control, and
+const/runtime template range capture no longer project compatibility token vectors for their facts.
+Compatibility `FileTokens` handoffs remain only at explicit 3F2 declaration/signature/type and
+later 3F3/3F4 grammar boundaries; no durable borrowed references or second canonical store was
+introduced. The accepted low-memory validation lane used one Cargo job (`CARGO_BUILD_JOBS=1`) and
+passed the library check plus focused header, cursor, classifier, dependency, template and
+source-config suites; the broader `moth_template` filter retains one unchanged plain-Markdown
+expectation failure and the build-system focus retains two unchanged generated-sidecar failures,
+with neither failure in a changed owner.
+- [x] **3F2 — declaration syntax:** signatures, declarations, types, structs, choices, traits and generic parameter parsers
+Slice 3F2 decision (2026-09-15): declaration shells, signatures, type syntax, structs, choices, traits
+and generic-parameter parsing now consume short-lived `DeclarationCursor`/`TokenCursor` views over
+the canonical `SourceTokens` owner. Durable shells retain checked `TokenRange` values for
+initializers and defaults; expression compatibility vectors are materialized only at explicit AST
+handoffs. Bounded generic adapters preserve destination-domain payload remaps through nested
+initializer/default materialisation without a second canonical store, while source-identity
+rebinding and single-token source-config default validation remain checked at their preparation
+boundaries. Low-memory validation (`CARGO_BUILD_JOBS=1`, `CARGO_PROFILE_DEV_DEBUG=0`) passed
+`cargo check -p moth --lib` plus focused declaration, type, header, tokenizer-cursor, source-config,
+and generic-body suites; a broader `frozen_body_tests` filter still reports two failures and was
+not used as 3F2 acceptance evidence.
 - [ ] **3F3 — AST core:** expression, statement, call, field, match, loop and assignment parsers
 - [ ] **3F4 — template parser:** template heads, TIR emission, slots, control flow and formatter-facing token reads
 - [ ] **3F5 — support surfaces:** token-based diagnostics, tests, debug/show-token output, `TokenStats` and benchmark classification; extend the owning test source helper with token-store construction rather than adding parser-specific fixture builders

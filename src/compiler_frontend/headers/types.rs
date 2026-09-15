@@ -34,7 +34,9 @@ use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenRange, TokenSequenceId};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, SourceTokens, Token, TokenRange, TokenSequenceId,
+};
 use crate::compiler_frontend::traits::syntax::{
     TraitConformanceSyntax, TraitDeclarationSyntax, TraitIncompatibilitySyntax,
 };
@@ -915,6 +917,9 @@ fn rebind_signature_member_source_identity(
         path_fork,
     )?;
     rebind_source_span(&mut member.span, file_id);
+    member.default_range = member
+        .default_range
+        .map(|range| range.rebind_source(file_id));
     rebind_parsed_type_ref_source_identity(&mut member.type_annotation, file_id);
     Ok(())
 }
@@ -994,6 +999,9 @@ fn rebind_declaration_source_identity(
     file_id: SourceId,
 ) -> Result<(), CompilerError> {
     rebind_source_span(&mut declaration.span, file_id);
+    declaration.initializer_range = declaration
+        .initializer_range
+        .map(|range| range.rebind_source(file_id));
     rebind_parsed_type_ref_source_identity(&mut declaration.type_annotation, file_id);
     // Initializer references retain their captured source-qualified spans. In particular, a
     // generated or materialised initializer may own a different source than its containing header.
@@ -1791,6 +1799,9 @@ impl FileFrontendPrepareOutput {
     ///
     /// The returned vector belongs to the caller and is never retained by a header or prepared
     /// source owner. Segmented start syntax is materialized through the canonical sequence cursor.
+    /// This compatibility materialization remains only for deferred 3F2 declaration/signature/type
+    /// and 3F3–3F4 AST/template parser boundaries; header-stage fact scans use a checked
+    /// canonical cursor directly.
     pub(crate) fn body_tokens(&self, header: &Header) -> Result<Vec<Token>, CompilerError> {
         if header.tokens.source() != self.file_id {
             return Err(CompilerError::compiler_error(
@@ -1871,6 +1882,11 @@ impl FileFrontendPrepareOutput {
         add_frontend_counter(FrontendCounter::PreparedFileInvariantValidationCount, 1);
         let path_syntax = self.path_syntax.table();
         path_syntax.validate_file_owned_locations(self.file_id)?;
+        let source_tokens = self
+            .source_token_stream
+            .as_deref()
+            .map(|stream| stream.source_tokens())
+            .transpose()?;
 
         validate_dependency_clauses(
             &self.file_dependency_clauses,
@@ -1885,9 +1901,9 @@ impl FileFrontendPrepareOutput {
                 header,
                 self.file_id,
                 self.source_file,
-                path_syntax,
                 path_fork,
                 self.source_token_stream.as_deref(),
+                source_tokens,
             )?;
         }
 
@@ -2032,9 +2048,9 @@ fn validate_header(
     header: &Header,
     file_id: SourceId,
     source_file: PathId,
-    path_syntax: &PathSyntaxTable,
     path_fork: &PathInternerFork,
     source_stream: Option<&FileTokens>,
+    source_tokens: Option<&SourceTokens>,
 ) -> Result<(), CompilerError> {
     if header.tokens.source() != file_id {
         return Err(CompilerError::compiler_error(
@@ -2096,13 +2112,12 @@ fn validate_header(
                     "tokenized header has no canonical source token owner",
                 ));
             }
-
             let HeaderKind::Constant { declaration } = &header.kind else {
                 return Err(CompilerError::compiler_error(
                     "payload-only synthetic content header is not a constant",
                 ));
             };
-            if !declaration.initializer_tokens.is_empty()
+            if declaration.initializer_range.is_some()
                 || !declaration.initializer_references.is_empty()
             {
                 return Err(CompilerError::compiler_error(
@@ -2120,9 +2135,9 @@ fn validate_header(
                 "MothTemplate synthetic payload is not attached to a constant",
             ));
         };
-        if !declaration.initializer_tokens.is_empty() {
+        if declaration.initializer_range != Some(header.tokens) {
             return Err(CompilerError::compiler_error(
-                "MothTemplate synthetic content retained body tokens in its declaration shell",
+                "MothTemplate synthetic content retained a mismatched initializer range",
             ));
         }
     }
@@ -2139,15 +2154,14 @@ fn validate_header(
     for reference in &header.capacity_references {
         validate_source_span(reference.span, file_id, "header capacity reference")?;
     }
-    validate_header_kind(&header.kind, file_id, source_file, path_syntax, path_fork)
+    validate_header_kind(&header.kind, file_id, source_file, path_fork, source_tokens)
 }
-
 fn validate_header_kind(
     kind: &HeaderKind,
     file_id: SourceId,
     source_file: PathId,
-    path_syntax: &PathSyntaxTable,
     path_fork: &PathInternerFork,
+    source_tokens: Option<&SourceTokens>,
 ) -> Result<(), CompilerError> {
     match kind {
         HeaderKind::Function {
@@ -2155,10 +2169,16 @@ fn validate_header_kind(
             signature,
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
-            validate_function_signature(signature, file_id, source_file, path_syntax, path_fork)?;
+            validate_function_signature(
+                signature,
+                file_id,
+                source_file,
+                path_fork,
+                source_tokens,
+            )?;
         }
         HeaderKind::Constant { declaration } => {
-            validate_declaration_syntax(declaration, file_id, source_file, path_syntax)?;
+            validate_declaration_syntax(declaration, file_id, source_tokens)?;
         }
         HeaderKind::Struct {
             generic_parameters,
@@ -2166,7 +2186,13 @@ fn validate_header_kind(
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
             for field in fields {
-                validate_signature_member(field, file_id, source_file, path_syntax, path_fork)?;
+                validate_signature_member(
+                    field,
+                    file_id,
+                    source_file,
+                    path_fork,
+                    source_tokens,
+                )?;
             }
         }
         HeaderKind::Choice {
@@ -2175,7 +2201,13 @@ fn validate_header_kind(
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
             for variant in variants {
-                validate_choice_variant(variant, file_id, source_file, path_syntax, path_fork)?;
+                validate_choice_variant(
+                    variant,
+                    file_id,
+                    source_file,
+                    path_fork,
+                    source_tokens,
+                )?;
             }
         }
         HeaderKind::TypeAlias { target } => {
@@ -2202,8 +2234,8 @@ fn validate_header_kind(
                     &requirement.signature,
                     file_id,
                     source_file,
-                    path_syntax,
                     path_fork,
+                    source_tokens,
                 )?;
             }
         }
@@ -2231,11 +2263,11 @@ fn validate_function_signature(
     signature: &FunctionSignatureSyntax,
     file_id: SourceId,
     source_file: PathId,
-    path_syntax: &PathSyntaxTable,
     path_fork: &PathInternerFork,
+    source_tokens: Option<&SourceTokens>,
 ) -> Result<(), CompilerError> {
     for parameter in &signature.parameters {
-        validate_signature_member(parameter, file_id, source_file, path_syntax, path_fork)?;
+        validate_signature_member(parameter, file_id, source_file, path_fork, source_tokens)?;
     }
     for return_slot in &signature.returns {
         validate_source_span(return_slot.value.span, file_id, "function return")?;
@@ -2247,8 +2279,8 @@ fn validate_signature_member(
     member: &SignatureMemberSyntax,
     file_id: SourceId,
     source_file: PathId,
-    path_syntax: &PathSyntaxTable,
     path_fork: &PathInternerFork,
+    source_tokens: Option<&SourceTokens>,
 ) -> Result<(), CompilerError> {
     if !path_fork.starts_with(member.id, source_file) {
         return Err(CompilerError::compiler_error(
@@ -2257,10 +2289,10 @@ fn validate_signature_member(
     }
     validate_source_span(member.span, file_id, "declaration member")?;
     validate_parsed_type_ref(&member.type_annotation, file_id)?;
-    validate_tokens(
-        &member.default_tokens,
+    validate_source_range(
+        member.default_range,
+        source_tokens,
         file_id,
-        path_syntax,
         "member default",
     )
 }
@@ -2269,8 +2301,8 @@ fn validate_choice_variant(
     variant: &ChoiceVariantSyntax,
     file_id: SourceId,
     source_file: PathId,
-    path_syntax: &PathSyntaxTable,
     path_fork: &PathInternerFork,
+    source_tokens: Option<&SourceTokens>,
 ) -> Result<(), CompilerError> {
     validate_source_span(variant.span, file_id, "choice variant")?;
     match &variant.payload {
@@ -2279,7 +2311,7 @@ fn validate_choice_variant(
             fields,
         } => {
             for field in fields.iter() {
-                validate_signature_member(field, file_id, source_file, path_syntax, path_fork)?;
+                validate_signature_member(field, file_id, source_file, path_fork, source_tokens)?;
             }
         }
     }
@@ -2289,15 +2321,14 @@ fn validate_choice_variant(
 fn validate_declaration_syntax(
     declaration: &DeclarationSyntax,
     file_id: SourceId,
-    _source_file: PathId,
-    path_syntax: &PathSyntaxTable,
+    source_tokens: Option<&SourceTokens>,
 ) -> Result<(), CompilerError> {
     validate_source_span(declaration.span, file_id, "declaration shell")?;
     validate_parsed_type_ref(&declaration.type_annotation, file_id)?;
-    validate_tokens(
-        &declaration.initializer_tokens,
+    validate_source_range(
+        declaration.initializer_range,
+        source_tokens,
         file_id,
-        path_syntax,
         "declaration initializer",
     )?;
     for reference in &declaration.initializer_references {
@@ -2364,13 +2395,29 @@ fn validate_parsed_type_ref(
     Ok(())
 }
 
-fn validate_tokens(
-    tokens: &[Token],
+fn validate_source_range(
+    range: Option<TokenRange>,
+    source_tokens: Option<&SourceTokens>,
     file_id: SourceId,
-    path_syntax: &PathSyntaxTable,
     role: &str,
 ) -> Result<(), CompilerError> {
-    path_syntax.validate_file_tokens(tokens, file_id, role)
+    let Some(range) = range else {
+        return Ok(());
+    };
+    if range.source() != file_id {
+        return Err(CompilerError::compiler_error(format!(
+            "{role} range does not use the prepared file's source identity"
+        )));
+    }
+    let source = source_tokens.ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "{role} range has no canonical source token owner"
+        ))
+    })?;
+    source.range(range.start(), range.end()).map_err(|error| {
+        CompilerError::compiler_error(format!("{role} range is invalid: {error:?}"))
+    })?;
+    Ok(())
 }
 
 

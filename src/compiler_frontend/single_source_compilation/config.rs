@@ -36,7 +36,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::find_invalid_config_qualifier_spacing;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    find_invalid_config_qualifier_spacing_in_cursor,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
@@ -656,12 +658,23 @@ fn prepare_config_file(
     };
     file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
 
-    if let Some(marker_span) = find_invalid_config_qualifier_spacing(
-        &file_tokens.tokens,
-        string_table,
-        request.file_id,
-        span_builder,
-    ) {
+    let marker_span = {
+        let canonical = file_tokens
+            .source_tokens()
+            .map_err(ConfigPreparationFailure::Infrastructure)?;
+        let full_range = canonical.full_range().map_err(|error| {
+            ConfigPreparationFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "config qualifier scan range is invalid: {error:?}"
+            )))
+        })?;
+        let cursor = canonical.cursor(full_range).map_err(|error| {
+            ConfigPreparationFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "config qualifier scan cursor is invalid: {error:?}"
+            )))
+        })?;
+        find_invalid_config_qualifier_spacing_in_cursor(cursor, string_table, span_builder)
+    };
+    if let Some(marker_span) = marker_span {
         let mut diagnostic = CompilerDiagnostic::common_syntax_mistake(
             CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
             Some(marker_span),

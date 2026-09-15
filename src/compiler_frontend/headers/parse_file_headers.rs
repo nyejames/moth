@@ -47,7 +47,9 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, SourceTokens, TokenCursor, TokenKind, TokenRange, TokenTag,
+};
 use rustc_hash::FxHashMap;
 use std::mem;
 use std::path::Path;
@@ -299,7 +301,13 @@ pub fn prepare_header_syntax(
         }
         headers.extend(mem::take(&mut output.headers));
         top_level_const_fragments.extend(mem::take(&mut output.top_level_const_fragments));
-        runtime_fragment_count += output.runtime_fragment_count;
+        runtime_fragment_count = runtime_fragment_count
+            .checked_add(output.runtime_fragment_count)
+            .ok_or_else(|| {
+                HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                    "runtime fragment count overflowed header aggregation",
+                ))
+            })?;
         has_non_trivial_root_body |= output.has_non_trivial_root_body;
     }
 
@@ -319,72 +327,185 @@ pub fn prepare_header_syntax(
         module_symbols,
     })
 }
-
-/// Find retained parameter/field defaults and body tokens carrying `#Config`.
+/// Find a `#Config` marker in source-owned declaration/default ranges.
 ///
-/// Header preparation has already parsed declaration shells for signatures and record payloads,
-/// while function bodies retain source ranges and the start body retains a source sequence.
-/// Callers provide bounded ephemeral token materializations so illegal nested placements stay
-/// ahead of AST without adding a recursive expression walk or a durable copied stream.
-pub(super) fn find_config_qualifier_marker_in_header(
+/// Declaration shells retain only checked ranges; this pass reads those ranges through the
+/// canonical owner and never recreates a declaration-owned token vector.
+pub(super) fn find_config_qualifier_marker_in_declaration_defaults(
     header: &Header,
+    source_tokens: &SourceTokens,
     string_table: &StringTable,
-    body_tokens: &[Token],
-) -> Option<(SourceSpan, bool)> {
-    fn marker_in_tokens(
-        tokens: &[crate::compiler_frontend::tokenizer::tokens::Token],
-        file_id: SourceId,
+) -> Result<Option<SourceSpan>, CompilerError> {
+    fn marker_in_cursor(
+        mut cursor: TokenCursor<'_>,
         string_table: &StringTable,
     ) -> Option<SourceSpan> {
-        tokens.windows(2).find_map(|pair| {
-            if pair[0].kind == TokenKind::Hash
-                && matches!(
-                    pair[1].kind,
-                    TokenKind::Symbol(name) if string_table.resolve(name) == "Config"
-                )
+        let mut previous = cursor.advance()?;
+        loop {
+            let crosses_segment = cursor.is_at_segment_start();
+            let Some(current) = cursor.advance() else {
+                break;
+            };
+            if !crosses_segment
+                && previous.tag() == TokenTag::HASH
+                && current.tag() == TokenTag::SYMBOL
+                && current
+                    .string_id()
+                    .is_some_and(|name| string_table.resolve(name) == "Config")
             {
-                Some(SourceSpan::new(file_id, pair[0].span))
-            } else {
-                None
+                return Some(previous.source_span());
             }
-        })
+            if current.is_eof() {
+                break;
+            }
+            previous = current;
+        }
+        None
     }
 
-    let marker = match &header.kind {
-        HeaderKind::Constant { declaration } => {
-            marker_in_tokens(&declaration.initializer_tokens, header.tokens.source(), string_table)
-        }
-        HeaderKind::Function { signature, .. } => signature.parameters.iter().find_map(|parameter| {
-            marker_in_tokens(&parameter.default_tokens, header.tokens.source(), string_table)
-        }),
-        HeaderKind::Struct { fields, .. } => fields.iter().find_map(|field| {
-            marker_in_tokens(&field.default_tokens, header.tokens.source(), string_table)
-        }),
-        HeaderKind::Choice { variants, .. } => variants.iter().find_map(|variant| {
-            let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
-                fields,
-            } = &variant.payload
-            else {
-                return None;
-            };
-            fields.iter().find_map(|field| {
-                marker_in_tokens(&field.default_tokens, header.tokens.source(), string_table)
-            })
-        }),
-        HeaderKind::Trait { declaration } => declaration
-            .requirements
-            .iter()
-            .flat_map(|requirement| requirement.signature.parameters.iter())
-            .find_map(|parameter| {
-                marker_in_tokens(&parameter.default_tokens, header.tokens.source(), string_table)
-            }),
-        _ => None,
+    let marker_in_range = |range: Option<TokenRange>| -> Result<Option<SourceSpan>, CompilerError> {
+        let Some(range) = range else {
+            return Ok(None);
+        };
+        let cursor = source_tokens.cursor(range).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "declaration marker range could not be resolved through its source owner: {error:?}"
+            ))
+        })?;
+        Ok(marker_in_cursor(cursor, string_table))
     };
 
-    marker
-        .or_else(|| marker_in_tokens(body_tokens, header.tokens.source(), string_table))
-        .map(|span| (span, true))
+    match &header.kind {
+        HeaderKind::Constant { declaration } => {
+            marker_in_range(declaration.initializer_range)
+        }
+        HeaderKind::Function { signature, .. } => {
+            for parameter in &signature.parameters {
+                if let Some(marker) = marker_in_range(parameter.default_range)? {
+                    return Ok(Some(marker));
+                }
+            }
+            Ok(None)
+        }
+        HeaderKind::Struct { fields, .. } => {
+            for field in fields {
+                if let Some(marker) = marker_in_range(field.default_range)? {
+                    return Ok(Some(marker));
+                }
+            }
+            Ok(None)
+        }
+        HeaderKind::Choice { variants, .. } => {
+            for variant in variants {
+                let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
+                    fields,
+                } = &variant.payload
+                else {
+                    continue;
+                };
+                for field in fields {
+                    if let Some(marker) = marker_in_range(field.default_range)? {
+                        return Ok(Some(marker));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        HeaderKind::Trait { declaration } => {
+            for requirement in &declaration.requirements {
+                for parameter in &requirement.signature.parameters {
+                    if let Some(marker) = marker_in_range(parameter.default_range)? {
+                        return Ok(Some(marker));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
 }
+
+/// Find retained declaration/body `#Config` markers through the canonical source owner.
+///
+/// Contiguous declaration ranges use `Header::tokens`; the active start body uses its checked
+/// `TokenSequenceId`. No body vector is materialized solely to inspect this two-token marker.
+pub(super) fn find_config_qualifier_marker_in_header(
+    header: &Header,
+    source_tokens: Option<&SourceTokens>,
+    string_table: &StringTable,
+) -> Result<Option<(SourceSpan, bool)>, CompilerError> {
+    let Some(source_tokens) = source_tokens else {
+        if header.token_sequence.is_some() || !header.tokens.is_empty() {
+            return Err(CompilerError::compiler_error(
+                "retained header marker scan has no source token owner",
+            ));
+        }
+        return Ok(None);
+    };
+    if header.tokens.source() != source_tokens.source() {
+        return Err(CompilerError::compiler_error(
+            "retained header marker scan does not match its source token owner",
+        ));
+    }
+
+    if let Some(marker) =
+        find_config_qualifier_marker_in_declaration_defaults(header, source_tokens, string_table)?
+    {
+        return Ok(Some((marker, true)));
+    }
+    let body_cursor = if let Some(sequence) = header.token_sequence {
+        let view = source_tokens.token_sequence(sequence).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "retained header marker scan could not resolve its token sequence: {error:?}"
+            ))
+        })?;
+        Some(view.cursor().map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "retained header marker scan could not construct its token sequence cursor: {error:?}"
+            ))
+        })?)
+    } else if header.tokens.is_empty() {
+        None
+    } else {
+        Some(source_tokens.cursor(header.tokens).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "retained header marker scan could not construct its token range cursor: {error:?}"
+            ))
+        })?)
+    };
+
+    fn marker_in_cursor(
+        mut cursor: TokenCursor<'_>,
+        string_table: &StringTable,
+    ) -> Option<SourceSpan> {
+        let mut previous = cursor.advance()?;
+        loop {
+            let crosses_segment = cursor.is_at_segment_start();
+            let Some(current) = cursor.advance() else {
+                break;
+            };
+            if !crosses_segment
+                && previous.tag() == TokenTag::HASH
+                && current.tag() == TokenTag::SYMBOL
+                && current
+                    .string_id()
+                    .is_some_and(|name| string_table.resolve(name) == "Config")
+            {
+                return Some(previous.source_span());
+            }
+            if current.is_eof() {
+                break;
+            }
+            previous = current;
+        }
+        None
+    }
+
+    Ok(body_cursor
+        .and_then(|cursor| marker_in_cursor(cursor, string_table))
+        .map(|marker| (marker, true)))
+}
+
 
 /// Collect source-owned `#Config` contract shells and reject all non-declaration placements.
 ///
@@ -409,10 +530,23 @@ fn collect_source_build_config_contracts(
             continue;
         }
 
+        let source_tokens = output
+            .source_token_stream
+            .as_ref()
+            .map(|stream| stream.source_tokens())
+            .transpose()
+            .map_err(HeaderPreparationFailure::Infrastructure)?;
+        if let Some(source_tokens) = source_tokens
+            && source_tokens.source() != output.file_id
+        {
+            return Err(HeaderPreparationFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "config marker scan source token owner does not match its file identity",
+                ),
+            ));
+        }
+
         for header in &output.headers {
-            let body_tokens = output
-                .body_tokens(header)
-                .map_err(HeaderPreparationFailure::Infrastructure)?;
             let report_marker = |span: SourceSpan, adjacent: bool| {
                 if adjacent {
                     CompilerDiagnostic::invalid_config_reason(
@@ -429,7 +563,8 @@ fn collect_source_build_config_contracts(
             };
 
             if let Some((location, adjacent)) =
-                find_config_qualifier_marker_in_header(header, string_table, &body_tokens)
+                find_config_qualifier_marker_in_header(header, source_tokens, string_table)
+                    .map_err(HeaderPreparationFailure::Infrastructure)?
             {
                 let mut diagnostic = report_marker(location, adjacent);
                 capture(output.file_id, &mut diagnostic)
@@ -459,11 +594,44 @@ fn collect_source_build_config_contracts(
                 continue;
             };
 
+            let initializer = if let Some(range) = declaration.initializer_range {
+                let source = source_tokens.ok_or_else(|| {
+                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                        "source config initializer has no canonical source token owner",
+                    ))
+                })?;
+                let mut cursor = source.cursor(range).map_err(|error| {
+                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                        format!("source config initializer range is invalid: {error:?}"),
+                    ))
+                })?;
+                let token = cursor.advance().ok_or_else(|| {
+                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                        "source config initializer range is empty",
+                    ))
+                })?;
+                let kind = if range.len() == 1 {
+                    token.to_token_kind().map_err(|error| {
+                        HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                            format!("source config initializer token is malformed: {error:?}"),
+                        ))
+                    })?
+                } else {
+                    // Source config defaults are deliberately limited to one primitive token.
+                    // Feed the existing normalizer's non-primitive path instead of silently
+                    // accepting only the first token of a full expression.
+                    TokenKind::Assign
+                };
+                Some((kind, token.source_span()))
+            } else {
+                None
+            };
+
             match normalize_source_build_config_contract(
                 name,
                 name_span,
                 qualifier,
-                &declaration.initializer_tokens,
+                initializer,
                 string_table,
             ) {
                 Ok(contract) => contracts.push(contract),

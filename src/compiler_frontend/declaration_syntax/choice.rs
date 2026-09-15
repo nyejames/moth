@@ -31,7 +31,8 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use super::DeclarationCursor;
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug)]
@@ -154,7 +155,7 @@ pub(crate) fn starts_rejected_choice_payload_shorthand(token: &TokenKind) -> boo
 /// Rejects shorthand payloads (`Variant Type`), constructor-style declarations
 /// (`Variant(...)`), and default values (`Variant = ...`).
 pub(crate) fn parse_choice_shell(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     choice_path: PathId,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
@@ -172,10 +173,7 @@ pub(crate) fn parse_choice_shell(
 
     loop {
         token_stream.skip_newlines();
-        let current_span = token_stream
-            .tokens
-            .get(token_stream.index)
-            .map(|token| SourceSpan::new(token_stream.file_id, token.span));
+        let current_span = current_source_span(token_stream);
         let current_token = token_stream.current_token_kind().to_owned();
 
         match current_token {
@@ -466,11 +464,8 @@ fn choice_variant_default_value_diagnostic(span: Option<SourceSpan>) -> Compiler
     )
 }
 
-fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
+    token_stream.current_span()
 }
 
 fn contains_non_generic_choice_self_reference(

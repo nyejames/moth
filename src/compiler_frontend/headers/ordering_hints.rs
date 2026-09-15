@@ -19,16 +19,15 @@ use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyCla
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, HeaderBuildContext, HeaderKind, LocalDeclarationOrderingHint,
-    SyntheticContentPayload,
 };
+use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind, TokenRange};
-use crate::compiler_frontend::utilities::token_scan::InitializerReference;
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenCursor, TokenRange};
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 
@@ -208,31 +207,21 @@ pub(super) fn collect_content_source_ordering_hints(
         let Header {
             kind,
             tokens: token_range,
-            synthetic_content_payload,
             local_ordering_hints,
             ..
         } = header;
 
         match kind {
             HeaderKind::Constant { declaration } => {
-                if declaration.config_qualifier.is_none() {
-                    if matches!(
-                        synthetic_content_payload,
-                        Some(SyntheticContentPayload::MothTemplate { .. })
-                    ) {
-                        scan_token_range_for_content_sources(
-                            *token_range,
-                            source_tokens,
-                            &content_targets,
-                            local_ordering_hints,
-                        )?;
-                    } else {
-                        scan_tokens_for_content_sources(
-                            &declaration.initializer_tokens,
-                            &content_targets,
-                            local_ordering_hints,
-                        );
-                    }
+                if declaration.config_qualifier.is_none()
+                    && let Some(range) = declaration.initializer_range
+                {
+                    scan_token_range_for_content_sources(
+                        range,
+                        source_tokens,
+                        &content_targets,
+                        local_ordering_hints,
+                    )?;
                 }
             }
 
@@ -249,21 +238,27 @@ pub(super) fn collect_content_source_ordering_hints(
 
             HeaderKind::Function { signature, .. } => {
                 for parameter in &signature.parameters {
-                    scan_tokens_for_content_sources(
-                        &parameter.default_tokens,
-                        &content_targets,
-                        local_ordering_hints,
-                    );
+                    if let Some(range) = parameter.default_range {
+                        scan_token_range_for_content_sources(
+                            range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    }
                 }
             }
 
             HeaderKind::Struct { fields, .. } => {
                 for field in fields {
-                    scan_tokens_for_content_sources(
-                        &field.default_tokens,
-                        &content_targets,
-                        local_ordering_hints,
-                    );
+                    if let Some(range) = field.default_range {
+                        scan_token_range_for_content_sources(
+                            range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    }
                 }
             }
 
@@ -273,11 +268,14 @@ pub(super) fn collect_content_source_ordering_hints(
                         continue;
                     };
                     for field in fields {
-                        scan_tokens_for_content_sources(
-                            &field.default_tokens,
-                            &content_targets,
-                            local_ordering_hints,
-                        );
+                        if let Some(range) = field.default_range {
+                            scan_token_range_for_content_sources(
+                                range,
+                                source_tokens,
+                                &content_targets,
+                                local_ordering_hints,
+                            )?;
+                        }
                     }
                 }
             }
@@ -332,37 +330,42 @@ fn scan_token_range_for_content_sources(
             "content ordering range belongs to a different source token owner",
         ));
     }
-    let start = range.start().index();
-    let end = range.end().index();
-    if end > source_tokens.tokens.len() {
+    let canonical = source_tokens.source_tokens().map_err(|_| {
+        CompilerError::compiler_error("content ordering range exceeds its source token owner")
+    })?;
+    if canonical.source() != source_tokens.file_id {
         return Err(CompilerError::compiler_error(
-            "content ordering range exceeds its source token owner",
+            "content ordering source token owner does not match its file identity",
         ));
     }
-    scan_tokens_for_content_sources(
-        &source_tokens.tokens[start..end],
-        content_targets,
-        hints,
-    );
+    let cursor = canonical.cursor(range).map_err(|_| {
+        CompilerError::compiler_error("content ordering range exceeds its source token owner")
+    })?;
+    scan_source_range_for_content_sources(cursor, content_targets, hints);
     Ok(())
 }
 
-/// Insert one content hint for every path token in the slice whose row is a content source.
-fn scan_tokens_for_content_sources(
-    tokens: &[Token],
+/// Insert one content hint for every path token in the range view whose row is a content source.
+///
+/// WHY: bounded cursor access keeps the per-shell scan allocation-free; path handles come
+/// from the shape and rows keep resolving through the existing prepared table lookup.
+fn scan_source_range_for_content_sources(
+    mut cursor: TokenCursor<'_>,
     content_targets: &FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>,
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
 ) {
-    for token in tokens {
-        let TokenKind::Path(path_id) = token.kind else {
-            continue;
-        };
-
-        if let Some(target) = content_targets.get(&path_id) {
+    while let Some(token) = cursor.advance() {
+        if let Some(path_id) = token.path_syntax_id()
+            && let Some(target) = content_targets.get(&path_id)
+        {
             hints.insert(target.clone());
+        }
+        if token.is_eof() {
+            break;
         }
     }
 }
+
 
 #[cfg(test)]
 #[path = "tests/ordering_hints_tests.rs"]

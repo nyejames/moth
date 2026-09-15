@@ -1048,8 +1048,23 @@ impl<'a> TokenRef<'a> {
             .map_err(|_| TokenViewError::MalformedPathHandle)
     }
 
-    pub fn string_id(self) -> Option<StringId> {
+    pub(crate) fn string_id(self) -> Option<StringId> {
         self.shape().string_id()
+    }
+
+    /// Stable tag for this token without cloning cold payloads.
+    ///
+    /// 3F1 header classification reads this instead of `TokenKind` matches.
+    pub(crate) fn tag(self) -> TokenTag {
+        self.shape().tag()
+    }
+
+    /// Dense path handle for this token, if it carries one.
+    ///
+    /// Header-stage callers resolve the row through the `FilePathSyntax` lifecycle
+    /// table while the canonical store is still `Preparing`/`Deferred`.
+    pub(crate) fn path_syntax_id(self) -> Option<PathSyntaxId> {
+        self.shape().path_syntax_id()
     }
 
     pub fn bool_value(self) -> Option<bool> {
@@ -1062,6 +1077,138 @@ impl<'a> TokenRef<'a> {
 
     pub fn is_eof(self) -> bool {
         self.shape().tag() == TokenTag::EOF
+    }
+    /// Materialize this short-lived canonical view at an explicit compatibility boundary.
+    ///
+    /// Declaration and signature parsers inspect the stable tag and typed payloads directly, but
+    /// their diagnostics still carry the legacy `TokenKind` payload shape. This conversion is
+    /// deliberately local and fallible: malformed compact payloads stay infrastructure failures
+    /// instead of becoming fabricated source tokens.
+    pub(crate) fn to_token_kind(self) -> Result<TokenKind, TokenViewError> {
+        let tag = self.tag();
+        let kind = match tag {
+            TokenTag::MODULE_START => TokenKind::ModuleStart,
+            TokenTag::EOF => TokenKind::Eof,
+            TokenTag::EXPORT => TokenKind::Export,
+            TokenTag::HASH => TokenKind::Hash,
+            TokenTag::REACTIVE => TokenKind::Reactive,
+            TokenTag::ARROW => TokenKind::Arrow,
+            TokenTag::SYMBOL => TokenKind::Symbol(
+                self.string_id()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?,
+            ),
+            TokenTag::STYLE_DIRECTIVE => TokenKind::StyleDirective(
+                self.string_id()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?,
+            ),
+            TokenTag::STRING_SLICE_LITERAL => TokenKind::StringSliceLiteral(
+                self.string_id()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?,
+            ),
+            TokenTag::PATH => TokenKind::Path(
+                self.path_syntax_id()
+                    .ok_or(TokenViewError::MalformedPathHandle)?,
+            ),
+            TokenTag::NUMERIC_LITERAL => TokenKind::NumericLiteral(
+                self.numeric_literal()?
+                    .ok_or(TokenViewError::MalformedNumericHandle)?
+                    .clone(),
+            ),
+            TokenTag::CHAR_LITERAL => TokenKind::CharLiteral(
+                self.char_value()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?,
+            ),
+            TokenTag::RAW_STRING_LITERAL => TokenKind::RawStringLiteral(
+                self.string_id()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?,
+            ),
+            TokenTag::BOOL_LITERAL => TokenKind::BoolLiteral(
+                self.bool_value()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?,
+            ),
+            TokenTag::OPEN_CURLY => TokenKind::OpenCurly,
+            TokenTag::CLOSE_CURLY => TokenKind::CloseCurly,
+            TokenTag::TYPE_PARAMETER_BRACKET => TokenKind::TypeParameterBracket,
+            TokenTag::NEWLINE => TokenKind::Newline,
+            TokenTag::END => TokenKind::End,
+            TokenTag::START_TEMPLATE_BODY => TokenKind::StartTemplateBody,
+            TokenTag::COMMA => TokenKind::Comma,
+            TokenTag::DOT => TokenKind::Dot,
+            TokenTag::COLON => TokenKind::Colon,
+            TokenTag::DOUBLE_COLON => TokenKind::DoubleColon,
+            TokenTag::ASSIGN => TokenKind::Assign,
+            TokenTag::THIS => TokenKind::This,
+            TokenTag::MUST => TokenKind::Must,
+            TokenTag::TRAIT_THIS => TokenKind::TraitThis,
+            TokenTag::OPEN_PARENTHESIS => TokenKind::OpenParenthesis,
+            TokenTag::CLOSE_PARENTHESIS => TokenKind::CloseParenthesis,
+            TokenTag::AS => TokenKind::As,
+            TokenTag::TYPE => TokenKind::Type,
+            TokenTag::OF => TokenKind::Of,
+            TokenTag::VARIADIC => TokenKind::Variadic,
+            TokenTag::MUTABLE => TokenKind::Mutable,
+            TokenTag::DATATYPE_NONE => TokenKind::DatatypeNone,
+            TokenTag::NONE_LITERAL => TokenKind::NoneLiteral,
+            TokenTag::DATATYPE_INT => TokenKind::DatatypeInt,
+            TokenTag::DATATYPE_FLOAT => TokenKind::DatatypeFloat,
+            TokenTag::DATATYPE_BOOL => TokenKind::DatatypeBool,
+            TokenTag::DATATYPE_TRUE => TokenKind::DatatypeTrue,
+            TokenTag::DATATYPE_FALSE => TokenKind::DatatypeFalse,
+            TokenTag::DATATYPE_STRING => TokenKind::DatatypeString,
+            TokenTag::DATATYPE_CHAR => TokenKind::DatatypeChar,
+            TokenTag::BANG => TokenKind::Bang,
+            TokenTag::QUESTION_MARK => TokenKind::QuestionMark,
+            TokenTag::NEGATIVE => TokenKind::Negative,
+            TokenTag::EXPONENT => TokenKind::Exponent,
+            TokenTag::MULTIPLY => TokenKind::Multiply,
+            TokenTag::DIVIDE => TokenKind::Divide,
+            TokenTag::MODULUS => TokenKind::Modulus,
+            TokenTag::INT_DIVIDE => TokenKind::IntDivide,
+            TokenTag::EXPONENT_ASSIGN => TokenKind::ExponentAssign,
+            TokenTag::MULTIPLY_ASSIGN => TokenKind::MultiplyAssign,
+            TokenTag::DIVIDE_ASSIGN => TokenKind::DivideAssign,
+            TokenTag::MODULUS_ASSIGN => TokenKind::ModulusAssign,
+            TokenTag::INT_DIVIDE_ASSIGN => TokenKind::IntDivideAssign,
+            TokenTag::ADD => TokenKind::Add,
+            TokenTag::SUBTRACT => TokenKind::Subtract,
+            TokenTag::ADD_ASSIGN => TokenKind::AddAssign,
+            TokenTag::SUBTRACT_ASSIGN => TokenKind::SubtractAssign,
+            TokenTag::NOT => TokenKind::Not,
+            TokenTag::IS => TokenKind::Is,
+            TokenTag::LESS_THAN => TokenKind::LessThan,
+            TokenTag::LESS_THAN_OR_EQUAL => TokenKind::LessThanOrEqual,
+            TokenTag::GREATER_THAN => TokenKind::GreaterThan,
+            TokenTag::GREATER_THAN_OR_EQUAL => TokenKind::GreaterThanOrEqual,
+            TokenTag::AND => TokenKind::And,
+            TokenTag::OR => TokenKind::Or,
+            TokenTag::IF => TokenKind::If,
+            TokenTag::ELSE => TokenKind::Else,
+            TokenTag::RETURN => TokenKind::Return,
+            TokenTag::RETURN_BANG => TokenKind::ReturnBang,
+            TokenTag::CATCH => TokenKind::Catch,
+            TokenTag::THEN => TokenKind::Then,
+            TokenTag::CHECKED => TokenKind::Checked,
+            TokenTag::ASYNC => TokenKind::Async,
+            TokenTag::CAST => TokenKind::Cast,
+            TokenTag::CAST_BANG => TokenKind::CastBang,
+            TokenTag::ASSERT => TokenKind::Assert,
+            TokenTag::LOOP => TokenKind::Loop,
+            TokenTag::BY => TokenKind::By,
+            TokenTag::BREAK => TokenKind::Break,
+            TokenTag::CONTINUE => TokenKind::Continue,
+            TokenTag::EXCLUSIVE_RANGE => TokenKind::ExclusiveRange,
+            TokenTag::AMPERSAND => TokenKind::Ampersand,
+            TokenTag::FAT_ARROW => TokenKind::FatArrow,
+            TokenTag::WILDCARD => TokenKind::Wildcard,
+            TokenTag::COPY => TokenKind::Copy,
+            TokenTag::TEMPLATE_CLOSE => TokenKind::TemplateClose,
+            TokenTag::TEMPLATE_HEAD => TokenKind::TemplateHead,
+            TokenTag::CHANNEL_SEND => TokenKind::ChannelSend,
+            TokenTag::CHANNEL_RECEIVE => TokenKind::ChannelReceive,
+            TokenTag::YIELD => TokenKind::Yield,
+            _ => return Err(TokenViewError::MalformedNumericHandle),
+        };
+        Ok(kind)
     }
 }
 
@@ -1081,6 +1228,32 @@ enum TokenCursorBounds<'a> {
 }
 
 impl<'a> TokenCursor<'a> {
+    /// Return the canonical source owner behind this short-lived cursor.
+    ///
+    /// This is used only to create checked nested/range cursors. No caller may retain the cursor
+    /// or source reference in declaration syntax shells.
+    pub(crate) const fn source_tokens(self) -> &'a SourceTokens {
+        self.tokens
+    }
+
+
+    /// Materialise the current canonical token for an explicit compatibility boundary.
+    pub(crate) fn current_token_owned(self) -> Result<Option<Token>, CompilerError> {
+        self.current()
+            .map(|token| {
+                token
+                    .to_token_kind()
+                    .map(|kind| Token::new(kind, token.span()))
+                    .map_err(|error| {
+                        CompilerError::compiler_error(format!(
+                            "canonical token payload could not be materialised: {error:?}"
+                        ))
+                    })
+            })
+            .transpose()
+    }
+
+
     pub fn new(
         tokens: &'a SourceTokens,
         range: TokenRange,
@@ -1101,6 +1274,80 @@ impl<'a> TokenCursor<'a> {
     ) -> Result<Self, TokenRangeError> {
         Self::new(tokens, TokenRange::try_new_for(tokens, start, end)?)
     }
+    /// Construct a contiguous cursor at a checked position inside `range`.
+    ///
+    /// The position is canonical (source-local), rather than an adapter-relative index. This is
+    /// the transient handoff used when a bounded compatibility parser resumes from its current
+    /// legacy-vector position.
+    fn from_range_position(
+        tokens: &'a SourceTokens,
+        range: TokenRange,
+        position: TokenIndex,
+    ) -> Result<Self, TokenRangeError> {
+        tokens.validate_range(range)?;
+        if position < range.start || position > range.end {
+            return Err(TokenRangeError::OutOfBounds {
+                start: position.raw(),
+                end: position.raw(),
+                len: range.end.index(),
+            });
+        }
+        Ok(Self {
+            tokens,
+            bounds: TokenCursorBounds::Contiguous(range),
+            segment_index: 0,
+            next: position,
+        })
+    }
+
+    /// Construct a segmented cursor at a checked compatibility-stream position.
+    ///
+    /// A sequence's compatibility position counts materialised tokens, not source indexes; this
+    /// preserves omitted source gaps while still allowing a parser handoff at any token boundary.
+    fn from_sequence_position(
+        view: TokenSequenceView<'a>,
+        compatibility_position: usize,
+    ) -> Result<Self, TokenSequenceError> {
+        let ranges = view.tokens.sequence_store.ranges(view.id)?;
+        let mut remaining = compatibility_position;
+        for (segment_index, entry) in ranges.iter().enumerate() {
+            let segment_len = entry.len() as usize;
+            if remaining < segment_len {
+                let offset = u32::try_from(remaining).map_err(|_| TokenSequenceError::Capacity)?;
+                let next = TokenIndex(
+                    entry
+                        .start()
+                        .raw()
+                        .checked_add(offset)
+                        .ok_or(TokenSequenceError::Capacity)?,
+                );
+                return Ok(Self {
+                    tokens: view.tokens,
+                    bounds: TokenCursorBounds::Segmented(view),
+                    segment_index,
+                    next,
+                });
+            }
+            remaining = remaining.saturating_sub(segment_len);
+        }
+        if remaining != 0 {
+            return Err(TokenSequenceError::OutOfRange {
+                raw: u32::try_from(compatibility_position).unwrap_or(u32::MAX),
+                len: compatibility_position.saturating_sub(remaining),
+            });
+        }
+        let next = ranges
+            .last()
+            .map(|entry| entry.end())
+            .unwrap_or(TokenIndex(0));
+        Ok(Self {
+            tokens: view.tokens,
+            bounds: TokenCursorBounds::Segmented(view),
+            segment_index: ranges.len(),
+            next,
+        })
+    }
+
 
     pub fn from_sequence(
         view: TokenSequenceView<'a>,
@@ -1132,6 +1379,93 @@ impl<'a> TokenCursor<'a> {
     pub const fn position(self) -> TokenIndex {
         self.next
     }
+
+    /// Return the number of materialised tokens consumed by this cursor.
+    ///
+    /// Contiguous positions are canonical indexes and therefore require the caller's range
+    /// metadata to subtract its start. Segmented positions count sequence entries and intentionally
+    /// skip source gaps.
+    fn compatibility_position(self) -> Result<usize, TokenSequenceError> {
+        let TokenCursorBounds::Segmented(view) = self.bounds else {
+            return Ok(self.next.index());
+        };
+        let mut position = 0usize;
+        for index in 0..self.segment_index {
+            let range = view.range_at(index)?;
+            position = position
+                .checked_add(range.len() as usize)
+                .ok_or(TokenSequenceError::Capacity)?;
+        }
+        if let Ok(range) = view.range_at(self.segment_index) {
+            if self.next < range.start() || self.next > range.end() {
+                return Err(TokenSequenceError::OutOfRange {
+                    raw: self.next.raw(),
+                    len: range.end().index(),
+                });
+            }
+            position = position
+                .checked_add((self.next.raw() - range.start().raw()) as usize)
+                .ok_or(TokenSequenceError::Capacity)?;
+        }
+        Ok(position)
+    }
+    /// Return the position of the cursor within its active compatibility view.
+    ///
+    /// Contiguous ranges use offsets from their range start; segmented sequences count logical
+    /// tokens across all prior ranges. This is the bridge for transient parser adapters whose
+    /// payload IDs may be remapped while spans remain canonical.
+    pub(crate) fn compatibility_position_from_start(
+        self,
+    ) -> Result<usize, CompilerError> {
+        match self.bounds {
+            TokenCursorBounds::Contiguous(range) => self
+                .next
+                .index()
+                .checked_sub(range.start().index())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "canonical cursor position precedes its active range start",
+                    )
+                }),
+            TokenCursorBounds::Segmented(_) => self.compatibility_position().map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "segmented cursor compatibility position was invalid: {error:?}"
+                ))
+            }),
+        }
+    }
+    /// Whether the next token starts a later segmented range with omitted source bytes.
+    ///
+    /// Contiguous cursors always return `false`. Adjacent ranges are still one logical token
+    /// stream; only a real source gap must prevent consumers from comparing the two tokens as an
+    /// authored pair.
+    pub(crate) fn is_at_segment_start(self) -> bool {
+        let TokenCursorBounds::Segmented(view) = self.bounds else {
+            return false;
+        };
+        let Some(current) = view.range_at(self.segment_index).ok() else {
+            return false;
+        };
+        if self.next != current.start() {
+            return false;
+        }
+        let Some(mut previous_index) = self.segment_index.checked_sub(1) else {
+            return false;
+        };
+        loop {
+            let Some(previous) = view.range_at(previous_index).ok() else {
+                return false;
+            };
+            if !previous.is_empty() {
+                return previous.end() != current.start();
+            }
+            let Some(next_previous_index) = previous_index.checked_sub(1) else {
+                return false;
+            };
+            previous_index = next_previous_index;
+        }
+    }
+
 
     fn current_range(self) -> Option<TokenRange> {
         match self.bounds {
@@ -1370,22 +1704,47 @@ impl Deref for FilePathSyntax {
     }
 }
 
+/// Provenance retained by a transient parser adapter.
+///
+/// `Unbounded` is the explicit compatibility-only path used by expression parsers over copied
+/// vectors. Bounded declaration adapters retain an `Arc` to the one canonical owner plus the
+/// checked range/sequence that produced their vector; no second `SourceTokens` is constructed.
+#[derive(Clone, Debug)]
+enum FileTokenAdapterMetadata {
+    Unbounded,
+    Contiguous {
+        source_tokens: Arc<SourceTokens>,
+        range: TokenRange,
+        /// Whether the compatibility vector carries one synthetic EOF after the retained range.
+        ///
+        /// Expression parsers need a stable sentinel even when the source-owned range stops at a
+        /// declaration/member delimiter. The sentinel is adapter data only; canonical positions
+        /// remain bounded by `range`.
+        synthetic_trailing_eof: bool,
+    },
+    Sequence {
+        source_tokens: Arc<SourceTokens>,
+        sequence: TokenSequenceId,
+    },
+}
+
 /// Explicit canonical-vs-adapter token ownership for one `FileTokens` stream.
 ///
 /// WHAT: the top-level lexer output owns the sole canonical `SourceTokens` SoA
 ///       (shapes/spans plus numeric/path cold stores) for its `SourceId`.
-///       Bounded parser adapters keep only their ephemeral `Token` vector, numeric side-store lane,
-///       and path lifecycle shell without allocating a second canonical owner.
+///       Bounded parser adapters retain only an `Arc` to that owner, their checked provenance,
+///       ephemeral `Token` vector, numeric side-store lane, and path lifecycle shell.
 /// WHY: duplicate `SourceTokens` owners for the same `SourceId` make source-qualified ranges
-///      ambiguous. Compatibility adapters therefore borrow materialized ranges while retaining
-///      no durable body stream or duplicate SoA owner.
+///      ambiguous. Compatibility adapters therefore share the canonical allocation explicitly
+///      for one transient parser handoff, while unbounded expression adapters retain no owner.
 #[derive(Clone, Debug)]
-pub(crate) enum FileTokenOwner {
+enum FileTokenOwner {
     /// Sole canonical SoA owner for its source construction.
-    Canonical(SourceTokens),
-    /// Bounded parser adapter without canonical shape/span arrays.
+    Canonical(Arc<SourceTokens>),
+    /// Bounded or compatibility parser adapter without owned shape/span arrays.
     Adapter {
         numeric_literals: NumericLiteralStore,
+        metadata: FileTokenAdapterMetadata,
     },
 }
 
@@ -1393,21 +1752,28 @@ impl FileTokenOwner {
     fn numeric_literal_store(&self) -> &NumericLiteralStore {
         match self {
             Self::Canonical(owner) => owner.numeric_literal_store(),
-            Self::Adapter { numeric_literals } => numeric_literals,
+            Self::Adapter {
+                numeric_literals, ..
+            } => numeric_literals,
         }
     }
 
-
     fn remap_owner_string_ids(&mut self, remap: &StringIdRemap) {
         match self {
-            Self::Canonical(owner) => owner.remap_string_ids(remap),
-            Self::Adapter { numeric_literals } => numeric_literals.remap_string_ids(remap),
+            Self::Canonical(owner) => Arc::get_mut(owner)
+                .expect("canonical source owner must be uniquely mutable before adapter handoff")
+                .remap_string_ids(remap),
+            Self::Adapter {
+                numeric_literals, ..
+            } => numeric_literals.remap_string_ids(remap),
         }
     }
 
     fn remap_owner_path_ids(&mut self, remap: &PathIdRemap) {
         match self {
-            Self::Canonical(owner) => owner.remap_path_ids(remap),
+            Self::Canonical(owner) => Arc::get_mut(owner)
+                .expect("canonical source owner must be uniquely mutable before adapter handoff")
+                .remap_path_ids(remap),
             // Adapters own no path table; the prepared-file owner remaps the one table.
             Self::Adapter { .. } => {}
         }
@@ -1415,21 +1781,31 @@ impl FileTokenOwner {
 
     fn rebind_owner_identity(&mut self, source: SourceId) {
         match self {
-            Self::Canonical(owner) => owner.rebind_source_identity(source),
-            Self::Adapter { numeric_literals } => numeric_literals.rebind_source_identity(source),
+            Self::Canonical(owner) => Arc::get_mut(owner)
+                .expect("canonical source owner must be uniquely mutable before adapter handoff")
+                .rebind_source_identity(source),
+            Self::Adapter {
+                numeric_literals, ..
+            } => numeric_literals.rebind_source_identity(source),
         }
     }
 
     fn freeze_owner_numeric_literals(&mut self) {
         match self {
-            Self::Canonical(owner) => owner.freeze_numeric_literals(),
-            Self::Adapter { numeric_literals } => numeric_literals.freeze(),
+            Self::Canonical(owner) => Arc::get_mut(owner)
+                .expect("canonical source owner must be uniquely mutable before adapter handoff")
+                .freeze_numeric_literals(),
+            Self::Adapter {
+                numeric_literals, ..
+            } => numeric_literals.freeze(),
         }
     }
 
     fn set_owner_token_stats(&mut self, token_stats: TokenStats) {
         match self {
-            Self::Canonical(owner) => owner.set_token_stats(token_stats),
+            Self::Canonical(owner) => Arc::get_mut(owner)
+                .expect("canonical source owner must be uniquely mutable before adapter handoff")
+                .set_token_stats(token_stats),
             // Adapter stats live only on the parser shell.
             Self::Adapter { .. } => {}
         }
@@ -1437,7 +1813,9 @@ impl FileTokenOwner {
 
     fn attach_owner_shared_path_syntax(&mut self, table: Arc<PathSyntaxTable>) {
         match self {
-            Self::Canonical(owner) => owner.attach_shared_path_syntax(table),
+            Self::Canonical(owner) => Arc::get_mut(owner)
+                .expect("canonical source owner must be uniquely mutable before adapter handoff")
+                .attach_shared_path_syntax(table),
             // Adapters share the lifecycle shell handle only; they own no SoA table slot.
             Self::Adapter { .. } => {}
         }
@@ -1445,22 +1823,55 @@ impl FileTokenOwner {
 
     fn as_canonical(&self) -> Result<&SourceTokens, CompilerError> {
         match self {
-            Self::Canonical(owner) => Ok(owner),
+            Self::Canonical(owner) => Ok(owner.as_ref()),
             Self::Adapter { .. } => Err(CompilerError::compiler_error(
                 "parser adapter stream owns no canonical source-token store",
             )),
+        }
+    }
+
+    fn canonical_arc(&self) -> Result<Arc<SourceTokens>, CompilerError> {
+        match self {
+            Self::Canonical(owner) => Ok(Arc::clone(owner)),
+            Self::Adapter { metadata, .. } => match metadata {
+                FileTokenAdapterMetadata::Unbounded => Err(CompilerError::compiler_error(
+                    "token adapter has no canonical source-token provenance",
+                )),
+                FileTokenAdapterMetadata::Contiguous { source_tokens, .. }
+                | FileTokenAdapterMetadata::Sequence { source_tokens, .. } => {
+                    Ok(Arc::clone(source_tokens))
+                }
+            },
+        }
+    }
+
+    fn canonical_source_tokens(&self) -> Result<&SourceTokens, CompilerError> {
+        match self {
+            Self::Canonical(owner) => Ok(owner.as_ref()),
+            Self::Adapter { metadata, .. } => match metadata {
+                FileTokenAdapterMetadata::Unbounded => Err(CompilerError::compiler_error(
+                    "token adapter has no canonical source-token provenance",
+                )),
+                FileTokenAdapterMetadata::Contiguous { source_tokens, .. }
+                | FileTokenAdapterMetadata::Sequence { source_tokens, .. } => {
+                    Ok(source_tokens.as_ref())
+                }
+            },
         }
     }
 
     fn as_canonical_mut(&mut self) -> Result<&mut SourceTokens, CompilerError> {
         match self {
-            Self::Canonical(owner) => Ok(owner),
+            Self::Canonical(owner) => Arc::get_mut(owner).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "canonical source token owner is shared during a mutable lifecycle transition",
+                )
+            }),
             Self::Adapter { .. } => Err(CompilerError::compiler_error(
                 "parser adapter stream owns no canonical source-token store",
             )),
         }
     }
-
 
     const fn is_canonical(&self) -> bool {
         matches!(self, Self::Canonical(_))
@@ -1469,11 +1880,14 @@ impl FileTokenOwner {
 
 #[derive(Clone, Debug)]
 pub struct FileTokens {
+    /// Canonical owner exactly when this stream constructed its source; otherwise an adapter that
+    /// may retain checked range/sequence provenance and an `Arc` to that canonical source. The
+    /// parser compatibility vector remains on this shell, while retained headers keep only source
+    /// ranges or sequence IDs.
+    token_owner: FileTokenOwner,
+    /// Transitional parser compatibility vector. This is materialized only at explicit AST
+    /// expression/parser handoff boundaries; retained declaration/signature shells keep ranges.
     pub tokens: Vec<Token>,
-    /// Canonical owner exactly when this stream constructed its source; otherwise
-    /// a bounded adapter without shape/span arrays. The parser compatibility vector is kept on
-    /// this shell, while retained headers keep only source ranges or sequence IDs.
-    pub(crate) token_owner: FileTokenOwner,
     /// File-owned authored path trees referenced by `TokenKind::Path` handles.
     ///
     /// This lifecycle adapter remains mutable while header preparation remaps and rebinds the
@@ -1639,8 +2053,32 @@ impl FileTokens {
             path_syntax,
             numeric_literals,
             numeric_literal_ids,
+            FileTokenAdapterMetadata::Unbounded,
         )
     }
+
+    fn with_adapter_path_syntax_and_metadata(
+        src_path: PathId,
+        file_id: SourceId,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+        path_syntax: FilePathSyntax,
+        metadata: FileTokenAdapterMetadata,
+    ) -> FileTokens {
+        let (numeric_literals, numeric_literal_ids) =
+            numeric_store_from_tokens(file_id, &tokens);
+        Self::with_adapter_path_syntax_and_numeric_store(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            path_syntax,
+            numeric_literals,
+            numeric_literal_ids,
+            metadata,
+        )
+    }
+
 
     fn with_canonical_path_syntax_and_numeric_store(
         src_path: PathId,
@@ -1671,7 +2109,7 @@ impl FileTokens {
         );
         FileTokens {
             length: tokens.len(),
-            token_owner: FileTokenOwner::Canonical(source_tokens),
+            token_owner: FileTokenOwner::Canonical(Arc::new(source_tokens)),
             path_syntax,
             numeric_literal_ids,
             src_path,
@@ -1691,6 +2129,7 @@ impl FileTokens {
         path_syntax: FilePathSyntax,
         numeric_literals: NumericLiteralStore,
         numeric_literal_ids: Vec<Option<NumericLiteralId>>,
+        metadata: FileTokenAdapterMetadata,
     ) -> FileTokens {
         debug_assert_eq!(
             tokens.len(),
@@ -1708,7 +2147,10 @@ impl FileTokens {
         }
         FileTokens {
             length: tokens.len(),
-            token_owner: FileTokenOwner::Adapter { numeric_literals },
+            token_owner: FileTokenOwner::Adapter {
+                numeric_literals,
+                metadata,
+            },
             path_syntax,
             numeric_literal_ids,
             src_path,
@@ -1763,15 +2205,13 @@ impl FileTokens {
             FilePathSyntax::Deferred,
         )
     }
-
     /// Build a downstream parser stream over already-frozen file syntax.
     ///
-    /// AST consumers use this for defaults, declaration initializers and loop headers. The table
-    /// handle is cloned, while path rows and their dense IDs remain owned by the prepared source.
-    /// The caller supplies the owning `SourceId` (for generated bodies, the retained donor/owner
-    /// identity); no `None` or magic identity is accepted. The adapter numeric store is frozen
-    /// eagerly because the source table is already immutable: there is no later owner-boundary
-    /// remap for these transient parser streams. This adapter owns no canonical `SourceTokens`.
+    /// AST expression parsers use this compatibility-only constructor for copied token vectors.
+    /// It deliberately retains no canonical provenance; `canonical_cursor_from_current` returns
+    /// an honest `CompilerError` for such a stream instead of fabricating a duplicate owner.
+    /// Bounded declaration adapters must use `new_bounded_substream`,
+    /// `new_bounded_sequence_substream`, or `new_remapped_bounded_adapter`.
     pub fn new_from_slice(
         src_path: PathId,
         file_id: SourceId,
@@ -1789,28 +2229,114 @@ impl FileTokens {
         stream.freeze_numeric_literals();
         Ok(stream)
     }
+    fn validate_remapped_token_pair(
+        canonical: TokenRef<'_>,
+        remapped: &Token,
+    ) -> Result<(), CompilerError> {
+        if canonical.span() != remapped.span || canonical.tag() != remapped.kind.token_tag() {
+            return Err(CompilerError::compiler_error(
+                "remapped compatibility token no longer matches canonical span or tag",
+            ));
+        }
+        Ok(())
+    }
     /// Build a frozen bounded parser adapter from a transiently remapped token slice.
     ///
-    /// The caller owns the bounded vector and path table only for this adapter's lifetime. This
-    /// never constructs a second canonical `SourceTokens` owner.
-    pub(crate) fn new_remapped_adapter(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
+    /// Remapping changes only the compatibility payload IDs; canonical spans/tags remain owned by
+    /// `source`. The adapter therefore retains the donor `Arc<SourceTokens>` and its checked range
+    /// or sequence metadata rather than constructing a second canonical source owner.
+    pub(crate) fn new_remapped_bounded_adapter(
+        source: &FileTokens,
+        token_range: TokenRange,
+        token_sequence: Option<TokenSequenceId>,
+        declaration_path: PathId,
         tokens: Vec<Token>,
         path_syntax: PathSyntaxTable,
-    ) -> FileTokens {
-        Self::with_adapter_path_syntax(
-            src_path,
-            file_id,
-            canonical_os_path,
+    ) -> Result<FileTokens, CompilerError> {
+        if token_range.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "remapped bounded adapter range does not match its source identity",
+            ));
+        }
+        let source_tokens = source.token_owner.canonical_arc()?;
+        if source_tokens.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "remapped bounded adapter canonical owner does not match its source identity",
+            ));
+        }
+
+        let metadata = if let Some(sequence) = token_sequence {
+            let view = source_tokens.token_sequence(sequence).map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "remapped bounded adapter sequence provenance is invalid: {error:?}"
+                ))
+            })?;
+            if tokens.len() != view.len() {
+                return Err(CompilerError::compiler_error(
+                    "remapped bounded adapter token count does not match its sequence",
+                ));
+            }
+            let mut cursor = view.cursor().map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "remapped bounded adapter sequence cursor is invalid: {error:?}"
+                ))
+            })?;
+            for token in &tokens {
+                let canonical = cursor.advance().ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "remapped bounded adapter sequence ended before its compatibility lane",
+                    )
+                })?;
+                Self::validate_remapped_token_pair(canonical, token)?;
+            }
+            FileTokenAdapterMetadata::Sequence {
+                source_tokens: Arc::clone(&source_tokens),
+                sequence,
+            }
+        } else {
+            let mut cursor = source_tokens.cursor(token_range).map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "remapped bounded adapter range provenance is invalid: {error:?}"
+                ))
+            })?;
+            if tokens.len() != token_range.len() as usize {
+                return Err(CompilerError::compiler_error(
+                    "remapped bounded adapter token count does not match its range",
+                ));
+            }
+            for token in &tokens {
+                let canonical = cursor.advance().ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "remapped bounded adapter range ended before its compatibility lane",
+                    )
+                })?;
+                Self::validate_remapped_token_pair(canonical, token)?;
+            }
+            FileTokenAdapterMetadata::Contiguous {
+                source_tokens: Arc::clone(&source_tokens),
+                range: token_range,
+                synthetic_trailing_eof: false,
+            }
+        };
+
+        let mut stream = Self::with_adapter_path_syntax_and_metadata(
+            declaration_path,
+            source.file_id,
+            source.canonical_os_path.clone(),
             tokens,
             FilePathSyntax::shared(path_syntax),
-        )
+            metadata,
+        );
+        stream.freeze_numeric_literals();
+        Ok(stream)
     }
 
 
     /// Build a bounded parser adapter from one contiguous canonical range.
+    ///
+    /// The adapter keeps a checked range and an `Arc` to the canonical source solely for the
+    /// transient declaration-parser handoff. Its legacy vector remains available to expression
+    /// parser code, but no `SourceTokens` rows are copied into the adapter.
     pub(crate) fn new_bounded_substream(
         source: &FileTokens,
         range: TokenRange,
@@ -1821,13 +2347,65 @@ impl FileTokens {
                 "retained token range does not match its source stream identity",
             ));
         }
-        Self::new_from_slice(
+        let source_tokens = source.token_owner.canonical_arc()?;
+        if source_tokens.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "bounded token range source owner does not match its file stream identity",
+            ));
+        }
+        let tokens = source.materialize_token_range(range)?;
+        let mut stream = Self::with_adapter_path_syntax_and_metadata(
             declaration_path,
             source.file_id,
             source.canonical_os_path.clone(),
-            source.materialize_token_range(range)?,
-            &source.path_syntax,
-        )
+            tokens,
+            source.path_syntax.frozen_substream()?,
+            FileTokenAdapterMetadata::Contiguous {
+                source_tokens,
+                range,
+                synthetic_trailing_eof: false,
+            },
+        );
+        stream.freeze_numeric_literals();
+        Ok(stream)
+    }
+    /// Build a bounded expression-parser adapter with an ephemeral EOF sentinel.
+    ///
+    /// The authored expression remains backed by `range` in the canonical owner. The trailing
+    /// EOF is compatibility-only parser data and is excluded from canonical cursor positions.
+    pub(crate) fn new_bounded_expression_substream(
+        source: &FileTokens,
+        range: TokenRange,
+        declaration_path: PathId,
+        eof_span: LocalSpan,
+    ) -> Result<FileTokens, CompilerError> {
+        if range.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "retained expression range does not match its source stream identity",
+            ));
+        }
+        let source_tokens = source.token_owner.canonical_arc()?;
+        if source_tokens.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "bounded expression range source owner does not match its file stream identity",
+            ));
+        }
+        let mut tokens = source.materialize_token_range(range)?;
+        tokens.push(Token::new(TokenKind::Eof, eof_span));
+        let mut stream = Self::with_adapter_path_syntax_and_metadata(
+            declaration_path,
+            source.file_id,
+            source.canonical_os_path.clone(),
+            tokens,
+            source.path_syntax.frozen_substream()?,
+            FileTokenAdapterMetadata::Contiguous {
+                source_tokens,
+                range,
+                synthetic_trailing_eof: true,
+            },
+        );
+        stream.freeze_numeric_literals();
+        Ok(stream)
     }
 
     /// Build the bounded parser adapter for one source-owned segmented sequence.
@@ -1836,14 +2414,33 @@ impl FileTokens {
         sequence: TokenSequenceId,
         declaration_path: PathId,
     ) -> Result<FileTokens, CompilerError> {
+        let source_tokens = source.token_owner.canonical_arc()?;
+        if source_tokens.source() != source.file_id {
+            return Err(CompilerError::compiler_error(
+                "bounded token sequence source owner does not match its file stream identity",
+            ));
+        }
         let tokens = source.materialize_token_sequence(sequence)?;
-        Self::new_from_slice(
+        source_tokens
+            .token_sequence(sequence)
+            .map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "bounded token sequence provenance is invalid: {error:?}"
+                ))
+            })?;
+        let mut stream = Self::with_adapter_path_syntax_and_metadata(
             declaration_path,
             source.file_id,
             source.canonical_os_path.clone(),
             tokens,
-            &source.path_syntax,
-        )
+            source.path_syntax.frozen_substream()?,
+            FileTokenAdapterMetadata::Sequence {
+                source_tokens,
+                sequence,
+            },
+        );
+        stream.freeze_numeric_literals();
+        Ok(stream)
     }
 
     /// Move this source stream into the prepared-source owner.
@@ -1904,18 +2501,268 @@ impl FileTokens {
     pub fn source_tokens(&self) -> Result<&SourceTokens, CompilerError> {
         self.token_owner.as_canonical()
     }
+    /// Borrow the canonical source store through a bounded adapter's retained provenance.
+    ///
+    /// Unlike `source_tokens`, this includes adapters that share an existing canonical owner.
+    /// Unbounded compatibility vectors still fail rather than fabricating source identity.
+    pub(crate) fn canonical_source_tokens(&self) -> Result<&SourceTokens, CompilerError> {
+        self.token_owner.canonical_source_tokens()
+    }
+    /// Create a checked canonical cursor at this stream's compatibility-vector position.
+    ///
+    /// Canonical streams use their full source range. Bounded adapters use the retained range or
+    /// sequence metadata and an `Arc` clone of that same owner. Compatibility-only vectors made
+    /// by [`Self::new_from_slice`] deliberately return an error instead of fabricating a source
+    /// owner.
+    pub fn canonical_cursor_from_current(&self) -> Result<TokenCursor<'_>, CompilerError> {
+        if self.length != self.tokens.len() || self.index > self.length {
+            return Err(CompilerError::compiler_error(
+                "token adapter compatibility position is outside its vector bounds",
+            ));
+        }
+        match &self.token_owner {
+            FileTokenOwner::Canonical(source_tokens) => {
+                if source_tokens.source() != self.file_id {
+                    return Err(CompilerError::compiler_error(
+                        "canonical source token owner does not match its file stream identity",
+                    ));
+                }
+                let range = source_tokens.full_range().map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "canonical source token range could not be constructed: {error:?}"
+                    ))
+                })?;
+                let position = TokenIndex::try_from_index(self.index).ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "canonical compatibility position exceeded its checked index domain",
+                    )
+                })?;
+                TokenCursor::from_range_position(source_tokens, range, position).map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "canonical cursor handoff position was out of bounds: {error:?}"
+                    ))
+                })
+            }
+            FileTokenOwner::Adapter { metadata, .. } => match metadata {
+                FileTokenAdapterMetadata::Unbounded => Err(CompilerError::compiler_error(
+                    "token adapter has no canonical source-token provenance",
+                )),
+                FileTokenAdapterMetadata::Contiguous {
+                    source_tokens,
+                    range,
+                    synthetic_trailing_eof,
+                } => {
+                    if source_tokens.source() != self.file_id || range.source() != self.file_id {
+                        return Err(CompilerError::compiler_error(
+                            "bounded token adapter provenance does not match its file identity",
+                        ));
+                    }
+                    let expected_length =
+                        range.len() as usize + if *synthetic_trailing_eof { 1 } else { 0 };
+                    if expected_length != self.length {
+                        return Err(CompilerError::compiler_error(
+                            "bounded token adapter length does not match its canonical range",
+                        ));
+                    }
+                    let offset = TokenIndex::try_from_index(self.index).ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "bounded compatibility position exceeded its checked index domain",
+                        )
+                    })?;
+                    let position = TokenIndex(
+                        range
+                            .start()
+                            .raw()
+                            .checked_add(offset.raw())
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "bounded canonical cursor position overflowed its index domain",
+                                )
+                            })?,
+                    );
+                    TokenCursor::from_range_position(source_tokens, *range, position).map_err(
+                        |error| {
+                            CompilerError::compiler_error(format!(
+                                "bounded canonical cursor handoff failed: {error:?}"
+                            ))
+                        },
+                    )
+                }
+                FileTokenAdapterMetadata::Sequence {
+                    source_tokens,
+                    sequence,
+                } => {
+                    if source_tokens.source() != self.file_id {
+                        return Err(CompilerError::compiler_error(
+                            "segmented token adapter provenance does not match its file identity",
+                        ));
+                    }
+                    let view = source_tokens.token_sequence(*sequence).map_err(|error| {
+                        CompilerError::compiler_error(format!(
+                            "segmented token adapter provenance is invalid: {error:?}"
+                        ))
+                    })?;
+                    if view.len() != self.length {
+                        return Err(CompilerError::compiler_error(
+                            "segmented token adapter length does not match its canonical sequence",
+                        ));
+                    }
+                    TokenCursor::from_sequence_position(view, self.index).map_err(|error| {
+                        CompilerError::compiler_error(format!(
+                            "segmented canonical cursor handoff failed: {error:?}"
+                        ))
+                    })
+                }
+            },
+        }
+    }
+
+    /// Compute the legacy compatibility index after a transient canonical parser handoff.
+    ///
+    /// The cursor must have been created for this exact owner and range/sequence metadata. A
+    /// foreign or differently bounded cursor is rejected rather than silently producing an
+    /// index for an unrelated source position.
+    pub fn compatibility_index_for_cursor(
+        &self,
+        cursor: TokenCursor<'_>,
+    ) -> Result<usize, CompilerError> {
+        if self.length != self.tokens.len() {
+            return Err(CompilerError::compiler_error(
+                "token adapter compatibility vector length is inconsistent",
+            ));
+        }
+        let next_index = match &self.token_owner {
+            FileTokenOwner::Canonical(source_tokens) => {
+                if !std::ptr::eq(cursor.tokens, source_tokens.as_ref())
+                    || cursor.tokens.source() != self.file_id
+                {
+                    return Err(CompilerError::compiler_error(
+                        "canonical cursor belongs to a different source-token owner",
+                    ));
+                }
+                let range = source_tokens.full_range().map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "canonical source token range could not be constructed: {error:?}"
+                    ))
+                })?;
+                if !matches!(cursor.bounds, TokenCursorBounds::Contiguous(actual) if actual == range)
+                {
+                    return Err(CompilerError::compiler_error(
+                        "canonical cursor bounds do not match the owning file stream",
+                    ));
+                }
+                cursor.position().index()
+            }
+            FileTokenOwner::Adapter { metadata, .. } => match metadata {
+                FileTokenAdapterMetadata::Unbounded => {
+                    return Err(CompilerError::compiler_error(
+                        "token adapter has no canonical source-token provenance",
+                    ));
+                }
+                FileTokenAdapterMetadata::Contiguous {
+                    source_tokens,
+                    range,
+                    synthetic_trailing_eof,
+                } => {
+                    if !std::ptr::eq(cursor.tokens, source_tokens.as_ref())
+                        || cursor.tokens.source() != self.file_id
+                    {
+                        return Err(CompilerError::compiler_error(
+                            "bounded cursor belongs to a different source-token owner",
+                        ));
+                    }
+                    if !matches!(cursor.bounds, TokenCursorBounds::Contiguous(actual) if actual == *range)
+                    {
+                        return Err(CompilerError::compiler_error(
+                            "bounded cursor range does not match the adapter provenance",
+                        ));
+                    }
+                    if cursor.position() < range.start() || cursor.position() > range.end() {
+                        return Err(CompilerError::compiler_error(
+                            "bounded cursor position is outside the adapter range",
+                        ));
+                    }
+                    let compatibility_index = cursor
+                        .position()
+                        .index()
+                        .checked_sub(range.start().index())
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "bounded cursor position underflowed its adapter index",
+                            )
+                        })?;
+                    if *synthetic_trailing_eof
+                        && compatibility_index == range.len() as usize
+                    {
+                        self.length.saturating_sub(1)
+                    } else {
+                        compatibility_index
+                    }
+                }
+                FileTokenAdapterMetadata::Sequence {
+                    source_tokens,
+                    sequence,
+                } => {
+                    if !std::ptr::eq(cursor.tokens, source_tokens.as_ref())
+                        || cursor.tokens.source() != self.file_id
+                    {
+                        return Err(CompilerError::compiler_error(
+                            "segmented cursor belongs to a different source-token owner",
+                        ));
+                    }
+                    let TokenCursorBounds::Segmented(view) = cursor.bounds else {
+                        return Err(CompilerError::compiler_error(
+                            "segmented adapter requires a segmented canonical cursor",
+                        ));
+                    };
+                    if !std::ptr::eq(view.tokens, source_tokens.as_ref())
+                        || view.id() != *sequence
+                    {
+                        return Err(CompilerError::compiler_error(
+                            "segmented cursor sequence does not match the adapter provenance",
+                        ));
+                    }
+                    cursor.compatibility_position().map_err(|error| {
+                        CompilerError::compiler_error(format!(
+                            "segmented cursor position could not be synchronised: {error:?}"
+                        ))
+                    })?
+                }
+            },
+        };
+        if next_index > self.length {
+            return Err(CompilerError::compiler_error(
+                "canonical cursor consumed beyond its compatibility adapter",
+            ));
+        }
+        Ok(next_index)
+    }
+
+
+
     pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
         self.path_syntax.table()
     }
-    /// Materialize one checked contiguous range through the canonical cursor.
+    /// Materialize one checked token range while preserving an adapter's transient payload lane.
     ///
-    /// The resulting vector is owned by the caller and is never retained by a header or
-    /// source-preparation state.
+    /// Canonical streams decode from the immutable source arrays. Bounded adapters may carry
+    /// rebased string/path IDs in their compatibility vector, so nested expression handoffs must
+    /// slice that vector instead of decoding the donor canonical owner again.
     pub(crate) fn materialize_token_range(
         &self,
         range: TokenRange,
     ) -> Result<Vec<Token>, CompilerError> {
-        let canonical = self.source_tokens()?;
+        match &self.token_owner {
+            FileTokenOwner::Canonical(_) => self.materialize_canonical_token_range(range),
+            FileTokenOwner::Adapter { .. } => self.materialize_adapter_token_range(range),
+        }
+    }
+
+    fn materialize_canonical_token_range(
+        &self,
+        range: TokenRange,
+    ) -> Result<Vec<Token>, CompilerError> {
+        let canonical = self.canonical_source_tokens()?;
         if canonical.source() != self.file_id {
             return Err(CompilerError::compiler_error(
                 "canonical source token owner does not match its file stream identity",
@@ -1927,12 +2774,128 @@ impl FileTokens {
         self.materialize_cursor(cursor)
     }
 
+    fn materialize_adapter_token_range(
+        &self,
+        range: TokenRange,
+    ) -> Result<Vec<Token>, CompilerError> {
+        if range.source() != self.file_id {
+            return Err(CompilerError::compiler_error(
+                "adapter token range does not match its file stream identity",
+            ));
+        }
+        let FileTokenOwner::Adapter { metadata, .. } = &self.token_owner else {
+            unreachable!("canonical owners use materialize_canonical_token_range");
+        };
+        match metadata {
+            FileTokenAdapterMetadata::Unbounded => Err(CompilerError::compiler_error(
+                "unbounded token adapter has no canonical range provenance",
+            )),
+            FileTokenAdapterMetadata::Contiguous {
+                range: owner_range,
+                ..
+            } => {
+                if range.start() < owner_range.start() || range.end() > owner_range.end() {
+                    return Err(CompilerError::compiler_error(
+                        "adapter token range exceeds its contiguous provenance",
+                    ));
+                }
+                let start = range
+                    .start()
+                    .index()
+                    .checked_sub(owner_range.start().index())
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "adapter token range start underflowed its provenance",
+                        )
+                    })?;
+                let end = range
+                    .end()
+                    .index()
+                    .checked_sub(owner_range.start().index())
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "adapter token range end underflowed its provenance",
+                        )
+                    })?;
+                self.tokens
+                    .get(start..end)
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "adapter token range exceeded its compatibility vector",
+                        )
+                    })
+            }
+            FileTokenAdapterMetadata::Sequence {
+                source_tokens,
+                sequence,
+            } => {
+                let view = source_tokens.token_sequence(*sequence).map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "adapter token sequence provenance is invalid: {error:?}"
+                    ))
+                })?;
+                if self.tokens.len() != view.len() {
+                    return Err(CompilerError::compiler_error(
+                        "adapter token sequence length does not match its compatibility vector",
+                    ));
+                }
+
+                let requested_start = range.start().index();
+                let requested_end = range.end().index();
+                let mut compatibility_start = 0usize;
+                let mut materialized = Vec::with_capacity(range.len() as usize);
+                for segment in view.ranges() {
+                    let segment_start = segment.start().index();
+                    let segment_end = segment.end().index();
+                    let overlap_start = requested_start.max(segment_start);
+                    let overlap_end = requested_end.min(segment_end);
+                    if overlap_start < overlap_end {
+                        let start = compatibility_start
+                            .checked_add(overlap_start - segment_start)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "adapter token sequence start overflowed its compatibility vector",
+                                )
+                            })?;
+                        let end = compatibility_start
+                            .checked_add(overlap_end - segment_start)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "adapter token sequence end overflowed its compatibility vector",
+                                )
+                            })?;
+                        let tokens = self.tokens.get(start..end).ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "adapter token sequence range exceeded its compatibility vector",
+                            )
+                        })?;
+                        materialized.extend_from_slice(tokens);
+                    }
+                    compatibility_start = compatibility_start
+                        .checked_add(segment.len() as usize)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "adapter token sequence length overflowed its compatibility vector",
+                            )
+                        })?;
+                }
+                if materialized.len() != range.len() as usize {
+                    return Err(CompilerError::compiler_error(
+                        "adapter token range crosses an omitted segmented-source gap",
+                    ));
+                }
+                Ok(materialized)
+            }
+        }
+    }
+
     /// Materialize one checked segmented sequence through the canonical cursor.
     pub(crate) fn materialize_token_sequence(
         &self,
         id: TokenSequenceId,
     ) -> Result<Vec<Token>, CompilerError> {
-        let canonical = self.source_tokens()?;
+        let canonical = self.canonical_source_tokens()?;
         if canonical.source() != self.file_id {
             return Err(CompilerError::compiler_error(
                 "canonical source token owner does not match its file stream identity",
@@ -1955,14 +2918,13 @@ impl FileTokens {
     ) -> Result<Vec<Token>, CompilerError> {
         let mut tokens = Vec::with_capacity(cursor.range().len() as usize);
         while let Some(token_ref) = cursor.advance() {
-            let index = token_ref.index().index();
-            let token = self.tokens.get(index).cloned().ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "canonical token cursor resolved outside its parser token adapter",
-                )
-            })?;
             let is_eof = token_ref.is_eof();
-            tokens.push(token);
+            let kind = token_ref.to_token_kind().map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "canonical token payload could not be materialized: {error:?}"
+                ))
+            })?;
+            tokens.push(Token::new(kind, token_ref.span()));
             if is_eof {
                 break;
             }
@@ -2634,7 +3596,6 @@ impl TokenDescriptor {
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TokenTag(u16);
-
 /// Fixed source-token shape: one stable tag, reserved/semantic flags and one compact payload.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
