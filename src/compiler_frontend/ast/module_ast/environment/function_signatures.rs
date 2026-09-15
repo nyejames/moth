@@ -40,7 +40,6 @@ use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -257,9 +256,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             string_table,
                         )
                     })?;
-                let body_tokens = FileTokens::new_bounded_substream(
-                    source_owner,
+                let body = GenericFunctionBody::source(
+                    Arc::clone(source_owner),
                     header.tokens,
+                    header.token_sequence,
                     header.declaration_path,
                 )
                 .map_err(|error| self.error_messages(error, string_table))?;
@@ -269,7 +269,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &resolved_signature.signature,
                     registered_generic_parameters.list_id,
                     self.header_source_path(header),
-                    body_tokens,
+                    body,
                 );
                 self.generic_function_templates_by_path
                     .insert(header.declaration_path.to_owned(), template);
@@ -444,14 +444,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 /// Constructs a generic function template from a resolved header and signature.
 ///
 /// WHY: generic function templates carry the unresolved body tokens and generic parameter
-/// metadata so that concrete instantiations can be emitted later during AST body lowering.
 fn build_generic_function_template(
     header: &Header,
     generic_parameters: &GenericParameterList,
     signature: &FunctionSignature,
     generic_parameter_list_id: GenericParameterListId,
     source_file: PathId,
-    body_tokens: FileTokens,
+    body: GenericFunctionBody,
 ) -> GenericFunctionTemplate {
     debug_assert!(
         !generic_parameters.is_empty(),
@@ -466,7 +465,7 @@ fn build_generic_function_template(
         generic_parameter_list_id,
         signature: signature.to_owned(),
         declaration_span: header.name_span,
-        body_tokens: Some(GenericFunctionBody::source(body_tokens)),
+        body_tokens: Some(body),
     }
 }
 

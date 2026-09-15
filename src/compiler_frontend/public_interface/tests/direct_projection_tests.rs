@@ -59,7 +59,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenRange};
+use std::sync::Arc;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -554,12 +555,18 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         declaration_identity: None,
         generic_parameter_owner: None,
         generic_parameter_list_id: list_id,
-        signature: method_signature,
-        body_tokens: Some(GenericFunctionBody::source(FileTokens::new(
-            method_fn_path,
-            SourceId::COMPILATION_ROOT,
-            vec![],
-        ))),
+        signature: FunctionSignature::default(),
+        body_tokens: Some({
+            let body = Arc::new(FileTokens::new(
+                method_fn_path,
+                SourceId::COMPILATION_ROOT,
+                vec![],
+            ));
+            let range = TokenRange::from_raw(SourceId::COMPILATION_ROOT, 0, 0)
+                .expect("empty body range ordering should be valid");
+            GenericFunctionBody::source(body, range, None, method_fn_path)
+                .expect("empty generic body should retain its checked range")
+        }),
         declaration_span: None,
     };
     let template_map: FxHashMap<PathId, GenericFunctionTemplate> =

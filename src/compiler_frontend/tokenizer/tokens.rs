@@ -1789,6 +1789,26 @@ impl FileTokens {
         stream.freeze_numeric_literals();
         Ok(stream)
     }
+    /// Build a frozen bounded parser adapter from a transiently remapped token slice.
+    ///
+    /// The caller owns the bounded vector and path table only for this adapter's lifetime. This
+    /// never constructs a second canonical `SourceTokens` owner.
+    pub(crate) fn new_remapped_adapter(
+        src_path: PathId,
+        file_id: SourceId,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+        path_syntax: PathSyntaxTable,
+    ) -> FileTokens {
+        Self::with_adapter_path_syntax(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            FilePathSyntax::shared(path_syntax),
+        )
+    }
+
 
     /// Build a bounded parser adapter from one contiguous canonical range.
     pub(crate) fn new_bounded_substream(

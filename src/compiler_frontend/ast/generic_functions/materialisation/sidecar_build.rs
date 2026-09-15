@@ -231,6 +231,7 @@ impl ModuleMaterialisationPreparation {
             let resources = resources.borrow();
             self.stable_folded_value_at_path(&content_path, &resources, path_fork)
         };
+        let mut capture_string_table = self.string_table.clone();
         let body = template.body_tokens.as_ref().ok_or_else(|| {
             CompilerMessages::from_error_ref(
                 CompilerError::compiler_error(
@@ -240,7 +241,7 @@ impl ModuleMaterialisationPreparation {
             )
         })?;
         let stage0_resolution_facts = match body {
-            GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
+            GenericFunctionBody::Source { .. } => self.stage0_resolution_facts.as_deref(),
             GenericFunctionBody::Materialised {
                 resolution_facts, ..
             } => Some(resolution_facts.as_ref()),
@@ -250,10 +251,10 @@ impl ModuleMaterialisationPreparation {
             .cloned()
             .unwrap_or_else(|| self.frozen_identity_handle.clone());
         let stable_body = StableBodySyntax::capture(
-            body.tokens(),
+            body,
             template.source_file,
             path_fork,
-            &self.string_table,
+            &mut capture_string_table,
             stage0_resolution_facts,
             frozen_identity_handle,
             &content_value_at_path,
@@ -268,7 +269,7 @@ impl ModuleMaterialisationPreparation {
                 continue;
             };
             let nested_stage0_resolution_facts = match nested_body {
-                GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
+                GenericFunctionBody::Source { .. } => self.stage0_resolution_facts.as_deref(),
                 GenericFunctionBody::Materialised {
                     resolution_facts, ..
                 } => Some(resolution_facts.as_ref()),
@@ -278,10 +279,10 @@ impl ModuleMaterialisationPreparation {
                 .cloned()
                 .unwrap_or_else(|| self.frozen_identity_handle.clone());
             let stable_nested_body = StableBodySyntax::capture(
-                nested_body.tokens(),
+                nested_body,
                 nested_template.source_file,
                 path_fork,
-                &self.string_table,
+                &mut capture_string_table,
                 nested_stage0_resolution_facts,
                 nested_frozen_identity_handle,
                 &content_value_at_path,
@@ -294,8 +295,9 @@ impl ModuleMaterialisationPreparation {
             .fork_materialisation_string_table(boundary_string_table)
             .map_err(|error| CompilerMessages::from_error_ref(error, boundary_string_table))?;
         let source_file = template.source_file;
+        let identity_tables = body.source_identity_tables();
         let materialised_body = stable_body
-            .materialise(source_file, path_fork, &mut string_table)
+            .materialise(source_file, path_fork, &mut string_table, identity_tables)
             .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
@@ -348,10 +350,14 @@ impl ModuleMaterialisationPreparation {
                     )
                 })
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
-            generated_template.body_tokens = Some(materialised_body.into_generic_body());
+            generated_template.body_tokens = Some(
+                materialised_body
+                    .into_generic_body()
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?,
+            );
             for (path, source_file, stable_nested_body) in stable_nested_bodies {
                 let materialised_nested_body = stable_nested_body
-                    .materialise(source_file, path_fork_ref, string_table_ref)
+                    .materialise(source_file, path_fork_ref, string_table_ref, None)
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
                 let nested_template = lookups
                     .generic_function_templates_by_path
@@ -362,7 +368,13 @@ impl ModuleMaterialisationPreparation {
                         )
                     })
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
-                nested_template.body_tokens = Some(materialised_nested_body.into_generic_body());
+                nested_template.body_tokens = Some(
+                    materialised_nested_body
+                        .into_generic_body()
+                        .map_err(|error| {
+                            CompilerMessages::from_error_ref(error, string_table_ref)
+                        })?,
+                );
             }
         }
         let (build_result, instance_path) = emit_materialised_sidecar(

@@ -10,16 +10,27 @@ use super::super::semantic_closure::StableSemanticClosure;
 use super::super::stable_types::{GenericTemplateArtefact, StableFunctionSignature};
 use super::super::visibility::StableFileVisibility;
 use super::ModuleMaterialisationContext;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 
 impl ModuleMaterialisationContext {
     /// Build a test-only context with one artefact per identity and no real body payload.
     pub(crate) fn from_identities_for_test(identities: Vec<GeneratedDeclarationIdentity>) -> Self {
         let frozen_identity_handle = FrozenIdentityHandle::new();
+        let empty_source_owner = Arc::new(FileTokens::new(
+            PathId::ROOT,
+            crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+            Vec::new(),
+        ));
+        let empty_token_range = empty_source_owner
+            .source_tokens()
+            .expect("test fixture must use a canonical source owner")
+            .full_range()
+            .expect("empty canonical source should have a checked full range");
         let artefacts = identities
             .into_iter()
             .map(|declaration_identity| GenericTemplateArtefact {
@@ -34,11 +45,11 @@ impl ModuleMaterialisationContext {
                     declaration_path: PathId::ROOT,
                     donor_file_id: crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
                     frozen_identity_handle: frozen_identity_handle.clone(),
-                    pool: Box::new([]),
-                    tokens: Box::new([]),
-                    numeric_literals: Default::default(),
-                    numeric_literal_ids: Box::new([]),
-                    path_syntax: PathSyntaxTable::default(),
+                    source_owner: Arc::clone(&empty_source_owner),
+                    token_range: empty_token_range,
+                    token_sequence: None,
+                    source_path_table: None,
+                    source_string_table: None,
                     resolved_file_references: Box::new([]),
                 },
                 signature: StableFunctionSignature {

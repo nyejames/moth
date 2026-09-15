@@ -741,7 +741,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             self.deferred_generic_requests.push(request);
             return Ok(());
         };
-        let mut token_stream = body.tokens().clone();
+        let mut token_stream = body
+            .parser_stream(string_table, &mut *self.path_fork)
+            .map_err(|error| self.error_messages(error, string_table))?;
         let frozen_identity_handle = body.frozen_identity_handle().cloned();
 
         let Some(mapping) = concrete_argument_mapping(

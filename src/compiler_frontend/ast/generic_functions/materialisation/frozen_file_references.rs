@@ -1,6 +1,6 @@
 //! Stable file-reference rows retained by generic-function materialisation.
 //!
-//! The capture representation owns only compact path handles, prepared reference classes and
+//! The capture representation owns source-owned path handles, prepared reference classes and
 //! portable outcomes. Donor-local paths and string identifiers are resolved before a row crosses
 //! the materialisation boundary.
 
@@ -15,8 +15,6 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-
 #[derive(Clone)]
 pub(super) struct StableResolvedFileReference {
     pub(super) path_syntax: PathSyntaxId,
@@ -28,7 +26,7 @@ pub(super) struct StableResolvedFileReference {
 pub(super) enum StableResolvedFileReferenceOutcome {
     NoPhysicalTarget,
     Content { value: OwnedFoldedString },
-    Resource { owner_relative_path: StringId },
+    Resource { owner_relative_path: String },
     IdentifiedSourceKind,
 }
 
@@ -36,7 +34,6 @@ impl StableResolvedFileReference {
     pub(super) fn capture(
         path_syntax: PathSyntaxId,
         resolved: Stage0ResolvedFileReferenceView<'_>,
-        intern_resource_path: &mut impl FnMut(&str) -> StringId,
         content_value_at_path: &impl Fn(&PathId) -> Result<PublicFoldedValue, CompilerError>,
     ) -> Result<Self, CompilerError> {
         let outcome = match resolved.outcome {
@@ -64,7 +61,7 @@ impl StableResolvedFileReference {
                 owner_relative_path,
                 ..
             } => StableResolvedFileReferenceOutcome::Resource {
-                owner_relative_path: intern_resource_path(owner_relative_path.as_str()),
+                owner_relative_path: owner_relative_path.as_str().to_owned(),
             },
             Stage0ResolvedFileReferenceOutcome::IdentifiedSourceKind => {
                 StableResolvedFileReferenceOutcome::IdentifiedSourceKind
@@ -83,11 +80,7 @@ impl StableResolvedFileReference {
         })
     }
 
-    pub(super) fn materialise(
-        &self,
-        remap: &[StringId],
-        string_table: &StringTable,
-    ) -> Result<FrozenResolvedFileReference, CompilerError> {
+    pub(super) fn materialise(&self) -> Result<FrozenResolvedFileReference, CompilerError> {
         let outcome = match &self.outcome {
             StableResolvedFileReferenceOutcome::NoPhysicalTarget => {
                 FrozenResolvedFileReferenceOutcome::NoPhysicalTarget
@@ -99,14 +92,11 @@ impl StableResolvedFileReference {
             }
             StableResolvedFileReferenceOutcome::Resource {
                 owner_relative_path,
-            } => {
-                let owner_relative_path = pool_remap(*owner_relative_path, remap)?;
-                FrozenResolvedFileReferenceOutcome::Resource {
-                    owner_relative_path: PortableResourcePath::from_portable_spelling(
-                        string_table.resolve(owner_relative_path).to_owned(),
-                    )?,
-                }
-            }
+            } => FrozenResolvedFileReferenceOutcome::Resource {
+                owner_relative_path: PortableResourcePath::from_portable_spelling(
+                    owner_relative_path.clone(),
+                )?,
+            },
             StableResolvedFileReferenceOutcome::IdentifiedSourceKind => {
                 FrozenResolvedFileReferenceOutcome::IdentifiedSourceKind
             }
@@ -129,13 +119,4 @@ fn capture_public_content_value(
         ));
     };
     Ok(value)
-}
-
-fn pool_remap(id: StringId, remap: &[StringId]) -> Result<StringId, CompilerError> {
-    let index = id.index() as usize;
-    remap.get(index).copied().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "frozen generic payload references out-of-range pool entry {index}"
-        ))
-    })
 }

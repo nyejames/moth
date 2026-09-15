@@ -983,7 +983,7 @@ AST folding materializes bounded wrapper tokens ephemerally from the canonical s
 validation, remapping, ordering hints, constant resolution and emission use the explicit payload
 fact, preserving source-database snapshot ownership and the existing adapter output contracts.
 
-- [ ] **3E7 — persistent generic syntax:** generic templates and generated/materialised generic
+- [x] **3E7 — persistent generic syntax:** generic templates and generated/materialised generic
   bodies retain their ranges/sequences over the canonical immutable source token store, plus donor
   identity/context, so nested and cross-package materialisation, donor diagnostics and retained
   file-reference facts keep exact ownership. No generic-specific token representation: materialised
@@ -991,6 +991,14 @@ fact, preserving source-database snapshot ownership and the existing adapter out
   second store before 3E7; if the final ownership needs the store to outlive one compilation
   boundary, that owner is an existing later owner (persistent generic materialisation), not a new
   framework
+
+Slice 3E7 decision (2026-09-15): generic source and materialised bodies retain one `Arc<FileTokens>`
+canonical source owner, checked half-open `TokenRange`, optional `TokenSequenceId`, declaration and
+donor identity, and frozen Stage 0/file-reference facts. Capture and parser consumers derive only
+bounded adapters; retained file-reference rows preserve donor `PathSyntaxId`s, while foreign
+identity rebasing remaps complete path roots through the existing materialisation-context tables.
+Stable resource paths own their spelling. No generic-specific store/framework or second canonical
+token store was introduced; test-only contexts use checked ranges over a canonical empty owner.
 
 ### Slice group 3F — Migrate parser and semantic consumers
 

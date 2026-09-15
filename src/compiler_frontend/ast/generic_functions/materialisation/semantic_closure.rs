@@ -11,6 +11,7 @@ use super::stable_types::{
     StableDeclarationBinding, StableFunctionSignature, StableFunctionTarget, StableNominalBinding,
 };
 use super::visibility::collect_namespace_source_paths;
+use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -30,7 +31,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
     TraitReceiverRequirement, TraitVisibility,
@@ -189,17 +190,18 @@ impl StableFunctionSignature {
     }
 }
 pub(super) fn stable_body_symbol_names(
-    tokens: &FileTokens,
-    string_table: &StringTable,
-) -> FxHashSet<String> {
-    tokens
+    body: &GenericFunctionBody,
+    string_table: &mut StringTable,
+) -> Result<FxHashSet<String>, CompilerError> {
+    let tokens = body.parser_stream_for_capture(string_table)?;
+    Ok(tokens
         .tokens
         .iter()
         .filter_map(|token| match token.kind {
             TokenKind::Symbol(symbol) => Some(string_table.resolve(symbol).to_owned()),
             _ => None,
         })
-        .collect()
+        .collect())
 }
 
 /// Collect every nominal identity one canonical type reaches, including generic-instance bases.

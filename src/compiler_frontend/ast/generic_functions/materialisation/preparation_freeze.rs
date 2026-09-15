@@ -379,6 +379,7 @@ impl ModuleMaterialisationPreparation {
         let body = template.body_tokens.as_ref().ok_or_else(|| {
             CompilerError::compiler_error("Retained generic template has no body syntax")
         })?;
+        let mut capture_string_table = self.string_table.clone();
         let generic_parameters = self.stable_generic_parameters(template)?;
         let generic_parameter_owner = template.generic_parameter_owner.clone();
         let receiver = self
@@ -395,7 +396,7 @@ impl ModuleMaterialisationPreparation {
             resources,
             path_fork,
         )?;
-        let mut referenced_names = stable_body_symbol_names(body.tokens(), &self.string_table);
+        let mut referenced_names = stable_body_symbol_names(body, &mut capture_string_table)?;
         self.retain_generic_bound_trait_names(
             &template.source_file,
             &generic_parameters,
@@ -421,7 +422,7 @@ impl ModuleMaterialisationPreparation {
             self.stable_folded_value_at_path(&content_path, resources, path_fork)
         };
         let stage0_resolution_facts = match body {
-            GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
+            GenericFunctionBody::Source { .. } => self.stage0_resolution_facts.as_deref(),
             GenericFunctionBody::Materialised {
                 resolution_facts, ..
             } => Some(resolution_facts.as_ref()),
@@ -440,10 +441,10 @@ impl ModuleMaterialisationPreparation {
             source_file: template.source_file,
             declaration_span: template.declaration_span,
             body: StableBodySyntax::capture(
-                body.tokens(),
+                body,
                 template.source_file,
                 path_fork,
-                &self.string_table,
+                &mut capture_string_table,
                 stage0_resolution_facts,
                 frozen_identity_handle,
                 &content_value_at_path,

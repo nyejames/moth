@@ -179,6 +179,23 @@ impl ModuleMaterialisationContext {
             )),
         }
     }
+    pub(crate) fn retained_identity_arcs(
+        &self,
+    ) -> Result<
+        Option<(
+            &Arc<PathTable>,
+            &Arc<FrozenStringTable>,
+        )>,
+        CompilerError,
+    > {
+        match (&self.path_table, &self.source_string_table) {
+            (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
+            (None, None) => Ok(None),
+            _ => Err(CompilerError::compiler_error(
+                "published materialisation context has an incomplete identity table pair",
+            )),
+        }
+    }
 
     /// Rebase a published provider context into the requester's path/string identity domain using
     /// the tables that issued the retained provider paths.
@@ -266,9 +283,12 @@ impl GenericTemplateArtefact {
         let source_file = self.source_file;
         let function_path = self.function_path;
         let entry_dir = path_fork.parent(source_file).unwrap_or(PathId::ROOT);
+        let identity_tables = context.retained_identity_arcs().map_err(|error| {
+            CompilerMessages::from_error_ref(error, &string_table)
+        })?;
         let materialised_body = self
             .body
-            .materialise(source_file, path_fork, &mut string_table)
+            .materialise(source_file, path_fork, &mut string_table, identity_tables)
             .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
@@ -437,6 +457,7 @@ impl GenericTemplateArtefact {
         let template_ir_store = services.template_ir_store;
         let module_resources = Rc::clone(&services.module_resources);
         let value_services = services;
+        let identity_tables = context.retained_identity_arcs()?;
         for nominal in &self.nominals {
             let type_id = intern_generated_canonical_type(
                 &nominal.identity,
@@ -1002,17 +1023,19 @@ impl GenericTemplateArtefact {
             };
             let source_file = nested.source_file;
             let body = if nested.declaration_identity == self.declaration_identity {
-                materialised_self_body.take().ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "generated materialisation consumed its root generic body more than once",
-                    )
-                })?
-                .into_generic_body()
+                materialised_self_body
+                    .take()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "generated materialisation consumed its root generic body more than once",
+                        )
+                    })?
+                    .into_generic_body()?
             } else {
                 nested
                     .body
-                    .materialise(source_file, path_fork, string_table)?
-                    .into_generic_body()
+                    .materialise(source_file, path_fork, string_table, identity_tables)?
+                    .into_generic_body()?
             };
             let template = GenericFunctionTemplate {
                 function_path: nested_path,
