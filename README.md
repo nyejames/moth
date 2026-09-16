@@ -1,9 +1,7 @@
 <div align="center">
-
 <img src="./docs/assets/moth-logo.webp" width="10%"/>
-
-
 <br>
+
 # Moth
 
 <p><em>
@@ -14,15 +12,14 @@
   Solve problems with code, not frameworks.
 </em></p>
 
+</div>
+
 > [!WARNING]
 > This project is in early Alpha ⚠️
 
 > [!IMPORTANT]
-> The language semantics and compiler are still stabilising. The Wasm backend and final memory model are not fully implemented.</p> 
+> The language semantics and compiler are still stabilising. The Wasm backend and final memory model are not fully implemented.
 
-<p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using this language and toolchain. Check it out for code examples and to familiarise yourself with the basics.</p>
-
-</div>
 <br>
 <br>
 
@@ -37,6 +34,8 @@ Moth is a small, statically typed and opinionated programming language.
 The goal is to provide everything you need for modern, memory safe apps. Designed from the ground up to work elegantly within one language and build system.
 
 Web development is the current focus. The home-grown HTML project builder creates static web pages using core compiler tooling.
+
+<p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using this language and toolchain. Check it out for code examples and to familiarise yourself with the basics.</p>
 
 </br>
 
