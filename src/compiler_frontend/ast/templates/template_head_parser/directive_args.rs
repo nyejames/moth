@@ -27,6 +27,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 use crate::compiler_frontend::source::SourceSpan;
@@ -40,8 +41,25 @@ use crate::compiler_frontend::value_mode::ValueMode;
 type DirectiveArgsResult<T> = Result<T, TemplateError>;
 
 /// Returns true if the next token after the current directive is `(`.
+///
+/// WHAT: pure read-only `(` lookahead that preserves adapter-relative indexes.
+/// WHY: directive dispatch must not advance before committing to the paren
+/// path; a short `DeclarationCursor` keeps that fact read-only and drops
+/// before any `FileTokens` advance or expression re-entry. Unbounded
+/// compatibility-only streams keep `peek_next_token` as the documented
+/// `FileTokens` grammar boundary (fallback below).
 pub(crate) fn directive_has_arguments(token_stream: &FileTokens) -> bool {
-    token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis)
+    DeclarationCursor::from_file_tokens(token_stream)
+        .map(|cursor| {
+            cursor
+                .position()
+                .checked_add(1)
+                .and_then(|next| cursor.token_kind_at(next))
+                == Some(TokenKind::OpenParenthesis)
+        })
+        .unwrap_or_else(|_| {
+            token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis)
+        })
 }
 
 /// Advances the token stream from the directive token past `(` into the
@@ -64,7 +82,7 @@ pub(crate) fn reject_unexpected_directive_arguments(
             CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::UnexpectedArguments,
-                token_stream.current_span().into(),
+                None,
             ),
         )
         .into());
@@ -84,7 +102,7 @@ pub(crate) fn reject_empty_directive_parens(
             CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::EmptyArguments,
-                token_stream.current_span().into(),
+                None,
             ),
         )
         .into());
@@ -119,7 +137,7 @@ pub(crate) fn expect_directive_close_paren(token_stream: &FileTokens) -> Directi
         CompilerDiagnostic::expected_token(
             TokenKind::CloseParenthesis,
             Some(found),
-            token_stream.current_span().into(),
+            None,
         ),
     )
     .into())
@@ -158,7 +176,7 @@ fn parse_single_expression_in_directive_parens(
             CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::EmptyArguments,
-                token_stream.current_span().into(),
+                None,
             ),
         )
         .into());
@@ -182,7 +200,7 @@ fn parse_single_expression_in_directive_parens(
             token_stream,
             CompilerDiagnostic::unexpected_token(
                 TokenKind::Comma,
-                token_stream.current_span().into(),
+                None,
             ),
         )
         .into());
@@ -238,7 +256,7 @@ pub(crate) fn parse_required_parenthesized_expression(
             CompilerDiagnostic::expected_token(
                 TokenKind::OpenParenthesis,
                 Some(token_stream.current_token_kind().to_owned()),
-                token_stream.current_span().into(),
+                None,
             ),
         )
         .into());
@@ -281,7 +299,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                     CompilerDiagnostic::invalid_template_directive(
                         Some(directive_name),
                         InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                        token_stream.current_span().into(),
+                        None,
                     ),
                 )
                 .into());
@@ -293,7 +311,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                     CompilerDiagnostic::invalid_number_literal(
                         token.source_text,
                         reason,
-                        token_stream.current_span().into(),
+                        None,
                     ),
                 )
             })?;
@@ -304,7 +322,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                     CompilerDiagnostic::invalid_template_directive(
                         Some(directive_name),
                         InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                        token_stream.current_span().into(),
+                        None,
                     ),
                 )
                 .into());
@@ -318,7 +336,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::EmptyArguments,
-                    token_stream.current_span().into(),
+                    None,
                 ),
             )
             .into());
@@ -329,7 +347,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                    token_stream.current_span().into(),
+                    None,
                 ),
             )
             .into());
@@ -352,7 +370,7 @@ pub(crate) fn parse_required_slot_name_argument(
             CompilerDiagnostic::expected_token(
                 TokenKind::OpenParenthesis,
                 Some(token_stream.current_token_kind().to_owned()),
-                token_stream.current_span().into(),
+                None,
             ),
         )
         .into());
@@ -368,7 +386,7 @@ pub(crate) fn parse_required_slot_name_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidInsertTarget,
-                    token_stream.current_span().into(),
+                    None,
                 ),
             )
             .into());
@@ -379,7 +397,7 @@ pub(crate) fn parse_required_slot_name_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::EmptyArguments,
-                    token_stream.current_span().into(),
+                    None,
                 ),
             )
             .into());
@@ -390,7 +408,7 @@ pub(crate) fn parse_required_slot_name_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidInsertTarget,
-                    token_stream.current_span().into(),
+                    None,
                 ),
             )
             .into());
@@ -411,10 +429,19 @@ fn with_current_token_span(
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.current_token().span,
-        ));
+        // Short-lived canonical view for this token-local directive span;
+        // dropped before any `FileTokens` advance or `create_expression`
+        // re-entry. Compatibility-only streams keep the checked vector lane as
+        // the documented `FileTokens` grammar boundary (fallback below).
+        diagnostic.primary_span = DeclarationCursor::from_file_tokens(token_stream)
+            .ok()
+            .and_then(|cursor| cursor.current_span())
+            .or_else(|| {
+                token_stream
+                    .tokens
+                    .get(token_stream.index)
+                    .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+            });
     }
     diagnostic
 }

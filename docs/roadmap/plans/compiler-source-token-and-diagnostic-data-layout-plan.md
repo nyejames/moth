@@ -12,8 +12,8 @@
 > plus validation-lane stabilization). The bounded pre-Phase-3 validation restoration is complete:
 > warning-denied native Clippy and the integration suite are green, and the only remaining red gate
 > is the explicitly accepted inherited generic-instantiation scaling exception recorded below.
-> Phase 3 fixed-token/source-owned migration is active: Slices 3A–3E and 3F1–3F3 are accepted,
-> with 3F4 template-parser migration next. Package work stays paused until accepted Phase 3. After
+> Phase 3 fixed-token/source-owned migration is active: Slices 3A–3E and 3F1–3F4 are accepted,
+> with 3F5 support-surface migration next. Package work stays paused until accepted Phase 3. After
 > Phase 3 this plan pauses: Wiring V1, then native result slots and Core const evaluation run first,
 > and Phase 4 resumes only after a rebase and explicit reactivation. The roadmap retains those
 > separate checkpoints.
@@ -76,7 +76,7 @@ ACTIVE_PLAN:
 - Phase: Phase 2 complete-path interning remains accepted at continuation checkpoint `c17672bb5` on
   `diagnostic-data-layout-changes`, with diagnostic correction `e7d9a7ab5` and merged-revision
   validation-lane stabilization. Phase 3 fixed-token/source-owned migration is active; Slices 3A–3E
-  and 3F1–3F3 are accepted, and 3F4 template-parser migration is next.
+  and 3F1–3F4 are accepted, and 3F5 support-surface migration is next.
 - Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
   diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
 - Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
@@ -120,8 +120,8 @@ CURRENT_WORKSPACE_STATE:
   benchmark preflight cases. It remains red only because the inherited generic-instantiation
   series fits `n^1.81` in the dedicated baseline rerun (`n^1.80` in the later full-gate rerun)
   against its unchanged `n^1.70` budget; the recorded current-main comparison was `n^1.77`.
-- Phase 3 fixed-token/source-owned migration is active. Slices 3A–3E and 3F1–3F3 are accepted;
-  3F4 template-parser migration is the next implementation slice. The named generic-instantiation
+- Phase 3 fixed-token/source-owned migration is active. Slices 3A–3E and 3F1–3F4 are accepted;
+  3F5 support-surface migration is the next implementation slice. The named generic-instantiation
   scaling exception remains the baseline and is not raised or loosened.
 - After Phase 3, this plan pauses. Wiring V1 runs, then native result slots and Core const
   evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
@@ -1042,7 +1042,16 @@ expression AST (`116`), statement AST (`317`, excluding the accepted
 `rejects_multiline_inline_catch_fallback_value` baseline failure), declaration syntax (`74`),
 token cursor (`14`) and tokenizer (`126`) suites. The independent AST-core audit passed with no
 required corrections.
-- [ ] **3F4 — template parser:** template heads, TIR emission, slots, control flow and formatter-facing token reads
+- [x] **3F4 — template parser:** template heads, TIR emission, slots, control flow and formatter-facing token reads
+Slice 3F4 decision (2026-09-16): template head/body scans, sentinel and control-flow suffix
+boundaries, directive lookahead, reactive-subscription spans, construction/path spans and the core
+slot/insert invariant now use short-lived `DeclarationCursor` views with explicit checked
+compatibility-vector fallbacks. Recursive expression, loop-header, `parse_if_header`,
+`resolve_file_value` and nested-template handoffs remain on `FileTokens`; no cursor survives a
+mutation or recursive re-entry, and TIR/slot/formatter state retains only payloads and spans.
+Low-memory validation (`CARGO_BUILD_JOBS=1`, `CARGO_PROFILE_DEV_DEBUG=0`) passed `cargo check -p
+moth --lib` and the template AST suite (`696` tests). The independent Phase 3F4 audit passed
+after correcting diagnostic-span attachment and unchecked fallback paths.
 - [ ] **3F5 — support surfaces:** token-based diagnostics, tests, debug/show-token output, `TokenStats` and benchmark classification; extend the owning test source helper with token-store construction rather than adding parser-specific fixture builders
 - [ ] in every batch, use short-lived token views only; no durable Rust reference or self-referential structure may be introduced
 

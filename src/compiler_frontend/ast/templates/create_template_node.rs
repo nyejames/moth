@@ -48,6 +48,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
 };
@@ -213,10 +214,10 @@ impl Template {
         // authoritative TIR identity exists, not mutated throughout parsing.
         let mut build_state = TemplateBuildState::new();
 
-        let construction_span = Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.current_token().span,
-        ));
+        // Short-lived canonical view for this token-local construction span; dropped
+        // before any `FileTokens` advance or recursive parse. The explicit vector
+        // lane stays the documented compatibility fallback (see `construction_span_for`).
+        let construction_span = construction_span_for(token_stream);
         let mut construction_context =
             TemplateConstructionContext::new(context.template_ir_store.clone(), construction_span);
 
@@ -492,6 +493,25 @@ impl Template {
         })
     }
 }
+/// Read-only construction span through a short canonical view.
+///
+/// WHAT: reports the current token span for template construction diagnostics and TIR.
+/// WHY: the construction span is a pure token-local read; a short `DeclarationCursor`
+/// keeps canonical source identity and drops before any `FileTokens` advance or
+/// recursive parse. Compatibility-only streams have no canonical provenance, so the
+/// explicit vector lane stays as the documented fallback rather than inventing a bridge.
+fn construction_span_for(token_stream: &FileTokens) -> Option<SourceSpan> {
+    DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_span())
+        .or_else(|| {
+            token_stream
+                .tokens
+                .get(token_stream.index)
+                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        })
+}
+
 fn default_nested_style_for_source_path(
     token_stream: &FileTokens,
     string_table: &StringTable,

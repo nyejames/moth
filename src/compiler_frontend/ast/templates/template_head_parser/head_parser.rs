@@ -38,6 +38,7 @@ use crate::ast_log;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
@@ -108,8 +109,28 @@ fn with_current_token_span(
     diagnostic
 }
 
+/// Read-only current-token span through a short canonical view.
+///
+/// WHAT: reports the exact authored span of the head-item token without
+/// advancing the stream.
+/// WHY: head dispatch needs only token-local span facts; a short
+/// `DeclarationCursor` keeps that fact read-only and drops before any
+/// `FileTokens` advance or expression re-entry. Unbounded
+/// compatibility-only streams have no canonical provenance, so fall back to
+/// the explicit checked vector lane there rather than inventing a bridge.
 fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    source_span_for(token_stream, token_stream.current_token().span)
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        if let Some(span) = cursor.current_span() {
+            return Some(span);
+        }
+    }
+    // Checked compatibility-only fallback (unbounded test adapters): keep
+    // adapter-relative indexing and file identity instead of fabricating a
+    // canonical owner.
+    token_stream
+        .tokens
+        .get(token_stream.index)
+        .and_then(|token| source_span_for(token_stream, token.span))
 }
 
 fn source_span_for(token_stream: &FileTokens, span: LocalSpan) -> Option<SourceSpan> {
@@ -158,7 +179,7 @@ fn should_inline_template_head_reference(
     context: &ScopeContext,
     declaration: &Declaration,
 ) -> bool {
-    if token_stream.peek_next_token() != Some(&TokenKind::TemplateClose) {
+    if peek_next_kind(token_stream) != Some(TokenKind::TemplateClose) {
         return true;
     }
 
@@ -171,6 +192,26 @@ fn should_inline_template_head_reference(
     // wrapper/source plan, so copying an already-materialized template would
     // lose that plan when the surrounding template later crosses into HIR.
     !expression_contains_runtime_slot_handoff(&declaration.value, context)
+}
+
+/// Read-only next-token lookahead through a short canonical view.
+///
+/// WHAT: probes the adapter-relative token after the current head item
+/// without advancing the stream.
+/// WHY: the inline-reference check is pure lookahead; a short
+/// `DeclarationCursor` keeps that fact read-only and drops before any
+/// `FileTokens` advance or expression re-entry. Unbounded
+/// compatibility-only streams have no canonical provenance, so fall back to
+/// the explicit `peek_next_token` lane there rather than inventing a bridge.
+fn peek_next_kind(token_stream: &FileTokens) -> Option<TokenKind> {
+    DeclarationCursor::from_file_tokens(token_stream)
+        .map(|cursor| {
+            cursor
+                .position()
+                .checked_add(1)
+                .and_then(|next| cursor.token_kind_at(next))
+        })
+        .unwrap_or_else(|_| token_stream.peek_next_token().cloned())
 }
 
 fn expression_contains_runtime_slot_handoff(
@@ -814,6 +855,55 @@ fn parse_style_directive_from_spec(
 ///
 /// Early returns make the first top-level suffix span explicit.
 fn find_unseparated_control_flow_suffix(token_stream: &FileTokens) -> Option<SourceSpan> {
+    // Short-lived canonical view for this pure lookahead scan; dropped before
+    // any `FileTokens` mutation or recursive parse. Compatibility-only streams
+    // keep the checked vector lane as the documented `FileTokens` grammar
+    // boundary (fallback below).
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        return find_unseparated_control_flow_suffix_at_cursor(&cursor);
+    }
+    find_unseparated_control_flow_suffix_in_tokens(token_stream)
+}
+
+/// Cursor-view form of [`find_unseparated_control_flow_suffix`].
+fn find_unseparated_control_flow_suffix_at_cursor(
+    cursor: &DeclarationCursor,
+) -> Option<SourceSpan> {
+    let mut nesting_depth = NestingDepth::default();
+    let mut index = cursor.position().checked_add(1)?;
+
+    while index < cursor.length {
+        // A `None` kind means the canonical lane ended before the vector lane
+        // (or lost the payload); the vector fallback below replays the same
+        // adapter-relative scan rather than truncating the diagnostic.
+        let kind = cursor.token_kind_at(index);
+        let span = cursor.span_at(index);
+        let (Some(kind), Some(span)) = (kind, span) else {
+            return None;
+        };
+
+        if nesting_depth.is_top_level() {
+            match kind {
+                TokenKind::Comma | TokenKind::StartTemplateBody | TokenKind::TemplateClose => {
+                    return None;
+                }
+                TokenKind::If | TokenKind::Loop => {
+                    return Some(span);
+                }
+                _ => {}
+            }
+        }
+
+        nesting_depth.step(&kind);
+        index += 1;
+    }
+
+    None
+}
+
+fn find_unseparated_control_flow_suffix_in_tokens(
+    token_stream: &FileTokens,
+) -> Option<SourceSpan> {
     let mut nesting_depth = NestingDepth::default();
     let mut index = token_stream.index + 1;
 

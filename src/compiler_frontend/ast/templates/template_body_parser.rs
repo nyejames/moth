@@ -39,6 +39,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -809,6 +810,20 @@ fn branch_selector_and_context_from_parsed_if_header(
 }
 
 fn next_meaningful_token_is_template_close(token_stream: &FileTokens, close_index: usize) -> bool {
+    // Pure lookahead over the `[else if ...]` header region. Prefer a
+    // short-lived canonical view; fall back to the explicit compatibility
+    // vector for unbounded (`FileTokens::new_from_slice`) streams. The cursor
+    // is dropped before `parse_if_header` re-enters the stream. Indices stay
+    // adapter-relative (`FileTokens.index` coordinates).
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        if let Some(close_is_canonical) = next_meaningful_token_is_template_close_at_cursor(
+            &cursor,
+            close_index,
+        ) {
+            return close_is_canonical;
+        }
+    }
+
     let mut index = token_stream.index;
 
     while index <= close_index && index < token_stream.length {
@@ -820,6 +835,23 @@ fn next_meaningful_token_is_template_close(token_stream: &FileTokens, close_inde
     }
 
     true
+}
+
+fn next_meaningful_token_is_template_close_at_cursor(
+    cursor: &DeclarationCursor<'_>,
+    close_index: usize,
+) -> Option<bool> {
+    let mut index = cursor.position();
+
+    while index <= close_index && index < cursor.length {
+        match cursor.token_kind_at(index)? {
+            TokenKind::Newline => index += 1,
+            TokenKind::TemplateClose => return Some(true),
+            _ => return Some(false),
+        }
+    }
+
+    Some(true)
 }
 
 #[derive(Clone, Copy)]
@@ -838,10 +870,17 @@ fn tir_only_body_construction_context(
     TemplateConstructionContext::new(context.template_ir_store.clone(), span)
 }
 fn current_token_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+    // Cursor source identity wins when canonical provenance exists; the checked
+    // compatibility lane otherwise preserves `FileTokens::new` fixture spans.
+    DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_span())
+        .or_else(|| {
+            token_stream
+                .tokens
+                .get(token_stream.index)
+                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        })
 }
 
 fn body_sentinel_target<'a>(

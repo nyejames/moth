@@ -23,6 +23,8 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{CoreStyleDirectiveKind, StyleDirectiveKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -126,7 +128,7 @@ pub(super) fn parse_core_style_directive(
                 format!(
                     "Core style directive '{directive_name}' reached generic style parsing but should have been handled by slot helper dispatch."
                 ),
-                token_stream.current_span().into(),
+                core_invariant_span(token_stream),
                 ErrorType::Compiler,
             )));
         }
@@ -153,4 +155,25 @@ fn apply_markdown_style(build_state: &mut TemplateBuildState) {
 
 pub(super) fn mark_template_body_whitespace_style_controlled(build_state: &mut TemplateBuildState) {
     build_state.style.body_whitespace_policy = BodyWhitespacePolicy::StyleDirectiveControlled;
+}
+
+/// Read-only invariant span through a short canonical view.
+///
+/// WHAT: reports the current token span for the slot/insert dispatch
+/// invariant without advancing the stream.
+/// WHY: the invariant span is a pure token-local read; a short
+/// `DeclarationCursor` keeps canonical source identity and drops before any
+/// further parse. Compatibility-only streams keep the checked vector lane as
+/// the documented fallback; the current token is guaranteed at directive
+/// dispatch, so a missing entry is an invariant failure rather than a silent span.
+fn core_invariant_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_span())
+        .or_else(|| {
+            token_stream
+                .tokens
+                .get(token_stream.index)
+                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        })
 }

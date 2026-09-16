@@ -27,6 +27,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -328,7 +329,7 @@ pub(super) fn push_template_head_path_expression(
     path_fork: &mut PathInternerFork,
 ) -> HeadExpressionResult<()> {
     let value_mode = ValueMode::ImmutableOwned;
-    let source_span = Some(token_stream.current_span());
+    let source_span = path_source_span_for(token_stream);
     let expression = resolve_file_value(
         path_syntax,
         token_stream,
@@ -351,6 +352,26 @@ pub(super) fn push_template_head_path_expression(
         source_span,
         string_table,
     )
+}
+
+/// Read-only path-expression source span through a short canonical view.
+///
+/// WHAT: reports the current token span for head path diagnostics and insertion.
+/// WHY: the path span is a pure token-local read; a short `DeclarationCursor`
+/// keeps canonical source identity and drops before `resolve_file_value` re-entry.
+/// Compatibility-only streams have no canonical provenance, so the checked vector
+/// lane stays as the documented fallback; `None` surfaces only when no current
+/// token exists.
+fn path_source_span_for(token_stream: &FileTokens) -> Option<SourceSpan> {
+    DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_span())
+        .or_else(|| {
+            token_stream
+                .tokens
+                .get(token_stream.index)
+                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        })
 }
 
 fn with_source_span_error(source_span: Option<SourceSpan>, error: TemplateError) -> TemplateError {

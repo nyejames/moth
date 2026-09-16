@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveEffects,
@@ -242,11 +243,25 @@ fn normalize_provided_style_argument_value(
     }
 }
 
+/// Read-only current-token span through a short canonical view.
+///
+/// WHAT: reports the exact authored span of the handler directive token
+/// without advancing the stream.
+/// WHY: the no-argument default span is pure token-local lookahead; a short
+/// `DeclarationCursor` keeps that fact read-only and drops before the
+/// `parse_optional_parenthesized_expression` re-entry. Compatibility-only
+/// streams have no canonical provenance, so the checked vector lane stays as
+/// the documented fallback; `None` surfaces only when no current token exists.
 fn current_token_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        if let Some(span) = cursor.current_span() {
+            return Some(span);
+        }
+    }
+    token_stream
+        .tokens
+        .get(token_stream.index)
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
 }
 
 fn with_argument_span(
