@@ -35,7 +35,7 @@ This is a solo hobby project so LLMs have become vital for keeping momentum goin
 
 The speed up from LLMs in terms of actual features hasn't been that large (I would estimate around 2 - 3x max). This is because good LLM code still requires a lot of auditing and occasional redirecting when it gets confused or it becomes clear that the original brief was not the right approach or not specific enough.
 
-There is plenty of pre-alpha "good enough" scaffold code in this codebase that I've flagged to return to later and improve by hand.
+There's plenty of pre-alpha "good enough" scaffold code in this codebase that I've flagged to return to later and improve by hand.
 When the time comes for hardening and optimising, I suspect the gains from using agents will decline further.
 
 A lot of the time I would be writing the code myself is now spent staring at diffs and writing plans and documentation.
@@ -51,13 +51,13 @@ All the architecture, code organisation and design decisions around this languag
 
 ### "good" agent generated code
 
-Modern agents seem to have a lot of post-training that makes them very "productive" or "proactive". This is good for people who want to leave it alone and come back to find something roughly resembling what they think they wanted on their screen. 
+Modern agents seem to have a lot of post-training that makes them very *productive* or *proactive*. This is good for people who want to leave it alone and come back to find something roughly resembling what they think they wanted on their screen. 
 
 For more serious projects this relentlessness can cause problems. 
 
 Agents given a high-level broad goal are at high risk of introducing design drift or adding unnecessary code. But it's hard to describe intent in a detailed and bounded way.
 
-Good agent written code is produced by giving it a step-by-step strict implementation plan with all the invariants and rules laid out ahead of time. When it starts to drift, or there's something you've missed, then you stop it and steer it in the new direction. Letting them be "proactive" leads to unmaintainable code.
+Good agent written code is produced by giving it a step-by-step strict implementation plan with all the invariants and rules laid out ahead of time. When it starts to drift, or there's something you've missed, then you stop it and steer it in the new direction. Letting them be *proactive* leads to unmaintainable code.
 
 LLMs can allow focus to shift more towards higher level concerns (design / architecture / codebase hygiene) rather than making sure the borrow checker is happy. I want to think about the layout of structs or how to make the constant folding more efficient, not spend time threading a slightly changed function signature through all its call sites.
 
@@ -65,7 +65,7 @@ They're also good at reviewing and helping to structure plans.
 
 If you're writing an implementation plan for an agent to follow, then get an LLM to help you understand what's missing or confusing before you try to execute it.
 
-LLM reviewing, especially when an LLM is loaded up with all the documentation, is often very useful and a vital part of orchestrating other agents. This helps cut down on the final diff staring at least a bit. They can catch things you don't even if they can be wrong. Having an unfeeling statistics machine's report can help bypass our ego. No pleasantries required to decorate the shit-sandwich we have to give another person.
+LLM reviewing, especially when an LLM is loaded up with all the documentation, is often very useful and a vital part of orchestrating other agents. This helps cut down on the final diff staring. Agents can catch things you've missed. A cold statistics machine auditing can help bypass our ego in a way that feedback from another person can make us defensive. The pleasantry seasoning on a shit-sandwich we give to other people can be skipped.
 
 <div align="center">
     <img src="./docs/assets/tng.jpg" width="400px" border="3" alt="Q playing the trumpet in Star Trek"/>
@@ -82,11 +82,11 @@ A brilliant approach or great design insight always comes from you. Not from a l
 
 I don't think skilled developers, or writers for that matter, are going anywhere.
 
-AI can benefit people who struggle to communicate or execute on their ideas. But LLMs are also a trap for laziness when you could be focusing on developing your own unique voice or thinking for yourself.
+AI can benefit people who struggle to communicate or execute on their ideas. But LLMs are also a trap for laziness when you could be focusing on developing your own unique voice or thinking for yourself. 
+
+I also worry its a trap for avoiding learning some technical skills on a deeper level. Spending months of reading, learning and iterating yourself builds wisdom on a topic that just reviewing the final result misses. Getting AI to skip that process and get straight to the finished product gives us a dangerously easy low-effort path to take. By our own desire for quick results, we miss out on the potential insight we could have uniquely contributed by exploring and learning the skills deeply ourselves.
 
 Maybe more people than ever will start to understand the difference between a technical demo and ambitious, polished software. Polish and good UX is the remaining 90% of drawing the owl. There are still no shortcuts.
-
-I just hope the keyboard becomes our shrine for carefully considered thought rather than high volume code output.
 
 ## Slop in -> slop out
 
