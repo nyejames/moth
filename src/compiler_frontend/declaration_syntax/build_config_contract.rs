@@ -10,7 +10,8 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, BuildInputType, PrimitiveBuildInputType, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason, NumberLiteralErrorReason,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidConfigReason,
+    NumberLiteralErrorReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
@@ -409,12 +410,13 @@ pub(crate) fn parse_build_config_qualifier(
     }
 
     if token_stream.current_token_kind() != &TokenKind::Of {
+        let span = token_stream.current_span();
+        let found = match token_stream.canonical_cursor().current() {
+            Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+            None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
+        };
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::expected_token(
-                TokenKind::Of,
-                Some(token_stream.current_token_kind().to_owned()),
-                token_stream.current_span(),
-            ),
+            CompilerDiagnostic::expected_token_from_tags(TokenTag::OF, found, span),
         ));
     }
     token_stream.advance();

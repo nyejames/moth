@@ -26,13 +26,13 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateDirectiveReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -117,10 +117,13 @@ pub(crate) fn expect_directive_close_paren(token_stream: &AstCursor) -> Directiv
         return Ok(());
     }
 
-    let found = token_stream.current_token_kind().to_owned();
+    let found = match token_stream.current() {
+        Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+        None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+    };
     Err(with_current_token_span(
         token_stream,
-        CompilerDiagnostic::expected_token(TokenKind::CloseParenthesis, Some(found), None),
+        CompilerDiagnostic::expected_token_from_tags(TokenTag::CLOSE_PARENTHESIS, found, None),
     )
     .into())
 }
@@ -178,11 +181,14 @@ fn parse_single_expression_in_directive_parens(
     .map_err(TemplateError::from)?;
 
     if token_stream.current_token_kind() == &TokenKind::Comma {
-        return Err(with_current_token_span(
-            token_stream,
-            CompilerDiagnostic::unexpected_token(TokenKind::Comma, None),
-        )
-        .into());
+        let diagnostic = match token_stream.current() {
+            Some(found) => CompilerDiagnostic::unexpected_token_from_ref(found, None),
+            None => CompilerDiagnostic::unexpected_token_from_tag(
+                DiagnosticToken::from_static_tag(TokenTag::COMMA),
+                None,
+            ),
+        };
+        return Err(with_current_token_span(token_stream, diagnostic).into());
     }
 
     expect_directive_close_paren(token_stream)?;
@@ -230,13 +236,15 @@ pub(crate) fn parse_required_parenthesized_expression(
     path_fork: &mut PathInternerFork,
 ) -> DirectiveArgsResult<Expression> {
     if !directive_has_arguments(token_stream) {
+        let found = Some(
+            token_stream
+                .current()
+                .map(DiagnosticToken::from_token_ref)
+                .unwrap_or_else(|| DiagnosticToken::from(token_stream.current_token_kind())),
+        );
         return Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::expected_token(
-                TokenKind::OpenParenthesis,
-                Some(token_stream.current_token_kind().to_owned()),
-                None,
-            ),
+            CompilerDiagnostic::expected_token_from_tags(TokenTag::OPEN_PARENTHESIS, found, None),
         )
         .into());
     }
@@ -340,13 +348,15 @@ pub(crate) fn parse_required_slot_name_argument(
     token_stream: &mut AstCursor,
 ) -> DirectiveArgsResult<StringId> {
     if !directive_has_arguments(token_stream) {
+        let found = Some(
+            token_stream
+                .current()
+                .map(DiagnosticToken::from_token_ref)
+                .unwrap_or_else(|| DiagnosticToken::from(token_stream.current_token_kind())),
+        );
         return Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::expected_token(
-                TokenKind::OpenParenthesis,
-                Some(token_stream.current_token_kind().to_owned()),
-                None,
-            ),
+            CompilerDiagnostic::expected_token_from_tags(TokenTag::OPEN_PARENTHESIS, found, None),
         )
         .into());
     }

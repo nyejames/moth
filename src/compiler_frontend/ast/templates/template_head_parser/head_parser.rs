@@ -37,14 +37,15 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::ast_log;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidTemplateDirectiveReason,
+    InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -321,11 +322,15 @@ pub fn parse_template_head(
             }
 
             if token != TokenKind::Comma {
+                let found = match token_stream.current() {
+                    Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+                    None => Some(DiagnosticToken::from(token)),
+                };
                 return Err(with_current_token_span(
                     token_stream,
-                    CompilerDiagnostic::expected_token(
-                        TokenKind::Comma,
-                        Some(token),
+                    CompilerDiagnostic::expected_token_from_tags(
+                        TokenTag::COMMA,
+                        found,
                         current_source_span(token_stream),
                     ),
                 )
@@ -539,14 +544,16 @@ pub fn parse_template_head(
                     defer_comma_advance = true;
                     apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
                 } else {
-                    return Err(with_current_token_span(
-                        token_stream,
-                        CompilerDiagnostic::unexpected_token(
-                            TokenKind::This,
-                            current_source_span(token_stream),
+                    let found = token_stream.current();
+                    let span = current_source_span(token_stream);
+                    let diagnostic = match found {
+                        Some(found) => CompilerDiagnostic::unexpected_token_from_ref(found, span),
+                        None => CompilerDiagnostic::unexpected_token_from_tag(
+                            DiagnosticToken::from_static_tag(TokenTag::THIS),
+                            span,
                         ),
-                    )
-                    .into());
+                    };
+                    return Err(with_current_token_span(token_stream, diagnostic).into());
                 }
             }
 
@@ -692,14 +699,16 @@ pub fn parse_template_head(
             // Separators
             TokenKind::Comma => {
                 // Multiple commas in succession.
-                return Err(with_current_token_span(
-                    token_stream,
-                    CompilerDiagnostic::unexpected_token(
-                        TokenKind::Comma,
-                        current_source_span(token_stream),
+                let found = token_stream.current();
+                let span = current_source_span(token_stream);
+                let diagnostic = match found {
+                    Some(found) => CompilerDiagnostic::unexpected_token_from_ref(found, span),
+                    None => CompilerDiagnostic::unexpected_token_from_tag(
+                        DiagnosticToken::from_static_tag(TokenTag::COMMA),
+                        span,
                     ),
-                )
-                .into());
+                };
+                return Err(with_current_token_span(token_stream, diagnostic).into());
             }
 
             // Newlines / empty things in the template head are ignored.
@@ -710,11 +719,16 @@ pub fn parse_template_head(
             }
 
             _ => {
-                return Err(with_current_token_span(
-                    token_stream,
-                    CompilerDiagnostic::unexpected_token(token, current_source_span(token_stream)),
-                )
-                .into());
+                let span = current_source_span(token_stream);
+                let found = token_stream.current();
+                let diagnostic = match found {
+                    Some(found) => CompilerDiagnostic::unexpected_token_from_ref(found, span),
+                    None => CompilerDiagnostic::unexpected_token_from_tag(
+                        DiagnosticToken::from(token),
+                        span,
+                    ),
+                };
+                return Err(with_current_token_span(token_stream, diagnostic).into());
             }
         }
 

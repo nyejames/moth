@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
@@ -61,6 +61,7 @@ pub(super) fn parse_reactive_subscription(
     }
 
     token_stream.advance();
+    let source_token = token_stream.current();
     let source_name = match token_stream.current_token_kind() {
         TokenKind::CloseParenthesis => {
             return Err(with_current_token_span(
@@ -106,10 +107,13 @@ pub(super) fn parse_reactive_subscription(
     }
 
     let Some(reference) = context.get_reference(&source_name) else {
+        let found = source_token
+            .map(DiagnosticToken::from_token_ref)
+            .unwrap_or_else(|| DiagnosticToken::from(TokenKind::Symbol(source_name)));
         return Err(with_token_span(
             token_stream,
             source_token_span,
-            CompilerDiagnostic::unexpected_token(TokenKind::Symbol(source_name), source_span),
+            CompilerDiagnostic::unexpected_token_from_tag(found, source_span),
         )
         .into());
     };

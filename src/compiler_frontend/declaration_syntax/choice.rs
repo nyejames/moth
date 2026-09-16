@@ -173,9 +173,8 @@ pub(crate) fn parse_choice_shell(
     loop {
         token_stream.skip_newlines();
         let current_span = current_source_span(token_stream);
-        let current_token = token_stream.current_token_kind().to_owned();
 
-        match current_token {
+        match token_stream.current_token_kind() {
             TokenKind::Must | TokenKind::TraitThis => {
                 let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                     token_stream.current_token_kind(),
@@ -188,6 +187,7 @@ pub(crate) fn parse_choice_shell(
             }
 
             TokenKind::Symbol(variant_name) => {
+                let variant_name = *variant_name;
                 ensure_not_keyword_shadow_identifier(variant_name, current_span, string_table)?;
 
                 // Make sure this is not a duplicate variant name.
@@ -437,9 +437,11 @@ pub(crate) fn parse_choice_shell(
                 .into());
             }
             _ => {
-                return Err(
-                    CompilerDiagnostic::unexpected_token(current_token, current_span).into(),
-                );
+                let span = current_source_span(token_stream);
+                let Some(found) = token_stream.canonical_cursor().current() else {
+                    return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
+                };
+                return Err(CompilerDiagnostic::unexpected_token_from_ref(found, span).into());
             }
         }
     }

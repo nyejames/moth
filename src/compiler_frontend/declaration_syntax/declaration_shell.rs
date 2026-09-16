@@ -11,7 +11,7 @@
 
 use super::DeclarationCursor;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidDeclarationReason,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -25,7 +25,7 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::{
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::{
     TokenScanFailure, collect_declaration_initializer_range,
 };
@@ -147,12 +147,13 @@ pub fn parse_declaration_syntax(
             ));
         }
         _ => {
+            let span = current_source_span(token_stream);
+            let found = match token_stream.canonical_cursor().current() {
+                Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+                None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
+            };
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::expected_token(
-                    TokenKind::Assign,
-                    Some(token_stream.current_token_kind().to_owned()),
-                    current_source_span(token_stream),
-                ),
+                CompilerDiagnostic::expected_token_from_tags(TokenTag::ASSIGN, found, span),
             ));
         }
     }
