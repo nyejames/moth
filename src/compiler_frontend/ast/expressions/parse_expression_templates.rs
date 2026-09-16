@@ -20,7 +20,8 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 // WHAT: parses a template literal and optionally folds it to a string slice expression.
@@ -28,7 +29,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 //      comments). This function decides whether the template stays a runtime value or can be
 //      folded at compile time.
 pub(super) fn parse_template_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     consume_closing_parenthesis: bool,
@@ -41,6 +42,7 @@ pub(super) fn parse_template_expression(
     let template = if context.kind.is_constant_context() {
         Template::new_const_required_with_type_interner(
             token_stream,
+            context.scope,
             &template_context,
             type_interner,
             vec![],
@@ -54,6 +56,7 @@ pub(super) fn parse_template_expression(
     } else {
         Template::new_with_type_interner(
             token_stream,
+            context.scope,
             &template_context,
             type_interner,
             vec![],
@@ -169,7 +172,7 @@ pub(super) fn parse_template_expression(
 }
 
 // Consume a trailing `)` when requested and one is present.
-fn maybe_consume_closing_parenthesis(token_stream: &mut FileTokens, should_consume: bool) {
+fn maybe_consume_closing_parenthesis(token_stream: &mut AstCursor, should_consume: bool) {
     if should_consume && token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
         token_stream.advance();
     }

@@ -33,7 +33,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalConstantValue;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[allow(
@@ -41,7 +42,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
     reason = "identifier parsing keeps the token stream, scope, mutable rpn/interner/string/path state, and the catch and evidence policy flags as separate borrows"
 )]
 pub(super) fn parse_identifier_or_call(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression: &mut Vec<ExpressionRpnItem>,
@@ -469,7 +470,7 @@ pub(super) fn parse_identifier_or_call(
 /// WHY: `this` is a reserved keyword token, not an ordinary identifier, so it needs its own
 /// parse path, but semantically it behaves like any other parameter reference.
 fn parse_this_reference(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression: &mut Vec<ExpressionRpnItem>,

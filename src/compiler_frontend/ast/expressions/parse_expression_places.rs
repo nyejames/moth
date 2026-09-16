@@ -27,11 +27,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 pub(super) struct ParsedCopyPlace {
     pub(super) place: PlaceExpression,
@@ -43,7 +43,7 @@ pub(super) struct ParsedCopyPlace {
 // WHY: mutable receiver syntax is a distinct place expression that must resolve to a field-access
 //      chain so the backend can pass the receiver by mutable reference.
 pub(super) fn parse_mutable_receiver_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression: &mut Vec<ExpressionRpnItem>,
@@ -51,18 +51,7 @@ pub(super) fn parse_mutable_receiver_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    // Short-lived canonical view for this token-local marker span; dropped before the
-    // grammar advance and field-access handoff. `current_token` stays the documented
-    // FileTokens grammar boundary (fallback below).
-    let marker_span = DeclarationCursor::from_file_tokens(&*token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_postfix_operator_span())
-        .or_else(|| {
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ))
-        });
+    let marker_span = Some(token_stream.current_postfix_operator_span());
     token_stream.advance();
 
     let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
@@ -145,7 +134,7 @@ pub(super) fn parse_mutable_receiver_expression(
 // WHY: `copy` clones the current stored value at a place; arbitrary expressions do not have
 //      stable storage, so the parser restricts this to names and parenthesized places.
 pub(super) fn parse_copy_place_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -161,7 +150,7 @@ pub(super) fn parse_copy_place_expression(
 }
 
 fn parse_copy_place_payload(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -242,7 +231,7 @@ fn parse_copy_place_payload(
                 );
                 token_stream.advance();
 
-                let copied_expression = if token_stream.index < token_stream.length
+                let copied_expression = if token_stream.position() < token_stream.length()
                     && token_stream.current_token_kind() == &TokenKind::Dot
                 {
                     parse_postfix_chain_expression(
@@ -408,17 +397,6 @@ pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expre
     expression
 }
 
-fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    // Short-lived canonical view for this token-local span; dropped before any
-    // FileTokens use. `current_token` stays the documented FileTokens grammar
-    // boundary (fallback below).
-    DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_postfix_operator_span())
-        .or_else(|| {
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ))
-        })
+fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }

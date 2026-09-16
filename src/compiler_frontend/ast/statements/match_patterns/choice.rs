@@ -7,18 +7,18 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 use rustc_hash::FxHashMap;
 
@@ -39,7 +39,7 @@ type ChoicePatternResult<T> = Result<T, ExpressionParseError>;
 /// WHY: later lowering uses the stable variant index in `HirPattern::ChoiceVariant`,
 /// while payload captures are materialized separately at arm entry.
 pub fn parse_choice_variant_pattern(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     choice_nominal_path: &PathId,
     variants: &[ChoiceVariant],
@@ -97,7 +97,7 @@ pub fn parse_choice_variant_pattern(
 }
 
 fn parse_choice_pattern_captures(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     variant: &ChoiceVariant,
     _choice_name_display: &str,
     string_table: &StringTable,
@@ -324,7 +324,7 @@ fn choice_payload_field_name(
 /// WHY: separating token-level parsing from tag resolution keeps each function focused
 /// and makes error messages specific to the syntactic layer they diagnose.
 fn parse_variant_name(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     choice_nominal_path: &PathId,
     _choice_name_display: &str,
@@ -435,16 +435,8 @@ fn resolve_variant_to_tag(
 
     Ok(variant_index)
 }
-fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_span())
-        .or_else(|| {
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ))
-        })
+fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }
 fn choice_display_name(
     choice_nominal_path: &PathId,

@@ -6,6 +6,7 @@
 //! without adding a second nominal-type system just for headers.
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use std::sync::Arc;
 
 use crate::compiler_frontend::ast::generic_functions::{
@@ -133,7 +134,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .environment_header_scope(header, string_table)
                     .with_file_visibility(Arc::clone(&visibility))
                     .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
-                let source_owner = self
+                let file_owner = self
                     .source_token_streams
                     .get(&header.tokens.source())
                     .ok_or_else(|| {
@@ -144,12 +145,37 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             string_table,
                         )
                     })?;
+                // Live parser state stays on the canonical source owner. The transient
+                // cursor spans the full canonical source so nested default ranges stay
+                // inside its bounds for this signature parse only. `from_file_tokens_range`
+                // retains the canonical owner for later bounded expression handoffs.
+                let full = file_owner
+                    .canonical_source_tokens()
+                    .map_err(|error| self.error_messages(error, string_table))?
+                    .full_range()
+                    .map_err(|error| {
+                        self.error_messages(
+                            CompilerError::compiler_error(format!(
+                                "function header source range could not be constructed: {error:?}"
+                            )),
+                            string_table,
+                        )
+                    })?;
+                let source_owner =
+                    AstCursor::from_file_tokens_range(file_owner, full).map_err(|error| {
+                        self.error_messages(
+                            CompilerError::compiler_error(format!(
+                                "function header source range is outside its source owner: {error:?}"
+                            )),
+                            string_table,
+                        )
+                    })?;
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
                 let signature = function_signature_from_syntax_with_unresolved_types(
                     signature,
-                    source_owner.as_ref(),
+                    &source_owner,
                     &signature_context,
                     &mut type_interner,
                     string_table,

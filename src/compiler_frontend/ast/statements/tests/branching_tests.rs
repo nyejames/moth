@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, Operator,
 };
@@ -1000,7 +1001,9 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
     }
     assert_eq!(tokens.current_token_kind(), &TokenKind::If);
     tokens.advance();
-    classify_if_header(&tokens).shape
+    let cursor = AstCursor::from_file_tokens(&mut tokens)
+        .expect("test token stream must expose an AST cursor");
+    classify_if_header(&cursor).shape
 }
 
 #[test]
@@ -1064,7 +1067,9 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
             tokens.advance();
         }
         tokens.advance();
-        classify_if_header(&tokens)
+        let cursor = AstCursor::from_file_tokens(&mut tokens)
+            .expect("test token stream must expose an AST cursor");
+        classify_if_header(&cursor)
     };
 
     assert_eq!(

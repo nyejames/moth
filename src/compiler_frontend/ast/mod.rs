@@ -35,6 +35,7 @@
 // `module_ast` contains the environment, emission, finalization, and scope-context helpers that
 // implement the AST pipeline. The rest of the AST surface is split by concern
 // (expressions, statements, templates, field access, etc.).
+pub(crate) mod cursor;
 pub(crate) mod ast_nodes;
 pub(crate) mod const_eval;
 pub(crate) mod const_values;
@@ -179,7 +180,7 @@ use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
@@ -497,7 +498,7 @@ impl AstHeaderCounterSnapshot {
 // WHY: callers should import one obvious `ast`-root function while detailed statement parsing
 // lives in focused helper modules.
 pub(crate) fn function_body_to_ast(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,

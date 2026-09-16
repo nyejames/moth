@@ -23,19 +23,18 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{CoreStyleDirectiveKind, StyleDirectiveKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 /// Typed result for the connected core-directive family.
 type CoreDirectiveResult<T> = Result<T, TemplateError>;
 
 pub(super) fn maybe_parse_slot_or_insert_helper_directive(
     directive_kind: &StyleDirectiveKind,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     build_state: &mut TemplateBuildState,
     string_table: &mut StringTable,
 ) -> CoreDirectiveResult<bool> {
@@ -67,7 +66,7 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
     reason = "core directive parsing keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and kind as separate borrows"
 )]
 pub(super) fn parse_core_style_directive(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     build_state: &mut TemplateBuildState,
@@ -157,23 +156,11 @@ pub(super) fn mark_template_body_whitespace_style_controlled(build_state: &mut T
     build_state.style.body_whitespace_policy = BodyWhitespacePolicy::StyleDirectiveControlled;
 }
 
-/// Read-only invariant span through a short canonical view.
+/// Read-only invariant span on the canonical cursor view.
 ///
 /// WHAT: reports the current token span for the slot/insert dispatch
 /// invariant without advancing the stream.
-/// WHY: the invariant span is a pure token-local read; a short
-/// `DeclarationCursor` keeps canonical source identity and drops before any
-/// further parse. Compatibility-only streams keep the checked vector lane as
-/// the documented fallback; the current token is guaranteed at directive
-/// dispatch, so a missing entry is an invariant failure rather than a silent span.
-fn core_invariant_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_span())
-        .or_else(|| {
-            token_stream
-                .tokens
-                .get(token_stream.index)
-                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-        })
+/// WHY: the invariant span is a pure token-local read.
+fn core_invariant_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }

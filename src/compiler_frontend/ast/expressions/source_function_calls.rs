@@ -21,11 +21,11 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidGenericInstantiationReason,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Input bundle for source callable member parsing.
 ///
@@ -33,8 +33,8 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 /// whether generic or non-generic.
 /// WHY: avoids threading a long argument list through both bare-identifier and
 /// namespace-member call sites.
-pub(super) struct SourceCallableMemberInput<'a, 'env> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct SourceCallableMemberInput<'a, 'env, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) function_path: &'a PathId,
     pub(super) signature: &'a FunctionSignature,
     pub(super) generic_template: Option<&'a GenericFunctionTemplate>,
@@ -58,7 +58,7 @@ pub(super) struct SourceCallableMemberInput<'a, 'env> {
 /// WHY: both bare identifier and namespace member access share this path, so
 /// keeping it in one place guarantees consistent behavior.
 pub(super) fn parse_source_callable_member(
-    input: SourceCallableMemberInput<'_, '_>,
+    input: SourceCallableMemberInput<'_, '_, '_>,
 ) -> Result<(), ExpressionParseError> {
     let SourceCallableMemberInput {
         token_stream,
@@ -90,22 +90,9 @@ pub(super) fn parse_source_callable_member(
             // Reject the known foreign spellings before they can be interpreted as
             // generic function values, comparisons, or templates.
             Some(TokenKind::Of | TokenKind::LessThan | TokenKind::TemplateHead) => {
-                // Pure lookahead: read the offending follower span through a short
-                // canonical view; fall back to the explicit lane only when the
-                // unbounded compatibility stream has no canonical provenance.
-                let cursor_span = DeclarationCursor::from_file_tokens(token_stream)
-                    .ok()
-                    .and_then(|cursor| {
-                        cursor
-                            .position()
-                            .checked_add(1)
-                            .and_then(|next| cursor.span_at(next))
-                    });
-                let fallback_span = token_stream
-                    .tokens
-                    .get(token_stream.index.saturating_add(1))
-                    .map(|token| SourceSpan::new(token_stream.file_id, token.span));
-                let explicit_syntax_span = cursor_span.or(fallback_span).or(call_span);
+                // Pure lookahead: read the offending follower span through the cursor view.
+                let follower_span = token_stream.span_at(token_stream.position().saturating_add(1));
+                let explicit_syntax_span = follower_span.or(call_span);
 
                 return Err(with_generic_primary_span(
                     explicit_generic_call_type_arguments_error(visible_name, explicit_syntax_span),

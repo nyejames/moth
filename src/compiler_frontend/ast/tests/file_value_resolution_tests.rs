@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::const_values::store::{
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{
@@ -709,9 +710,11 @@ fn resolve_file_value_fixture(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let cursor = AstCursor::from_file_tokens(&mut token_stream)
+        .expect("test token stream must expose an AST cursor");
     let expression = resolve_file_value(
         path_syntax,
-        &token_stream,
+        &cursor,
         &context,
         &type_interner,
         &ValueMode::ImmutableOwned,

@@ -4,6 +4,7 @@
 //! including multibyte source, rather than reconstructing line/column data.
 
 use super::{UnexpectedScopeCloseContext, unexpected_scope_close, unexpected_statement_token};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidStatementPositionReason,
 };
@@ -33,14 +34,14 @@ fn move_to_token(tokens: &mut FileTokens, kind: TokenKind) {
         .position(|token| token.kind == kind)
         .expect("statement diagnostic fixture should contain the requested token");
 }
-
 #[test]
 fn unexpected_statement_token_retains_exact_multibyte_span() {
     let (mut tokens, mut string_table) = tokenize_source("value = \"é\"\n,\n");
     move_to_token(&mut tokens, TokenKind::Comma);
     let token_span = tokens.current_token().span;
-
-    let diagnostic = unexpected_statement_token(&tokens, &mut string_table);
+    let cursor = AstCursor::from_file_tokens(&mut tokens)
+        .expect("test token stream must expose an AST cursor");
+    let diagnostic = unexpected_statement_token(&cursor, &mut string_table);
 
     assert!(matches!(
         diagnostic.payload,
@@ -53,14 +54,14 @@ fn unexpected_statement_token_retains_exact_multibyte_span() {
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, token_span))
     );
 }
-
 #[test]
 fn unexpected_scope_close_retains_exact_multibyte_span() {
     let (mut tokens, _string_table) = tokenize_source("value = \"é\";\n");
     move_to_token(&mut tokens, TokenKind::End);
     let token_span = tokens.current_token().span;
-
-    let diagnostic = unexpected_scope_close(UnexpectedScopeCloseContext::Expression, &tokens);
+    let cursor = AstCursor::from_file_tokens(&mut tokens)
+        .expect("test token stream must expose an AST cursor");
+    let diagnostic = unexpected_scope_close(UnexpectedScopeCloseContext::Expression, &cursor);
 
     assert!(matches!(
         diagnostic.payload,

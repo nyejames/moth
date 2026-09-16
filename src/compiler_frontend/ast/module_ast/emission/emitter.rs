@@ -12,6 +12,7 @@
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::{
@@ -831,18 +832,28 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context.expected_result_type_ids = expected_result_type_ids;
         context.expected_error_type = signature.error_return_type_id();
         context.set_local_declarations(signature.parameters.to_owned(), &*self.path_fork);
-
         // --------------------------
         //  Parse body and materialize nested instances
         // --------------------------
         token_stream.src_path = request.instance_path;
+        let remapped = body.uses_remapped_adapter();
+        let mut compat_cursor;
+        let mut canonical_cursor;
+        let body_cursor = if remapped {
+            compat_cursor = AstCursor::from_file_tokens_compatibility(&mut token_stream);
+            &mut compat_cursor
+        } else {
+            canonical_cursor = AstCursor::from_file_tokens(&mut token_stream)
+                .map_err(|error| self.error_messages(error, string_table))?;
+            &mut canonical_cursor
+        };
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let warning_start = self.warnings.len();
         let body = match function_body_to_ast(
-            &mut token_stream,
+            body_cursor,
             context,
             &mut type_interner,
             &mut self.warnings,
@@ -1061,13 +1072,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .body_parser_stream(&header)
             .map_err(|error| self.error_messages(error, string_table))?;
         let function_scope = context.scope;
-
+        let mut body_cursor = AstCursor::from_file_tokens(&mut token_stream)
+            .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let body_result = function_body_to_ast(
-            &mut token_stream,
+            &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.warnings,
@@ -1118,13 +1130,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .body_parser_stream(&header)
             .map_err(|error| self.error_messages(error, string_table))?;
         let start_scope = context.scope;
-
+        let start_src_path = token_stream.src_path;
+        let mut body_cursor = AstCursor::from_file_tokens(&mut token_stream)
+            .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let body_result = function_body_to_ast(
-            &mut token_stream,
+            &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.warnings,
@@ -1137,11 +1151,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         // --------------------------
         //  Synthesize implicit start signature and emit node
-        // --------------------------
         let full_name = self
             .path_fork
             .try_intern_child(
-                token_stream.src_path,
+                start_src_path,
                 string_table.intern(IMPLICIT_START_FUNC_NAME),
             )
             .expect("path table exhausted while creating implicit start function path");
@@ -1222,12 +1235,16 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context: &ScopeContext,
         string_table: &mut StringTable,
     ) -> Result<PreparedTemplateConstruction, CompilerMessages> {
+        let source_path = context.scope;
+        let mut template_cursor = AstCursor::from_file_tokens(template_tokens)
+            .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let template_result = Template::new_const_required_with_type_interner(
-            template_tokens,
+            &mut template_cursor,
+            source_path,
             context,
             &mut type_interner,
             vec![],

@@ -27,7 +27,8 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement,
 };
@@ -58,7 +59,7 @@ fn fallible_receiver_result_type_ids(
 pub(super) fn receiver_result_type_ids_for_call(
     success_return_type_ids: Vec<TypeId>,
     error_return_type_id: Option<TypeId>,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     type_interner: &mut AstTypeInterner<'_>,
 ) -> Result<Vec<TypeId>, ExpressionParseError> {
     if let Some(error_return_type_id) = error_return_type_id {

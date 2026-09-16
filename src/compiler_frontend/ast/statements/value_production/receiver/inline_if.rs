@@ -25,7 +25,7 @@ type InlineIfResult<T> = Result<T, ExpressionParseError>;
 /// WHY: kept separate from inline match so it does not know about option/choice
 /// single-predicate matching.
 pub(super) fn parse_inline_value_if(
-    input: ValueIfParseInput<'_, '_>,
+    input: ValueIfParseInput<'_, '_, '_>,
 ) -> InlineIfResult<ParsedReceiverValue> {
     let ValueIfParseInput {
         token_stream,

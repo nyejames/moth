@@ -19,7 +19,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveEffects,
@@ -27,7 +27,6 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// Typed result shared by handler-directive parsing helpers.
 type HandlerDirectiveResult<T> = Result<T, TemplateError>;
 
@@ -41,7 +40,7 @@ struct ParsedHandlerDirectiveArgument {
     reason = "handler directive application keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and handler spec as separate borrows"
 )]
 pub(super) fn apply_handler_style_directive(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     build_state: &mut TemplateBuildState,
@@ -104,7 +103,7 @@ fn apply_style_directive_effects(
 /// accepts one. Early exits keep the no-argument and invalid-argument cases
 /// explicit.
 fn parse_optional_handler_style_argument(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     directive_name: &str,
@@ -243,25 +242,13 @@ fn normalize_provided_style_argument_value(
     }
 }
 
-/// Read-only current-token span through a short canonical view.
+/// Read-only current-token span on the canonical cursor view.
 ///
 /// WHAT: reports the exact authored span of the handler directive token
 /// without advancing the stream.
-/// WHY: the no-argument default span is pure token-local lookahead; a short
-/// `DeclarationCursor` keeps that fact read-only and drops before the
-/// `parse_optional_parenthesized_expression` re-entry. Compatibility-only
-/// streams have no canonical provenance, so the checked vector lane stays as
-/// the documented fallback; `None` surfaces only when no current token exists.
-fn current_token_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        if let Some(span) = cursor.current_span() {
-            return Some(span);
-        }
-    }
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+/// WHY: the no-argument default span is pure token-local lookahead.
+fn current_token_source_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }
 
 fn with_argument_span(

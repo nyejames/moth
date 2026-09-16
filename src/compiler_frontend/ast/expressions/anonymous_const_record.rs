@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    parse_build_config_qualifier, starts_build_config_qualifier,
+    parse_build_config_qualifier, starts_build_config_qualifier_at_cursor,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -25,7 +25,8 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -68,27 +69,10 @@ pub(crate) fn pipe_opens_value_record(
     )
 }
 
-fn looks_like_nested_record_literal(tokens: &[Token], pipe_index: usize) -> bool {
-    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
-    let skip_newlines = |mut cursor: usize| {
-        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
-            cursor += 1;
-        }
-        cursor
-    };
-
-    let cursor = skip_newlines(pipe_index + 1);
-    if matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket)) {
-        return true;
-    }
-
-    pipe_opens_value_record(tokens, pipe_index, false)
-}
-
-/// Cursor-view form of [`looks_like_nested_record_literal`] for expression-window scans.
+/// Cursor-view form of the shared struct-shell/record dispatch for expression-window scans.
 ///
-/// WHAT: reads the same newline-tolerant `|`, `name`, `=`, `,` facts through a short-lived
-/// canonical [`DeclarationCursor`] view instead of the parser compatibility vector.
+/// WHAT: reads the same newline-tolerant `|`, `name`, `=`, `,` facts through the
+/// canonical cursor view.
 /// WHY: expression field-value checks need only token-local facts; keeping the slice helper
 /// preserves the shared struct-shell grammar boundary owned with `declarations.rs`.
 fn looks_like_nested_record_literal_at_cursor(
@@ -139,7 +123,7 @@ fn looks_like_nested_record_literal_at_cursor(
 /// WHY: this is the single anonymous-record grammar owner. Struct shells (`field Type`),
 /// choice payloads and signature member lists keep their own parsers.
 pub(super) fn parse_anonymous_const_record_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -246,7 +230,7 @@ pub(super) fn parse_anonymous_const_record_expression(
 )]
 fn parse_record_field(
     field_name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     fields: &mut Vec<Declaration>,
@@ -269,16 +253,18 @@ fn parse_record_field(
     seen_field_names.insert(field_name, binding_span);
     token_stream.advance(); // past the field name
 
-    let mut qualifier = if starts_build_config_qualifier(token_stream, string_table) {
-        let mut declaration_cursor = DeclarationCursor::from_file_tokens(token_stream)?;
-        let qualifier = parse_build_config_qualifier(&mut declaration_cursor, string_table, None)?;
-        let next_index =
-            token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-        drop(declaration_cursor);
-        token_stream.index = next_index;
-        Some(qualifier)
-    } else {
-        None
+    let mut qualifier = {
+        let mut declaration_cursor = token_stream.declaration_cursor()?;
+        if !starts_build_config_qualifier_at_cursor(&declaration_cursor, string_table) {
+            None
+        } else {
+            let qualifier =
+                parse_build_config_qualifier(&mut declaration_cursor, string_table, None)?;
+            let next_index = declaration_cursor.position();
+            drop(declaration_cursor);
+            token_stream.set_position(next_index)?;
+            Some(qualifier)
+        }
     };
     let has_initializer = token_stream.current_token_kind() == &TokenKind::Assign;
     if !has_initializer && qualifier.is_none() {
@@ -307,17 +293,14 @@ fn parse_record_field(
         }
 
         if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
-            // Short-lived canonical view for this token-local nested-record fact; dropped
-            // before any FileTokens mutation. Bounded adapters keep the legacy vector
-            // helper as the documented grammar boundary (fallback below).
-            let nested = match DeclarationCursor::from_file_tokens(&*token_stream) {
-                Ok(cursor) => {
+            // Nested `|...|` values are rejected; the nested-record fact is token-local
+            // lookahead through the canonical cursor position.
+            let nested = token_stream
+                .declaration_cursor()
+                .map(|cursor| {
                     looks_like_nested_record_literal_at_cursor(&cursor, cursor.position())
-                }
-                Err(_) => {
-                    looks_like_nested_record_literal(&token_stream.tokens, token_stream.index)
-                }
-            };
+                })
+                .unwrap_or(false);
             if nested {
                 return Err(CompilerDiagnostic::invalid_expression(
                     InvalidExpressionReason::NestedAnonymousConstRecord,
@@ -386,7 +369,7 @@ fn parse_record_field(
 /// `|...|` literals are rejected so each record is a single pipe-delimited region.
 /// WHY: inner records are separate declarations; the field then names that binding.
 fn parse_record_field_value(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -418,7 +401,7 @@ fn finish_record(
 
 fn unexpected_record_end(
     string_table: &mut StringTable,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> ExpressionParseError {
     CompilerDiagnostic::unexpected_end_of_file(
         Some(string_table.intern("|")),
@@ -427,17 +410,7 @@ fn unexpected_record_end(
     .into()
 }
 
-fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    // Short-lived canonical view for this token-local record span; dropped before any
-    // FileTokens mutation. `current_token` stays the documented FileTokens grammar
-    // boundary (fallback below).
-    DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_postfix_operator_span())
-        .or_else(|| {
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ))
-        })
+fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    // Record spans are token-local facts on the canonical cursor view.
+    Some(token_stream.current_span())
 }

@@ -7,6 +7,7 @@
 //! guarantee before trait bounds exist.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
@@ -55,19 +56,29 @@ pub(crate) fn validate_generic_function_body(
 
     context.generic_template_validation = true;
 
-    let mut token_stream = template
-        .body_tokens
-        .as_ref()
-        .ok_or_else(|| {
-            ExpressionParseError::Infrastructure(Box::new(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                    "declaring-module generic validation requires retained body syntax",
-                ),
-            ))
-        })?
-        .parser_stream(string_table, path_fork)?;
+    let Some(body) = template.body_tokens.as_ref() else {
+        return Err(ExpressionParseError::Infrastructure(Box::new(
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "declaring-module generic validation requires retained body syntax",
+            ),
+        )));
+    };
+    let remapped = body.uses_remapped_adapter();
+    let mut token_stream = body.parser_stream(string_table, path_fork)?;
+    if remapped {
+        let mut body_cursor = AstCursor::from_file_tokens_compatibility(&mut token_stream);
+        return function_body_to_ast(
+            &mut body_cursor,
+            context,
+            type_interner,
+            warnings,
+            string_table,
+            path_fork,
+        );
+    }
+    let mut body_cursor = AstCursor::from_file_tokens(&mut token_stream)?;
     function_body_to_ast(
-        &mut token_stream,
+        &mut body_cursor,
         context,
         type_interner,
         warnings,

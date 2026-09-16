@@ -6,6 +6,7 @@
 //!      construction, and ensures all statement-position errors emit structured
 //!      `CompilerDiagnostic` records instead of legacy `CompilerError`.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword, reserved_trait_keyword_error,
 };
@@ -13,11 +14,11 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidStatementPositionReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Attach the exact authored range of the current token when this stream has a source identity.
 fn with_current_token_span(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
@@ -33,7 +34,7 @@ fn with_current_token_span(
 /// WHY: centralizes the decision about which constructor to use so the dispatch
 ///      loop stays readable.
 pub(crate) fn unexpected_statement_token(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     _string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let token_kind = token_stream.current_token_kind();
@@ -112,7 +113,7 @@ pub(crate) enum UnexpectedScopeCloseContext {
 ///       `End` inside them needs a targeted explanation.
 pub(crate) fn unexpected_scope_close(
     context: UnexpectedScopeCloseContext,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> CompilerDiagnostic {
     let reason = match context {
         UnexpectedScopeCloseContext::Expression => {

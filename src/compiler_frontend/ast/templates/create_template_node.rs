@@ -48,14 +48,13 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 #[cfg(test)]
 use crate::compiler_frontend::{
     datatypes::environment::TypeEnvironment, type_coercion::compatibility::TypeCompatibilityCache,
@@ -97,7 +96,8 @@ impl Template {
     /// 4. Formatting — style-directed body formatting
     /// 5. Validation — directive-owned warnings and slot insertion checks
     pub(crate) fn new_with_type_interner(
-        token_stream: &mut FileTokens,
+        token_stream: &mut AstCursor<'_>,
+        source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
@@ -105,9 +105,10 @@ impl Template {
         path_fork: &mut PathInternerFork,
     ) -> TemplateConstructionResult {
         let default_style =
-            default_nested_style_for_source_path(token_stream, string_table, path_fork);
+            default_nested_style_for_source_path(source_path, string_table, path_fork);
         let construction = Self::new_nested_template(
             token_stream,
+            source_path,
             context,
             type_interner,
             direct_child_wrappers,
@@ -125,7 +126,8 @@ impl Template {
     /// folding can select branches and produce source diagnostics before the
     /// template reaches runtime lowering.
     pub(crate) fn new_const_required_with_type_interner(
-        token_stream: &mut FileTokens,
+        token_stream: &mut AstCursor<'_>,
+        source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
@@ -133,9 +135,10 @@ impl Template {
         path_fork: &mut PathInternerFork,
     ) -> PreparedTemplateConstructionResult {
         let default_style =
-            default_nested_style_for_source_path(token_stream, string_table, path_fork);
+            default_nested_style_for_source_path(source_path, string_table, path_fork);
         Self::new_nested_template(
             token_stream,
+            source_path,
             context,
             type_interner,
             direct_child_wrappers,
@@ -147,7 +150,8 @@ impl Template {
 
     #[cfg(test)]
     pub(crate) fn new(
-        token_stream: &mut FileTokens,
+        token_stream: &mut AstCursor<'_>,
+        source_path: PathId,
         context: &ScopeContext,
         templates_inherited: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
@@ -159,6 +163,7 @@ impl Template {
             AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
         Self::new_with_type_interner(
             token_stream,
+            source_path,
             context,
             &mut type_interner,
             templates_inherited,
@@ -169,7 +174,8 @@ impl Template {
 
     #[cfg(test)]
     pub(crate) fn new_const_required(
-        token_stream: &mut FileTokens,
+        token_stream: &mut AstCursor<'_>,
+        source_path: PathId,
         context: &ScopeContext,
         templates_inherited: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
@@ -181,6 +187,7 @@ impl Template {
             AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
         Self::new_const_required_with_type_interner(
             token_stream,
+            source_path,
             context,
             &mut type_interner,
             templates_inherited,
@@ -192,7 +199,8 @@ impl Template {
     /// Internal constructor that supports doc comment context propagation.
     /// Called recursively for nested templates in the body parser.
     pub(crate) fn new_nested_template(
-        token_stream: &mut FileTokens,
+        token_stream: &mut AstCursor<'_>,
+        source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
@@ -214,9 +222,6 @@ impl Template {
         // authoritative TIR identity exists, not mutated throughout parsing.
         let mut build_state = TemplateBuildState::new();
 
-        // Short-lived canonical view for this token-local construction span; dropped
-        // before any `FileTokens` advance or recursive parse. The explicit vector
-        // lane stays the documented compatibility fallback (see `construction_span_for`).
         let construction_span = construction_span_for(token_stream);
         let mut construction_context =
             TemplateConstructionContext::new(context.template_ir_store.clone(), construction_span);
@@ -261,6 +266,7 @@ impl Template {
                 control_context,
                 string_table,
                 default_style: default_style.clone(),
+                source_path,
                 path_fork,
             },
         )?;
@@ -493,31 +499,20 @@ impl Template {
         })
     }
 }
-/// Read-only construction span through a short canonical view.
+/// Read-only construction span on the canonical cursor view.
 ///
 /// WHAT: reports the current token span for template construction diagnostics and TIR.
-/// WHY: the construction span is a pure token-local read; a short `DeclarationCursor`
-/// keeps canonical source identity and drops before any `FileTokens` advance or
-/// recursive parse. Compatibility-only streams have no canonical provenance, so the
-/// explicit vector lane stays as the documented fallback rather than inventing a bridge.
-fn construction_span_for(token_stream: &FileTokens) -> Option<SourceSpan> {
-    DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_span())
-        .or_else(|| {
-            token_stream
-                .tokens
-                .get(token_stream.index)
-                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-        })
+/// WHY: the construction span is a pure token-local read on the canonical cursor.
+fn construction_span_for(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }
 
 fn default_nested_style_for_source_path(
-    token_stream: &FileTokens,
+    source_path: PathId,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> Option<Style> {
-    if !is_moth_template_content_constant_path(token_stream, string_table, path_fork) {
+    if !is_moth_template_content_constant_path(source_path, string_table, path_fork) {
         return None;
     }
 
@@ -525,19 +520,19 @@ fn default_nested_style_for_source_path(
 }
 
 fn is_moth_template_content_constant_path(
-    token_stream: &FileTokens,
+    source_path: PathId,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> bool {
     if path_fork
-        .component(token_stream.src_path)
+        .component(source_path)
         .is_none_or(|id| string_table.resolve(id) != SYNTHETIC_CONTENT_CONSTANT_NAME)
     {
         return false;
     }
 
     path_fork
-        .parent(token_stream.src_path)
+        .parent(source_path)
         .and_then(|parent| path_fork.component(parent))
         .map(|name| string_table.resolve(name).to_owned())
         .is_some_and(|source_name| {

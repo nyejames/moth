@@ -11,6 +11,7 @@ use super::result_type::{final_slot_type_ids, infer_value_match_result_type};
 use super::single_predicate::{SinglePredicateHeaderInput, try_parse_single_predicate_header};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::if_headers::{
@@ -28,12 +29,12 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Input for the block single-predicate body parser after `if` has been consumed.
-pub(super) struct BlockSinglePredicateParseInput<'a, 'b> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct BlockSinglePredicateParseInput<'a, 'b, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
@@ -48,7 +49,7 @@ pub(super) struct BlockSinglePredicateParseInput<'a, 'b> {
 /// WHAT: consumes the shared header parser, then requires `:`.
 /// Returns `None` if the header is not a committed option/choice predicate so
 pub(super) fn try_parse_block_single_predicate_value_match(
-    input: BlockSinglePredicateParseInput<'_, '_>,
+    input: BlockSinglePredicateParseInput<'_, '_, '_>,
 ) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
     let BlockSinglePredicateParseInput {
         token_stream,
@@ -100,8 +101,8 @@ pub(super) fn try_parse_block_single_predicate_value_match(
     }))
 }
 
-struct BlockValueMatchParseInput<'a, 'b> {
-    token_stream: &'a mut FileTokens,
+struct BlockValueMatchParseInput<'a, 'b, 'tokens> {
+    token_stream: &'a mut AstCursor<'tokens>,
     context: &'a ScopeContext,
     then_parent: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'b>,
@@ -116,7 +117,7 @@ struct BlockValueMatchParseInput<'a, 'b> {
 type BlockValueMatchResult<T> = Result<T, ExpressionParseError>;
 
 fn parse_block_value_match(
-    input: BlockValueMatchParseInput<'_, '_>,
+    input: BlockValueMatchParseInput<'_, '_, '_>,
 ) -> BlockValueMatchResult<ParsedReceiverValue> {
     let BlockValueMatchParseInput {
         token_stream,

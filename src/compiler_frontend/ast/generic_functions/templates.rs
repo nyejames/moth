@@ -182,6 +182,22 @@ impl GenericFunctionBody {
         }
     }
 
+    /// Whether [`parser_stream`](Self::parser_stream) returns a remapped compatibility vector.
+    ///
+    /// WHAT: true when a donor string table is retained (donor path rebasing optional).
+    /// WHY: remapped adapters keep donor canonical provenance whose spans/tags match but whose
+    /// payload IDs are stale; consumers must force the compatibility cursor lane to preserve
+    /// the rebased token/path payloads.
+    pub(crate) fn uses_remapped_adapter(&self) -> bool {
+        matches!(
+            self,
+            Self::Materialised {
+                source_string_table: Some(_),
+                ..
+            }
+        )
+    }
+
     pub(crate) fn resolution_facts(&self) -> Option<&Arc<Stage0ResolutionFacts>> {
         match self {
             Self::Source { .. } => None,

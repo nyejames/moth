@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
@@ -18,7 +19,7 @@ fn truncated_template_head_stream_returns_missing_closing_delimiter() {
     let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
     let context = new_constant_context(scope.to_owned(), &path_fork);
 
-    let mut token_stream = FileTokens::new(
+    let mut file_tokens = FileTokens::new(
         scope,
         SourceId::COMPILATION_ROOT,
         vec![
@@ -26,8 +27,11 @@ fn truncated_template_head_stream_returns_missing_closing_delimiter() {
             numeric_token("3", 1, &mut string_table),
         ],
     );
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
-    let result = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork);
+    let result = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork);
     assert!(
         result.is_err(),
         "truncated template-head stream without closing delimiter should produce an error"
@@ -39,10 +43,13 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[html_defaults.color]",
+    let mut file_tokens = template_tokens_from_source("[html_defaults.color]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let scope = token_stream.src_path;
+    let source_path = file_tokens.src_path;
+    let scope = source_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
@@ -95,6 +102,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
 
     let template = Template::new_const_required_with_type_interner(
         &mut token_stream,
+        source_path,
         &context,
         &mut type_interner,
         vec![],
@@ -179,14 +187,17 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut shell_tokens =
+    let mut shell_file_tokens =
         template_tokens_from_source("[:<ul>[$slot]</ul>]", &mut string_table, &mut span_builder, &mut path_fork);
-    let shell_context = new_constant_context(shell_tokens.src_path.to_owned(), &path_fork);
+    let shell_source_path = shell_file_tokens.src_path;
+    let shell_context = new_constant_context(shell_source_path, &path_fork);
+    let mut shell_tokens = AstCursor::from_file_tokens(&mut shell_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let shell_template =
-        Template::new(&mut shell_tokens, &shell_context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut shell_tokens, shell_source_path, &shell_context, vec![], &mut string_table, &mut path_fork)
             .expect("slot shell should parse");
 
-    let mut token_stream = template_tokens_from_source("[:
+    let mut file_tokens = template_tokens_from_source("[:
         before
         [list_shell, loop keep_going:
             [break]
@@ -196,7 +207,10 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let scope = token_stream.src_path;
+    let source_path = file_tokens.src_path;
+    let scope = source_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let list_shell_name = string_table.intern("list_shell");
     let keep_going_name = string_table.intern("keep_going");
     let declaration = Declaration {
@@ -232,7 +246,7 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     )
     .with_template_ir_store(shell_context.template_ir_store.clone());
 
-    Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("slot-fill loop should parse");
 }
 
@@ -327,24 +341,27 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if show_banner:
+    let mut file_tokens = template_tokens_from_source("[if show_banner:
         Visible
     [else]
         Hidden
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
     let show_banner = string_table.intern("show_banner");
     let declaration = Declaration {
-        id: path_fork.try_intern_child(token_stream.src_path, show_banner).expect("test path fits"),
+        id: path_fork.try_intern_child(source_path, show_banner).expect("test path fits"),
         value: Expression::bool(true, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&token_stream.src_path, &[declaration], &path_fork);
+    let context = constant_template_context(&source_path, &[declaration], &path_fork);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
     let template =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new_const_required(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect("const-required template if should inline source const bool")
             .template;
     let folded = fold_template_in_context(&template, &context, &mut string_table);
@@ -359,13 +376,14 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if show_banner:
+    let mut file_tokens = template_tokens_from_source("[if show_banner:
         Visible
     [else]
         Hidden
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
     let show_banner = string_table.intern("show_banner");
     let flags_scope = path_fork.try_intern_portable_path("flags.moth", &mut string_table).expect("test path fits");
     let imported_path = path_fork.try_intern_child(flags_scope, show_banner).expect("test path fits");
@@ -375,10 +393,12 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
         binding_span: None,
         config_qualifier: None,
     };
-    let context = imported_const_template_context(&token_stream.src_path, declaration, show_banner, &path_fork);
+    let context = imported_const_template_context(&source_path, declaration, show_banner, &path_fork);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
     let template =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new_const_required(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect("const-required template if should inline imported source const bool")
             .template;
     let folded = fold_template_in_context(&template, &context, &mut string_table);
@@ -396,11 +416,14 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     let wrapper_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
+    let mut card_file_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let card_context = new_constant_context(card_tokens.src_path.to_owned(), &path_fork);
-    let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
+    let card_source_path = card_file_tokens.src_path;
+    let card_context = new_constant_context(card_source_path, &path_fork);
+    let mut card_tokens = AstCursor::from_file_tokens(&mut card_file_tokens)
+        .expect("test token stream must expose an AST cursor");
+    let card_template = Template::new(&mut card_tokens, card_source_path, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
 
     let card_name = string_table.intern("card");
@@ -413,18 +436,21 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source("[card, if false:
+    let mut file_tokens = template_tokens_from_source("[card, if false:
         Visible
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = constant_template_context(&token_stream.src_path, &declarations, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut context = constant_template_context(&source_path, &declarations, &path_fork);
     // Production scopes in one module share one module-local TIR store. Keep
     // the declaration fixture on that topology so the wrapper reference stays
     // resolvable without compatibility reconstruction.
     context.template_ir_store = card_context.template_ir_store.clone();
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let template =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new_const_required(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect("const-required template if should parse")
             .template;
 
@@ -547,24 +573,27 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[loop 0 to 2 |i|:
+    let mut file_tokens = template_tokens_from_source("[loop 0 to 2 |i|:
         [if show_item:
             [i]
         ]
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
     let show_item = string_table.intern("show_item");
     let declaration = Declaration {
-        id: path_fork.try_intern_child(token_stream.src_path, show_item).expect("test path fits"),
+        id: path_fork.try_intern_child(source_path, show_item).expect("test path fits"),
         value: Expression::bool(true, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&token_stream.src_path, &[declaration], &path_fork);
+    let context = constant_template_context(&source_path, &[declaration], &path_fork);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
     let template =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new_const_required(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect("nested const-required template if should inline source const bool")
             .template;
     let folded = fold_template_in_context(&template, &context, &mut string_table);
@@ -593,11 +622,14 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     let wrapper_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
+    let mut card_file_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let card_context = new_constant_context(card_tokens.src_path.to_owned(), &path_fork);
-    let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
+    let card_source_path = card_file_tokens.src_path;
+    let card_context = new_constant_context(card_source_path, &path_fork);
+    let mut card_tokens = AstCursor::from_file_tokens(&mut card_file_tokens)
+        .expect("test token stream must expose an AST cursor");
+    let card_template = Template::new(&mut card_tokens, card_source_path, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
 
     let card_name = string_table.intern("card");
@@ -610,15 +642,18 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source("[card, loop 0 to 0 |i|:
+    let mut file_tokens = template_tokens_from_source("[card, loop 0 to 0 |i|:
         [i]
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork)
+    let source_path = file_tokens.src_path;
+    let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let template =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new_const_required(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect("const-required zero loop should parse")
             .template;
 
@@ -635,13 +670,15 @@ fn const_required_template_loop_wraps_aggregate_once() {
     let wrapper_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut card_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
+    let mut card_file_tokens = template_tokens_from_source("[:<card>[$slot]</card>]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let card_context = new_constant_context(card_tokens.src_path.to_owned(), &path_fork);
-    let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
+    let card_source_path = card_file_tokens.src_path;
+    let card_context = new_constant_context(card_source_path, &path_fork);
+    let mut card_tokens = AstCursor::from_file_tokens(&mut card_file_tokens)
+        .expect("test token stream must expose an AST cursor");
+    let card_template = Template::new(&mut card_tokens, card_source_path, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
-
     let card_name = string_table.intern("card");
     let declarations = vec![Declaration {
         id: path_fork
@@ -652,15 +689,18 @@ fn const_required_template_loop_wraps_aggregate_once() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source("[card, loop 0 to 2 |i|:
+    let mut file_tokens = template_tokens_from_source("[card, loop 0 to 2 |i|:
         [i]
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork)
+    let source_path = file_tokens.src_path;
+    let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let template =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new_const_required(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect("const-required loop should parse")
             .template;
 
@@ -701,12 +741,13 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[loop keep_going:
+    let mut file_tokens = template_tokens_from_source("[loop keep_going:
         Never
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut context = new_constant_context(source_path, &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -714,7 +755,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
 
     context.add_var(
         Declaration {
-            id: path_fork.try_intern_child(token_stream.src_path, keep_going).expect("test path fits"),
+            id: path_fork.try_intern_child(source_path, keep_going).expect("test path fits"),
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
@@ -729,8 +770,11 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
         &path_fork,
     );
 
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let diagnostic = Template::new_const_required_with_type_interner(
         &mut token_stream,
+        source_path,
         &context,
         &mut type_interner,
         vec![],
@@ -751,12 +795,13 @@ fn const_required_template_loop_reports_non_const_collection_source() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[loop items |item|:
+    let mut file_tokens = template_tokens_from_source("[loop items |item|:
         [item]
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-let mut context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut context = new_constant_context(source_path, &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let collection_type_id =
         type_environment.intern_collection(type_environment.builtins().string, None);
@@ -766,7 +811,7 @@ let mut context = new_constant_context(token_stream.src_path, &path_fork);
 
     context.add_var(
         Declaration {
-            id: path_fork.try_intern_child(token_stream.src_path, items).expect("test path fits"),
+            id: path_fork.try_intern_child(source_path, items).expect("test path fits"),
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
@@ -781,8 +826,11 @@ let mut context = new_constant_context(token_stream.src_path, &path_fork);
         &path_fork,
     );
 
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let diagnostic = Template::new_const_required_with_type_interner(
         &mut token_stream,
+        source_path,
         &context,
         &mut type_interner,
         vec![],
@@ -803,12 +851,13 @@ fn const_required_template_loop_reports_non_const_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[loop 0 to 1 |i|:
+    let mut file_tokens = template_tokens_from_source("[loop 0 to 1 |i|:
         [value]
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-let mut context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut context = new_constant_context(source_path, &path_fork);
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -816,7 +865,7 @@ let mut context = new_constant_context(token_stream.src_path, &path_fork);
 
     context.add_var(
         Declaration {
-            id: path_fork.try_intern_child(token_stream.src_path, value).expect("test path fits"),
+            id: path_fork.try_intern_child(source_path, value).expect("test path fits"),
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
@@ -831,8 +880,11 @@ let mut context = new_constant_context(token_stream.src_path, &path_fork);
         &path_fork,
     );
 
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let diagnostic = Template::new_const_required_with_type_interner(
         &mut token_stream,
+        source_path,
         &context,
         &mut type_interner,
         vec![],
@@ -894,16 +946,19 @@ fn const_required_construction_preparation_is_reused_by_folding() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if true:
+    let mut file_tokens = template_tokens_from_source("[if true:
         Visible
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.src_path;
+    let context = new_constant_context(source_path, &path_fork);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
     reset_ast_counters();
     let construction =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new_const_required(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect("const-required template should parse");
     let template = construction.template;
     let prepared = construction.preparation;
@@ -1070,9 +1125,10 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if maybe_name is |name|:Hello [name]]",
+    let mut file_tokens = template_tokens_from_source("[if maybe_name is |name|:Hello [name]]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
     let maybe_name = string_table.intern("maybe_name");
 
     let mut type_environment = TypeEnvironment::new();
@@ -1084,17 +1140,20 @@ fn const_required_template_option_capture_inlines_present_source_const() {
         ValueMode::ImmutableOwned,
     );
     let declaration = Declaration {
-        id: path_fork.try_intern_child(token_stream.src_path, maybe_name).expect("test path fits"),
+        id: path_fork.try_intern_child(source_path, maybe_name).expect("test path fits"),
         value: Expression::coerced(present_value, option_string_type_id),
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&token_stream.src_path, &[declaration], &path_fork);
+    let context = constant_template_context(&source_path, &[declaration], &path_fork);
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let template = Template::new_const_required_with_type_interner(
         &mut token_stream,
+        source_path,
         &context,
         &mut type_interner,
         vec![],
@@ -1113,13 +1172,14 @@ fn const_required_template_option_capture_inlines_absent_source_const() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if maybe_name is |name|:
+    let mut file_tokens = template_tokens_from_source("[if maybe_name is |name|:
         Hello [name]
     [else]
         Guest
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
     let maybe_name = string_table.intern("maybe_name");
 
     let mut type_environment = TypeEnvironment::new();
@@ -1131,17 +1191,20 @@ fn const_required_template_option_capture_inlines_absent_source_const() {
         None,
     );
     let declaration = Declaration {
-        id: path_fork.try_intern_child(token_stream.src_path, maybe_name).expect("test path fits"),
+        id: path_fork.try_intern_child(source_path, maybe_name).expect("test path fits"),
         value: absent_value,
         binding_span: None,
         config_qualifier: None,
     };
-    let context = constant_template_context(&token_stream.src_path, &[declaration], &path_fork);
+    let context = constant_template_context(&source_path, &[declaration], &path_fork);
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let template = Template::new_const_required_with_type_interner(
         &mut token_stream,
+        source_path,
         &context,
         &mut type_interner,
         vec![],
@@ -1160,16 +1223,17 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if maybe_name is |name|: [name]]",
+    let mut file_tokens = template_tokens_from_source("[if maybe_name is |name|: [name]]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut context = new_constant_context(source_path, &path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let maybe_name_type_id = type_environment.intern_option(type_environment.builtins().string);
     let maybe_name = string_table.intern("maybe_name");
     let declaration = Declaration {
-        id: path_fork.try_intern_child(token_stream.src_path, maybe_name).expect("test path fits"),
+        id: path_fork.try_intern_child(source_path, maybe_name).expect("test path fits"),
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
@@ -1184,8 +1248,11 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
 
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let diagnostic = Template::new_const_required_with_type_interner(
         &mut token_stream,
+        source_path,
         &context,
         &mut type_interner,
         vec![],
@@ -1206,14 +1273,15 @@ fn const_required_template_if_rejects_runtime_local_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if show_banner: Visible]",
+    let mut file_tokens = template_tokens_from_source("[if show_banner: Visible]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let mut context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut context = new_constant_context(source_path, &path_fork);
     let show_banner = string_table.intern("show_banner");
     context.add_var(
         Declaration {
-            id: path_fork.try_intern_child(token_stream.src_path, show_banner).expect("test path fits"),
+            id: path_fork.try_intern_child(source_path, show_banner).expect("test path fits"),
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
@@ -1228,8 +1296,10 @@ fn const_required_template_if_rejects_runtime_local_condition() {
         &path_fork,
     );
 
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let diagnostic =
-        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new_const_required(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("const-required template if should reject runtime local condition");
     let diagnostic = expect_template_diagnostic(diagnostic);
 

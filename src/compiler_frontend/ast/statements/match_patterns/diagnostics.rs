@@ -8,7 +8,8 @@ use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::d
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
 };
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Reject match-pattern lead tokens that are unsupported or deferred.
 ///
@@ -16,7 +17,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 /// and `as` patterns and returns a structured diagnostic for each.
 /// WHY: every parser entry point that begins a pattern should call this so
 /// unsupported syntax is rejected with consistent wording and stable codes.
-pub fn reject_deferred_pattern_lead_token(token_stream: &FileTokens) -> Option<CompilerDiagnostic> {
+pub fn reject_deferred_pattern_lead_token(token_stream: &AstCursor) -> Option<CompilerDiagnostic> {
     // These forms intentionally fail fast so unsupported syntax never drifts silently.
     match token_stream.current_token_kind() {
         TokenKind::Wildcard => {

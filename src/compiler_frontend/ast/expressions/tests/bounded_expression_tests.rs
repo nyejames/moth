@@ -5,6 +5,7 @@
 //!      prove the cap behaves correctly for delimiters, nesting, and EOF boundaries.
 
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
@@ -62,7 +63,7 @@ fn token(kind: TokenKind, _scope: &PathId) -> Token {
 }
 
 fn create_expression_until_for_test(
-    stream: &mut FileTokens,
+    stream: &mut AstCursor,
     context: &ScopeContext,
     expected_type: &mut ExpectedType,
     value_mode: &ValueMode,
@@ -98,7 +99,9 @@ fn bounded_expression_empty_at_delimiter_errors() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(
@@ -138,7 +141,9 @@ fn bounded_expression_parses_simple_literal() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -155,7 +160,7 @@ fn bounded_expression_parses_simple_literal() {
     assert!(matches!(expression.kind, ExpressionKind::Int(42)));
 
     // The stop token (comma) should not be consumed.
-    assert_eq!(stream.index, 1);
+    assert_eq!(stream.position(), 1);
     assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
 }
 
@@ -176,7 +181,9 @@ fn bounded_expression_nested_parentheses() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -194,7 +201,7 @@ fn bounded_expression_nested_parentheses() {
     assert!(matches!(expression.kind, ExpressionKind::Int(6)));
 
     // Stop token should remain unconsumed.
-    assert_eq!(stream.index, 7);
+    assert_eq!(stream.position(), 7);
     assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
 }
 
@@ -215,7 +222,9 @@ fn bounded_expression_nested_curly_braces() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -231,7 +240,7 @@ fn bounded_expression_nested_curly_braces() {
 
     // Should parse as a collection expression.
     assert!(matches!(expression.kind, ExpressionKind::Collection(_)));
-    assert_eq!(stream.index, 5);
+    assert_eq!(stream.position(), 5);
     assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
 }
 
@@ -247,7 +256,9 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         numeric_token("2", &scope, &mut string_table),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(

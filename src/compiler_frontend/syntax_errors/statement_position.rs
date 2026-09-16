@@ -8,10 +8,11 @@
 //! control flow, comments), so it is the richest source of language-mismatch errors.
 
 use super::common_syntax_mistake;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerDiagnostic};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Check for common statement-position mistakes before falling back to a generic error.
 ///
@@ -19,7 +20,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 /// statement start.
 pub(crate) fn check_statement_common_mistake(
     token: &TokenKind,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> Option<CompilerDiagnostic> {
     let location = token_stream.current_span();
 
@@ -49,7 +50,7 @@ pub(crate) fn check_statement_common_mistake(
 /// variable reference, declaration, or call.
 pub(crate) fn check_mistaken_keyword_symbol(
     symbol_id: StringId,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     string_table: &StringTable,
 ) -> Option<CompilerDiagnostic> {
     let name = string_table.resolve(symbol_id);

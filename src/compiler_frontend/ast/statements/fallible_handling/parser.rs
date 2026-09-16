@@ -34,10 +34,10 @@ use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_com
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 use super::catch_handler::{
     CatchFallibleHandler, CatchFallibleHandlerSite, parse_catch_fallible_handler_typed,
@@ -175,7 +175,7 @@ impl HandledFallibleCall {
     reason = "fallible suffix parsing keeps the token stream, scope, mutable interner/string/path state, the parsed expression, and the value/catch policy flags as separate borrows"
 )]
 pub(crate) fn parse_fallible_handling_suffix_for_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression: Expression,
@@ -286,7 +286,7 @@ pub(crate) fn fallible_catch_allowed_in_context(context: &ScopeContext) -> bool 
 }
 
 fn parse_fallible_handling_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -314,7 +314,7 @@ fn parse_fallible_handling_suffix(
 }
 
 fn parse_postfix_propagation(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     site: FallibleHandlingSite<'_>,
     type_environment: &TypeEnvironment,
@@ -380,7 +380,7 @@ pub(crate) fn wrap_catch_expression(
 }
 
 fn parse_catch_handling_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -441,7 +441,7 @@ fn parse_catch_handling_suffix(
 }
 
 fn parse_inline_catch_without_error_binding(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -468,7 +468,7 @@ fn parse_inline_catch_without_error_binding(
 
 /// Delegates to `parse_catch_without_error_binding_typed` for `catch:` (no error binding).
 fn parse_catch_without_error_binding(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -497,7 +497,7 @@ fn parse_catch_without_error_binding(
 
 /// Delegates to the block or inline binding parser for `catch |err|`.
 fn parse_catch_handler(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -538,8 +538,8 @@ fn parse_catch_handler(
     Ok(FallibleHandling::Handler { error, body })
 }
 
-fn next_catch_binding_is_inline(token_stream: &FileTokens) -> bool {
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+fn next_catch_binding_is_inline(token_stream: &AstCursor) -> bool {
+    if let Ok(cursor) = token_stream.declaration_cursor() {
         let mut index = cursor.position().checked_add(1);
 
         while let Some(probe) = index {
@@ -568,22 +568,24 @@ fn next_catch_binding_is_inline(token_stream: &FileTokens) -> bool {
         return false;
     }
 
-    let mut index = token_stream.index.saturating_add(1);
-    while index < token_stream.length {
-        match &token_stream.tokens[index].kind {
-            TokenKind::TypeParameterBracket => {
-                return token_stream
-                    .tokens
-                    .iter()
-                    .skip(index.saturating_add(1))
-                    .find(|token| token.kind != TokenKind::Newline)
-                    .is_some_and(|token| token.kind == TokenKind::Then);
+    let mut index = token_stream.position().saturating_add(1);
+    while index < token_stream.length() {
+        match token_stream.token_kind_at(index) {
+            Some(TokenKind::TypeParameterBracket) => {
+                let mut lookahead = index.saturating_add(1);
+                loop {
+                    match token_stream.token_kind_at(lookahead) {
+                        Some(TokenKind::Newline) => lookahead = lookahead.saturating_add(1),
+                        Some(kind) => return kind == TokenKind::Then,
+                        None => return false,
+                    }
+                }
             }
-            TokenKind::Newline | TokenKind::End | TokenKind::Eof => return false,
-            _ => index = index.saturating_add(1),
+            Some(TokenKind::Newline) | Some(TokenKind::End) | Some(TokenKind::Eof) => return false,
+            Some(_) => index = index.saturating_add(1),
+            None => return false,
         }
     }
-
     false
 }
 
@@ -592,7 +594,7 @@ fn next_catch_binding_is_inline(token_stream: &FileTokens) -> bool {
 // --------------------------
 
 pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     handler_call: FallibleCallSite,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
@@ -643,7 +645,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
 }
 
 pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     handler_call: FallibleHostCallSite,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
@@ -711,7 +713,7 @@ pub(crate) struct CastCatchSite {
 /// WHY: cast recovery uses the same surface syntax as fallible calls, but the error value is
 ///      supplied by the selected cast evidence rather than a Result carrier.
 pub(crate) fn parse_cast_catch_handling_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CastCatchSite,

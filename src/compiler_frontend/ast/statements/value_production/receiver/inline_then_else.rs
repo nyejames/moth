@@ -7,6 +7,7 @@
 
 use super::result_type::{infer_inline_result_type, receiver_type_mismatch_context};
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::{
@@ -27,23 +28,20 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id,
 };
-use crate::compiler_frontend::utilities::token_scan::{
-    ExpressionBoundaryDepth, find_expression_end_index,
-};
+use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Input for the shared inline then/else parser.
-pub(super) struct InlineThenElseInput<'a, 'b> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct InlineThenElseInput<'a, 'b, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) then_context: &'a ScopeContext,
     pub(super) else_context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
@@ -78,7 +76,7 @@ struct ParsedInlineBranchValues {
 /// WHY: token spans intentionally carry byte ranges only; newline tokens are the
 /// parser's retained physical-line boundary and avoid reconstructing locations.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn same_logical_line(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     left_index: usize,
     right_index: usize,
 ) -> bool {
@@ -88,7 +86,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn same_logi
         (right_index, left_index)
     };
 
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+    if let Ok(cursor) = token_stream.declaration_cursor() {
         return (start..=end).all(|index| {
             cursor
                 .token_kind_at(index)
@@ -97,9 +95,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn same_logi
     }
     (start..=end).all(|index| {
         token_stream
-            .tokens
-            .get(index)
-            .is_some_and(|token| token.kind != TokenKind::Newline)
+            .token_kind_at(index)
+            .is_some_and(|kind| kind != TokenKind::Newline)
     })
 }
 /// converting a retained-token lifecycle fault into a source diagnostic mid-parse.
@@ -112,7 +109,7 @@ type InlineThenElseResult<T> = Result<T, ExpressionParseError>;
 /// WHY: known multi-value receivers and inferred multi-bind share this grammar;
 /// slot inference stays with the multi-bind owner after these values are collected.
 fn parse_inline_then_else_with_target(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     then_context: &ScopeContext,
     else_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -121,7 +118,7 @@ fn parse_inline_then_else_with_target(
     path_fork: &mut PathInternerFork,
 ) -> InlineThenElseResult<ParsedInlineBranchValues> {
     let then_request_start = then_context.generic_request_checkpoint();
-    let then_index = token_stream.index;
+    let then_index = token_stream.position();
     let then_span = Some(token_stream.current_span());
     token_stream.advance(); // consume `then`
 
@@ -192,7 +189,7 @@ fn parse_inline_then_else_with_target(
 /// WHY: consolidates duplicated logic from inline Bool value-if and inline
 /// single-predicate value-match.
 pub(super) fn parse_inline_then_else(
-    input: InlineThenElseInput<'_, '_>,
+    input: InlineThenElseInput<'_, '_, '_>,
 ) -> InlineThenElseResult<InlineThenElseOutput> {
     let InlineThenElseInput {
         token_stream,
@@ -244,7 +241,7 @@ pub(super) fn parse_inline_then_else(
         });
     }
 
-    let then_index = token_stream.index;
+    let then_index = token_stream.position();
     let then_span = Some(token_stream.current_span());
     let then_request_start = then_context.generic_request_checkpoint();
     token_stream.advance(); // consume `then`
@@ -328,7 +325,7 @@ pub(super) fn parse_inline_then_else(
         string_table,
         path_fork,
     );
-    let else_expression_start_index = token_stream.index;
+    let else_expression_start_index = token_stream.position();
     let input = ExpressionParseInput::ordinary(
         ExpressionParseResources {
             token_stream,
@@ -423,7 +420,7 @@ fn cast_target_context_for_inline_branch(
 /// WHAT: follows only expression-continuation newlines, while still recognising
 /// a directly authored multiline `else`.
 /// WHY: a later statement's unrelated `else` must not capture this value-if branch.
-fn inline_else_follows_before_statement_end(token_stream: &FileTokens) -> bool {
+fn inline_else_follows_before_statement_end(token_stream: &AstCursor) -> bool {
     let stop_tokens = [
         TokenKind::Else,
         TokenKind::Newline,
@@ -433,18 +430,18 @@ fn inline_else_follows_before_statement_end(token_stream: &FileTokens) -> bool {
         TokenKind::CloseParenthesis,
         TokenKind::CloseCurly,
     ];
-    let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) else {
-        return inline_else_follows_before_statement_end_in_tokens(token_stream, &stop_tokens);
+    let Ok(cursor) = token_stream.declaration_cursor() else {
+        return inline_else_follows_before_statement_end_in_cursor(token_stream, &stop_tokens);
     };
+    // Short-lived canonical view for pure lookahead; dropped before any
+    // cursor advance or expression re-entry. Compatibility-only streams fall
+    // back to the explicit AstCursor lane below.
     let mut scan_start = cursor.position();
 
     loop {
         let mut depth = ExpressionBoundaryDepth::default();
         let mut boundary_index = scan_start;
-        while boundary_index < cursor.length {
-            let Some(kind) = cursor.token_kind_at(boundary_index) else {
-                break;
-            };
+        while let Some(kind) = cursor.token_kind_at(boundary_index) {
             if depth.is_top_level() && stop_tokens.contains(&kind) {
                 break;
             }
@@ -503,43 +500,58 @@ fn inline_else_follows_before_statement_end(token_stream: &FileTokens) -> bool {
     }
 }
 
-fn inline_else_follows_before_statement_end_in_tokens(
-    token_stream: &FileTokens,
+
+fn inline_else_follows_before_statement_end_in_cursor(
+    token_stream: &AstCursor,
     stop_tokens: &[TokenKind],
 ) -> bool {
-    let mut scan_start = token_stream.index;
+    let mut scan_start = token_stream.position();
 
     loop {
-        let boundary_index =
-            find_expression_end_index(&token_stream.tokens, scan_start, stop_tokens);
-        let Some(boundary) = token_stream.tokens.get(boundary_index) else {
+        // Bounded lookahead through AstCursor keeps the temporary window
+        // explicit and bounded to one scan pass.
+        let mut boundary_index = scan_start;
+        let mut depth = ExpressionBoundaryDepth::default();
+        while let Some(kind) = token_stream.token_kind_at(boundary_index) {
+            if depth.is_top_level() && stop_tokens.contains(&kind) {
+                break;
+            }
+            depth.step(&kind);
+            if matches!(kind, TokenKind::Eof) {
+                break;
+            }
+            boundary_index += 1;
+        }
+        let Some(boundary) = token_stream.token_kind_at(boundary_index) else {
             return false;
         };
 
-        match boundary.kind {
+        match boundary {
             TokenKind::Else => return true,
             TokenKind::Newline => {
                 let previous_continues = boundary_index
                     .checked_sub(1)
                     .filter(|previous_index| *previous_index >= scan_start)
                     .is_some_and(|previous_index| {
-                        token_stream.tokens[previous_index]
-                            .kind
-                            .continues_expression()
+                        token_stream
+                            .token_kind_at(previous_index)
+                            .is_some_and(|kind| kind.continues_expression())
                     });
-                let next_non_newline_index = token_stream
-                    .tokens
-                    .iter()
-                    .enumerate()
-                    .skip(boundary_index.saturating_add(1))
-                    .find(|(_, token)| token.kind != TokenKind::Newline)
-                    .map(|(index, _)| index);
+                let mut next_non_newline_index = boundary_index.checked_add(1);
+                while token_stream.token_kind_at(next_non_newline_index.unwrap_or(usize::MAX))
+                    == Some(TokenKind::Newline)
+                {
+                    next_non_newline_index =
+                        next_non_newline_index.and_then(|index| index.checked_add(1));
+                }
                 let Some(next_non_newline_index) = next_non_newline_index else {
                     return false;
                 };
-                let next_kind = &token_stream.tokens[next_non_newline_index].kind;
+                let Some(next_kind) = token_stream.token_kind_at(next_non_newline_index) else {
+                    return false;
+                };
 
-                if next_kind == &TokenKind::Else {
+                if next_kind == TokenKind::Else {
                     return true;
                 }
                 if !previous_continues && !next_kind.continues_expression() {
@@ -554,7 +566,7 @@ fn inline_else_follows_before_statement_end_in_tokens(
 }
 
 /// Requires that the current token is `else` and that it is on the same logical line.
-fn require_else_inline(token_stream: &FileTokens, then_index: usize) -> InlineThenElseResult<()> {
+fn require_else_inline(token_stream: &AstCursor, then_index: usize) -> InlineThenElseResult<()> {
     if token_stream.current_token_kind() != &TokenKind::Else {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfMissingElse,
@@ -563,7 +575,7 @@ fn require_else_inline(token_stream: &FileTokens, then_index: usize) -> InlineTh
         .into());
     }
 
-    if !same_logical_line(token_stream, then_index, token_stream.index) {
+    if !same_logical_line(token_stream, then_index, token_stream.position()) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
@@ -575,7 +587,7 @@ fn require_else_inline(token_stream: &FileTokens, then_index: usize) -> InlineTh
 }
 
 /// Rejects `else then`, which is never valid in inline value-producing `if`.
-fn reject_else_then(token_stream: &FileTokens) -> InlineThenElseResult<()> {
+fn reject_else_then(token_stream: &AstCursor) -> InlineThenElseResult<()> {
     if token_stream.current_token_kind() == &TokenKind::Then {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfElseThen,
@@ -588,7 +600,7 @@ fn reject_else_then(token_stream: &FileTokens) -> InlineThenElseResult<()> {
 }
 
 /// Rejects a newline immediately after `else` in inline form.
-fn reject_newline_after_else(token_stream: &FileTokens) -> InlineThenElseResult<()> {
+fn reject_newline_after_else(token_stream: &AstCursor) -> InlineThenElseResult<()> {
     if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
@@ -601,7 +613,7 @@ fn reject_newline_after_else(token_stream: &FileTokens) -> InlineThenElseResult<
 }
 
 /// Rejects an empty `else` branch at its first definite boundary.
-fn reject_empty_value_after_else(token_stream: &FileTokens) -> InlineThenElseResult<()> {
+fn reject_empty_value_after_else(token_stream: &AstCursor) -> InlineThenElseResult<()> {
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterElse,

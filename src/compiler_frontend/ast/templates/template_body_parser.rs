@@ -39,13 +39,13 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
-use crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::utilities::token_scan::TemplateBalance;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 /// Template-body parsing owns recursive template construction, so it carries the template error
 /// boundary rather than reducing an inner retained-data failure to a user diagnostic.
@@ -60,7 +60,7 @@ type BodyParseResult<T> = Result<T, TemplateError>;
 ///
 /// Truncated source is reported as a user-facing EOF diagnostic.
 pub(crate) fn parse_template_body(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     build_state: &mut TemplateBuildState,
     construction_context: &mut TemplateConstructionContext,
     input: TemplateBodyParseRequest<'_, '_>,
@@ -74,6 +74,7 @@ pub(crate) fn parse_template_body(
         control_context,
         string_table,
         default_style,
+        source_path,
         path_fork,
     } = input;
 
@@ -94,6 +95,7 @@ pub(crate) fn parse_template_body(
         open_bracket_id,
         close_bracket_id,
         default_style,
+        source_path,
         path_fork,
     };
 
@@ -133,6 +135,7 @@ pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
     pub(crate) string_table: &'a mut StringTable,
     /// Source-kind policy applied to child templates without an explicit formatter.
     pub(crate) default_style: Option<Style>,
+    pub(crate) source_path: PathId,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
@@ -197,8 +200,8 @@ struct BodyParseInput<'context, 'build> {
     inherited_wrappers: InheritedChildWrapperPolicy,
 }
 
-struct TemplateBodyParser<'a, 'types> {
-    token_stream: &'a mut FileTokens,
+struct TemplateBodyParser<'a, 'cursor, 'types> {
+    token_stream: &'a mut AstCursor<'cursor>,
     type_interner: &'a mut AstTypeInterner<'types>,
     direct_child_wrappers: &'a [TemplateWrapperReference],
     control_flow_validation: TemplateControlFlowValidationMode,
@@ -210,10 +213,11 @@ struct TemplateBodyParser<'a, 'types> {
     open_bracket_id: StringId,
     close_bracket_id: StringId,
     default_style: Option<Style>,
+    source_path: PathId,
     path_fork: &'a mut PathInternerFork,
 }
 
-impl<'a, 'types> TemplateBodyParser<'a, 'types> {
+impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
     /// Parses body tokens into parser TIR.
     ///
     /// All body content — literal text, newlines, nested templates, and slot
@@ -227,7 +231,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
     ) -> BodyParseResult<TemplateBodyBoundary> {
         // The tokenizer only allows for strings, templates or slots inside the template body.
         let mut last_known_span = current_token_source_span(self.token_stream);
-        while self.token_stream.index < self.token_stream.tokens.len() {
+        while self.token_stream.position() < self.token_stream.length() {
             add_ast_counter(AstCounter::TemplateBodyTokenVisits, 1);
             last_known_span = current_token_source_span(self.token_stream);
 
@@ -481,7 +485,9 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         close_index: usize,
         marker_span: Option<SourceSpan>,
     ) -> BodyParseResult<ParsedElseIfBranch> {
-        self.token_stream.index = if_index + 1;
+        self.token_stream
+            .set_position(if_index + 1)
+            .map_err(TemplateError::from)?;
 
         if next_meaningful_token_is_template_close(self.token_stream, close_index) {
             return Err(CompilerDiagnostic::invalid_template_structure(
@@ -499,7 +505,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             self.path_fork,
         )?;
 
-        if self.token_stream.index != close_index
+        if self.token_stream.position() != close_index
             || !matches!(
                 self.token_stream.current_token_kind(),
                 TokenKind::TemplateClose
@@ -592,6 +598,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
 
         let child_construction = Template::new_nested_template(
             self.token_stream,
+            self.source_path,
             input.context,
             self.type_interner,
             nested_direct_child_wrappers,
@@ -718,7 +725,9 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         let kind = loop_control_kind(marker);
         construction_context.record_loop_control(kind, loop_control_marker_source_span(marker));
 
-        self.token_stream.index = close_index;
+        self.token_stream
+            .set_position(close_index)
+            .map_err(TemplateError::from)?;
         self.token_stream.advance();
         ensure_loop_control_boundary_after_sentinel(self.token_stream, marker, self.string_table)?;
 
@@ -766,7 +775,7 @@ struct ParsedFallbackBranch {
 fn branch_selector_and_context_from_parsed_if_header(
     parsed_header: ParsedIfHeader,
     base_context: &ScopeContext,
-    parser: &mut TemplateBodyParser<'_, '_>,
+    parser: &mut TemplateBodyParser<'_, '_, '_>,
 ) -> BodyParseResult<(TemplateBranchSelector, ScopeContext)> {
     match parsed_header {
         ParsedIfHeader::BoolCondition { condition } => {
@@ -809,41 +818,17 @@ fn branch_selector_and_context_from_parsed_if_header(
     }
 }
 
-fn next_meaningful_token_is_template_close(token_stream: &FileTokens, close_index: usize) -> bool {
-    // Pure lookahead over the `[else if ...]` header region. Prefer a
-    // short-lived canonical view; fall back to the explicit compatibility
-    // vector for unbounded (`FileTokens::new_from_slice`) streams. The cursor
-    // is dropped before `parse_if_header` re-enters the stream. Indices stay
-    // adapter-relative (`FileTokens.index` coordinates).
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        if let Some(close_is_canonical) = next_meaningful_token_is_template_close_at_cursor(
-            &cursor,
-            close_index,
-        ) {
-            return close_is_canonical;
-        }
-    }
-
-    let mut index = token_stream.index;
-
-    while index <= close_index && index < token_stream.length {
-        match token_stream.tokens[index].kind {
-            TokenKind::Newline => index += 1,
-            TokenKind::TemplateClose => return true,
-            _ => return false,
-        }
-    }
-
-    true
+fn next_meaningful_token_is_template_close(token_stream: &AstCursor, close_index: usize) -> bool {
+    next_meaningful_token_is_template_close_at_cursor(token_stream, close_index).unwrap_or(true)
 }
 
 fn next_meaningful_token_is_template_close_at_cursor(
-    cursor: &DeclarationCursor<'_>,
+    cursor: &AstCursor,
     close_index: usize,
 ) -> Option<bool> {
     let mut index = cursor.position();
 
-    while index <= close_index && index < cursor.length {
+    while index <= close_index && index < cursor.length() {
         match cursor.token_kind_at(index)? {
             TokenKind::Newline => index += 1,
             TokenKind::TemplateClose => return Some(true),
@@ -869,18 +854,8 @@ fn tir_only_body_construction_context(
 ) -> TemplateConstructionContext {
     TemplateConstructionContext::new(context.template_ir_store.clone(), span)
 }
-fn current_token_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    // Cursor source identity wins when canonical provenance exists; the checked
-    // compatibility lane otherwise preserves `FileTokens::new` fixture spans.
-    DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_span())
-        .or_else(|| {
-            token_stream
-                .tokens
-                .get(token_stream.index)
-                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-        })
+fn current_token_source_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }
 
 fn body_sentinel_target<'a>(
@@ -967,12 +942,12 @@ struct LiteralTemplateTextIds {
 }
 
 fn consume_balanced_brackets_as_literal_text(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
     text_ids: LiteralTemplateTextIds,
 ) {
-    let source = token_stream.file_id;
+    let source = token_stream.source_id();
 
     // Emit the opening bracket as literal text.
     add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
@@ -980,9 +955,15 @@ fn consume_balanced_brackets_as_literal_text(
     construction_context.record_text(text_ids.open_bracket_id, 1, span);
     token_stream.advance();
 
-    let _ = consume_balanced_template_region(
-        token_stream,
-        |token, token_kind| match token_kind {
+    let mut balance = TemplateBalance::with_opening_template();
+    while balance.has_unclosed_templates() {
+        let token_kind = token_stream.current_token_kind().clone();
+        if matches!(token_kind, TokenKind::Eof) {
+            return;
+        }
+        let token = token_stream.current_token();
+        balance.step(&token_kind);
+        match &token_kind {
             TokenKind::TemplateHead => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 construction_context.record_text(
@@ -1081,9 +1062,9 @@ fn consume_balanced_brackets_as_literal_text(
             }
 
             _ => {}
-        },
-        |_location| (),
-    );
+        }
+        token_stream.advance();
+    }
 }
 
 // -------------------------

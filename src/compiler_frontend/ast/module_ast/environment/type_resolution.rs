@@ -5,6 +5,7 @@
 //! can reference constants, so constants are resolved before struct fields.
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
@@ -1212,13 +1213,28 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Parse each field inside a temporary scope so that type-resolution errors
         // can be remapped to the appropriate diagnostic for struct defaults vs choice payloads.
         let conversion_result = (|| -> Result<Vec<Declaration>, ExpressionParseError> {
-            let source_owner = self
+            let file_owner = self
                 .source_token_streams
                 .get(&header.tokens.source())
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
                         "member-bearing header has no prepared source token owner",
                     )
+                })?;
+            // Live parser state stays on the canonical source owner. The transient
+            // cursor spans the full canonical source so nested default ranges stay
+            // inside its bounds for this member-shell parse only. `from_file_tokens_range`
+            // retains the canonical owner for later bounded expression handoffs.
+            let full = file_owner.canonical_source_tokens()?.full_range().map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "member-bearing header source range could not be constructed: {error:?}"
+                ))
+            })?;
+            let source_owner =
+                AstCursor::from_file_tokens_range(file_owner, full).map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "member-bearing header source range is outside its source owner: {error:?}"
+                    ))
                 })?;
             let mut compatibility_cache = TypeCompatibilityCache::new();
             let mut type_interner =
@@ -1228,7 +1244,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             for field in fields {
                 let declaration = signature_member_to_declaration(
                     field,
-                    source_owner.as_ref(),
+                    &source_owner,
                     &field_context,
                     &mut type_interner,
                     string_table,

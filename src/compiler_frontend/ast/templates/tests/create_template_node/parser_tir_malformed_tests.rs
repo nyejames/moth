@@ -10,23 +10,25 @@
 //! expected malformed-surface behavior without relying on internal TIR IDs.
 
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-/// Parses a template that is expected to fail and returns the diagnostic.
 fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream =
+    let mut file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = new_constant_context(source_path, &path_fork);
 
     expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("template source should fail to parse"),
     )
 }
@@ -37,21 +39,39 @@ fn parse_template_diagnostic_with_replaced_body_token(
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     // Normal template-body lexing emits text, newline, nested-template, and close tokens only.
     // Replace the retained text token to exercise the parser's defensive unexpected-token lane
     // while keeping its authored UTF-8 span and source identity intact.
-    let body_token = token_stream
-        .tokens
+    // The lexer output is a canonical owner, so its compatibility vector is ignored by the
+    // canonical cursor. Rebuild the mutated vector as an explicit unbounded compatibility
+    // adapter; the adapter shares the frozen path table but owns no canonical provenance,
+    // so `AstCursor` reads the replaced token.
+    let opener_index = file_tokens.index;
+    let mut mutated_tokens = file_tokens.tokens.clone();
+    let body_token = mutated_tokens
         .iter_mut()
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("template source should contain a body token");
     body_token.kind = TokenKind::Comma;
-    let context = new_constant_context(token_stream.src_path, &path_fork);
+    let mut file_tokens = FileTokens::new_from_slice(
+        file_tokens.src_path,
+        file_tokens.file_id,
+        file_tokens.canonical_os_path.clone(),
+        mutated_tokens,
+        &file_tokens.path_syntax,
+    )
+    .expect("mutated body-token adapter must retain its frozen path table");
+    // `new_from_slice` resets the cursor to zero; restore the template-opener position so the
+    // parser starts at the same token as the unmutated fixture.
+    file_tokens.index = opener_index;
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = new_constant_context(source_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("template source should fail to parse"),
     );
     (diagnostic, span_builder)
@@ -63,12 +83,14 @@ fn parse_template_diagnostic_with_span_builder(
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream =
+    let mut file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = new_constant_context(source_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
             .expect_err("template source should fail to parse"),
     );
     (diagnostic, span_builder)

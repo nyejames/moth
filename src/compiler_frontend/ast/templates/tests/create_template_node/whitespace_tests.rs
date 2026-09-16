@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -60,18 +61,21 @@ fn escape_html_preserves_runtime_head_references() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream = template_tokens_from_source_with_style_directives("[value, $escape_html:\n    <b>body</b>\n]",
+    let mut file_tokens = template_tokens_from_source_with_style_directives("[value, $escape_html:\n    <b>body</b>\n]",
     &style_directives,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
     let context = runtime_template_context_with_style_directives(
-        &token_stream.src_path,
+        &source_path,
         &style_directives,
         &mut string_table,
         &mut path_fork,
     );
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template should parse");
 
     let store = context.template_ir_store.borrow();

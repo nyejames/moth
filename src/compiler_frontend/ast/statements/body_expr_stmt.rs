@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 /// Returns `true` if the given expression is valid in statement position.
@@ -97,7 +97,7 @@ fn rejects_discarded_fallible_success(expression: &Expression) -> Option<Compile
 /// Rejects expressions whose success value would be silently discarded,
 /// and rejects non-call expressions that have no side effects as statements.
 fn parse_and_validate_statement_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -130,7 +130,7 @@ fn parse_and_validate_statement_expression(
 }
 
 pub(crate) fn parse_expression_statement_candidate(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -139,7 +139,7 @@ pub(crate) fn parse_expression_statement_candidate(
     parse_and_validate_statement_expression(token_stream, context, type_interner, string_table, path_fork)
 }
 pub(crate) fn parse_symbol_expression_statement_candidate(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     _symbol_id: StringId,
     type_interner: &mut AstTypeInterner<'_>,

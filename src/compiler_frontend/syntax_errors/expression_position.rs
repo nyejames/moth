@@ -8,8 +8,9 @@
 //! messages waste the user's time.
 
 use super::common_syntax_mistake;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerDiagnostic};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Check for common expression-position mistakes before falling back to a generic error.
 ///
@@ -18,7 +19,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 ///
 /// Returns `Some(diagnostic)` when a known mistake is detected, `None` otherwise.
 pub(crate) fn check_expression_common_mistake(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     expression_is_empty: bool,
 ) -> Option<CompilerDiagnostic> {
     let current = token_stream.current_token_kind();

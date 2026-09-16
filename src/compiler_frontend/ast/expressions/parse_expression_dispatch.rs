@@ -49,16 +49,14 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
-use crate::compiler_frontend::utilities::token_scan::{
-    ExpressionBoundaryDepth, find_expression_end_index,
-};
+use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 pub(super) enum ExpressionTokenStep {
@@ -122,7 +120,7 @@ fn is_value_operand_start_token(token: &TokenKind) -> bool {
 
 /// Skips value-less comment templates before checking what follows a value template.
 fn reject_second_operand_after_value_template(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     consume_closing_parenthesis: bool,
@@ -167,7 +165,7 @@ fn reject_second_operand_after_value_template(
     reason = "suffix dispatch keeps the token stream, scope, mutable interner/string/rpn/path state, catch policy, and the postfix expression as separate borrows"
 )]
 fn push_expression_after_suffixes(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -180,14 +178,13 @@ fn push_expression_after_suffixes(
     //  Common mistake: `!=`
     // ----------------------------
     // Detect `!=` (Bang + Assign) before treating `!` as a result-handling suffix.
-    if token_stream.index < token_stream.length
+    if token_stream.position() < token_stream.length()
         && token_stream.current_token_kind() == &TokenKind::Bang
         && token_stream.peek_next_token() == Some(&TokenKind::Assign)
     {
         if let Some(error) = check_expression_common_mistake(token_stream, false) {
             return Err(error.into());
         }
-
         // Invariant: the condition above guarantees Bang+Assign, which
         // check_expression_common_mistake always matches. Reaching here is a compiler bug.
         return Err(CompilerError::compiler_error(
@@ -199,7 +196,7 @@ fn push_expression_after_suffixes(
     // ----------------------------
     //  Fallible handling suffix
     // ----------------------------
-    let expression_after_fallible = if token_stream.index < token_stream.length
+    let expression_after_fallible = if token_stream.position() < token_stream.length()
         && (token_stream.current_token_kind() == &TokenKind::Bang
             || token_stream.current_token_kind() == &TokenKind::Catch
             || (matches!(token_stream.current_token_kind(), TokenKind::Symbol(_))
@@ -225,7 +222,7 @@ fn push_expression_after_suffixes(
     // ----------------------------
     //  Option propagation suffix
     // ----------------------------
-    let expression_after_option_propagation = if token_stream.index < token_stream.length
+    let expression_after_option_propagation = if token_stream.position() < token_stream.length()
         && token_stream.current_token_kind() == &TokenKind::QuestionMark
     {
         parse_option_propagation_suffix_for_expression(
@@ -271,7 +268,7 @@ fn push_expression_after_suffixes(
     reason = "operand dispatch keeps the token stream, scope, mutable interner/string/rpn/path state, catch policy, and the operand expression as separate borrows"
 )]
 pub(super) fn push_expression_operand(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -306,7 +303,7 @@ pub(super) fn push_expression_operand(
     reason = "operand dispatch keeps the token stream, scope, mutable interner/string/rpn/path state, catch policy, and the spanned operand input as separate borrows"
 )]
 pub(super) fn push_expression_operand_with_span(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -315,7 +312,7 @@ pub(super) fn push_expression_operand_with_span(
     operand_input: ExpressionOperandInput,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let expression_after_postfix = if token_stream.index < token_stream.length
+    let expression_after_postfix = if token_stream.position() < token_stream.length()
         && token_stream.current_token_kind() == &TokenKind::Dot
     {
         parse_postfix_chain_expression(
@@ -369,7 +366,7 @@ fn const_record_expression_name(
 /// Pushes a unary operator item onto the expression stack when the current token
 /// is `Negative` or `Not`. Returns `true` when an operator was consumed.
 fn parse_unary_operator(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     _context: &ScopeContext,
     expression: &mut Vec<ExpressionRpnItem>,
     next_number_negative: &mut bool,
@@ -382,18 +379,8 @@ fn parse_unary_operator(
             ) {
                 *next_number_negative = true;
             } else {
-                // Short-lived canonical view for this token-local unary span; dropped
-                // before any FileTokens use. `current_span` stays the documented
-                // FileTokens grammar boundary (fallback below).
-                let span = DeclarationCursor::from_file_tokens(token_stream)
-                    .ok()
-                    .and_then(|cursor| cursor.current_postfix_operator_span())
-                    .or_else(|| {
-                        Some(SourceSpan::new(
-                            token_stream.file_id,
-                            token_stream.current_token().span,
-                        ))
-                    });
+                // Token-local postfix span comes from the AstCursor view.
+                let span = Some(token_stream.current_postfix_operator_span());
                 expression.push(ExpressionRpnItem::Operator {
                     operator: Operator::Negate,
                     span,
@@ -402,15 +389,7 @@ fn parse_unary_operator(
             true
         }
         TokenKind::Not => {
-            let span = DeclarationCursor::from_file_tokens(token_stream)
-                .ok()
-                .and_then(|cursor| cursor.current_postfix_operator_span())
-                .or_else(|| {
-                    Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    ))
-                });
+            let span = Some(token_stream.current_postfix_operator_span());
             expression.push(ExpressionRpnItem::Operator {
                 operator: Operator::Not,
                 span,
@@ -434,25 +413,17 @@ fn push_operator_item(
 fn advance_with_operator(
     expression: &mut Vec<ExpressionRpnItem>,
     context: &ScopeContext,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     operator: Operator,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    let span = DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_postfix_operator_span())
-        .or_else(|| {
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ))
-        });
+    let span = Some(token_stream.current_postfix_operator_span());
     push_operator_item(expression, context, span, operator);
     Ok(ExpressionTokenStep::Advance)
 }
 
 pub(super) fn dispatch_expression_token(
     token: TokenKind,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut ExpressionDispatchState<'_>,
@@ -495,18 +466,7 @@ pub(super) fn dispatch_expression_token(
         TokenKind::CloseParenthesis => dispatch_close_parenthesis(token_stream, state),
 
         TokenKind::OpenParenthesis => {
-            // Short-lived canonical view for this token-local group span; dropped before
-            // the grammar advance/re-entrant parse. `current_token` stays the documented
-            // FileTokens grammar boundary (fallback below).
-            let group_span = DeclarationCursor::from_file_tokens(&*token_stream)
-                .ok()
-                .and_then(|cursor| cursor.current_postfix_operator_span())
-                .or_else(|| {
-                    Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    ))
-                });
+            let group_span = Some(token_stream.current_postfix_operator_span());
             token_stream.advance();
             // A grouped expression is no longer the immediate receiving boundary.
             // This keeps `(cast value)` from acting as an operator operand while
@@ -651,18 +611,7 @@ pub(super) fn dispatch_expression_token(
         }
 
         TokenKind::Path(path_syntax) => {
-            // Short-lived canonical view for this token-local path span; dropped before the
-            // template/file-value handoff and grammar advance. `current_token` stays the
-            // documented FileTokens grammar boundary (fallback below).
-            let path_span = DeclarationCursor::from_file_tokens(&*token_stream)
-                .ok()
-                .and_then(|cursor| cursor.current_postfix_operator_span())
-                .or_else(|| {
-                    Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    ))
-                });
+            let path_span = Some(token_stream.current_postfix_operator_span());
             let operand = resolve_file_value(
                 path_syntax,
                 token_stream,
@@ -969,7 +918,7 @@ pub(super) fn dispatch_expression_token(
 // -------------------------------
 fn dispatch_delimiter_token(
     token: TokenKind,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     state: &mut ExpressionDispatchState<'_>,
     string_table: &mut StringTable,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
@@ -1010,7 +959,7 @@ fn dispatch_delimiter_token(
 //  Close parenthesis
 // -------------------------------
 fn dispatch_close_parenthesis(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     state: &mut ExpressionDispatchState<'_>,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     if state.consume_closing_parenthesis {
@@ -1032,23 +981,15 @@ fn dispatch_close_parenthesis(
 //  Newline
 // -------------------------------
 fn dispatch_newline(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     state: &mut ExpressionDispatchState<'_>,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    // Short-lived canonical view for this token-local previous fact; dropped before
-    // any FileTokens mutation or rewind. Index save/restore below stays the
-    // documented FileTokens grammar boundary (no safe cursor reposition API).
-    let previous_token = DeclarationCursor::from_file_tokens(&*token_stream)
-        .ok()
-        .and_then(|cursor| cursor.previous_token_kind())
-        .or_else(|| {
-            if token_stream.index == 0 {
-                Some(TokenKind::Newline)
-            } else {
-                Some(token_stream.previous_token().clone())
-            }
-        })
+    let previous_token = token_stream
+        .position()
+        .checked_sub(1)
+        .and_then(|previous| token_stream.token_kind_at(previous))
+        .or_else(|| token_stream.previous_token().cloned())
         .unwrap_or(TokenKind::Newline);
     let previous_token = &previous_token;
     if state.consume_closing_parenthesis
@@ -1067,31 +1008,28 @@ fn dispatch_newline(
     // ----------------------------
     // Look ahead past newlines to find the next meaningful token.
     // If that token continues the expression, skip newlines and keep parsing.
-    let saved_index = token_stream.index;
+    let saved_position = token_stream.position();
     token_stream.skip_newlines();
     if context.kind == ContextKind::MatchArm
         && current_token_starts_match_arm_header(token_stream).is_some()
     {
-        token_stream.index = saved_index;
+        token_stream.set_position(saved_position)?;
         return Ok(ExpressionTokenStep::Break);
     }
 
-    if token_stream.index < token_stream.length
+    if token_stream.position() < token_stream.length()
         && token_stream.current_token_kind().continues_expression()
     {
         return Ok(ExpressionTokenStep::Continue);
     }
-    token_stream.index = saved_index;
+    token_stream.set_position(saved_position)?;
 
     ast_log!("Breaking out of expression with newline");
     Ok(ExpressionTokenStep::Break)
 }
 
-// -------------------------------
-//  Is operator
-// -------------------------------
 fn dispatch_is_token(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut ExpressionDispatchState<'_>,
@@ -1140,7 +1078,7 @@ fn dispatch_is_token(
 /// WHY: cast is a prefix keyword whose meaning depends on the receiver type, so it is handled
 ///      directly by the dispatcher rather than the general operator or call machinery.
 fn parse_cast_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut ExpressionDispatchState<'_>,
@@ -1321,7 +1259,7 @@ fn parse_cast_expression(
     reason = "cast operand parsing keeps the token stream, scope, mutable interner/expected-type/string/path state, value mode, and parenthesis policy as separate borrows"
 )]
 fn parse_cast_operand_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expected_type: &mut ExpectedType,
@@ -1330,36 +1268,20 @@ fn parse_cast_operand_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    // Short-lived canonical view for the pure `catch` lookahead; dropped before any
-    // FileTokens mutation or re-entrant parse. Bounded adapters keep the legacy
-    // vector scan (documented grammar boundary in the fallback below).
-    let catch_is_cast_suffix = match DeclarationCursor::from_file_tokens(&*token_stream) {
-        Ok(cursor) => {
-            let mut scan = cursor.position();
-            let mut depth = ExpressionBoundaryDepth::default();
-            loop {
-                let Some(kind) = cursor.token_kind_at(scan) else {
-                    break false;
-                };
-                if depth.is_top_level() && kind == TokenKind::Catch {
-                    break true;
-                }
-                depth.step(&kind);
-                if matches!(kind, TokenKind::Eof) {
-                    break false;
-                }
-                scan += 1;
-            }
+    let mut scan = token_stream.position();
+    let mut depth = ExpressionBoundaryDepth::default();
+    let catch_is_cast_suffix = loop {
+        let Some(kind) = token_stream.token_kind_at(scan) else {
+            break false;
+        };
+        if depth.is_top_level() && kind == TokenKind::Catch {
+            break true;
         }
-        Err(_) => {
-            let catch_index = find_expression_end_index(
-                &token_stream.tokens,
-                token_stream.index,
-                &[TokenKind::Catch],
-            );
-            catch_index < token_stream.length
-                && token_stream.tokens[catch_index].kind == TokenKind::Catch
+        depth.step(&kind);
+        if matches!(kind, TokenKind::Eof) {
+            break false;
         }
+        scan += 1;
     };
 
     let mut cast_target_context = CastTargetContext::None;

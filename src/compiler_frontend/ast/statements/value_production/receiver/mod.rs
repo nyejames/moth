@@ -10,6 +10,7 @@
 
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
@@ -30,7 +31,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -62,8 +63,8 @@ pub(super) fn emit_collected_warnings(context: &ScopeContext, warnings: Vec<Comp
 /// Shared input for inline and block value-if parsers.
 ///
 /// WHAT: bundles the common state needed after the condition has been parsed.
-pub(super) struct ValueIfParseInput<'a, 'b> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct ValueIfParseInput<'a, 'b, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
@@ -80,7 +81,7 @@ pub(super) struct ValueIfParseInput<'a, 'b> {
 /// block and returns the resulting expression. The error preserves authored diagnostics and
 /// retained-data infrastructure failures until the enclosing AST emission boundary.
 pub fn try_parse_value_block_at_receiver(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expected_result_type_ids: &[TypeId],
@@ -112,7 +113,7 @@ pub fn try_parse_value_block_at_receiver(
 ///
 /// WHAT: the shared structural dispatcher for known and mixed inferred slots.
 pub fn try_parse_value_block_at_receiver_with_target(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     target: ActiveValueProductionTarget,
@@ -123,7 +124,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
         return None;
     }
 
-    let header_index = token_stream.index;
+    let header_index = token_stream.position();
     let span = Some(token_stream.current_span());
     token_stream.advance();
 
@@ -234,7 +235,7 @@ type ReceiverResult<T> = Result<T, ExpressionParseError>;
     reason = "receiver value parsing keeps the token stream, scope, mutable interner/string/path state, the value target, header position, and span as separate borrows"
 )]
 fn parse_bool_value_if_after_condition(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     target: ActiveValueProductionTarget,
@@ -270,7 +271,7 @@ fn parse_bool_value_if_after_condition(
     ensure_if_statement_condition(&condition, type_interner.environment())?;
 
     if token_stream.current_token_kind() == &TokenKind::Then {
-        if !same_logical_line(token_stream, header_index, token_stream.index) {
+        if !same_logical_line(token_stream, header_index, token_stream.position()) {
             return Err(CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::InlineValueIfMultiline,
                 Some(token_stream.current_span()),

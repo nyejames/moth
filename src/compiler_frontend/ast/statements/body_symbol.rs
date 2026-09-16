@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::function_calls::{
@@ -29,11 +30,10 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidDeclarationReason,
     InvalidStandaloneStatementReason, InvalidThisUsageReason, ReservedNameOwner,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 // --------------------------
 //  Accessed-symbol statement helper
@@ -43,7 +43,7 @@ fn push_accessed_symbol_statement(
     accessed_expression: Expression,
     ast: &mut Vec<AstNode>,
     context: &ScopeContext,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     _symbol_id: StringId,
     _string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
@@ -71,21 +71,13 @@ fn push_accessed_symbol_statement(
     ))
 }
 
-/// Read the next token kind through a short-lived canonical view.
+/// Read the next token kind through the canonical cursor view.
 ///
-/// WHAT: pure read-only lookahead that preserves adapter-relative indexes; dropped
-/// before any `FileTokens` mutation or re-entrant parse.
-/// WHY: narrowed `new_from_slice` streams have no canonical provenance, so they keep
-/// `peek_next_token` as the documented `FileTokens` grammar boundary (fallback below).
-fn peek_next_kind(token_stream: &FileTokens) -> Option<TokenKind> {
-    DeclarationCursor::from_file_tokens(token_stream)
-        .map(|cursor| {
-            cursor
-                .position()
-                .checked_add(1)
-                .and_then(|next| cursor.token_kind_at(next))
-        })
-        .unwrap_or_else(|_| token_stream.peek_next_token().cloned())
+/// WHAT: pure read-only lookahead at the adapter-relative next position.
+/// WHY: symbol dispatch only needs one token of lookahead; `AstCursor::token_kind_at`
+/// already covers both canonical and compatibility backings.
+fn peek_next_kind(token_stream: &AstCursor) -> Option<TokenKind> {
+    token_stream.token_kind_at(token_stream.position().saturating_add(1))
 }
 
 // --------------------------
@@ -93,7 +85,7 @@ fn peek_next_kind(token_stream: &FileTokens) -> Option<TokenKind> {
 // --------------------------
 
 pub(crate) fn parse_this_statement(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     ast: &mut Vec<AstNode>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -214,7 +206,7 @@ pub(crate) fn parse_this_statement(
 // --------------------------
 
 pub(crate) fn parse_symbol_statement(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     ast: &mut Vec<AstNode>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,

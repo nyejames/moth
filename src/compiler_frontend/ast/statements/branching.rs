@@ -40,9 +40,9 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 
 /// Branches recursively parse function bodies, so retained-data failures travel to the module
 /// emission boundary instead of being recast as authored control-flow diagnostics.
@@ -81,74 +81,33 @@ pub(crate) struct ParsedMatchBlock {
     pub exhaustiveness: MatchExhaustiveness,
     pub scope: PathId,
 }
-/// Returns the cursor's parser-relative position for a compatibility lane view.
-///
-/// Falls back to the legacy vector index when the stream has no canonical provenance
-/// (unbounded expression adapters); the boundary is reported to the migration owner.
-fn cursor_position_or_zero(token_stream: &FileTokens) -> usize {
-    DeclarationCursor::from_file_tokens(token_stream)
-        .map(|cursor| cursor.position())
-        .unwrap_or_else(|_| token_stream.index)
-}
-
 /// Peek at the next non-newline token without advancing the stream.
-fn peek_next_non_newline_token(token_stream: &FileTokens) -> Option<Token> {
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        let mut index = cursor.position().checked_add(1)?;
-        loop {
-            let kind = cursor.token_kind_at(index)?;
-            if kind != TokenKind::Newline {
-                return cursor.token_at(index);
-            }
-            index = index.checked_add(1)?;
+fn peek_next_non_newline_token(token_stream: &AstCursor) -> Option<Token> {
+    let mut index = token_stream.position().checked_add(1)?;
+    loop {
+        let kind = token_stream.token_kind_at(index)?;
+        if kind != TokenKind::Newline {
+            return token_stream.token_at(index);
         }
+        index = index.checked_add(1)?;
     }
-
-    let mut index = token_stream.index.saturating_add(1);
-    while let Some(token) = token_stream.tokens.get(index) {
-        if token.kind != TokenKind::Newline {
-            return Some(token.clone());
-        }
-        index = index.saturating_add(1);
-    }
-    None
 }
 
 /// Peek at the index of the next non-newline token without advancing the stream.
-fn peek_next_non_newline_token_index(token_stream: &FileTokens) -> Option<usize> {
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        let mut index = cursor.position().checked_add(1)?;
-        loop {
-            let kind = cursor.token_kind_at(index)?;
-            if kind != TokenKind::Newline {
-                return Some(index);
-            }
-            index = index.checked_add(1)?;
-        }
-    }
-
-    let mut index = token_stream.index.saturating_add(1);
-    while let Some(token) = token_stream.tokens.get(index) {
-        if token.kind != TokenKind::Newline {
+fn peek_next_non_newline_token_index(token_stream: &AstCursor) -> Option<usize> {
+    let mut index = token_stream.position().checked_add(1)?;
+    loop {
+        let kind = token_stream.token_kind_at(index)?;
+        if kind != TokenKind::Newline {
             return Some(index);
         }
-        index = index.saturating_add(1);
+        index = index.checked_add(1)?;
     }
-    None
 }
 
-fn reject_same_line_else_if(token_stream: &FileTokens) -> BranchingResult<()> {
+fn reject_same_line_else_if(token_stream: &AstCursor) -> BranchingResult<()> {
     let else_span = Some(token_stream.current_span());
-    let next_kind = DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| {
-            cursor
-                .position()
-                .checked_add(1)
-                .and_then(|next| cursor.token_kind_at(next))
-        })
-        .or_else(|| token_stream.peek_next_token().cloned());
-    let Some(next_kind) = next_kind else {
+    let Some(next_kind) = token_stream.peek_next_token().cloned() else {
         return Ok(());
     };
 
@@ -173,27 +132,15 @@ fn reject_same_line_else_if(token_stream: &FileTokens) -> BranchingResult<()> {
 /// WHY: the single-predicate and statement-match shapes share the `if` keyword,
 /// so this entry point disambiguates them early based on token lookahead.
 pub fn create_branch(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<Vec<AstNode>> {
-    let header_span = DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| {
-            cursor
-                .previous_token()
-                .map(|token| SourceSpan::new(cursor.source_id(), token.span))
-        })
-        .or_else(|| {
-            token_stream
-                .index
-                .checked_sub(1)
-                .and_then(|index| token_stream.tokens.get(index))
-                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-        })
+    let header_span = token_stream
+        .previous_span()
         .or_else(|| Some(token_stream.current_span()));
     let parsed_header = parse_if_header(
         token_stream,
@@ -314,7 +261,7 @@ pub fn create_branch(
 
 fn create_option_present_capture_branch(
     parsed_header: OptionPresentCaptureBranch,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -399,7 +346,7 @@ fn create_option_present_capture_branch(
 fn create_match_node(
     scrutinee: Expression,
     header_span: Option<SourceSpan>,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -442,7 +389,7 @@ fn create_match_node(
 )]
 pub(crate) fn parse_match_block(
     scrutinee: Expression,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -540,7 +487,7 @@ pub(crate) fn parse_match_block(
             // Normal pattern arm or malformed header — delegate to dedicated parsing.
             _ => {
                 if let Some(candidate) = current_token_starts_match_arm_header(token_stream) {
-                    debug_assert_eq!(candidate.start_index, token_stream.index);
+                    debug_assert_eq!(candidate.start_index, token_stream.position());
                     debug_assert!(candidate.arrow_index > candidate.start_index);
                     let parsed = parse_match_arm(
                         &scrutinee,
@@ -573,7 +520,7 @@ pub(crate) fn parse_match_block(
                     continue;
                 }
 
-                if token_is_line_initial(token_stream, cursor_position_or_zero(token_stream))
+                if token_is_line_initial(token_stream, token_stream.position())
                     && current_line_contains_top_level_colon(token_stream)
                 {
                     return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
@@ -615,7 +562,7 @@ pub(crate) fn parse_match_block(
 }
 
 fn parse_else_arm(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -671,7 +618,7 @@ fn parse_else_arm(
 /// pattern; this function does not advance before parsing.
 fn parse_match_arm(
     scrutinee: &Expression,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,

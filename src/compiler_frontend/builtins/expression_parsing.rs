@@ -5,6 +5,7 @@
 //! surfaces does not keep bloating the generic expression parser.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::statements::collections::new_curly_literal;
@@ -13,7 +14,6 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismat
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::parse_context::{
     ExpectedCollectionContext, ExpectedCurlyLiteralContext, ExpectedMapContext, ExpectedType,
 };
@@ -30,7 +30,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
     reason = "curly literal parsing keeps the token stream, scope, mutable interner/string/rpn/path state, expected type, and value mode as separate borrows"
 )]
 pub(crate) fn parse_curly_literal_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expected_type: &ExpectedType,

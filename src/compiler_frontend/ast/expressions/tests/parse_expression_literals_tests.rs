@@ -6,6 +6,7 @@
 //!      prevents silent changes to literal type inference.
 
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -142,7 +143,9 @@ fn parse_whole_number_token(
         ),
         Token::new(TokenKind::Eof, LocalSpan::source_start()),
     ];
-    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = Vec::new();
     let mut next_number_negative = next_number_negative;
     let mut type_environment = TypeEnvironment::new();

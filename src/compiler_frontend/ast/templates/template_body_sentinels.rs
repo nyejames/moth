@@ -10,10 +10,10 @@ use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Selects how a direct `[else]` marker is interpreted in the current body.
 #[derive(Clone, Copy)]
@@ -134,30 +134,20 @@ impl BodySentinelTarget<'_> {
     }
 }
 
-pub(super) fn classify_direct_else_marker(token_stream: &FileTokens) -> Option<DirectElseMarker> {
-    // Pure lookahead: prefer a short-lived canonical view, fall back to the
-    // explicit compatibility vector for unbounded (`FileTokens::new_from_slice`)
-    // streams with no canonical provenance. The cursor is dropped before any
-    // stream mutation or recursive parse.
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        classify_direct_else_marker_at_cursor(&cursor)
-    } else {
-        classify_direct_else_marker_in_tokens(token_stream)
-    }
+pub(super) fn classify_direct_else_marker(token_stream: &AstCursor) -> Option<DirectElseMarker> {
+    classify_direct_else_marker_at_cursor(token_stream)
 }
 
-fn classify_direct_else_marker_at_cursor(
-    cursor: &DeclarationCursor<'_>,
-) -> Option<DirectElseMarker> {
+fn classify_direct_else_marker_at_cursor(cursor: &AstCursor) -> Option<DirectElseMarker> {
     let mut index = cursor.position().checked_add(1)?;
 
-    while index < cursor.length
+    while index < cursor.length()
         && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
     {
         index += 1;
     }
 
-    if index >= cursor.length
+    if index >= cursor.length()
         || !matches!(cursor.token_kind_at(index), Some(TokenKind::Else))
     {
         return None;
@@ -166,19 +156,19 @@ fn classify_direct_else_marker_at_cursor(
     let span = cursor.span_at(index);
     index += 1;
 
-    while index < cursor.length
+    while index < cursor.length()
         && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
     {
         index += 1;
     }
 
-    if index < cursor.length && matches!(cursor.token_kind_at(index), Some(TokenKind::If)) {
+    if index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::If)) {
         let if_index = index;
         index += 1;
 
         let mut scan_index = index;
         let mut nested_templates = 0usize;
-        while scan_index < cursor.length {
+        while scan_index < cursor.length() {
             let Some(kind) = cursor.token_kind_at(scan_index) else {
                 break;
             };
@@ -207,7 +197,7 @@ fn classify_direct_else_marker_at_cursor(
         return Some(DirectElseMarker::MalformedElseIf { span });
     }
 
-    if index < cursor.length
+    if index < cursor.length()
         && matches!(cursor.token_kind_at(index), Some(TokenKind::TemplateClose))
     {
         return Some(DirectElseMarker::Sentinel {
@@ -219,74 +209,8 @@ fn classify_direct_else_marker_at_cursor(
     Some(DirectElseMarker::Malformed { span })
 }
 
-fn classify_direct_else_marker_in_tokens(token_stream: &FileTokens) -> Option<DirectElseMarker> {
-    let mut index = token_stream.index + 1;
-
-    while index < token_stream.length
-        && matches!(token_stream.tokens[index].kind, TokenKind::Newline)
-    {
-        index += 1;
-    }
-
-    if index >= token_stream.length || !matches!(token_stream.tokens[index].kind, TokenKind::Else) {
-        return None;
-    }
-
-    let else_token = &token_stream.tokens[index];
-    let span = Some(SourceSpan::new(token_stream.file_id, else_token.span));
-    index += 1;
-
-    while index < token_stream.length
-        && matches!(token_stream.tokens[index].kind, TokenKind::Newline)
-    {
-        index += 1;
-    }
-
-    if index < token_stream.length && matches!(token_stream.tokens[index].kind, TokenKind::If) {
-        let if_index = index;
-        index += 1;
-
-        let mut scan_index = index;
-        let mut nested_templates = 0usize;
-        while scan_index < token_stream.length {
-            match token_stream.tokens[scan_index].kind {
-                TokenKind::TemplateHead => nested_templates += 1,
-                TokenKind::TemplateClose if nested_templates == 0 => {
-                    return Some(DirectElseMarker::ElseIf {
-                        if_index,
-                        close_index: scan_index,
-                        span,
-                    });
-                }
-                TokenKind::TemplateClose => nested_templates = nested_templates.saturating_sub(1),
-                TokenKind::StartTemplateBody | TokenKind::Colon if nested_templates == 0 => {
-                    return Some(DirectElseMarker::MalformedElseIf { span });
-                }
-                TokenKind::Eof => {
-                    return Some(DirectElseMarker::MalformedElseIf { span });
-                }
-                _ => {}
-            }
-
-            scan_index += 1;
-        }
-
-        return Some(DirectElseMarker::MalformedElseIf { span });
-    }
-
-    if index < token_stream.length
-        && matches!(token_stream.tokens[index].kind, TokenKind::TemplateClose)
-    {
-        return Some(DirectElseMarker::Sentinel {
-            close_index: index,
-            span,
-        });
-    }
-
-    Some(DirectElseMarker::Malformed { span })
-}
 pub(super) fn handle_direct_else_marker(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     else_marker: DirectElseMarker,
     policy: ElseSentinelPolicy,
     mut target: BodySentinelTarget<'_>,
@@ -346,7 +270,9 @@ pub(super) fn handle_direct_else_marker(
             )
             .map_err(|diagnostic| with_direct_else_marker_span(diagnostic, span))?;
             target.trim_trailing_whitespace(string_table);
-            token_stream.index = close_index;
+            token_stream
+                .set_position(close_index)
+                .expect("else sentinel close index stays inside the body cursor");
             token_stream.advance();
             Ok(TemplateBodyBoundary::Else { span })
         }
@@ -366,7 +292,7 @@ pub(super) fn handle_direct_else_marker(
 }
 
 pub(super) fn handle_direct_else_if_marker(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     if_index: usize,
     close_index: usize,
     span: Option<SourceSpan>,
@@ -431,23 +357,17 @@ pub(super) fn with_direct_else_marker_span(
 }
 
 pub(super) fn classify_direct_loop_control_marker(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> Option<DirectLoopControlMarker> {
-    // Pure lookahead with the same cursor-first/fallback split as the `[else]`
-    // classifier. Short-lived view; dropped before any mutation or recursion.
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        classify_direct_loop_control_marker_at_cursor(&cursor)
-    } else {
-        classify_direct_loop_control_marker_in_tokens(token_stream)
-    }
+    classify_direct_loop_control_marker_at_cursor(token_stream)
 }
 
 fn classify_direct_loop_control_marker_at_cursor(
-    cursor: &DeclarationCursor<'_>,
+    cursor: &AstCursor,
 ) -> Option<DirectLoopControlMarker> {
     let mut index = cursor.position().checked_add(1)?;
 
-    while index < cursor.length
+    while index < cursor.length()
         && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
     {
         index += 1;
@@ -460,59 +380,14 @@ fn classify_direct_loop_control_marker_at_cursor(
     };
     index += 1;
 
-    while index < cursor.length
+    while index < cursor.length()
         && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
     {
         index += 1;
     }
 
-    let close_index = if index < cursor.length
+    let close_index = if index < cursor.length()
         && matches!(cursor.token_kind_at(index), Some(TokenKind::TemplateClose))
-    {
-        Some(index)
-    } else {
-        None
-    };
-
-    if kind_is_break {
-        Some(DirectLoopControlMarker::Break { close_index, span })
-    } else {
-        Some(DirectLoopControlMarker::Continue { close_index, span })
-    }
-}
-
-fn classify_direct_loop_control_marker_in_tokens(
-    token_stream: &FileTokens,
-) -> Option<DirectLoopControlMarker> {
-    let mut index = token_stream.index + 1;
-
-    while index < token_stream.length
-        && matches!(token_stream.tokens[index].kind, TokenKind::Newline)
-    {
-        index += 1;
-    }
-
-    let (kind_is_break, span) = match token_stream.tokens.get(index) {
-        Some(token) if matches!(token.kind, TokenKind::Break) => (
-            true,
-            Some(SourceSpan::new(token_stream.file_id, token.span)),
-        ),
-        Some(token) if matches!(token.kind, TokenKind::Continue) => (
-            false,
-            Some(SourceSpan::new(token_stream.file_id, token.span)),
-        ),
-        _ => return None,
-    };
-    index += 1;
-
-    while index < token_stream.length
-        && matches!(token_stream.tokens[index].kind, TokenKind::Newline)
-    {
-        index += 1;
-    }
-
-    let close_index = if index < token_stream.length
-        && matches!(token_stream.tokens[index].kind, TokenKind::TemplateClose)
     {
         Some(index)
     } else {
@@ -582,7 +457,7 @@ pub(super) fn orphan_loop_control_diagnostic(
 }
 
 pub(super) fn ensure_loop_control_boundary_before_sentinel(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     marker: &DirectLoopControlMarker,
     string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
@@ -595,61 +470,34 @@ pub(super) fn ensure_loop_control_boundary_before_sentinel(
 }
 
 pub(super) fn ensure_loop_control_boundary_after_sentinel(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     marker: &DirectLoopControlMarker,
     string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    // Short-lived canonical read of the token after the sentinel. Falls back
-    // to the explicit compatibility vector for unbounded streams. The cursor
-    // is dropped before any stream mutation.
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        if let Some(next_kind) = cursor.token_kind_at(cursor.position()) {
-            return match next_kind {
-                TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text)
-                    if first_line_has_meaningful_text(string_table.resolve(text)) =>
-                {
-                    Err(inline_sentinel_diagnostic(
-                        loop_control_marker_source_span(marker),
-                        inline_loop_control_reason(marker),
-                    ))
-                }
-
-                TokenKind::TemplateHead => Err(inline_sentinel_diagnostic(
-                    loop_control_marker_source_span(marker),
-                    inline_loop_control_reason(marker),
-                )),
-
-                _ => Ok(()),
-            };
-        }
-    }
-
-    if token_stream.index >= token_stream.length {
+    if token_stream.position() >= token_stream.length() {
         return Ok(());
     }
 
-    let next_token = &token_stream.tokens[token_stream.index];
-    match &next_token.kind {
+    let Some(next_kind) = token_stream.token_kind_at(token_stream.position()) else {
+        return Ok(());
+    };
+    match next_kind {
         TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text)
-            if first_line_has_meaningful_text(string_table.resolve(*text)) =>
+            if first_line_has_meaningful_text(string_table.resolve(text)) =>
         {
-            return Err(inline_sentinel_diagnostic(
+            Err(inline_sentinel_diagnostic(
                 loop_control_marker_source_span(marker),
                 inline_loop_control_reason(marker),
-            ));
+            ))
         }
 
-        TokenKind::TemplateHead => {
-            return Err(inline_sentinel_diagnostic(
-                loop_control_marker_source_span(marker),
-                inline_loop_control_reason(marker),
-            ));
-        }
+        TokenKind::TemplateHead => Err(inline_sentinel_diagnostic(
+            loop_control_marker_source_span(marker),
+            inline_loop_control_reason(marker),
+        )),
 
-        _ => {}
+        _ => Ok(()),
     }
-
-    Ok(())
 }
 fn inline_loop_control_reason(marker: &DirectLoopControlMarker) -> InvalidTemplateStructureReason {
     match marker {
@@ -663,102 +511,53 @@ fn inline_loop_control_reason(marker: &DirectLoopControlMarker) -> InvalidTempla
 }
 
 pub(super) fn ensure_else_boundary_after_sentinel(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     sentinel_span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    // Same cursor-first/fallback split as the loop-control after-check.
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        if let Some(next_kind) = cursor.token_kind_at(cursor.position()) {
-            return match next_kind {
-                TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text)
-                    if first_line_has_meaningful_text(string_table.resolve(text)) =>
-                {
-                    Err(with_direct_else_marker_span(
-                        inline_else_diagnostic(sentinel_span),
-                        sentinel_span,
-                    ))
-                }
-
-                TokenKind::TemplateHead => Err(with_direct_else_marker_span(
-                    inline_else_diagnostic(sentinel_span),
-                    sentinel_span,
-                )),
-
-                _ => Ok(()),
-            };
-        }
-    }
-
-    if token_stream.index >= token_stream.length {
+    if token_stream.position() >= token_stream.length() {
         return Ok(());
     }
 
-    let next_token = &token_stream.tokens[token_stream.index];
-    match &next_token.kind {
+    let Some(next_kind) = token_stream.token_kind_at(token_stream.position()) else {
+        return Ok(());
+    };
+    match next_kind {
         TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text)
-            if first_line_has_meaningful_text(string_table.resolve(*text)) =>
+            if first_line_has_meaningful_text(string_table.resolve(text)) =>
         {
-            return Err(with_direct_else_marker_span(
+            Err(with_direct_else_marker_span(
                 inline_else_diagnostic(sentinel_span),
                 sentinel_span,
-            ));
+            ))
         }
 
-        TokenKind::TemplateHead => {
-            return Err(with_direct_else_marker_span(
-                inline_else_diagnostic(sentinel_span),
-                sentinel_span,
-            ));
-        }
+        TokenKind::TemplateHead => Err(with_direct_else_marker_span(
+            inline_else_diagnostic(sentinel_span),
+            sentinel_span,
+        )),
 
-        _ => {}
+        _ => Ok(()),
     }
-
-    Ok(())
 }
 
 fn ensure_body_boundary_before_sentinel(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     sentinel_span: Option<SourceSpan>,
     string_table: &StringTable,
     inline_reason: InvalidTemplateStructureReason,
 ) -> Result<(), CompilerDiagnostic> {
-    // Short-lived canonical read of the token before the sentinel; the
-    // previous token sits behind the already-advanced stream position. Falls
-    // back to the explicit vector for unbounded compatibility streams.
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        let Some(previous_index) = cursor.position().checked_sub(1) else {
-            return Ok(());
-        };
-        if let Some(previous_kind) = cursor.token_kind_at(previous_index) {
-            return match previous_kind {
-                TokenKind::Newline => Ok(()),
-
-                TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text) => {
-                    if last_line_has_meaningful_text(string_table.resolve(text)) {
-                        return Err(inline_sentinel_diagnostic(sentinel_span, inline_reason));
-                    }
-
-                    Ok(())
-                }
-
-                _ => Err(inline_sentinel_diagnostic(sentinel_span, inline_reason)),
-            };
-        }
-    }
-
-    if token_stream.index == 0 {
+    let Some(previous_index) = token_stream.position().checked_sub(1) else {
         return Ok(());
-    }
-
-    let previous_token = &token_stream.tokens[token_stream.index - 1];
-
-    match &previous_token.kind {
+    };
+    let Some(previous_kind) = token_stream.token_kind_at(previous_index) else {
+        return Ok(());
+    };
+    match previous_kind {
         TokenKind::Newline => Ok(()),
 
         TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text) => {
-            if last_line_has_meaningful_text(string_table.resolve(*text)) {
+            if last_line_has_meaningful_text(string_table.resolve(text)) {
                 return Err(inline_sentinel_diagnostic(sentinel_span, inline_reason));
             }
 

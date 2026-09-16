@@ -20,6 +20,7 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::module_ast::environment::{
@@ -194,14 +195,14 @@ impl ConstantResolutionSession {
 
         let mut type_interner =
             AstTypeInterner::new(type_environment, &mut self.compatibility_cache);
-        let source_owner = self
+        let file_owner = self
             .module_view
             .source_token_streams
             .get(&header.tokens.source())
             .map(|owner| owner.as_ref());
         let payload = header.synthetic_content_payload;
         if matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_)))
-            && source_owner.is_some()
+            && file_owner.is_some()
         {
             return Err(CompilerError::compiler_error(
                 "RenderedHtml synthetic content retained a canonical source token owner",
@@ -209,7 +210,7 @@ impl ConstantResolutionSession {
             .into());
         }
 
-        let fallback_path_syntax = if source_owner.is_none() {
+        let fallback_path_syntax = if file_owner.is_none() {
             if !matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) {
                 return Err(CompilerError::compiler_error(
                     "constant header has no canonical source token owner for its retained syntax",
@@ -220,7 +221,7 @@ impl ConstantResolutionSession {
         } else {
             None
         };
-        let path_syntax = source_owner
+        let path_syntax = file_owner
             .map(|owner| &owner.path_syntax)
             .or_else(|| fallback_path_syntax.as_ref())
             .expect("constant header path syntax fallback must be present");
@@ -228,7 +229,7 @@ impl ConstantResolutionSession {
         let initializer_override = if let Some(payload) = payload {
             let initializer_tokens = materialize_synthetic_content_initializer(
                 payload,
-                source_owner,
+                file_owner,
                 header.tokens,
                 header.declaration_path,
             )
@@ -247,10 +248,33 @@ impl ConstantResolutionSession {
             None
         };
 
+        // Live parser state stays on the canonical source owner. The transient
+        // cursor spans the full canonical source so nested initializer ranges
+        // stay inside its bounds; synthetic content has no canonical owner
+        // and therefore passes no live cursor alongside its explicit `FileTokens`.
+        // `from_file_tokens_range` retains the owner for bounded handoffs.
+        let body_cursor = file_owner
+            .map(|owner| -> Result<AstCursor, ExpressionParseError> {
+                let canonical = owner
+                    .canonical_source_tokens()
+                    .map_err(ExpressionParseError::from)?;
+                let full = canonical.full_range().map_err(|error| {
+                    ExpressionParseError::from(CompilerError::compiler_error(format!(
+                        "constant header source range could not be constructed: {error:?}"
+                    )))
+                })?;
+                AstCursor::from_file_tokens_range(owner, full).map_err(|error| {
+                    ExpressionParseError::from(CompilerError::compiler_error(format!(
+                        "constant header source range is outside its source owner: {error:?}"
+                    )))
+                })
+            })
+            .transpose()?;
+        let source_owner = body_cursor;
         let declaration_result = resolve_declaration_syntax(
             declaration.clone(),
             header.declaration_path.to_owned(),
-            source_owner,
+            source_owner.as_ref(),
             initializer_override,
             &mut scope_context,
             &mut type_interner,

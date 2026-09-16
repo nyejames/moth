@@ -14,12 +14,9 @@
 //! - Delimiter depth is tracked so `=>` inside nested parentheses, collections, or
 //!   templates is not mistaken for an arm separator.
 
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
-use crate::compiler_frontend::tokenizer::line_scanning::{
-    find_top_level_colon_on_line, find_top_level_fat_arrow_on_line,
-    find_top_level_match_arm_fat_arrow,
-};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
 pub(crate) struct MatchArmHeaderCandidate {
     pub(crate) start_index: usize,
@@ -30,46 +27,70 @@ pub(crate) struct MatchArmHeaderCandidate {
 ///
 /// A token starts a logical line when:
 /// - it is not `Newline`, `End`, or `Eof`;
-pub(crate) fn token_is_line_initial(token_stream: &FileTokens, index: usize) -> bool {
-    if index >= token_stream.length {
+pub(crate) fn token_is_line_initial(token_stream: &AstCursor, index: usize) -> bool {
+    if index >= token_stream.length() {
         return false;
     }
 
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        let Some(kind) = cursor.token_kind_at(index) else {
-            return false;
-        };
-        if matches!(kind, TokenKind::Newline | TokenKind::End | TokenKind::Eof) {
-            return false;
-        }
-
-        return index == 0
-            || cursor.token_kind_at(index.saturating_sub(1)) == Some(TokenKind::Newline);
-    }
-
-    let Some(token) = token_stream.tokens.get(index) else {
+    let Some(kind) = token_stream.token_kind_at(index) else {
         return false;
     };
-    if matches!(
-        token.kind,
-        TokenKind::Newline | TokenKind::End | TokenKind::Eof
-    ) {
+    if matches!(kind, TokenKind::Newline | TokenKind::End | TokenKind::Eof) {
         return false;
     }
     index == 0
-        || token_stream
-            .tokens
-            .get(index.saturating_sub(1))
-            .is_some_and(|previous| previous.kind == TokenKind::Newline)
+        || token_stream.token_kind_at(index.saturating_sub(1)) == Some(TokenKind::Newline)
 }
 
 /// Returns true when the token at `start_index` has a top-level `=>` in a match
 /// header, including the narrow guarded-header newline exception.
 pub(crate) fn token_index_has_top_level_fat_arrow(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     start_index: usize,
 ) -> bool {
     find_top_level_match_arm_fat_arrow(token_stream, start_index).is_some()
+}
+
+fn find_top_level_match_arm_fat_arrow(
+    token_stream: &AstCursor,
+    start_index: usize,
+) -> Option<usize> {
+    let mut nesting_depth = NestingDepth::default();
+    let mut guard_started = false;
+    let mut guard_expression_started = false;
+
+    let mut index = start_index;
+    while index < token_stream.length() {
+        let kind = token_stream.token_kind_at(index)?;
+        match kind {
+            TokenKind::End | TokenKind::Eof => break,
+            TokenKind::Newline => {
+                if nesting_depth.is_top_level() && guard_started && !guard_expression_started {
+                    index += 1;
+                    continue;
+                }
+                break;
+            }
+            TokenKind::FatArrow if nesting_depth.is_top_level() => {
+                if !guard_started || guard_expression_started {
+                    return Some(index);
+                }
+                break;
+            }
+            TokenKind::If if nesting_depth.is_top_level() && !guard_started => {
+                guard_started = true;
+            }
+            _ => {
+                if guard_started && nesting_depth.is_top_level() {
+                    guard_expression_started = true;
+                }
+                nesting_depth.step(&kind);
+            }
+        }
+        index += 1;
+    }
+
+    None
 }
 
 /// Check whether the current token starts a line-initial match arm header.
@@ -80,9 +101,9 @@ pub(crate) fn token_index_has_top_level_fat_arrow(
 /// - the match header contains a top-level `=>`, with only the parser-supported
 ///   newline exception after a guard `if`.
 pub(crate) fn current_token_starts_match_arm_header(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> Option<MatchArmHeaderCandidate> {
-    token_index_starts_match_arm_header(token_stream, token_stream.index, None)
+    token_index_starts_match_arm_header(token_stream, token_stream.position(), None)
 }
 
 /// Check whether the token at `start_index` begins a match arm header.
@@ -91,7 +112,7 @@ pub(crate) fn current_token_starts_match_arm_header(
 /// character column. This preserves the "same arm column" idea used by semicolon
 /// delimiter diagnostics.
 pub(crate) fn token_index_starts_match_arm_header(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     start_index: usize,
     _required_column: Option<i32>,
 ) -> Option<MatchArmHeaderCandidate> {
@@ -99,16 +120,7 @@ pub(crate) fn token_index_starts_match_arm_header(
         return None;
     }
 
-    let Some(start_kind) = DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.token_kind_at(start_index))
-        .or_else(|| {
-            token_stream
-                .tokens
-                .get(start_index)
-                .map(|token| token.kind.clone())
-        })
-    else {
+    let Some(start_kind) = token_stream.token_kind_at(start_index) else {
         return None;
     };
 
@@ -132,13 +144,38 @@ pub(crate) fn token_index_starts_match_arm_header(
 /// position, regardless of whether the current token is line-initial.
 ///
 /// Used by `body_dispatch.rs` to detect same-line accidental second arms.
-pub(crate) fn current_line_contains_top_level_fat_arrow(token_stream: &FileTokens) -> bool {
-    find_top_level_fat_arrow_on_line(token_stream, token_stream.index).is_some()
+pub(crate) fn current_line_contains_top_level_fat_arrow(token_stream: &AstCursor) -> bool {
+    find_top_level_token_on_line(token_stream, token_stream.position(), |kind| {
+        matches!(kind, TokenKind::FatArrow)
+    })
+    .is_some()
 }
 
 /// Scan forward from the current token looking for a top-level `Colon` on the same
 /// logical line. Returns `true` if one is found at delimiter depth `0` before any
 /// `Newline`, `End`, or `Eof`.
-pub(crate) fn current_line_contains_top_level_colon(token_stream: &FileTokens) -> bool {
-    find_top_level_colon_on_line(token_stream, token_stream.index).is_some()
+pub(crate) fn current_line_contains_top_level_colon(token_stream: &AstCursor) -> bool {
+    find_top_level_token_on_line(token_stream, token_stream.position(), |kind| {
+        matches!(kind, TokenKind::Colon)
+    })
+    .is_some()
+}
+
+fn find_top_level_token_on_line(
+    token_stream: &AstCursor,
+    start_index: usize,
+    matches_target: impl Fn(&TokenKind) -> bool,
+) -> Option<usize> {
+    let mut nesting_depth = NestingDepth::default();
+    let mut index = start_index;
+    while index < token_stream.length() {
+        let kind = token_stream.token_kind_at(index)?;
+        match kind {
+            TokenKind::Newline | TokenKind::End | TokenKind::Eof => break,
+            _ if nesting_depth.is_top_level() && matches_target(&kind) => return Some(index),
+            _ => nesting_depth.step(&kind),
+        }
+        index += 1;
+    }
+    None
 }

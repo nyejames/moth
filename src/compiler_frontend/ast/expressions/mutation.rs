@@ -58,7 +58,8 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -130,7 +131,7 @@ struct CompoundAssignmentInput<'a> {
 /// WHY: compound assignments must behave exactly as the equivalent binary
 ///      expression for type rules and for constant propagation.
 fn evaluate_compound_assignment_value(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     input: CompoundAssignmentInput<'_>,
     type_interner: &mut AstTypeInterner<'_>,
@@ -207,7 +208,7 @@ fn evaluate_compound_assignment_value(
     reason = "mutation building keeps the token stream, declaration, place target, span, scope, and mutable interner/string/path state as separate borrows"
 )]
 fn build_mutation_from_target(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
     target: PlaceExpression,
     declaration_span: Option<SourceSpan>,
@@ -216,10 +217,7 @@ fn build_mutation_from_target(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<AstNode, ExpressionParseError> {
-    let span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let span = Some(token_stream.current_span());
     let target_type_id = target.type_id;
 
     ast_log!(
@@ -323,10 +321,7 @@ fn build_mutation_from_target(
             {
                 return Err(CompilerDiagnostic::invalid_fallible_handling(
                     InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
-                    Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    )),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -386,7 +381,7 @@ fn build_mutation_from_target(
     reason = "mutation handling keeps the token stream, declaration, place target, span, scope, and mutable interner/string/path state as separate borrows"
 )]
 pub(crate) fn handle_mutation_target(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
     target: PlaceExpression,
     declaration_span: Option<SourceSpan>,
@@ -412,7 +407,7 @@ pub(crate) fn handle_mutation_target(
 /// WHAT: parses field-access chains on the variable, then builds the mutation
 ///       node through `build_mutation_from_target`.
 pub fn handle_mutation(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
     declaration_span: Option<SourceSpan>,
     context: &ScopeContext,
@@ -437,10 +432,7 @@ pub fn handle_mutation(
             None,
             None,
             None,
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            )),
+            Some(token_stream.current_span()),
         )
         .into());
     };

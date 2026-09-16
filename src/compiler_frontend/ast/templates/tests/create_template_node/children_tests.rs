@@ -7,6 +7,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
@@ -14,25 +15,27 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut wrapper_tokens =
+    let mut wrapper_file_tokens =
         template_tokens_from_source("[: inherited]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(wrapper_tokens.src_path.to_owned(), &path_fork);
+    let wrapper_source_path = wrapper_file_tokens.src_path;
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let context = new_constant_context(wrapper_source_path, &path_fork);
     let wrapper =
-        Template::new(&mut wrapper_tokens, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut wrapper_tokens, wrapper_source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("inherited wrapper should parse");
     let inherited_wrapper = {
         let reference = &wrapper.tir_reference;
         TemplateWrapperReference::new(reference.root, reference.phase, reference.context)
     };
 
-    let mut token_stream = template_tokens_from_source("[$fresh, $md:\n# Hello\n]",
+    let mut file_tokens = template_tokens_from_source("[$fresh, $md:\n# Hello\n]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = new_constant_context(source_path, &path_fork);
 
-    let template = Template::new(
-        &mut token_stream,
-        &context,
+    let template = Template::new(&mut token_stream, source_path, &context,
         vec![inherited_wrapper],
         &mut string_table,
         &mut path_fork,
@@ -55,13 +58,15 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[$children([:prefix]): [: child]]",
+    let mut file_tokens = template_tokens_from_source("[$children([:prefix]): [: child]]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = new_constant_context(source_path, &path_fork);
 
     let template =
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template should parse");
 
     // The $children directive attaches a wrapper-context overlay carrying
@@ -102,13 +107,15 @@ fn children_directive_accepts_const_string_reference() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source("[$children(prefix): [: child]]",
+    let mut file_tokens = template_tokens_from_source("[$children(prefix): [: child]]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = constant_template_context(&source_path, &declarations, &path_fork);
 
     let template =
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("children directive should accept const-folded references");
 
     // Resolve the wrapper reference through the TIR overlay system.
@@ -164,13 +171,15 @@ fn children_directive_rejects_runtime_values() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[$children(value): [: child]]",
+    let mut file_tokens = template_tokens_from_source("[$children(value): [: child]]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = runtime_template_context(&token_stream.src_path, &mut string_table, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
 
     let error =
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("children directive should reject runtime values");
     let error = expect_template_diagnostic(error);
 
@@ -265,12 +274,14 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream =
+    let mut file_tokens =
         template_tokens_from_source("[$children(]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = new_constant_context(source_path, &path_fork);
 
     let error =
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("empty $children argument at a template boundary should fail to parse");
     let error = expect_template_diagnostic(error);
 

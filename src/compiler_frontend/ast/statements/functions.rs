@@ -5,6 +5,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind, ReactiveTemplateMetadata,
@@ -27,25 +28,20 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::declaration_syntax::{
-    DeclarationCursor,
-    signature_members::{
-        FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
-        parse_function_signature_syntax,
-    },
+use crate::compiler_frontend::declaration_syntax::signature_members::{
+    FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
+    parse_function_signature_syntax,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenRange};
 use crate::compiler_frontend::type_coercion::parse_context::{
     cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
 
-/// Signature parsing shares the AST error lane because default values materialise temporary
-/// streams from the frozen file-owned path table.
+/// Signature parsing shares the AST error lane because default values nest an explicit
+/// cursor over the frozen file-owned source owner.
 type SignatureResult<T> = Result<T, ExpressionParseError>;
 
 /// Whether a return slot carries success-channel or error-channel values.
@@ -102,7 +98,7 @@ pub(crate) enum SignatureTypeFallbackPolicy {
 
 impl FunctionSignature {
     pub(crate) fn new(
-        token_stream: &mut FileTokens,
+        token_stream: &mut AstCursor,
         warnings: &mut Vec<CompilerDiagnostic>,
         string_table: &mut StringTable,
         function_path: &PathId,
@@ -112,7 +108,7 @@ impl FunctionSignature {
     ) -> SignatureResult<Self> {
         let mut span_builder = ExtendedSpanBuilder::new();
         let signature_syntax = {
-            let mut declaration_cursor = DeclarationCursor::from_file_tokens(token_stream)?;
+            let mut declaration_cursor = token_stream.declaration_cursor()?;
             let syntax = parse_function_signature_syntax(
                 &mut declaration_cursor,
                 warnings,
@@ -121,10 +117,9 @@ impl FunctionSignature {
                 path_fork,
                 &mut span_builder,
             )?;
-            let next_index =
-                token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
+            let next_index = declaration_cursor.position();
             drop(declaration_cursor);
-            token_stream.index = next_index;
+            token_stream.set_position(next_index)?;
             syntax
         };
 
@@ -181,7 +176,7 @@ impl FunctionSignature {
 ///
 pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     syntax: &FunctionSignatureSyntax,
-    source_owner: &FileTokens,
+    source_owner: &AstCursor,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -228,7 +223,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
 }
 pub(crate) fn signature_member_to_declaration(
     member: &SignatureMemberSyntax,
-    source_owner: &FileTokens,
+    source_owner: &AstCursor,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -413,7 +408,7 @@ fn should_fallback_signature_type(
 /// Parse the default-value expression for a single signature parameter.
 fn parse_signature_default_expression(
     member: &SignatureMemberSyntax,
-    source_owner: &FileTokens,
+    source_owner: &AstCursor,
     type_id: TypeId,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -430,12 +425,18 @@ fn parse_signature_default_expression(
         string_table,
         &*path_fork,
     );
-    let mut expression_stream = token_stream_with_eof(
-        source_owner,
-        member.default_range,
-        member.id,
-        member.span,
-    )?;
+    // The default range is canonical source provenance. Nest an explicit cursor over the
+    // live owner so the canonical owner stays available for bounded expression handoffs;
+    // the canonical view reports EOF at the range end, matching the bounded-adapter handoff
+    // which excludes its synthetic EOF from canonical positions.
+    let range = member.default_range.ok_or_else(|| {
+        CompilerError::compiler_error("signature default expression range was unexpectedly empty")
+    })?;
+    let mut expression_stream = source_owner.nested_cursor(range).map_err(|error| {
+        CompilerError::compiler_error(format!(
+            "signature default expression range is outside its source owner: {error:?}"
+        ))
+    })?;
 
     let input = ExpressionParseInput::new(
         ExpressionParseResources {
@@ -456,32 +457,6 @@ fn parse_signature_default_expression(
         },
     );
     create_expression_with_trailing_newline_policy(input)
-}
-
-/// Build a bounded expression-parser stream for one source-owned member default range.
-///
-/// The source-qualified range remains the only durable syntax fact on the member shell. The
-/// adapter appends an ephemeral EOF for the legacy expression parser while retaining canonical
-/// range provenance.
-fn token_stream_with_eof(
-    source_owner: &FileTokens,
-    default_range: Option<TokenRange>,
-    declaration_path: PathId,
-    member_span: Option<SourceSpan>,
-) -> SignatureResult<FileTokens> {
-    let range = default_range.ok_or_else(|| {
-        CompilerError::compiler_error("signature default expression range was unexpectedly empty")
-    })?;
-    let eof_span = member_span
-        .map(SourceSpan::local)
-        .unwrap_or_else(LocalSpan::source_start);
-    FileTokens::new_bounded_expression_substream(
-        source_owner,
-        range,
-        declaration_path,
-        eof_span,
-    )
-    .map_err(ExpressionParseError::from)
 }
 
 /// Build a `ReturnSlot` from parsed syntax.

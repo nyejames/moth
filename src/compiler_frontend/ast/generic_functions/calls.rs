@@ -48,12 +48,13 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use rustc_hash::FxHashMap;
 
 /// Input bundle for generic call inference.
-pub(crate) struct GenericFunctionCallParseInput<'a, 'b> {
-    pub(crate) token_stream: &'a mut FileTokens,
+pub(crate) struct GenericFunctionCallParseInput<'a, 'b, 'tokens> {
+    pub(crate) token_stream: &'a mut AstCursor<'tokens>,
     pub(crate) template: &'a GenericFunctionTemplate,
     pub(crate) context: &'a ScopeContext,
     pub(crate) expected_context: GenericCallExpectedContext<'a>,
@@ -79,8 +80,8 @@ pub(crate) enum GenericCallExpectedContext<'a> {
     None,
 }
 
-struct GenericFunctionCallFinishInput<'a, 'b> {
-    token_stream: &'a mut FileTokens,
+struct GenericFunctionCallFinishInput<'a, 'b, 'tokens> {
+    token_stream: &'a mut AstCursor<'tokens>,
     context: &'a ScopeContext,
     call: HandledFallibleCall,
     error_return_type_id: Option<TypeId>,
@@ -93,7 +94,7 @@ struct GenericFunctionCallFinishInput<'a, 'b> {
 }
 
 fn parse_generic_function_call(
-    input: GenericFunctionCallParseInput<'_, '_>,
+    input: GenericFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
@@ -197,13 +198,13 @@ fn parse_generic_function_call(
 }
 
 pub(crate) fn parse_generic_function_call_expression(
-    input: GenericFunctionCallParseInput<'_, '_>,
+    input: GenericFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     parse_generic_function_call(input)
 }
 
 fn validate_generic_function_template_call(
-    input: GenericFunctionCallParseInput<'_, '_>,
+    input: GenericFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
@@ -286,13 +287,13 @@ fn validate_generic_function_template_call(
 }
 
 pub(crate) fn validate_generic_function_template_call_expression(
-    input: GenericFunctionCallParseInput<'_, '_>,
+    input: GenericFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     validate_generic_function_template_call(input)
 }
 
 fn finish_generic_function_call(
-    input: GenericFunctionCallFinishInput<'_, '_>,
+    input: GenericFunctionCallFinishInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let GenericFunctionCallFinishInput {
         token_stream,

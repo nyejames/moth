@@ -42,7 +42,8 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 pub(super) fn lookup_receiver_method<'a>(
     context: &'a ScopeContext,
@@ -170,8 +171,8 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
     Ok((inference.instance_path, inference.signature, request))
 }
 
-pub(super) struct SourceReceiverMethodCallInput<'a, 'interner> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct SourceReceiverMethodCallInput<'a, 'interner, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) receiver_node: &'a AstNode,
     pub(super) member_name: StringId,
     pub(super) member_span: Option<SourceSpan>,
@@ -185,7 +186,7 @@ pub(super) struct SourceReceiverMethodCallInput<'a, 'interner> {
 }
 
 pub(super) fn parse_source_receiver_method_target_call_typed(
-    input: SourceReceiverMethodCallInput<'_, '_>,
+    input: SourceReceiverMethodCallInput<'_, '_, '_>,
 ) -> Result<AstNode, ExpressionParseError> {
     let SourceReceiverMethodCallInput {
         token_stream,

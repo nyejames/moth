@@ -870,6 +870,14 @@ impl SourceTokens {
         })
     }
 
+    pub(crate) fn path_syntax_arc(&self) -> Result<Arc<PathSyntaxTable>, CompilerError> {
+        self.path_syntax.clone().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "source token path table is not attached at its immutable publication boundary",
+            )
+        })
+    }
+
     fn validate_structure(&self) -> Result<(), CompilerError> {
         if self.shapes.len() != self.spans.len() {
             return Err(CompilerError::compiler_error(
@@ -943,7 +951,31 @@ impl SourceTokens {
     }
 
     pub fn cursor_all(&self) -> Result<TokenCursor<'_>, TokenRangeError> {
+
         self.cursor(self.full_range()?)
+    }
+    /// Materialize one checked contiguous range directly from this canonical owner.
+    ///
+    /// Parser adapters use this only at an explicit handoff boundary. The returned vector is
+    /// transient compatibility data; canonical shapes, spans and cold stores remain owned here.
+    fn materialize_range(&self, range: TokenRange) -> Result<Vec<Token>, CompilerError> {
+        let mut cursor = self.cursor(range).map_err(|error| {
+            CompilerError::compiler_error(format!("token range materialization failed: {error:?}"))
+        })?;
+        let mut tokens = Vec::with_capacity(range.len() as usize);
+        while let Some(token_ref) = cursor.advance() {
+            let is_eof = token_ref.is_eof();
+            let kind = token_ref.to_token_kind().map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "canonical token payload could not be materialized: {error:?}"
+                ))
+            })?;
+            tokens.push(Token::new(kind, token_ref.span()));
+            if is_eof {
+                break;
+            }
+        }
+        Ok(tokens)
     }
 
     /// Register one checked segmented token sequence in this source owner.
@@ -1248,6 +1280,31 @@ impl<'a> TokenCursor<'a> {
     pub(crate) const fn source_tokens(self) -> &'a SourceTokens {
         self.tokens
     }
+    /// Whether this cursor is backed by a segmented logical token sequence.
+    pub(crate) const fn is_segmented(self) -> bool {
+        matches!(self.bounds, TokenCursorBounds::Segmented(_))
+    }
+
+    /// Return the parser-facing position while retaining raw source positions in `position`.
+    ///
+    /// Contiguous cursors preserve their existing source-index semantics. Segmented cursors
+    /// expose a dense compatibility position that skips omitted source gaps.
+    pub(crate) fn parser_position(self) -> usize {
+        match self.bounds {
+            TokenCursorBounds::Contiguous(_) => self.next.index(),
+            TokenCursorBounds::Segmented(_) => self
+                .compatibility_position()
+                .expect("validated segmented cursor has a logical position"),
+        }
+    }
+
+    /// Return the parser-facing length while retaining raw source ranges in `range`.
+    pub(crate) fn parser_length(self) -> usize {
+        match self.bounds {
+            TokenCursorBounds::Contiguous(range) => range.end().index(),
+            TokenCursorBounds::Segmented(view) => view.len(),
+        }
+    }
 
 
     /// Materialise the current canonical token for an explicit compatibility boundary.
@@ -1422,6 +1479,65 @@ impl<'a> TokenCursor<'a> {
         }
         Ok(position)
     }
+    /// Read a token in the dense parser-facing view.
+    ///
+    /// Segmented cursors resolve the argument through sequence order, while contiguous cursors
+    /// retain their source-index view for callers that still use canonical positions.
+    pub(crate) fn parser_token_at(self, index: usize) -> Option<TokenRef<'a>> {
+        match self.bounds {
+            TokenCursorBounds::Contiguous(_) => {
+                let index = TokenIndex::try_from_index(index)?;
+                self.tokens.token(index).ok()
+            }
+            TokenCursorBounds::Segmented(view) => {
+                Self::from_sequence_position(view, index).ok()?.current()
+            }
+        }
+    }
+
+    /// Peek one token ahead in the parser-facing view.
+    pub(crate) fn parser_peek_next(self) -> Option<TokenRef<'a>> {
+        if self.is_segmented() {
+            let position = self.compatibility_position().ok()?;
+            return self.parser_token_at(position.checked_add(1)?);
+        }
+        self.peek_next()
+    }
+
+    /// Peek at a parser-facing offset, crossing segmented ranges but never source gaps.
+    pub(crate) fn parser_peek_at(self, offset: usize) -> Option<TokenRef<'a>> {
+        if self.is_segmented() {
+            let position = self.compatibility_position().ok()?;
+            return self.parser_token_at(position.checked_add(offset)?);
+        }
+        self.peek_at(offset)
+    }
+
+    /// Return the previous token in the parser-facing view.
+    pub(crate) fn parser_previous(self) -> Option<TokenRef<'a>> {
+        if self.is_segmented() {
+            let position = self.compatibility_position().ok()?;
+            return self.parser_token_at(position.checked_sub(1)?);
+        }
+        let previous = TokenIndex::try_from_raw(self.next.raw().checked_sub(1)?)?;
+        if previous < self.range().start() {
+            return None;
+        }
+        self.tokens.token(previous).ok()
+    }
+
+    /// Move a segmented cursor to a dense parser-facing position.
+    pub(crate) fn set_parser_position(
+        &mut self,
+        position: usize,
+    ) -> Result<(), TokenSequenceError> {
+        let TokenCursorBounds::Segmented(view) = self.bounds else {
+            return Err(TokenSequenceError::Absent);
+        };
+        *self = Self::from_sequence_position(view, position)?;
+        Ok(())
+    }
+
     /// Return the position of the cursor within its active compatibility view.
     ///
     /// Contiguous ranges use offsets from their range start; segmented sequences count logical
@@ -1535,7 +1651,60 @@ impl<'a> TokenCursor<'a> {
             self.tokens.token(next).ok()
         }
     }
+    /// Peek at a token relative to the current position without crossing a segmented range.
+    pub fn peek_at(self, offset: usize) -> Option<TokenRef<'a>> {
+        let range = self.current_range()?;
+        let offset = TokenIndex::try_from_index(offset)?;
+        let index = TokenIndex(self.next.raw().checked_add(offset.raw())?);
+        if index >= range.end {
+            return None;
+        }
+        self.tokens.token(index).ok()
+    }
 
+    /// Move to a checked position in the active token view.
+    ///
+    /// Segmented cursors accept positions inside one segment, including that segment's end
+    /// sentinel, but never fabricate a position in an omitted source gap.
+    pub fn set_position(&mut self, position: TokenIndex) -> Result<(), TokenRangeError> {
+        match self.bounds {
+            TokenCursorBounds::Contiguous(range) => {
+                if position < range.start || position > range.end {
+                    return Err(TokenRangeError::OutOfBounds {
+                        start: position.raw(),
+                        end: position.raw(),
+                        len: range.end.index(),
+                    });
+                }
+                self.next = position;
+                Ok(())
+            }
+            TokenCursorBounds::Segmented(view) => {
+                for (segment_index, range) in view.ranges().enumerate() {
+                    if position >= range.start() && position <= range.end() {
+                        self.segment_index = segment_index;
+                        self.next = position;
+                        self.skip_empty_segments();
+                        return Ok(());
+                    }
+                }
+                Err(TokenRangeError::OutOfBounds {
+                    start: position.raw(),
+                    end: position.raw(),
+                    len: view.len(),
+                })
+            }
+        }
+    }
+
+    /// Advance over authored newline tokens while preserving canonical segment boundaries.
+    pub fn skip_newlines(&mut self) {
+        while self.current().is_some_and(|token| token.tag() == TokenTag::NEWLINE) {
+            self.advance();
+        }
+    }
+
+    /// Whether the current token view is at EOF.
     pub fn is_eof(self) -> bool {
         self.current().is_none_or(TokenRef::is_eof)
     }
@@ -1621,7 +1790,7 @@ impl FilePathSyntax {
         }
     }
 
-    fn frozen_substream(&self) -> Result<Self, CompilerError> {
+    pub(crate) fn frozen_substream(&self) -> Result<Self, CompilerError> {
         match self {
             Self::Shared(table) => Ok(Self::Shared(Arc::clone(table))),
             Self::Preparing(_) => Err(CompilerError::compiler_error(
@@ -2414,6 +2583,43 @@ impl FileTokens {
         stream.freeze_numeric_literals();
         Ok(stream)
     }
+    /// Build a bounded expression adapter directly from an already-borrowed canonical owner.
+    ///
+    /// This is the handoff used by `AstCursor::new_bounded_expression_substream` when the cursor
+    /// was created from a `FileTokens` owner. The canonical `SourceTokens` allocation is shared;
+    /// only the explicit parser compatibility vector is materialized.
+    pub(crate) fn new_bounded_expression_substream_from_canonical(
+        source_tokens: Arc<SourceTokens>,
+        canonical_os_path: Option<PathBuf>,
+        range: TokenRange,
+        declaration_path: PathId,
+        eof_span: LocalSpan,
+    ) -> Result<FileTokens, CompilerError> {
+        let file_id = source_tokens.source();
+        source_tokens.validate_range(range).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "retained expression range does not match its source identity: {error:?}"
+            ))
+        })?;
+        let mut tokens = source_tokens.materialize_range(range)?;
+        tokens.push(Token::new(TokenKind::Eof, eof_span));
+        let path_syntax = FilePathSyntax::Shared(source_tokens.path_syntax_arc()?);
+        let mut stream = Self::with_adapter_path_syntax_and_metadata(
+            declaration_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            path_syntax,
+            FileTokenAdapterMetadata::Contiguous {
+                source_tokens,
+                range,
+                synthetic_trailing_eof: true,
+            },
+        );
+        stream.freeze_numeric_literals();
+        Ok(stream)
+    }
+
 
     /// Build the bounded parser adapter for one source-owned segmented sequence.
     pub(crate) fn new_bounded_sequence_substream(
@@ -2514,6 +2720,55 @@ impl FileTokens {
     /// Unbounded compatibility vectors still fail rather than fabricating source identity.
     pub(crate) fn canonical_source_tokens(&self) -> Result<&SourceTokens, CompilerError> {
         self.token_owner.canonical_source_tokens()
+    }
+    /// Clone the canonical source owner retained by this stream.
+    ///
+    /// AST cursors keep this handle when they are created from a `FileTokens` stream so a later
+    /// bounded expression handoff can share the same source allocation without rebuilding it.
+    pub(crate) fn canonical_source_tokens_arc(&self) -> Result<Arc<SourceTokens>, CompilerError> {
+        self.token_owner.canonical_arc()
+    }
+    /// Translate a canonical source-token index into this stream's compatibility-vector index.
+    ///
+    /// Canonical and unbounded streams retain source-indexed vectors, so they use an identity
+    /// mapping. Contiguous adapters subtract their retained range start; segmented adapters walk
+    /// the checked sequence and omit source gaps. Synthetic trailing EOF entries have no canonical
+    /// source index and therefore are not mapped.
+    pub(crate) fn compatibility_index_for_source_index(
+        &self,
+        source_index: usize,
+    ) -> Option<usize> {
+        match &self.token_owner {
+            FileTokenOwner::Canonical(_) => Some(source_index),
+            FileTokenOwner::Adapter { metadata, .. } => match metadata {
+                FileTokenAdapterMetadata::Unbounded => Some(source_index),
+                FileTokenAdapterMetadata::Contiguous { range, .. } => {
+                    let start = range.start().index();
+                    let end = range.end().index();
+                    (start..end)
+                        .contains(&source_index)
+                        .then(|| source_index.checked_sub(start))
+                        .flatten()
+                }
+                FileTokenAdapterMetadata::Sequence {
+                    source_tokens,
+                    sequence,
+                } => {
+                    let view = source_tokens.token_sequence(*sequence).ok()?;
+                    let mut compatibility_index = 0usize;
+                    for segment in view.ranges() {
+                        let start = segment.start().index();
+                        let end = segment.end().index();
+                        if (start..end).contains(&source_index) {
+                            return compatibility_index.checked_add(source_index - start);
+                        }
+                        compatibility_index =
+                            compatibility_index.checked_add(segment.len() as usize)?;
+                    }
+                    None
+                }
+            },
+        }
     }
     /// Create a checked canonical cursor at this stream's compatibility-vector position.
     ///
@@ -2749,6 +3004,18 @@ impl FileTokens {
 
     pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
         self.path_syntax.table()
+    }
+
+    pub(crate) fn path_syntax_arc(&self) -> Result<Arc<PathSyntaxTable>, CompilerError> {
+        match &self.path_syntax {
+            FilePathSyntax::Shared(table) => Ok(Arc::clone(table)),
+            FilePathSyntax::Preparing(_) => Err(CompilerError::compiler_error(
+                "file token path table is still mutable at parser handoff",
+            )),
+            FilePathSyntax::Deferred => Err(CompilerError::compiler_error(
+                "file token path table is not attached at parser handoff",
+            )),
+        }
     }
     /// Materialize one checked token range while preserving an adapter's transient payload lane.
     ///

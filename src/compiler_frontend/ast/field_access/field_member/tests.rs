@@ -27,6 +27,7 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -112,7 +113,7 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
     let offending_span =
         LocalSpan::exact(12, 1, &mut span_builder).expect("offending token span should fit");
 
-    let stream = FileTokens::new(
+    let mut tokens = FileTokens::new(
         scope,
         SourceId::COMPILATION_ROOT,
         vec![
@@ -120,7 +121,8 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
             Token::new(TokenKind::Eof, LocalSpan::source_start()),
         ],
     );
-
+    let stream = AstCursor::from_file_tokens(&mut tokens)
+        .expect("test token stream must expose an AST cursor");
     let error = super::parse_member_name_typed(&stream, &string_table)
         .expect_err("a non-name token after '.' must be rejected as a missing member name");
     let crate::compiler_frontend::ast::expressions::error::ExpressionParseError::Diagnostic(

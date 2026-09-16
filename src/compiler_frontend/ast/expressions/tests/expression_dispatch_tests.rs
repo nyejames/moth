@@ -5,6 +5,7 @@
 //!      tests keep those decisions aligned without exercising unrelated statement parsing.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, Operator,
 };
@@ -86,7 +87,9 @@ fn hash_in_expression_position_rejected() {
         numeric_token("2", &scope, &mut string_table),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -142,7 +145,9 @@ fn hash_before_template_head_allowed() {
         token(TokenKind::TemplateHead, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -185,7 +190,9 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         token(TokenKind::Symbol(name), &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -247,7 +254,9 @@ fn hash_from_tokenized_source_rejected() {
     // Slice from after Assign to end
     let expr_tokens: Vec<Token> = file_tokens.tokens[index..].to_vec();
     let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, expr_tokens);
+    let mut expr_file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, expr_tokens);
+    let mut stream = AstCursor::from_file_tokens(&mut expr_file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
@@ -351,7 +360,9 @@ fn constant_identifier_uses_module_store_tir() {
         token(TokenKind::Symbol(constant_name), &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);

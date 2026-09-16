@@ -30,8 +30,9 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
@@ -44,11 +45,13 @@ fn parse_args(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
-    let mut tokens: FileTokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let mut tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
+    let mut token_stream =
+        AstCursor::from_file_tokens(&mut tokens).expect("test token stream must expose an AST cursor");
 
-    while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
-        tokens.advance();
+    while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+        token_stream.advance();
     }
 
     let context = ScopeContext::new_for_tests(
@@ -64,7 +67,7 @@ fn parse_args(
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     parse_raw_call_args_for_test(
-        &mut tokens,
+        &mut token_stream,
         &context,
         &mut type_interner,
         &mut string_table,
@@ -80,9 +83,11 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
+    let mut token_stream =
+        AstCursor::from_file_tokens(&mut tokens).expect("test token stream must expose an AST cursor");
 
-    while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
-        tokens.advance();
+    while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+        token_stream.advance();
     }
 
     let context = ScopeContext::new_for_tests(
@@ -109,7 +114,7 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     super::parse_call_arguments_typed_with_expectations(
-        &mut tokens,
+        &mut token_stream,
         &context,
         &mut type_interner,
         &mut string_table,
@@ -127,7 +132,7 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
 /// WHY: keeping this local to the test module avoids a test-only production API while preserving
 ///      the exact behavior these syntax tests need.
 fn parse_raw_call_args_for_test(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -152,9 +157,11 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
+    let mut token_stream =
+        AstCursor::from_file_tokens(&mut tokens).expect("test token stream must expose an AST cursor");
 
-    while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
-        tokens.advance();
+    while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+        token_stream.advance();
     }
 
     let context = ScopeContext::new_for_tests(
@@ -171,7 +178,7 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     let error =
         parse_raw_call_args_for_test(
-            &mut tokens,
+            &mut token_stream,
             &context,
             &mut type_interner,
             &mut string_table,
@@ -279,9 +286,11 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize("call(1, third = 3)", file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
     .expect("tokenization should succeed");
+    let mut token_stream =
+        AstCursor::from_file_tokens(&mut tokens).expect("test token stream must expose an AST cursor");
 
-    while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
-        tokens.advance();
+    while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+        token_stream.advance();
     }
 
     let context = ScopeContext::new_for_tests(
@@ -322,7 +331,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     let arguments = super::parse_call_arguments_typed_with_expectations(
-        &mut tokens,
+        &mut token_stream,
         &context,
         &mut type_interner,
         &mut string_table,

@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -39,8 +39,8 @@ pub(crate) struct ExpressionTrailingPolicy {
 ///      trailing policy is selected.
 /// WHY: callers should choose the parse mode, not thread a long positional
 ///      argument list through every expression boundary.
-pub(crate) struct ExpressionParseResources<'a, 'env> {
-    pub(crate) token_stream: &'a mut FileTokens,
+pub(crate) struct ExpressionParseResources<'a, 'env, 'tokens> {
+    pub(crate) token_stream: &'a mut AstCursor<'tokens>,
     pub(crate) scope_context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'env>,
     pub(crate) expected_type: &'a mut ExpectedType,
@@ -61,8 +61,8 @@ pub(crate) struct ExpressionParseResources<'a, 'env> {
 ///      - `CastTargetContext` is for explicit `cast` / `cast!` target boundaries
 ///        supplied by typed receivers; it does not affect ordinary literal
 ///        resolution and is intentionally independent of expected-type hints.
-pub(crate) struct ExpressionParseInput<'a, 'env> {
-    pub(crate) token_stream: &'a mut FileTokens,
+pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {
+    pub(crate) token_stream: &'a mut AstCursor<'tokens>,
     pub(crate) scope_context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'env>,
     pub(crate) expected_type: &'a mut ExpectedType,
@@ -73,14 +73,14 @@ pub(crate) struct ExpressionParseInput<'a, 'env> {
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
-impl<'a, 'env> ExpressionParseInput<'a, 'env> {
+impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
     /// Build an input with a fully custom trailing policy.
     ///
     /// WHAT: the low-level constructor used by the named helpers below.
     /// WHY: keeps field initialization in one place while the caller provides a
     ///      named resource bundle instead of another long argument list.
     pub(crate) fn new(
-        resources: ExpressionParseResources<'a, 'env>,
+        resources: ExpressionParseResources<'a, 'env, 'tokens>,
         trailing_policy: ExpressionTrailingPolicy,
     ) -> Self {
         Self {
@@ -102,7 +102,7 @@ impl<'a, 'env> ExpressionParseInput<'a, 'env> {
     /// WHAT: normal receiver-boundary expression input for declarations,
     ///      assignments, returns, and other typed sites.
     pub(crate) fn ordinary(
-        resources: ExpressionParseResources<'a, 'env>,
+        resources: ExpressionParseResources<'a, 'env, 'tokens>,
         consume_closing_parenthesis: bool,
     ) -> Self {
         Self::new(
@@ -123,7 +123,7 @@ impl<'a, 'env> ExpressionParseInput<'a, 'env> {
     /// WHAT: replaces the previous `create_expression_without_boundary_catch`
     ///      entry point.
     pub(crate) fn without_boundary_catch(
-        resources: ExpressionParseResources<'a, 'env>,
+        resources: ExpressionParseResources<'a, 'env, 'tokens>,
         consume_closing_parenthesis: bool,
     ) -> Self {
         Self::new(
@@ -142,7 +142,7 @@ impl<'a, 'env> ExpressionParseInput<'a, 'env> {
     ///
     /// WHAT: sets up the policy half of a `create_expression_until` call; the
     ///      stop tokens are supplied separately to the bounded parser.
-    pub(crate) fn until(resources: ExpressionParseResources<'a, 'env>) -> Self {
+    pub(crate) fn until(resources: ExpressionParseResources<'a, 'env, 'tokens>) -> Self {
         Self::new(
             resources,
             ExpressionTrailingPolicy {
@@ -164,7 +164,7 @@ impl<'a, 'env> ExpressionParseInput<'a, 'env> {
     /// The caller must supply a `CastTargetContext` reference; passing
     /// `&mut CastTargetContext::None` is the intended usage.
     pub(crate) fn grouped_without_cast_target(
-        resources: ExpressionParseResources<'a, 'env>,
+        resources: ExpressionParseResources<'a, 'env, 'tokens>,
     ) -> Self {
         Self::new(
             resources,

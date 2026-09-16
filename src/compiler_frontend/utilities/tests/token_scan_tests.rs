@@ -1,3 +1,4 @@
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -54,7 +55,7 @@ fn top_level_comma_detection_ignores_nested_commas() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
 
-    let nested_only = stream_from_kinds(
+    let mut nested_only = stream_from_kinds(
         vec![
             TokenKind::OpenParenthesis,
             TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
@@ -66,9 +67,11 @@ fn top_level_comma_detection_ignores_nested_commas() {
         ],
         &mut string_table,
     );
-    assert!(!has_top_level_comma_before_statement_end(&nested_only));
+    let nested_cursor =
+        AstCursor::from_file_tokens(&mut nested_only).expect("test stream should expose a cursor");
+    assert!(!has_top_level_comma_before_statement_end(&nested_cursor));
 
-    let top_level = stream_from_kinds(
+    let mut top_level = stream_from_kinds(
         vec![
             TokenKind::Symbol(string_table.intern("a")),
             TokenKind::Comma,
@@ -80,9 +83,11 @@ fn top_level_comma_detection_ignores_nested_commas() {
         ],
         &mut string_table,
     );
-    assert!(has_top_level_comma_before_statement_end(&top_level));
+    let top_level_cursor =
+        AstCursor::from_file_tokens(&mut top_level).expect("test stream should expose a cursor");
+    assert!(has_top_level_comma_before_statement_end(&top_level_cursor));
 
-    let multiline = stream_from_kinds(
+    let mut multiline = stream_from_kinds(
         vec![
             TokenKind::Symbol(string_table.intern("a")),
             TokenKind::Comma,
@@ -95,7 +100,9 @@ fn top_level_comma_detection_ignores_nested_commas() {
         ],
         &mut string_table,
     );
-    assert!(has_top_level_comma_before_statement_end(&multiline));
+    let multiline_cursor =
+        AstCursor::from_file_tokens(&mut multiline).expect("test stream should expose a cursor");
+    assert!(has_top_level_comma_before_statement_end(&multiline_cursor));
 }
 
 #[test]

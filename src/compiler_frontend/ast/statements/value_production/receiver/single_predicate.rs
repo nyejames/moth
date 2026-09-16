@@ -7,6 +7,7 @@
 //! eligibility and option `none`/literal diagnostics.
 
 use crate::compiler_frontend::ast::ContextKind;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
@@ -20,10 +21,9 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Shared facts after a committed single-predicate header.
 ///
@@ -42,8 +42,9 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Parse
 pub(in crate::compiler_frontend::ast::statements::value_production) struct SinglePredicateHeaderInput<
     'a,
     'b,
+    'tokens,
 > {
-    pub token_stream: &'a mut FileTokens,
+    pub token_stream: &'a mut AstCursor<'tokens>,
     pub context: &'a ScopeContext,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub string_table: &'a mut StringTable,
@@ -55,7 +56,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Singl
 ///
 /// Returns `None` only when an authored diagnostic still allows Bool fallback
 pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse_single_predicate_header(
-    input: SinglePredicateHeaderInput<'_, '_>,
+    input: SinglePredicateHeaderInput<'_, '_, '_>,
 ) -> Option<Result<ParsedSinglePredicateHeader, ExpressionParseError>> {
     let SinglePredicateHeaderInput {
         token_stream,
@@ -66,7 +67,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
         path_fork,
     } = input;
 
-    let start_index = token_stream.index;
+    let start_index = token_stream.position();
     let scrutinee_context =
         context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
     let scrutinee = match parse_scrutinee_until_is(
@@ -78,14 +79,18 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
     ) {
         Ok(expression) => expression,
         Err(ExpressionParseError::Diagnostic(_)) => {
-            token_stream.index = start_index;
+            if let Err(error) = token_stream.set_position(start_index) {
+                return Some(Err(ExpressionParseError::Infrastructure(Box::new(error))));
+            }
             return None;
         }
         Err(error @ ExpressionParseError::Infrastructure(_)) => return Some(Err(error)),
     };
 
     if token_stream.current_token_kind() != &TokenKind::Is {
-        token_stream.index = start_index;
+        if let Err(error) = token_stream.set_position(start_index) {
+            return Some(Err(ExpressionParseError::Infrastructure(Box::new(error))));
+        }
         return None;
     }
 
@@ -95,7 +100,9 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
         &scrutinee,
         classification,
     ) {
-        token_stream.index = start_index;
+        if let Err(error) = token_stream.set_position(start_index) {
+            return Some(Err(ExpressionParseError::Infrastructure(Box::new(error))));
+        }
         return None;
     }
 
@@ -131,7 +138,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
 /// because inline optional recovery must use present capture (`|value|`).
 /// WHY: these diagnostics stay receiver-only and must not rescan the header.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupported_optional_single_predicate_reason(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     context: &ScopeContext,
     type_environment: &TypeEnvironment,
     classification: IfHeaderClassification,
@@ -142,23 +149,14 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupport
     let TokenKind::Symbol(scrutinee_name) = token_stream.current_token_kind() else {
         return None;
     };
-    if token_stream.index + 1 != is_index {
+    if token_stream.position() + 1 != is_index {
         return None;
     }
 
     let scrutinee_type_id = context.get_reference(scrutinee_name)?.value.type_id;
     type_environment.option_inner_type(scrutinee_type_id)?;
 
-    let Some(pattern_kind) = DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.token_kind_at(pattern_index))
-        .or_else(|| {
-            token_stream
-                .tokens
-                .get(pattern_index)
-                .map(|token| token.kind.clone())
-        })
-    else {
+    let Some(pattern_kind) = token_stream.token_kind_at(pattern_index) else {
         return None;
     };
 
@@ -176,7 +174,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupport
 }
 
 fn scrutinee_is_single_predicate_eligible(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     type_interner: &AstTypeInterner<'_>,
     scrutinee: &Expression,
     classification: IfHeaderClassification,

@@ -21,11 +21,11 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
 /// Template head control flow joins ordinary expression parsing with template construction. It
@@ -35,17 +35,13 @@ type ControlFlowSuffixResult<T> = Result<T, TemplateError>;
 
 /// Parse a template `if` suffix after the `if` token has been seen.
 pub(crate) fn parse_if_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     validation_mode: TemplateControlFlowValidationMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> ControlFlowSuffixResult<TemplateBodyParseMode> {
-    // Short-lived canonical view for this token-local marker span; dropped
-    // before the grammar advance and recursive `parse_if_header` handoff.
-    // `current_token` stays the documented `FileTokens` grammar boundary
-    // (fallback below).
     let marker_span = current_token_local_span(token_stream);
     token_stream.advance(); // consume `if`
 
@@ -55,7 +51,7 @@ pub(crate) fn parse_if_suffix(
             marker_span,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateIfCondition,
-                Some(SourceSpan::new(token_stream.file_id, marker_span)),
+                Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
         )
         .into());
@@ -115,23 +111,20 @@ pub(crate) fn parse_if_suffix(
             selector: condition,
             then_context,
             else_context,
-            span: Some(SourceSpan::new(token_stream.file_id, marker_span)),
+            span: Some(SourceSpan::new(token_stream.source_id(), marker_span)),
         },
     )))
 }
 
 /// Parse a template `loop` suffix after the `loop` token has been seen.
 pub(crate) fn parse_loop_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     validation_mode: TemplateControlFlowValidationMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> ControlFlowSuffixResult<TemplateBodyParseMode> {
-    // Short-lived canonical view for this token-local marker span; dropped
-    // before the grammar advance and recursive header scan. `current_token`
-    // stays the documented `FileTokens` grammar boundary (fallback below).
     let marker_span = current_token_local_span(token_stream);
     token_stream.advance(); // consume `loop`
 
@@ -141,31 +134,35 @@ pub(crate) fn parse_loop_suffix(
             marker_span,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateLoopHeader,
-                Some(SourceSpan::new(token_stream.file_id, marker_span)),
+                Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
         )
         .into());
     }
 
     let body_start_index = find_template_body_start(token_stream)?;
-    let suffix_tokens = &token_stream.tokens[token_stream.index..body_start_index];
+    let start_index = token_stream.position();
+    let suffix_tokens: Vec<Token> = (start_index..body_start_index)
+        .filter_map(|index| token_stream.token_at(index))
+        .collect();
 
-    if has_top_level_suffix_separator(suffix_tokens) {
+    if has_top_level_suffix_separator(&suffix_tokens) {
         return Err(with_token_span(
             token_stream,
             marker_span,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
-                Some(SourceSpan::new(token_stream.file_id, marker_span)),
+                Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
         )
         .into());
     }
 
+    let path_syntax = token_stream.path_syntax_for_substream().map_err(TemplateError::from)?;
     let mut warnings = Vec::new();
     let (parsed_header, body_context) = parse_loop_header_tokens(
-        suffix_tokens,
-        &token_stream.path_syntax,
+        &suffix_tokens,
+        &path_syntax,
         context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
         type_interner,
         &mut warnings,
@@ -202,33 +199,28 @@ pub(crate) fn parse_loop_suffix(
         },
     };
 
-    token_stream.index = body_start_index + 1;
+    token_stream
+        .set_position(body_start_index + 1)
+        .map_err(TemplateError::from)?;
 
     Ok(TemplateBodyParseMode::Loop(Box::new(
         TemplateLoopBodyParseInput {
             header,
             body_context,
-            span: Some(SourceSpan::new(token_stream.file_id, marker_span)),
+            span: Some(SourceSpan::new(token_stream.source_id(), marker_span)),
         },
     )))
 }
 
-fn next_meaningful_token_is_body_boundary(token_stream: &FileTokens) -> bool {
-    // Short-lived canonical view for this pure newline-skipping lookahead;
-    // dropped before any `FileTokens` mutation or recursive parse.
-    // Compatibility-only streams keep the checked vector lane as the
-    // documented `FileTokens` grammar boundary (fallback below).
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        return next_meaningful_token_is_body_boundary_at_cursor(&cursor);
-    }
-    next_meaningful_token_is_body_boundary_in_tokens(token_stream)
+fn next_meaningful_token_is_body_boundary(token_stream: &AstCursor) -> bool {
+    next_meaningful_token_is_body_boundary_at_cursor(token_stream)
 }
 
 /// Cursor-view form of [`next_meaningful_token_is_body_boundary`].
-fn next_meaningful_token_is_body_boundary_at_cursor(cursor: &DeclarationCursor) -> bool {
+fn next_meaningful_token_is_body_boundary_at_cursor(cursor: &AstCursor) -> bool {
     let mut index = cursor.position();
 
-    while index < cursor.length {
+    while index < cursor.length() {
         match cursor.token_kind_at(index) {
             Some(TokenKind::Newline) => index += 1,
             Some(TokenKind::StartTemplateBody | TokenKind::TemplateClose | TokenKind::Eof) => {
@@ -242,23 +234,8 @@ fn next_meaningful_token_is_body_boundary_at_cursor(cursor: &DeclarationCursor) 
     true
 }
 
-fn next_meaningful_token_is_body_boundary_in_tokens(token_stream: &FileTokens) -> bool {
-    let mut index = token_stream.index;
 
-    while index < token_stream.length {
-        match token_stream.tokens[index].kind {
-            TokenKind::Newline => index += 1,
-            TokenKind::StartTemplateBody | TokenKind::TemplateClose | TokenKind::Eof => {
-                return true;
-            }
-            _ => return false,
-        }
-    }
-
-    true
-}
-
-fn ensure_suffix_ends_at_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResult<()> {
+fn ensure_suffix_ends_at_body_start(token_stream: &AstCursor) -> ControlFlowSuffixResult<()> {
     match token_stream.current_token_kind() {
         TokenKind::StartTemplateBody => Ok(()),
         TokenKind::Comma => Err(with_current_token_span(
@@ -280,39 +257,32 @@ fn ensure_suffix_ends_at_body_start(token_stream: &FileTokens) -> ControlFlowSuf
     }
 }
 
-fn find_template_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResult<usize> {
-    // Short-lived canonical view for this pure body-boundary scan; dropped
-    // before the mutable stream repositioning in `parse_loop_suffix`.
-    // Compatibility-only streams keep the checked vector lane as the
-    // documented `FileTokens` grammar boundary (fallback below). Indexes stay
-    // adapter-relative in both lanes.
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        // Canonical handoff failure inside the scan still surfaces the same
-        // authored diagnostic; only a missing canonical provenance falls back
-        // to the vector lane.
-        match find_template_body_start_at_cursor(token_stream, &cursor) {
-            Ok(index) => return Ok(index),
-            Err(Some(error)) => return Err(error),
-            Err(None) => {}
-        }
+fn find_template_body_start(token_stream: &AstCursor) -> ControlFlowSuffixResult<usize> {
+    match find_template_body_start_at_cursor(token_stream, token_stream) {
+        Ok(index) => Ok(index),
+        Err(Some(error)) => Err(error),
+        Err(None) => Err(with_current_token_span(
+            token_stream,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
+                None,
+            ),
+        )
+        .into()),
     }
-    find_template_body_start_in_tokens(token_stream)
 }
 
-/// Cursor-view form of [`find_template_body_start`]. `Ok` carries the
-/// adapter-relative body index; `Err(Some)` carries the ready diagnostic and
-/// `Err(None)` signals the caller should use the vector fallback.
+/// Cursor body-boundary scan. `Ok` carries the body index; `Err(Some)`
+/// carries the ready diagnostic and `Err(None)` signals a truncated scan.
 fn find_template_body_start_at_cursor(
-    token_stream: &FileTokens,
-    cursor: &DeclarationCursor,
+    token_stream: &AstCursor,
+    cursor: &AstCursor,
 ) -> Result<usize, Option<TemplateError>> {
     let mut nesting_depth = NestingDepth::default();
     let mut index = cursor.position();
 
-    while index < cursor.length {
+    while index < cursor.length() {
         let Some(kind) = cursor.token_kind_at(index) else {
-            // Canonical lane ended before the vector lane; let the checked
-            // vector fallback finish the scan on adapter-relative coordinates.
             return Err(None);
         };
         if nesting_depth.is_top_level() && matches!(kind, TokenKind::StartTemplateBody) {
@@ -323,8 +293,6 @@ fn find_template_body_start_at_cursor(
             && matches!(kind, TokenKind::TemplateClose | TokenKind::Eof)
         {
             let Some(span) = cursor.span_at(index) else {
-                // Canonical span unavailable; the vector fallback reports the
-                // same boundary on adapter-relative coordinates.
                 return Err(None);
             };
             return Err(Some(
@@ -347,114 +315,46 @@ fn find_template_body_start_at_cursor(
     Err(None)
 }
 
-fn find_template_body_start_in_tokens(
-    token_stream: &FileTokens,
-) -> ControlFlowSuffixResult<usize> {
-    let mut nesting_depth = NestingDepth::default();
-    let mut index = token_stream.index;
-
-    while index < token_stream.length {
-        let token = &token_stream.tokens[index];
-        if nesting_depth.is_top_level() && matches!(token.kind, TokenKind::StartTemplateBody) {
-            return Ok(index);
-        }
-
-        if nesting_depth.is_top_level()
-            && matches!(token.kind, TokenKind::TemplateClose | TokenKind::Eof)
-        {
-            return Err(with_token_span(
-                token_stream,
-                token.span,
-                CompilerDiagnostic::invalid_template_structure(
-                    InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
-                    Some(SourceSpan::new(token_stream.file_id, token.span)),
-                ),
-            )
-            .into());
-        }
-
-        nesting_depth.step(&token.kind);
-        index += 1;
-    }
-
-    Err(with_current_token_span(
-        token_stream,
-        CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
-            None,
-        ),
-    )
-    .into())
-}
-
 /// Attach the exact source span for a direct suffix diagnostic.
 fn with_current_token_span(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        // Short-lived canonical view for this token-local suffix span; dropped
-        // before any `FileTokens` mutation. Compatibility-only streams keep the
-        // checked vector lane as the documented fallback; every call site now
-        // passes `None` so this cursor-first lane is live.
-        let span = DeclarationCursor::from_file_tokens(token_stream)
-            .ok()
-            .and_then(|cursor| cursor.current_span())
-            .or_else(|| {
-                token_stream
-                    .tokens
-                    .get(token_stream.index)
-                    .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-            });
         let mut diagnostic = diagnostic;
-        diagnostic.primary_span = span;
+        diagnostic.primary_span = Some(token_stream.current_span());
         return diagnostic;
     }
     diagnostic
 }
 
 fn with_token_span(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     span: LocalSpan,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(SourceSpan::new(token_stream.file_id, span));
+        diagnostic.primary_span = Some(SourceSpan::new(token_stream.source_id(), span));
     }
     diagnostic
 }
 
-/// Read-only current-token local span through a short canonical view.
+/// Read-only current-token local span on the canonical cursor view.
 ///
 /// WHAT: reports the `LocalSpan` of the suffix marker token without advancing
 /// the stream.
-/// WHY: marker payloads join with `file_id` at the diagnostic site; a short
-/// `DeclarationCursor` keeps that fact read-only and drops before the grammar
-/// advance. Unbounded compatibility-only streams fall back to the explicit
-/// vector lane rather than inventing a bridge.
-fn current_token_local_span(token_stream: &FileTokens) -> LocalSpan {
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        if let Some(span) = cursor.current_span() {
-            return span.local();
-        }
-    }
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| token.span)
-        .expect("control-flow suffix marker requires a current token")
+/// WHY: marker payloads join with `source_id` at the diagnostic site.
+fn current_token_local_span(token_stream: &AstCursor) -> LocalSpan {
+    token_stream.current_span().local()
 }
 
 /// Pure top-level comma scan over the already-sliced loop-suffix window.
 ///
 /// WHAT: reports whether the suffix window contains a top-level `,` without
 /// touching the stream.
-/// WHY: the suffix window is a `FileTokens` compatibility slice feeding
-/// `parse_loop_header_tokens`, which owns the `&[Token]` grammar boundary;
-/// probing it through a short cursor would copy or reverse the adapter and
-/// break that handoff. The scan stays on the slice payload while surrounding
-/// lookahead/span helpers are cursor-first. `Token` payloads/spans only are
-/// read — no cursor is retained.
+/// WHY: the suffix window is a transient `Vec<Token>` feeding
+/// `parse_loop_header_tokens`, which owns the `&[Token]` grammar boundary.
+/// `Token` payloads/spans only are read — no cursor is retained.
 fn has_top_level_suffix_separator(tokens: &[Token]) -> bool {
     let mut nesting_depth = NestingDepth::default();
     let mut pipe_depth = 0usize;

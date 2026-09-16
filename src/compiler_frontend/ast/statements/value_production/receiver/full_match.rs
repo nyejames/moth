@@ -9,6 +9,7 @@ use super::emit_collected_warnings;
 use super::result_type::infer_value_match_result_type;
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::statements::branching::parse_match_block;
 use crate::compiler_frontend::ast::statements::match_headers::parse_scrutinee_until_is;
@@ -23,7 +24,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Full value matches recurse into statement match bodies, so their result retains internal
@@ -31,8 +32,8 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 type FullMatchResult<T> = Result<T, ExpressionParseError>;
 
 /// Input for `parse_value_match_at_receiver`.
-pub(super) struct ValueMatchParseInput<'a, 'b> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct ValueMatchParseInput<'a, 'b, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
@@ -46,7 +47,7 @@ pub(super) struct ValueMatchParseInput<'a, 'b> {
 /// WHAT: parses the scrutinee, consumes `is`, delegates to `parse_match_block`,
 /// validates completeness, infers the result type, and builds the expression.
 pub(super) fn parse_value_match_at_receiver(
-    input: ValueMatchParseInput<'_, '_>,
+    input: ValueMatchParseInput<'_, '_, '_>,
 ) -> FullMatchResult<ParsedReceiverValue> {
     let ValueMatchParseInput {
         token_stream,

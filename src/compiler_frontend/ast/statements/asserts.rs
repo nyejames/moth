@@ -10,6 +10,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::assert_message_escape_diagnostic;
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::assertion_condition_is_statically_true;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
@@ -29,10 +30,10 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 pub(crate) fn parse_assert_statement(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     ast: &mut Vec<AstNode>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,

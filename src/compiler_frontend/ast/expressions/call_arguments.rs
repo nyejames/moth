@@ -29,11 +29,11 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
@@ -68,7 +68,7 @@ pub(crate) enum CallArgumentSyntax {
 /// WHY: raw call parsing used to resolve arguments before validation. Threading expectations keeps
 ///      the cast-target channel narrow and local to the argument parser.
 pub(crate) fn parse_call_arguments_typed_with_expectations(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -89,7 +89,7 @@ pub(crate) fn parse_call_arguments_typed_with_expectations(
 }
 
 pub(crate) fn parse_generic_call_arguments_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -166,7 +166,7 @@ fn cast_target_context_for_parameter_expectation(
     reason = "argument parsing keeps the token stream, scope, mutable interner/string/path state, syntax contexts, and optional expectations as separate borrows"
 )]
 fn parse_call_arguments_inner(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -245,9 +245,8 @@ fn parse_call_arguments_inner(
         reject_simple_generic_argument_type_ascription(token_stream, syntax_context)?;
 
         // Detect named-target syntax (`name = expr`) or reject unsupported variants.
-        // Pure lookahead only: probe deeper tokens through a short canonical view and
-        // drop it before any `FileTokens` advance or expression re-entry.
-        let lookahead_base = token_stream.index;
+        // Pure lookahead only: probe deeper tokens without advancing the stream.
+        let lookahead_base = token_stream.position();
         let lookahead_third_is_assign =
             lookahead_kind_at(token_stream, lookahead_base.saturating_add(2)).as_ref()
                 == Some(&TokenKind::Assign);
@@ -408,12 +407,12 @@ fn parse_call_arguments_inner(
 ///      `none is optional_value`.
 /// WHY: only the bare literal needs the receiving option type during parsing. Larger expressions
 ///      must keep natural inference so their result type and diagnostics stay call-owned.
-fn argument_is_bare_none(token_stream: &FileTokens) -> bool {
+fn argument_is_bare_none(token_stream: &AstCursor) -> bool {
     if token_stream.current_token_kind() != &TokenKind::NoneLiteral {
         return false;
     }
 
-    let mut next_index = token_stream.index.saturating_add(1);
+    let mut next_index = token_stream.position().saturating_add(1);
     while lookahead_kind_at(token_stream, next_index).is_some_and(|kind| kind == TokenKind::Newline)
     {
         next_index = next_index.saturating_add(1);
@@ -603,31 +602,23 @@ fn known_parameter_names(expectations: &[ParameterExpectation]) -> Vec<StringId>
         .filter_map(|expectation| expectation.name)
         .collect()
 }
-/// Read-only lookahead through a short canonical view.
+/// Read-only lookahead through the canonical cursor view.
 ///
-/// WHAT: probes one adapter-relative token kind without advancing the stream.
-/// WHY: call-argument named-target and bare-`none` scans are pure lookahead; a
-/// short `DeclarationCursor` keeps that fact read-only and drops before any
-/// `FileTokens` advance or expression re-entry. Unbounded compatibility-only
-/// streams have no canonical provenance, so fall back to the explicit vector
-/// lane there rather than inventing a bridge.
-fn lookahead_kind_at(token_stream: &FileTokens, index: usize) -> Option<TokenKind> {
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        if let Some(kind) = cursor.token_kind_at(index) {
-            return Some(kind);
-        }
-    }
-    token_stream
-        .tokens
-        .get(index)
-        .map(|token| token.kind.clone())
+/// WHAT: probes one token kind without advancing the stream.
+/// WHY: call-argument named-target and bare-`none` scans are pure lookahead.
+/// `AstCursor::token_kind_at` already covers both canonical and compatibility
+/// backings, so compatibility-only streams stay on the explicit lane without a
+/// separate bridge.
+fn lookahead_kind_at(token_stream: &AstCursor, index: usize) -> Option<TokenKind> {
+    token_stream.token_kind_at(index)
 }
 
-fn next_token_kind(token_stream: &FileTokens) -> Option<TokenKind> {
-    lookahead_kind_at(token_stream, token_stream.index.saturating_add(1))
+fn next_token_kind(token_stream: &AstCursor) -> Option<TokenKind> {
+    lookahead_kind_at(token_stream, token_stream.position().saturating_add(1))
 }
+
 fn reject_simple_generic_argument_type_ascription(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     syntax_context: CallArgumentSyntaxContext,
 ) -> Result<(), ExpressionParseError> {
     let CallArgumentSyntaxContext::GenericFunction { function_name } = syntax_context else {
@@ -638,16 +629,8 @@ fn reject_simple_generic_argument_type_ascription(
         return Ok(());
     }
 
-    let cursor_span = if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        cursor.span_at(cursor.position().saturating_add(1))
-    } else {
-        None
-    };
-    let fallback_span = token_stream
-        .tokens
-        .get(token_stream.index.saturating_add(1))
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span));
-    let Some(type_span) = cursor_span.or(fallback_span) else {
+    let type_span = token_stream.span_at(token_stream.position().saturating_add(1));
+    let Some(type_span) = type_span else {
         return Ok(());
     };
 
@@ -662,8 +645,8 @@ fn reject_simple_generic_argument_type_ascription(
 ///
 /// This deliberately stays small: broader type-looking symbol recovery would be speculative in
 /// the shared call parser and could change ordinary call errors.
-fn starts_simple_value_with_attached_type(token_stream: &FileTokens) -> bool {
-    let base = token_stream.index;
+fn starts_simple_value_with_attached_type(token_stream: &AstCursor) -> bool {
+    let base = token_stream.position();
     let Some(value_kind) = lookahead_kind_at(token_stream, base) else {
         return false;
     };
@@ -698,14 +681,7 @@ fn starts_simple_value_with_attached_type(token_stream: &FileTokens) -> bool {
 #[cfg(test)]
 #[path = "tests/function_call_tests.rs"]
 mod function_call_tests;
-fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    DeclarationCursor::from_file_tokens(token_stream)
-        .ok()
-        .and_then(|cursor| cursor.current_span())
-        .or_else(|| {
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ))
-        })
+fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    // Call-argument spans are token-local facts on the canonical cursor view.
+    Some(token_stream.current_span())
 }

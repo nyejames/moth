@@ -5,6 +5,7 @@
 //! WHY: option matching needs a narrow owner that preserves the compiler-owned
 //! carrier model without exposing public `Option` constructors.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, parse_non_choice_pattern,
 };
@@ -14,7 +15,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Result for the option pattern family.
 ///
@@ -30,7 +31,7 @@ type OptionPatternResult<T> = Result<T, CompilerDiagnostic>;
 /// inner type must support runtime equality. Relational present-value patterns are
 /// forwarded without additional validation.
 pub fn parse_option_pattern(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     option_inner_type_id: TypeId,
     string_table: &StringTable,
     type_environment: &TypeEnvironment,
@@ -85,7 +86,7 @@ pub fn parse_option_pattern(
 /// - Multiple names are rejected.
 /// - Type annotations inside `|...|` are rejected.
 fn parse_option_present_capture(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     inner_type_id: TypeId,
     _string_table: &StringTable,
 ) -> OptionPatternResult<MatchPattern> {

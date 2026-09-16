@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
@@ -6,15 +7,17 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if maybe_name is |name|:
+    let mut file_tokens = template_tokens_from_source("[if maybe_name is |name|:
         [name]
     [else]
         [name]
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let mut context =
-        runtime_template_context(&token_stream.src_path.clone(), &mut string_table, &mut path_fork);
+        runtime_template_context(&source_path.clone(), &mut string_table, &mut path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let maybe_name_type_id = type_environment.intern_option(type_environment.builtins().string);
@@ -24,7 +27,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
     let maybe_name = string_table.intern("maybe_name");
     let capture_name = string_table.intern("name");
     let declaration = Declaration {
-        id: path_fork.try_intern_child(token_stream.src_path, maybe_name).expect("test path fits"),
+        id: path_fork.try_intern_child(source_path, maybe_name).expect("test path fits"),
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
@@ -37,9 +40,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
     };
     context.add_var(declaration, None, &path_fork);
 
-    let diagnostic = Template::new_with_type_interner(
-        &mut token_stream,
-        &context,
+    let diagnostic = Template::new_with_type_interner(&mut token_stream, source_path, &context,
         &mut type_interner,
         vec![],
         &mut string_table,
@@ -160,7 +161,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[if false:
+    let mut file_tokens = template_tokens_from_source("[if false:
         hidden
     [else if maybe_name is |name|]
         [name]
@@ -169,8 +170,10 @@ fn template_else_if_option_capture_binding_is_branch_local() {
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let mut context =
-        runtime_template_context(&token_stream.src_path.clone(), &mut string_table, &mut path_fork);
+        runtime_template_context(&source_path.clone(), &mut string_table, &mut path_fork);
 
     let mut type_environment = TypeEnvironment::new();
     let maybe_name_type_id = type_environment.intern_option(type_environment.builtins().string);
@@ -180,7 +183,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
     let maybe_name = string_table.intern("maybe_name");
     let capture_name = string_table.intern("name");
     let declaration = Declaration {
-        id: path_fork.try_intern_child(token_stream.src_path, maybe_name).expect("test path fits"),
+        id: path_fork.try_intern_child(source_path, maybe_name).expect("test path fits"),
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
@@ -193,9 +196,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
     };
     context.add_var(declaration, None, &path_fork);
 
-    let diagnostic = Template::new_with_type_interner(
-        &mut token_stream,
-        &context,
+    let diagnostic = Template::new_with_type_interner(&mut token_stream, source_path, &context,
         &mut type_interner,
         vec![],
         &mut string_table,
@@ -609,11 +610,13 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
     let wrapper_scope =
         path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut card_tokens = template_tokens_from_source("[: <card>[$slot]</card>]",
+    let mut card_file_tokens = template_tokens_from_source("[: <card>[$slot]</card>]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let card_context = new_constant_context(card_tokens.src_path.to_owned(), &path_fork);
-    let card_template = Template::new(&mut card_tokens, &card_context, vec![], &mut string_table, &mut path_fork)
+    let card_source_path = card_file_tokens.src_path;
+    let mut card_tokens = AstCursor::from_file_tokens(&mut card_file_tokens).expect("test token stream must expose an AST cursor");
+    let card_context = new_constant_context(card_source_path, &path_fork);
+    let card_template = Template::new(&mut card_tokens, card_source_path, &card_context, vec![], &mut string_table, &mut path_fork)
         .expect("card wrapper should parse");
 
     let card_name = string_table.intern("card");
@@ -626,23 +629,23 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source("[card, if true:
+    let mut file_tokens = template_tokens_from_source("[card, if true:
         Visible
     [else]
         Hidden
     ]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork)
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
 
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
-    let template = Template::new_nested_template(
-        &mut token_stream,
-        &context,
+    let template = Template::new_nested_template(&mut token_stream, source_path, &context,
         &mut type_interner,
         Vec::new(),
         &mut string_table,

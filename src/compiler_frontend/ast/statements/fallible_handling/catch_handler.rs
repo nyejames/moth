@@ -24,7 +24,8 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -57,7 +58,7 @@ struct ParsedCatchErrorBinding {
 /// WHY: expression and call fallible handling both use this entrypoint when the user
 /// supplies an error variable.
 pub(crate) fn parse_catch_fallible_handler_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -88,7 +89,7 @@ pub(crate) fn parse_catch_fallible_handler_typed(
 
 /// Parses a `catch:` handler without an error binding.
 pub(crate) fn parse_catch_without_error_binding_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -119,7 +120,7 @@ pub(crate) fn parse_catch_without_error_binding_typed(
 /// WHAT: validates bracket tokens, extracts the handler identifier, runs naming and
 /// scope-conflict checks, and returns a `CatchErrorBinding`.
 fn parse_catch_error_binding(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     site: &CatchFallibleHandlerSite<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -203,7 +204,7 @@ fn parse_catch_error_binding(
     reason = "catch body parsing keeps the token stream, scope, mutable interner/string/path state, handler site, error binding, and warning sink as separate borrows"
 )]
 fn parse_catch_fallible_handler_body(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -280,7 +281,7 @@ fn parse_catch_fallible_handler_body(
 /// WHY: inline catch is only sugar at receiving sites; keeping the body as `ThenValue`
 /// lets AST/HIR reuse the value-block catch path without catch-specific fallback fields.
 pub(super) fn parse_inline_catch_without_error_binding_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -304,7 +305,7 @@ pub(super) fn parse_inline_catch_without_error_binding_typed(
 /// WHY: the inline shorthand must preserve the same scoping and conflict rules as
 /// block-form catch handlers.
 pub(super) fn parse_inline_catch_fallible_handler_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -331,7 +332,7 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
     )
 }
 fn parse_inline_catch_handler_body(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,

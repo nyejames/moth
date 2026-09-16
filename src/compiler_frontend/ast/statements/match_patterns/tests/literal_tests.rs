@@ -5,6 +5,7 @@
 //! WHY: match-pattern literal parsing has its own negative-literal fallback path,
 //!      so it needs independent boundary coverage.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::statements::match_patterns::literal::parse_literal_pattern;
 use crate::compiler_frontend::compiler_messages::{
@@ -95,7 +96,9 @@ fn parse_whole_number_pattern(
         ),
         Token::new(TokenKind::Eof, LocalSpan::source_start()),
     ];
-    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let type_environment = TypeEnvironment::new();
 
     parse_literal_pattern(
@@ -133,7 +136,9 @@ fn parse_negative_number_pattern(normalized_text: &str) -> LiteralPatternTestRes
         ),
         Token::new(TokenKind::Eof, LocalSpan::source_start()),
     ];
-    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let type_environment = TypeEnvironment::new();
 
     parse_literal_pattern(

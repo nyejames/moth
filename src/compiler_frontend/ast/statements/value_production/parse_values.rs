@@ -5,6 +5,7 @@
 //! WHY: this logic was previously catch-specific; generalising it lets value `if`,
 //! match, and catch share one arity/coercion path.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
@@ -26,7 +27,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -36,8 +37,8 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// WHAT: avoids a long parameter list by grouping everything the parser needs.
 /// WHY: the caller already has all of these values on hand; a struct keeps call sites
 /// readable.
-pub struct ProducedValuesParseInput<'a, 'b> {
-    pub token_stream: &'a mut FileTokens,
+pub struct ProducedValuesParseInput<'a, 'b, 'tokens> {
+    pub token_stream: &'a mut AstCursor<'tokens>,
     pub context: &'a ScopeContext,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub target: &'a ActiveValueProductionTarget,
@@ -65,8 +66,8 @@ pub(crate) fn is_missing_produced_value_boundary(kind: &TokenKind) -> bool {
 /// `target.result_type_ids`, and applies contextual coercion per position.
 /// WHY: every value-producing site (value `if`, match and catch) needs identical
 /// arity and coercion validation.
-pub fn parse_produced_values_typed<'a, 'b>(
-    input: ProducedValuesParseInput<'a, 'b>,
+pub fn parse_produced_values_typed<'a, 'b, 'tokens>(
+    input: ProducedValuesParseInput<'a, 'b, 'tokens>,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     let ProducedValuesParseInput {
         token_stream,
@@ -186,7 +187,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
 //      only learn their type from the authored `then` values. Known and mixed
 //      multi-slot receivers keep per-slot expected types instead.
 fn parse_single_inferred_declaration_value(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -237,7 +238,7 @@ fn parse_single_inferred_declaration_value(
     reason = "fixed-arity value parsing keeps the token stream, scope, mutable interner/string/path state, arity, slot types, and receiver kind as separate borrows"
 )]
 pub(crate) fn parse_fixed_arity_inferred_values(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     arity: usize,

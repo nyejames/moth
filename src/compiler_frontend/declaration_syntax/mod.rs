@@ -36,13 +36,16 @@ pub(crate) mod type_syntax;
 /// semantic handoffs, but no parser shell may retain the materialised values.
 pub(crate) struct DeclarationCursor<'a> {
     cursor: TokenCursor<'a>,
-    /// Absolute canonical position for a cursor without a compatibility lane.
+    /// Parser position for a cursor without a compatibility lane.
+    ///
+    /// Contiguous cursors retain their canonical absolute position; segmented cursors expose the
+    /// dense sequence position used by parser APIs.
     ///
     /// When a parser adapter supplies `compatibility_tokens`, `index` becomes that adapter's
     /// relative position so bounded and segmented adapters share the legacy parser contract.
     pub(crate) index: usize,
-    /// End of the active cursor view. This is canonical for a bare cursor and adapter-relative
-    /// when a compatibility lane is present.
+    /// End of the active parser view. This is canonical for a bare contiguous cursor, logical for
+    /// a bare segmented cursor, and adapter-relative when a compatibility lane is present.
     pub(crate) length: usize,
     source: crate::compiler_frontend::source::SourceId,
     current_kind: TokenKind,
@@ -61,8 +64,8 @@ impl<'a> DeclarationCursor<'a> {
         // range here would repeat that work for every declaration in a file.
         let current_token = cursor.current_token_owned()?;
         let source = cursor.range().source();
-        let index = cursor.position().index();
-        let length = cursor.range().end().index();
+        let index = cursor.parser_position();
+        let length = cursor.parser_length();
         let current_kind = current_token
             .as_ref()
             .map(|token| token.kind.clone())
@@ -141,7 +144,13 @@ impl<'a> DeclarationCursor<'a> {
     }
     pub(crate) fn token_at(&self, index: usize) -> Option<Token> {
         let lower_bound = self.compatibility_tokens.map_or_else(
-            || self.cursor.range().start().index(),
+            || {
+                if self.cursor.is_segmented() {
+                    0
+                } else {
+                    self.cursor.range().start().index()
+                }
+            },
             |_| self.compatibility_base,
         );
         if index < lower_bound || index >= self.length {
@@ -151,19 +160,18 @@ impl<'a> DeclarationCursor<'a> {
             return tokens.get(index).cloned();
         }
 
-        let index = crate::compiler_frontend::tokenizer::tokens::TokenIndex::try_from_index(index)?;
-        self.cursor
-            .source_tokens()
-            .token(index)
+        let token = if self.cursor.is_segmented() {
+            self.cursor.parser_token_at(index)?
+        } else {
+            let index =
+                crate::compiler_frontend::tokenizer::tokens::TokenIndex::try_from_index(index)?;
+            self.cursor.source_tokens().token(index).ok()?
+        };
+        token
+            .to_token_kind()
             .ok()
-            .and_then(|token| {
-                token
-                    .to_token_kind()
-                    .ok()
-                    .map(|kind| Token::new(kind, token.span()))
-            })
+            .map(|kind| Token::new(kind, token.span()))
     }
-
     pub(crate) fn token_kind_at(&self, index: usize) -> Option<TokenKind> {
         self.token_at(index).map(|token| token.kind)
     }
@@ -217,8 +225,8 @@ impl<'a> DeclarationCursor<'a> {
                 .flatten()
                 .cloned();
         } else {
-            self.index = self.cursor.position().index();
-            self.length = self.cursor.range().end().index();
+            self.index = self.cursor.parser_position();
+            self.length = self.cursor.parser_length();
             self.current_token = self.cursor.current().map(|token| {
                 let kind = token
                     .to_token_kind()
@@ -260,11 +268,16 @@ impl<'a> DeclarationCursor<'a> {
                 .flatten()
                 .map(|token| token.kind.clone());
         }
-        self.cursor.peek_next().map(|token| {
+        let token = if self.cursor.is_segmented() {
+            self.cursor.parser_peek_next()
+        } else {
+            self.cursor.peek_next()
+        }?;
+        Some(
             token
                 .to_token_kind()
-                .expect("validated declaration cursor token")
-        })
+                .expect("validated declaration cursor token"),
+        )
     }
 
     pub(crate) fn advance(&mut self) {

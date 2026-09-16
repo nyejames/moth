@@ -36,10 +36,10 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Parse a `Choice::Variant` or `Choice::Variant(...)` construct expression.
@@ -51,7 +51,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// WHY: the caller has already verified the base symbol is a choice declaration
 /// and that `::` follows it.
 pub(super) fn parse_choice_construct(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     choice_declaration: &Declaration,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -104,10 +104,7 @@ pub(super) fn parse_choice_construct(
     token_stream.advance();
     token_stream.skip_newlines();
 
-    let variant_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let variant_span = Some(token_stream.current_span());
     let variant_name = match token_stream.current_token_kind() {
         TokenKind::Symbol(name) => *name,
 

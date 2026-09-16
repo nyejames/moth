@@ -27,6 +27,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues, ProducedValuesParseInput, ValueReceiverKind,
     is_missing_produced_value_boundary, parse_produced_values_typed,
 };
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
@@ -35,12 +36,11 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
     ReservedNameOwner,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings;
 
@@ -67,16 +67,14 @@ fn reserved_keyword_as_name_error(
 /// If the keyword is followed by an assignment operator, treats it as an attempt to use the
 /// keyword as a variable name and reports a reserved-name error instead.
 fn deferred_block_error(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     string_table: &mut StringTable,
     keyword: &str,
     reason: DeferredFeatureReason,
 ) -> CompilerDiagnostic {
     let span = Some(token_stream.current_span());
-    // Short-lived canonical view for this token-local assignment fact; dropped before
-    // any FileTokens use. Narrowed streams keep `peek_next_token` as the documented
-    // FileTokens grammar boundary (fallback below).
-    let next_is_assignment = DeclarationCursor::from_file_tokens(token_stream)
+    let next_is_assignment = token_stream
+        .declaration_cursor()
         .map(|cursor| {
             cursor
                 .position()
@@ -99,7 +97,7 @@ fn deferred_block_error(
 }
 
 pub(crate) fn parse_function_body_statements(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     mut context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -107,9 +105,9 @@ pub(crate) fn parse_function_body_statements(
     path_fork: &mut PathInternerFork,
 ) -> StatementDispatchResult<Vec<AstNode>> {
     let mut body_nodes: Vec<AstNode> =
-        Vec::with_capacity(token_stream.length / settings::TOKEN_TO_NODE_RATIO);
+        Vec::with_capacity(token_stream.length() / settings::TOKEN_TO_NODE_RATIO);
 
-    while token_stream.index < token_stream.length {
+    while token_stream.position() < token_stream.length() {
         let current_token = token_stream.current_token_kind().to_owned();
 
         ast_log!("Parsing Token: ", #current_token);
@@ -118,8 +116,7 @@ pub(crate) fn parse_function_body_statements(
         // Same-line accidental second arms are rejected here before statement dispatch.
         if context.kind == ContextKind::MatchArm {
             if let Some(candidate) = current_token_starts_match_arm_header(token_stream) {
-                debug_assert_eq!(candidate.start_index, token_stream.index);
-                debug_assert!(candidate.arrow_index > candidate.start_index);
+                debug_assert_eq!(candidate.start_index, token_stream.position());
                 break;
             }
 
@@ -190,6 +187,7 @@ pub(crate) fn parse_function_body_statements(
 
                 body_nodes.push(create_loop(
                     token_stream,
+                    &token_stream.path_syntax_for_substream()?,
                     context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
                     type_interner,
                     warnings,
@@ -395,6 +393,7 @@ pub(crate) fn parse_function_body_statements(
                 let fragment_span = Some(token_stream.current_span());
                 let template = Template::new_with_type_interner(
                     token_stream,
+                    context.scope,
                     &context,
                     type_interner,
                     vec![],

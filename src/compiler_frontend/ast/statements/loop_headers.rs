@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::{
@@ -607,7 +608,8 @@ fn parse_range_loop_spec_from_tokens(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<RangeLoopSpec> {
-    let mut stream = token_stream_with_eof(range_tokens, path_syntax, context)?;
+    let mut file_tokens = token_stream_with_eof(range_tokens, path_syntax, context)?;
+    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)?;
 
     // Omitted-start sugar: `loop to 5:` desugars to `loop 0 to 5:`.
     let start = if matches!(stream.current_token_kind(), TokenKind::ExclusiveRange) {
@@ -917,7 +919,6 @@ fn declare_loop_binding(
 
     Ok(declaration)
 }
-
 fn parse_expression_from_tokens(
     expression_tokens: &[Token],
     path_syntax: &FilePathSyntax,
@@ -927,7 +928,8 @@ fn parse_expression_from_tokens(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<Expression> {
-    let mut expression_stream = token_stream_with_eof(expression_tokens, path_syntax, context)?;
+    let mut file_tokens = token_stream_with_eof(expression_tokens, path_syntax, context)?;
+    let mut expression_stream = AstCursor::from_file_tokens(&mut file_tokens)?;
     let mut inferred_type = ExpectedType::Infer;
 
     let expression = create_expression_without_boundary_catch(
@@ -947,7 +949,9 @@ fn parse_expression_from_tokens(
 /// Wrap a loop header's tokens in a `FileTokens` stream terminated by EOF.
 ///
 /// WHY the context: the header tokens were lexed from the file that owns this loop, so the
-/// substream takes that scope's source identity instead of a caller's argument.
+/// substream takes that scope's source identity instead of a caller's argument. Callers wrap
+/// the result in `AstCursor` immediately; this constructor is the one allowed explicit
+/// token-vector fixture/source construction site in this file.
 fn token_stream_with_eof(
     tokens: &[Token],
     path_syntax: &FilePathSyntax,

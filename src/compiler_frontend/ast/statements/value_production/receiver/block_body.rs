@@ -9,6 +9,7 @@ use super::emit_collected_warnings;
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericRequestRange, IfGenericRequestRanges,
@@ -24,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Input for the shared then/else block-body parser.
 ///
@@ -33,8 +34,9 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 pub(in crate::compiler_frontend::ast::statements::value_production) struct BlockBodyParseInput<
     'a,
     'b,
+    'tokens,
 > {
-    pub token_stream: &'a mut FileTokens,
+    pub token_stream: &'a mut AstCursor<'tokens>,
     pub outer_context: &'a ScopeContext,
     pub then_parent: &'a ScopeContext,
     pub else_parent: &'a ScopeContext,
@@ -58,7 +60,7 @@ type BlockBodyResult<T> = Result<T, ExpressionParseError>;
 
 /// Parses both value-block bodies after the header, starting at `:`.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_value_block_bodies(
-    input: BlockBodyParseInput<'_, '_>,
+    input: BlockBodyParseInput<'_, '_, '_>,
 ) -> BlockBodyResult<ParsedValueBlockBodies> {
     let BlockBodyParseInput {
         token_stream,
@@ -122,7 +124,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
 }
 
 fn parse_one_value_block_body(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     parent: &ScopeContext,
     outer_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,

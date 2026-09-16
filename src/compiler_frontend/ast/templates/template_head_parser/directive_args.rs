@@ -27,13 +27,12 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -42,31 +41,18 @@ type DirectiveArgsResult<T> = Result<T, TemplateError>;
 
 /// Returns true if the next token after the current directive is `(`.
 ///
-/// WHAT: pure read-only `(` lookahead that preserves adapter-relative indexes.
+/// WHAT: pure read-only `(` lookahead on the canonical cursor view.
 /// WHY: directive dispatch must not advance before committing to the paren
-/// path; a short `DeclarationCursor` keeps that fact read-only and drops
-/// before any `FileTokens` advance or expression re-entry. Unbounded
-/// compatibility-only streams keep `peek_next_token` as the documented
-/// `FileTokens` grammar boundary (fallback below).
-pub(crate) fn directive_has_arguments(token_stream: &FileTokens) -> bool {
-    DeclarationCursor::from_file_tokens(token_stream)
-        .map(|cursor| {
-            cursor
-                .position()
-                .checked_add(1)
-                .and_then(|next| cursor.token_kind_at(next))
-                == Some(TokenKind::OpenParenthesis)
-        })
-        .unwrap_or_else(|_| {
-            token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis)
-        })
+/// path; the cached cursor lookahead keeps that fact read-only.
+pub(crate) fn directive_has_arguments(token_stream: &AstCursor) -> bool {
+    token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis)
 }
 
 /// Advances the token stream from the directive token past `(` into the
 /// first argument position.
 ///
 /// Precondition: `directive_has_arguments` returned `true`.
-pub(crate) fn advance_into_directive_arguments(token_stream: &mut FileTokens) {
+pub(crate) fn advance_into_directive_arguments(token_stream: &mut AstCursor) {
     token_stream.advance(); // past directive token
     token_stream.advance(); // past '('
 }
@@ -74,7 +60,7 @@ pub(crate) fn advance_into_directive_arguments(token_stream: &mut FileTokens) {
 /// Rejects parenthesized arguments for directives that do not accept them.
 pub(crate) fn reject_unexpected_directive_arguments(
     directive_name: StringId,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> DirectiveArgsResult<()> {
     if directive_has_arguments(token_stream) {
         return Err(with_current_token_span(
@@ -94,7 +80,7 @@ pub(crate) fn reject_unexpected_directive_arguments(
 /// parentheses.
 pub(crate) fn reject_empty_directive_parens(
     directive_name: StringId,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> DirectiveArgsResult<()> {
     if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
         return Err(with_current_token_span(
@@ -126,7 +112,7 @@ fn ends_directive_argument_without_expression(token: &TokenKind) -> bool {
 
 /// Expects the current token to be `)`. Returns a syntax error with a
 /// suggestion if it is not.
-pub(crate) fn expect_directive_close_paren(token_stream: &FileTokens) -> DirectiveArgsResult<()> {
+pub(crate) fn expect_directive_close_paren(token_stream: &AstCursor) -> DirectiveArgsResult<()> {
     if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
         return Ok(());
     }
@@ -156,7 +142,7 @@ pub(crate) fn expect_directive_close_paren(token_stream: &FileTokens) -> Directi
 /// - expects `)` after the expression
 fn parse_single_expression_in_directive_parens(
     directive_name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -217,7 +203,7 @@ fn parse_single_expression_in_directive_parens(
 /// Returns `Ok(Some(expression))` if a single expression was parsed.
 pub(crate) fn parse_optional_parenthesized_expression(
     directive_name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -244,7 +230,7 @@ pub(crate) fn parse_optional_parenthesized_expression(
 /// Returns an error if no `(` follows the directive.
 pub(crate) fn parse_required_parenthesized_expression(
     directive_name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -281,7 +267,7 @@ pub(crate) fn parse_required_parenthesized_expression(
 /// or positive positional integer.
 pub(crate) fn parse_optional_slot_target_argument(
     directive_name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     string_table: &StringTable,
 ) -> DirectiveArgsResult<SlotKey> {
     if !directive_has_arguments(token_stream) {
@@ -362,7 +348,7 @@ pub(crate) fn parse_optional_slot_target_argument(
 /// Parses the required named target argument to `$insert("name")`.
 pub(crate) fn parse_required_slot_name_argument(
     directive_name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
 ) -> DirectiveArgsResult<StringId> {
     if !directive_has_arguments(token_stream) {
         return Err(with_current_token_span(
@@ -425,23 +411,11 @@ pub(crate) fn parse_required_slot_name_argument(
 /// Directive argument validation keeps the exact global span of the token
 /// owning a syntax diagnostic.
 fn with_current_token_span(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        // Short-lived canonical view for this token-local directive span;
-        // dropped before any `FileTokens` advance or `create_expression`
-        // re-entry. Compatibility-only streams keep the checked vector lane as
-        // the documented `FileTokens` grammar boundary (fallback below).
-        diagnostic.primary_span = DeclarationCursor::from_file_tokens(token_stream)
-            .ok()
-            .and_then(|cursor| cursor.current_span())
-            .or_else(|| {
-                token_stream
-                    .tokens
-                    .get(token_stream.index)
-                    .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-            });
+        diagnostic.primary_span = Some(token_stream.current_span());
     }
     diagnostic
 }

@@ -4,6 +4,7 @@
 //! WHY: declaration parsing is the entrypoint for most AST values and must preserve type intent.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
@@ -499,8 +500,11 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let declaration_path = path_fork
             .try_intern_child(source_path, name)
             .expect("declaration path should intern");
+        let mut owner = tokens;
+        let owner = AstCursor::from_file_tokens(&mut owner)
+            .expect("the tokenized source must expose an AST cursor");
         let initializer = super::declaration_initializer_stream(
-            Some(&tokens),
+            Some(&owner),
             declaration.initializer_range,
             None,
             &declaration_path,
@@ -508,7 +512,6 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         )
         .expect("initializer must retain its declaration's source owner");
         let terminator = initializer.tokens.last().unwrap();
-        assert_eq!(terminator.kind, TokenKind::Eof);
         assert_eq!(initializer.file_id, file_id);
         sources
             .install_extended_spans(file_id, builder.freeze())

@@ -31,7 +31,8 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
@@ -429,7 +430,7 @@ fn resolve_field_member(
 }
 
 pub(super) fn parse_member_name_typed(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor<'_>,
     _string_table: &StringTable,
 ) -> Result<StringId, ExpressionParseError> {
     match token_stream.current_token_kind() {
@@ -464,7 +465,7 @@ pub(super) fn parse_member_name_typed(
 // --------------------------
 
 pub(super) fn parse_field_member_access_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
     path_fork: &PathInternerFork,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -7,12 +8,15 @@ fn markdown_formats_only_template_body_content() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream = template_tokens_from_source("[\"prefix\", $md:\n# Hello\n]",
+    let mut file_tokens = template_tokens_from_source("[\"prefix\", $md:\n# Hello\n]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let source_path = file_tokens.src_path;
+    let context = new_constant_context(source_path.to_owned(), &path_fork);
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("template should parse");
 
     assert!(matches!(

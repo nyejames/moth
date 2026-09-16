@@ -26,15 +26,16 @@ use crate::compiler_frontend::headers::binding_environment::{
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Input bundle for namespace access parsing.
 ///
 /// WHAT: carries everything needed to resolve a dotted path starting at a visible namespace
 /// dependency namespace.
 /// WHY: avoids threading a long argument list through the identifier dispatch path.
-pub(super) struct NamespaceAccessInput<'a, 'env> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct NamespaceAccessInput<'a, 'env, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
@@ -57,7 +58,7 @@ pub(super) struct NamespaceAccessInput<'a, 'env> {
 /// BOUNDARY: source and module public-surface namespace records remain shallow, so any second dot
 /// in a source or module public-surface path reports the existing `nested_traversal` diagnostic.
 pub(super) fn parse_namespace_access(
-    input: NamespaceAccessInput<'_, '_>,
+    input: NamespaceAccessInput<'_, '_, '_>,
 ) -> Result<(), ExpressionParseError> {
     let NamespaceAccessInput {
         token_stream,

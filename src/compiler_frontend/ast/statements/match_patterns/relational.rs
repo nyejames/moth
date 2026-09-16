@@ -5,6 +5,7 @@
 //! WHY: relational patterns share literal parsing but have distinct validation
 //! rules, so they live in a dedicated submodule.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp, literal::parse_literal_pattern,
 };
@@ -13,7 +14,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Result for the relational pattern family.
 ///
@@ -26,7 +27,7 @@ type RelationalPatternResult<T> = Result<T, CompilerDiagnostic>;
 /// Validates that the subject type supports ordering, then parses the literal
 /// operand that follows the operator.
 pub(super) fn parse_relational_pattern(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     subject_type_id: TypeId,
     string_table: &StringTable,
     type_environment: &TypeEnvironment,

@@ -15,11 +15,11 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, MultiBindTarget, MultiBindTargetKind, NodeKind,
 };
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::statements::value_production::try_parse_multi_bind_value_block;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionContextInputs, resolve_diagnostic_type_to_type_id_checked,
@@ -33,7 +33,6 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     BindingTargetSyntax, parse_binding_target_syntax,
 };
@@ -41,9 +40,10 @@ use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::utilities::token_scan::has_top_level_comma_before_statement_end;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::collections::HashSet;
@@ -63,7 +63,7 @@ struct ResolvedMultiBindTargets {
 // --------------------------
 
 pub(crate) fn parse_multi_bind_statement(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -205,10 +205,10 @@ fn validate_multi_bind_target_identifiers(
 ///
 /// WHY: this is the only place that knows how to backtrack when the stream is not a multi-bind.
 fn parse_target_list(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     string_table: &mut StringTable,
 ) -> MultiBindResult<Option<Vec<BindingTargetSyntax>>> {
-    let start_index = token_stream.index;
+    let start_position = token_stream.position();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut parsed_targets = Vec::new();
     let mut saw_comma = false;
@@ -235,13 +235,19 @@ fn parse_target_list(
             .into());
         };
         token_stream.advance();
-        let mut declaration_cursor = DeclarationCursor::from_file_tokens(token_stream)?;
-        let target_syntax =
-            parse_binding_target_syntax(name, &mut declaration_cursor, string_table, &mut span_builder)?;
-        let next_index =
-            token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-        drop(declaration_cursor);
-        token_stream.index = next_index;
+        let target_syntax = {
+            let mut declaration_cursor = token_stream.declaration_cursor()?;
+            let target_syntax = parse_binding_target_syntax(
+                name,
+                &mut declaration_cursor,
+                string_table,
+                &mut span_builder,
+            )?;
+            let next_index = declaration_cursor.position();
+            drop(declaration_cursor);
+            token_stream.set_position(next_index)?;
+            target_syntax
+        };
         validate_target_mutability(&target_syntax, string_table)?;
         parsed_targets.push(target_syntax);
 
@@ -289,7 +295,7 @@ fn parse_target_list(
     }
 
     if !saw_comma || parsed_targets.len() < 2 {
-        token_stream.index = start_index;
+        token_stream.set_position(start_position)?;
         return Ok(None);
     }
 
@@ -338,7 +344,7 @@ fn validate_unique_target_names(
 
 /// Parse the single expression on the right-hand side of a multi-bind.
 fn parse_multi_bind_rhs_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,

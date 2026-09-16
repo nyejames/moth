@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{
     ConstRecordState, Expression, ReactiveSource, ReactiveSourceKind,
@@ -37,11 +38,13 @@ fn parse_template(
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let mut token_stream = template_tokens_from_source(source, string_table, span_builder, path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), path_fork);
+    let mut file_tokens = template_tokens_from_source(source, string_table, span_builder, path_fork);
+    let source_path = file_tokens.src_path;
+    let context = new_constant_context(source_path, path_fork);
     let template_ir_store = context.template_ir_store();
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
 
-    let template = Template::new(&mut token_stream, &context, vec![], string_table, path_fork)
+    let template = Template::new(&mut token_stream, source_path, &context, vec![], string_table, path_fork)
         .expect("template should parse");
 
     (template, template_ir_store)
@@ -53,11 +56,13 @@ fn parse_const_required_template(
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let mut token_stream = template_tokens_from_source(source, string_table, span_builder, path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), path_fork);
+    let mut file_tokens = template_tokens_from_source(source, string_table, span_builder, path_fork);
+    let source_path = file_tokens.src_path;
+    let context = new_constant_context(source_path, path_fork);
     let template_ir_store = context.template_ir_store();
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
 
-    let template = Template::new_const_required(&mut token_stream, &context, vec![], string_table, path_fork)
+    let template = Template::new_const_required(&mut token_stream, source_path, &context, vec![], string_table, path_fork)
         .expect("const-required template should parse")
         .template;
 
@@ -836,19 +841,21 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
         config_qualifier: None,
     };
 
-    let mut token_stream =
+    let mut file_tokens =
         template_tokens_from_source("[$(source): body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let template_source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
-        token_stream.src_path.to_owned(),
+        template_source_path,
         Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::default()),
         vec![],
         0,
     )
-    .with_source_file_scope(token_stream.src_path.to_owned());
+    .with_source_file_scope(template_source_path);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut token_stream, template_source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("reactive head template should parse");
     let store = context.template_ir_store();
     let store = store.borrow();
@@ -952,11 +959,13 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source("[$md: `before [value] after`]",
+    let mut file_tokens = template_tokens_from_source("[$md: `before [value] after`]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork);
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let context = constant_template_context(&source_path, &declarations, &path_fork);
+    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("markdown inline-code with body reference should parse");
     let store = context.template_ir_store();
     let store = store.borrow();
@@ -1677,12 +1686,14 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
 
-    let mut wrapper_tokens = template_tokens_from_source("[:<article>[$slot]</article>]",
+    let mut wrapper_file_tokens = template_tokens_from_source("[:<article>[$slot]</article>]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned(), &path_fork)
+    let wrapper_source_path = wrapper_file_tokens.src_path;
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("head-chain wrapper should parse");
 
     let declaration = Declaration {
@@ -1692,11 +1703,13 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
         config_qualifier: None,
     };
 
-    let mut parent_tokens =
+    let mut parent_file_tokens =
         template_tokens_from_source("[wrapper, $md: body]", &mut string_table, &mut span_builder, &mut path_fork);
-    let parent_context = constant_template_context(&parent_tokens.src_path, &[declaration], &path_fork)
+    let parent_source_path = parent_file_tokens.src_path;
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
+    let parent_context = constant_template_context(&parent_source_path, &[declaration], &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(&mut parent_tokens, &parent_context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut parent_tokens, parent_source_path, &parent_context, vec![], &mut string_table, &mut path_fork)
     .expect("formatted head-chain template should parse");
 
     let reference = &template.tir_reference;
@@ -1727,12 +1740,14 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
 
-    let mut wrapper_tokens = template_tokens_from_source("[:\n    [$children([:H: [$slot]]):[$slot(1)]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
+    let mut wrapper_file_tokens = template_tokens_from_source("[:\n    [$children([:H: [$slot]]):[$slot(1)]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned(), &path_fork)
+    let wrapper_source_path = wrapper_file_tokens.src_path;
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("slot wrapper should parse");
 
     let declaration = Declaration {
@@ -1742,12 +1757,14 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
         config_qualifier: None,
     };
 
-    let mut parent_tokens = template_tokens_from_source("[wrapper:\n    [: First]\n    [: Second]\n    [: Third]\n]",
+    let mut parent_file_tokens = template_tokens_from_source("[wrapper:\n    [: First]\n    [: Second]\n    [: Third]\n]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let parent_context = constant_template_context(&parent_tokens.src_path, &[declaration], &path_fork)
+    let parent_source_path = parent_file_tokens.src_path;
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
+    let parent_context = constant_template_context(&parent_source_path, &[declaration], &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(&mut parent_tokens, &parent_context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut parent_tokens, parent_source_path, &parent_context, vec![], &mut string_table, &mut path_fork)
     .expect("slot application should parse");
 
     let folded = fold_template_in_context(&template, &parent_context, &mut string_table);
@@ -1792,12 +1809,14 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
 
-    let mut wrapper_tokens = template_tokens_from_source("[$md:title[$slot(\"title\")]body[$slot]]",
+    let mut wrapper_file_tokens = template_tokens_from_source("[$md:title[$slot(\"title\")]body[$slot]]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned(), &path_fork)
+    let wrapper_source_path = wrapper_file_tokens.src_path;
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("formatted named-slot wrapper should parse");
 
     let wrapper_reference = &wrapper.tir_reference;
@@ -1807,12 +1826,14 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         "explicit formatter named-slot receivers can install formatted TIR"
     );
 
-    let mut insert_tokens = template_tokens_from_source("[$md, $insert(\"title\"):Heading]",
+    let mut insert_file_tokens = template_tokens_from_source("[$md, $insert(\"title\"):Heading]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let insert_context = new_constant_context(insert_tokens.src_path.to_owned(), &path_fork)
+    let insert_source_path = insert_file_tokens.src_path;
+    let mut insert_tokens = AstCursor::from_file_tokens(&mut insert_file_tokens).expect("test token stream must expose an AST cursor");
+    let insert_context = new_constant_context(insert_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let insert = Template::new(&mut insert_tokens, &insert_context, vec![], &mut string_table, &mut path_fork)
+    let insert = Template::new(&mut insert_tokens, insert_source_path, &insert_context, vec![], &mut string_table, &mut path_fork)
     .expect("formatted named insert should parse");
 
     let insert_reference = &insert.tir_reference;
@@ -1841,12 +1862,14 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         },
     ];
 
-    let mut parent_tokens = template_tokens_from_source("[wrapper, heading:Body]",
+    let mut parent_file_tokens = template_tokens_from_source("[wrapper, heading:Body]",
     &mut string_table,
     &mut span_builder, &mut path_fork);
-    let parent_context = constant_template_context(&parent_tokens.src_path, &declarations, &path_fork)
+    let parent_source_path = parent_file_tokens.src_path;
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
+    let parent_context = constant_template_context(&parent_source_path, &declarations, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(&mut parent_tokens, &parent_context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut parent_tokens, parent_source_path, &parent_context, vec![], &mut string_table, &mut path_fork)
     .expect("formatted named-slot application should parse");
 
     let folded = fold_template_in_context(&template, &parent_context, &mut string_table);
@@ -2225,11 +2248,13 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
 
-    let mut wrapper_tokens =
+    let mut wrapper_file_tokens =
         template_tokens_from_source("[:head]", &mut string_table, &mut span_builder, &mut path_fork);
-    let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned(), &path_fork)
+    let wrapper_source_path = wrapper_file_tokens.src_path;
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("wrapper template should parse");
 
     let declaration = Declaration {
@@ -2238,11 +2263,13 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         binding_span: None,
         config_qualifier: None,
     };
-    let mut parent_tokens =
+    let mut parent_file_tokens =
         template_tokens_from_source("[wrapper: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let parent_source_path = parent_file_tokens.src_path;
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
     let parent_context = ScopeContext::new_for_tests(
         ContextKind::Constant,
-        parent_tokens.src_path.to_owned(),
+        parent_source_path,
         Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
@@ -2302,11 +2329,13 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
 
-    let mut wrapper_tokens =
+    let mut wrapper_file_tokens =
         template_tokens_from_source("[:head]", &mut string_table, &mut span_builder, &mut path_fork);
-    let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned(), &path_fork)
+    let wrapper_source_path = wrapper_file_tokens.src_path;
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
     .expect("wrapper template should parse");
 
     let declaration = Declaration {
@@ -2316,18 +2345,20 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         config_qualifier: None,
     };
 
-    let mut parent_tokens =
+    let mut parent_file_tokens =
         template_tokens_from_source("[wrapper: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let parent_source_path = parent_file_tokens.src_path;
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
     let parent_context = ScopeContext::new_for_tests(
         ContextKind::Constant,
-        parent_tokens.src_path.to_owned(),
+        parent_source_path,
         Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
     )
     .with_template_ir_store(Rc::clone(&shared_store));
-    let parent = Template::new(&mut parent_tokens, &parent_context, vec![], &mut string_table, &mut path_fork)
+    let parent = Template::new(&mut parent_tokens, parent_source_path, &parent_context, vec![], &mut string_table, &mut path_fork)
     .expect("parent template should parse");
     let store = shared_store.borrow();
     let parent_child_ids = tir_root_child_ids(&parent, &store);

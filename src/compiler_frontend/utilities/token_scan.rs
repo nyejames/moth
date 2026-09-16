@@ -8,6 +8,7 @@
 //! This module owns generic scan mechanics only.
 //! It does NOT own statement/feature semantics or diagnostics policy.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
@@ -380,7 +381,6 @@ enum RecordPipeAction {
     Close,
     Ignore,
 }
-
 fn classify_pipe_list(
     tokens: &[Token],
     pipe_index: usize,
@@ -388,17 +388,11 @@ fn classify_pipe_list(
     nesting_is_top_level: bool,
     allow_value_first: bool,
 ) -> RecordPipeAction {
-    if !nesting_is_top_level {
-        return RecordPipeAction::Ignore;
-    }
-
-    if pipe_list_depth == 0 && pipe_opens_member_list(tokens, pipe_index, allow_value_first) {
-        RecordPipeAction::Open
-    } else if pipe_list_depth > 0 {
-        RecordPipeAction::Close
-    } else {
-        RecordPipeAction::Ignore
-    }
+    record_pipe_action(
+        pipe_list_depth,
+        nesting_is_top_level,
+        pipe_opens_member_list(tokens, pipe_index, allow_value_first),
+    )
 }
 
 /// True when `|` at `pipe_index` opens a balanced `|...|` member list.
@@ -408,31 +402,149 @@ fn classify_pipe_list(
 /// (`|err|`) and option captures (`|name|`) stay outside so `|` keeps continuing
 /// the surrounding expression.
 fn pipe_opens_member_list(tokens: &[Token], pipe_index: usize, allow_value_first: bool) -> bool {
-    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
+    pipe_opens_member_list_with(
+        |cursor| {
+            tokens
+                .get(cursor)
+                .map(|token| PipeMemberFact::of_kind(&token.kind))
+        },
+        pipe_index,
+        allow_value_first,
+    )
+}
+
+/// Shared `|...|` member-list lookahead over an index-addressed token view.
+///
+/// WHAT: single decision body for both the legacy slice scan and the live
+///       [`AstCursor`] scan; each caller supplies one lightweight fact probe.
+/// WHY: both lanes must preserve identical lookahead/newline boundaries without
+///      maintaining two copies of the match, and without cloning non-`Copy`
+///      token payloads only to classify their shape.
+fn pipe_opens_member_list_with(
+    fact_at: impl Fn(usize) -> Option<PipeMemberFact>,
+    pipe_index: usize,
+    allow_value_first: bool,
+) -> bool {
     let skip_newlines = |mut cursor: usize| {
-        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
-            cursor += 1;
+        while fact_at(cursor).is_some_and(|fact| fact.tag == TokenTag::NEWLINE) {
+            cursor = cursor.saturating_add(1);
         }
         cursor
     };
 
-    let mut cursor = skip_newlines(pipe_index + 1);
-    match kind_at(cursor) {
-        Some(TokenKind::TypeParameterBracket) => true,
-        Some(TokenKind::Symbol(_) | TokenKind::This) => {
-            cursor = skip_newlines(cursor + 1);
-            !matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket))
+    let mut cursor = skip_newlines(pipe_index.saturating_add(1));
+    if fact_at(cursor).is_some_and(|fact| fact.tag == TokenTag::TYPE_PARAMETER_BRACKET) {
+        return true;
+    }
+    match fact_at(cursor).map(|fact| fact.shape) {
+        Some(PipeMemberShape::Name) => {
+            cursor = skip_newlines(cursor.saturating_add(1));
+            !fact_at(cursor).is_some_and(|fact| fact.tag == TokenTag::TYPE_PARAMETER_BRACKET)
         }
-        Some(
+        Some(PipeMemberShape::Value) => allow_value_first,
+        Some(PipeMemberShape::Other) | None => false,
+    }
+}
+
+/// Lightweight pipe-list member fact shared by both scan lanes.
+///
+/// Only the distinctions consumed by the shared lookahead are modeled, so both
+/// lanes avoid cloning full token payloads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PipeMemberFact {
+    tag: TokenTag,
+    shape: PipeMemberShape,
+}
+
+impl PipeMemberFact {
+    fn of_kind(kind: &TokenKind) -> Self {
+        Self {
+            tag: kind.token_tag(),
+            shape: PipeMemberShape::of_kind(kind),
+        }
+    }
+}
+
+/// Narrow shape probe for pipe-list member classification.
+///
+/// Only the distinctions consumed by the shared lookahead are modeled, so both
+/// lanes avoid cloning full token payloads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PipeMemberShape {
+    Name,
+    Value,
+    Other,
+}
+
+impl PipeMemberShape {
+    fn of_kind(kind: &TokenKind) -> Self {
+        match kind {
+            TokenKind::Symbol(_) | TokenKind::This => Self::Name,
             TokenKind::NumericLiteral(_)
             | TokenKind::StringSliceLiteral(_)
             | TokenKind::RawStringLiteral(_)
             | TokenKind::CharLiteral(_)
             | TokenKind::BoolLiteral(_)
             | TokenKind::NoneLiteral
-            | TokenKind::Path(_),
-        ) => allow_value_first,
-        Some(_) | None => false,
+            | TokenKind::Path(_) => Self::Value,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// True when `|` at `pipe_offset` opens a balanced `|...|` member list on a live cursor.
+///
+/// This reads through [`AstCursor::token_kind_at_offset`] so the multi-bind lookahead follows the
+/// logical parser view without touching the legacy token vector.
+fn pipe_opens_member_list_at_cursor(
+    token_stream: &AstCursor,
+    pipe_offset: usize,
+    allow_value_first: bool,
+) -> bool {
+    pipe_opens_member_list_with(
+        |offset| {
+            token_stream
+                .token_kind_at_offset(offset)
+                .map(|kind| PipeMemberFact::of_kind(&kind))
+        },
+        pipe_offset,
+        allow_value_first,
+    )
+}
+
+fn classify_pipe_list_at_cursor(
+    token_stream: &AstCursor,
+    pipe_index: usize,
+    pipe_list_depth: usize,
+    nesting_is_top_level: bool,
+    allow_value_first: bool,
+) -> RecordPipeAction {
+    record_pipe_action(
+        pipe_list_depth,
+        nesting_is_top_level,
+        pipe_opens_member_list_at_cursor(token_stream, pipe_index, allow_value_first),
+    )
+}
+
+/// Map one pipe observation to its record-list depth action.
+///
+/// WHAT: single branching body shared by the slice and cursor classifiers.
+/// WHY: depth/top-level handling must stay identical across both scan lanes.
+fn record_pipe_action(
+    pipe_list_depth: usize,
+    nesting_is_top_level: bool,
+    opens_member_list: bool,
+) -> RecordPipeAction {
+    if !nesting_is_top_level {
+        return RecordPipeAction::Ignore;
+    }
+
+    if pipe_list_depth == 0 && opens_member_list {
+        RecordPipeAction::Open
+    } else if pipe_list_depth > 0 {
+        RecordPipeAction::Close
+    } else {
+        RecordPipeAction::Ignore
     }
 }
 
@@ -754,6 +866,7 @@ pub(crate) fn collect_declaration_initializer_range(
     let mut depth = NestingDepth::default();
     let mut catch_block_depth = 0usize;
     let mut catch_header_pending = false;
+    let mut inline_catch_value_pending = false;
     let mut value_if_block_depth = 0usize;
     let mut value_if_header_pending = false;
     let mut inline_value_if_missing_else_depth = 0usize;
@@ -803,7 +916,12 @@ pub(crate) fn collect_declaration_initializer_range(
                 .is_some_and(TokenTag::continues_expression);
             let continues_to_authored_else = inline_value_if_missing_else_depth > 0
                 && next_non_newline_tag == Some(TokenTag::ELSE);
-            previous_continues || next_continues || continues_to_authored_else
+            let continues_to_catch_header =
+                catch_header_pending || inline_catch_value_pending;
+            previous_continues
+                || next_continues
+                || continues_to_authored_else
+                || continues_to_catch_header
         } else {
             false
         };
@@ -885,7 +1003,10 @@ pub(crate) fn collect_declaration_initializer_range(
 
         if depth.is_top_level() {
             match current_tag {
-                TokenTag::CATCH => catch_header_pending = true,
+                TokenTag::CATCH => {
+                    catch_header_pending = true;
+                    inline_catch_value_pending = false;
+                }
                 TokenTag::IF if catch_block_depth == 0 => value_if_header_pending = true,
                 TokenTag::COLON if catch_header_pending => {
                     catch_header_pending = false;
@@ -904,6 +1025,10 @@ pub(crate) fn collect_declaration_initializer_range(
                 TokenTag::COLON if value_if_block_depth > 0 => {
                     value_if_block_depth = value_if_block_depth.saturating_add(1);
                     open_constructs.push(OpenConstruct::ValueIfBlock);
+                }
+                TokenTag::THEN if catch_header_pending => {
+                    catch_header_pending = false;
+                    inline_catch_value_pending = true;
                 }
                 TokenTag::THEN if value_if_header_pending => {
                     value_if_header_pending = false;
@@ -934,6 +1059,9 @@ pub(crate) fn collect_declaration_initializer_range(
                 }
                 _ => {}
             }
+        }
+        if current_tag != TokenTag::NEWLINE && current_tag != TokenTag::THEN {
+            inline_catch_value_pending = false;
         }
 
         match current_tag {
@@ -1012,38 +1140,20 @@ fn classify_canonical_pipe(
         return RecordPipeAction::Close;
     }
 
-    let mut lookahead = *cursor;
-    let _ = lookahead.advance();
-    while lookahead
-        .peek()
-        .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
-    {
-        let _ = lookahead.advance();
-    }
-    let Some(first) = lookahead.peek() else {
-        return RecordPipeAction::Ignore;
-    };
-    let opens = match first.tag() {
-        TokenTag::TYPE_PARAMETER_BRACKET => true,
-        TokenTag::SYMBOL | TokenTag::THIS => {
-            let _ = lookahead.advance();
-            while lookahead
-                .peek()
-                .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
-            {
-                let _ = lookahead.advance();
+    let opens = pipe_opens_member_list_with(
+        |offset| {
+            let mut lookahead = *cursor;
+            for _ in 0..offset {
+                lookahead.advance()?;
             }
-            lookahead.peek().is_none_or(|token| token.tag() != TokenTag::TYPE_PARAMETER_BRACKET)
-        }
-        TokenTag::NUMERIC_LITERAL
-        | TokenTag::STRING_SLICE_LITERAL
-        | TokenTag::RAW_STRING_LITERAL
-        | TokenTag::CHAR_LITERAL
-        | TokenTag::BOOL_LITERAL
-        | TokenTag::NONE_LITERAL
-        | TokenTag::PATH => allow_value_first,
-        _ => false,
-    };
+            lookahead
+                .peek()
+                .and_then(|token| token.to_token_kind().ok())
+                .map(|kind| PipeMemberFact::of_kind(&kind))
+        },
+        0,
+        allow_value_first,
+    );
     if opens {
         RecordPipeAction::Open
     } else {
@@ -1051,20 +1161,17 @@ fn classify_canonical_pipe(
     }
 }
 
-pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &FileTokens) -> bool {
+pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor) -> bool {
     let mut depth = NestingDepth::default();
     let mut record_pipe_depth = 0usize;
-    let mut index = token_stream.index;
-    let tokens = &token_stream.tokens;
+    let mut offset = 0usize;
     let mut seen_non_newline = false;
 
-    while index < token_stream.length {
-        let token_kind = &tokens[index].kind;
-
-        if matches!(token_kind, TokenKind::TypeParameterBracket) {
-            match classify_pipe_list(
-                tokens,
-                index,
+    while let Some(token_kind) = token_stream.token_kind_at_offset(offset) {
+        if token_kind == TokenKind::TypeParameterBracket {
+            match classify_pipe_list_at_cursor(
+                token_stream,
+                offset,
                 record_pipe_depth,
                 depth.is_top_level(),
                 !seen_non_newline,
@@ -1079,8 +1186,7 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &FileTokens
             }
         }
 
-        if record_pipe_depth == 0 && depth.is_top_level() && matches!(token_kind, TokenKind::Comma)
-        {
+        if record_pipe_depth == 0 && depth.is_top_level() && token_kind == TokenKind::Comma {
             return true;
         }
 
@@ -1094,11 +1200,11 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &FileTokens
             break;
         }
 
-        if !matches!(token_kind, TokenKind::Newline) {
+        if token_kind != TokenKind::Newline {
             seen_non_newline = true;
         }
-        depth.step(token_kind);
-        index += 1;
+        depth.step(&token_kind);
+        offset += 1;
     }
 
     false

@@ -21,12 +21,12 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -65,7 +65,7 @@ pub(super) struct LiteralParseState<'a> {
 /// `next_number_negative` fallback keeps parser-owned unary negation and hand-built test streams
 /// on the same signed-i32 boundary policy as tokenizer-signed literals.
 pub(super) fn parse_literal_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut LiteralParseState<'_>,
@@ -236,27 +236,19 @@ pub(super) fn parse_literal_expression(
 /// even when there is no explicit `ExpectedType` context.
 /// WHY: the type of `none` can be inferred from the other operand during later
 /// type-checking, so rejecting it here would be overly strict.
-fn none_literal_has_option_equality_context(token_stream: &FileTokens) -> bool {
-    // Short-lived canonical view for these two token-local equality facts; dropped
-    // before any FileTokens use. Bounded adapters keep the legacy vector facts as
-    // the documented grammar boundary (fallback below).
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        let position = cursor.position();
-        let follows_equality_operator = matches!(
-            cursor.previous_token_kind(),
-            Some(TokenKind::Is) | Some(TokenKind::Not)
-        );
-        let leads_equality_operator =
-            matches!(cursor.token_kind_at(position + 1), Some(TokenKind::Is));
-        return follows_equality_operator || leads_equality_operator;
-    }
-    let follows_equality_operator = token_stream.index > 0
-        && matches!(
-            token_stream.previous_token(),
-            TokenKind::Is | TokenKind::Not
-        );
-    let leads_equality_operator = matches!(token_stream.peek_next_token(), Some(TokenKind::Is));
-
+fn none_literal_has_option_equality_context(token_stream: &AstCursor) -> bool {
+    let position = token_stream.position();
+    let previous_kind = token_stream
+        .position()
+        .checked_sub(1)
+        .and_then(|previous| token_stream.token_kind_at(previous))
+        .or_else(|| token_stream.previous_token().cloned());
+    let follows_equality_operator =
+        matches!(previous_kind, Some(TokenKind::Is) | Some(TokenKind::Not));
+    let leads_equality_operator = token_stream
+        .token_kind_at(position.saturating_add(1))
+        .or_else(|| token_stream.peek_next_token().cloned())
+        == Some(TokenKind::Is);
     follows_equality_operator || leads_equality_operator
 }
 

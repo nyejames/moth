@@ -27,12 +27,12 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedCurlyLiteralContext, ExpectedMapContext,
@@ -49,7 +49,7 @@ type CollectionParseResult<T> = Result<T, ExpressionParseError>;
 
 /// Entry point for parsing a `{...}` collection literal with homogeneous items.
 pub fn new_collection(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     collection_context: ExpectedCollectionContext,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -70,7 +70,7 @@ pub fn new_collection(
 
 /// Entry point for parsing a `{...}` literal that may be a collection or a map.
 pub fn new_curly_literal(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     curly_context: ExpectedCurlyLiteralContext,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -109,7 +109,7 @@ pub fn new_curly_literal(
 }
 
 fn parse_collection_literal(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     collection_context: ExpectedCollectionContext,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -142,7 +142,7 @@ fn parse_collection_literal(
     // ------------------------
     //  Parse collection items
     // ------------------------
-    while token_stream.index < token_stream.length {
+    while token_stream.position() < token_stream.length() {
         match token_stream.current_token_kind() {
             TokenKind::CloseCurly => {
                 consumed_close_curly = true;
@@ -387,7 +387,7 @@ fn record_known_map_key(
 }
 
 fn parse_expression_until_curly_entry_delimiter(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expected_type: &mut ExpectedType,
@@ -414,24 +414,15 @@ fn parse_expression_until_curly_entry_delimiter(
     )
 }
 
-/// Read the next token kind through a short-lived canonical view.
+/// Read the next token kind through the cursor lookahead.
 ///
-/// WHAT: pure read-only lookahead for the `==` common-mistake checks; dropped before
-/// any `FileTokens` mutation or expression re-entry.
-/// WHY: narrowed `new_from_slice` initializer streams have no canonical provenance,
-/// so they keep `peek_next_token` as the documented `FileTokens` grammar boundary.
-fn peek_next_kind(token_stream: &FileTokens) -> Option<TokenKind> {
-    DeclarationCursor::from_file_tokens(token_stream)
-        .map(|cursor| {
-            cursor
-                .position()
-                .checked_add(1)
-                .and_then(|next| cursor.token_kind_at(next))
-        })
-        .unwrap_or_else(|_| token_stream.peek_next_token().cloned())
+/// WHAT: pure read-only lookahead for the `==` common-mistake checks.
+/// WHY: the cursor already tracks the next token kind, so no direct vector read is needed.
+fn peek_next_kind(token_stream: &AstCursor) -> Option<TokenKind> {
+    token_stream.peek_next_token().cloned()
 }
 
-fn mixed_collection_entry_error(token_stream: &FileTokens) -> Option<CompilerDiagnostic> {
+fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<CompilerDiagnostic> {
     if token_stream.current_token_kind() != &TokenKind::Assign {
         return None;
     }
@@ -446,7 +437,7 @@ fn mixed_collection_entry_error(token_stream: &FileTokens) -> Option<CompilerDia
     ))
 }
 
-fn consume_map_entry_separator(token_stream: &mut FileTokens) -> CollectionParseResult<()> {
+fn consume_map_entry_separator(token_stream: &mut AstCursor) -> CollectionParseResult<()> {
     if token_stream.current_token_kind() != &TokenKind::Assign {
         return Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MixedCollectionMapEntries,
@@ -465,7 +456,7 @@ fn consume_map_entry_separator(token_stream: &mut FileTokens) -> CollectionParse
     Ok(())
 }
 
-fn reject_missing_map_key_expression(token_stream: &FileTokens) -> CollectionParseResult<()> {
+fn reject_missing_map_key_expression(token_stream: &AstCursor) -> CollectionParseResult<()> {
     if token_stream.current_token_kind() == &TokenKind::Assign {
         return Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MissingKeyExpression,
@@ -477,7 +468,7 @@ fn reject_missing_map_key_expression(token_stream: &FileTokens) -> CollectionPar
     Ok(())
 }
 
-fn reject_missing_map_value_expression(token_stream: &mut FileTokens) -> CollectionParseResult<()> {
+fn reject_missing_map_value_expression(token_stream: &mut AstCursor) -> CollectionParseResult<()> {
     while token_stream.current_token_kind() == &TokenKind::Newline {
         token_stream.advance();
     }
@@ -493,7 +484,7 @@ fn reject_missing_map_value_expression(token_stream: &mut FileTokens) -> Collect
 }
 
 fn parse_map_literal(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     map_context: ExpectedMapContext,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -521,7 +512,7 @@ fn parse_map_literal(
     // ------------------------
     //  Parse map entries
     // ------------------------
-    while token_stream.index < token_stream.length {
+    while token_stream.position() < token_stream.length() {
         match token_stream.current_token_kind() {
             TokenKind::CloseCurly => {
                 consumed_close_curly = true;
@@ -674,7 +665,7 @@ fn parse_map_literal(
 // ------------------------
 
 fn parse_inferred_curly_literal(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     value_mode: &ValueMode,
@@ -766,7 +757,7 @@ fn parse_inferred_curly_literal(
 
             // Parse remaining map entries.
             let mut awaiting_entry = false;
-            while token_stream.index < token_stream.length {
+            while token_stream.position() < token_stream.length() {
                 match token_stream.current_token_kind() {
                     TokenKind::CloseCurly => {
                         break;
@@ -921,7 +912,7 @@ fn parse_inferred_curly_literal(
             let mut items = vec![coerced_first];
             let mut awaiting_item = false;
 
-            while token_stream.index < token_stream.length {
+            while token_stream.position() < token_stream.length() {
                 match token_stream.current_token_kind() {
                     TokenKind::CloseCurly => {
                         break;

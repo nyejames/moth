@@ -5,6 +5,7 @@
 //! WHY: separating literal parsing from relational and choice parsing keeps each
 //! submodule focused on one pattern category.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidMatchPatternReason, TypeMismatchContext,
@@ -17,7 +18,7 @@ use crate::compiler_frontend::numeric_text::token::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -73,7 +74,7 @@ fn materialize_numeric_literal(
 
 /// Parse a non-choice match pattern, dispatching to relational or literal parsers.
 pub fn parse_non_choice_pattern(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     subject_type_id: TypeId,
     string_table: &StringTable,
     type_environment: &TypeEnvironment,
@@ -108,7 +109,7 @@ pub fn parse_non_choice_pattern(
 /// WHY: catching type mismatches at parse time produces better source-located errors
 /// than deferring the check to HIR lowering.
 pub(super) fn parse_literal_pattern(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     subject_type_id: TypeId,
     string_table: &StringTable,
     type_environment: &TypeEnvironment,

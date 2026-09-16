@@ -20,11 +20,11 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Typed result for reactive subscription parsing.
 type ReactiveSubscriptionResult<T> = Result<T, TemplateError>;
@@ -34,19 +34,16 @@ type ReactiveSubscriptionResult<T> = Result<T, TemplateError>;
 /// The token stream enters on `TokenKind::Reactive` and exits on the token after
 /// the closing `)`.
 pub(super) fn parse_reactive_subscription(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_environment: &TypeEnvironment,
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> ReactiveSubscriptionResult<()> {
-    // Short-lived canonical view for this token-local subscription span;
-    // dropped before the grammar advance below. `current_token` stays the
-    // documented `FileTokens` grammar boundary (fallback below).
     let subscription_token_span = current_token_local_span(token_stream);
     let subscription_span = Some(SourceSpan::new(
-        token_stream.file_id,
+        token_stream.source_id(),
         subscription_token_span,
     ));
 
@@ -90,11 +87,8 @@ pub(super) fn parse_reactive_subscription(
         }
     };
 
-    // Short-lived canonical view for this token-local source span; dropped
-    // before the grammar advance below. Fallback preserves the checked vector
-    // lane for compatibility-only streams.
     let source_token_span = current_token_local_span(token_stream);
-    let source_span = Some(SourceSpan::new(token_stream.file_id, source_token_span));
+    let source_span = Some(SourceSpan::new(token_stream.source_id(), source_token_span));
 
     token_stream.advance();
     if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
@@ -164,57 +158,32 @@ pub(super) fn parse_reactive_subscription(
 
 /// Attach the authored span for a reactive-head syntax diagnostic.
 fn with_current_token_span(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        // Short-lived canonical view for this token-local reactive span;
-        // dropped before any `FileTokens` advance. Compatibility-only streams
-        // keep the checked vector lane as the documented fallback; every call
-        // site now passes `None` so this cursor-first lane is live.
-        diagnostic.primary_span = DeclarationCursor::from_file_tokens(token_stream)
-            .ok()
-            .and_then(|cursor| cursor.current_span())
-            .or_else(|| {
-                token_stream
-                    .tokens
-                    .get(token_stream.index)
-                    .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-            });
+        diagnostic.primary_span = Some(token_stream.current_span());
     }
     diagnostic
 }
 
 fn with_token_span(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     span: LocalSpan,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(SourceSpan::new(token_stream.file_id, span));
+        diagnostic.primary_span = Some(SourceSpan::new(token_stream.source_id(), span));
     }
     diagnostic
 }
 
-/// Read-only current-token local span through a short canonical view.
+/// Read-only current-token local span on the canonical cursor view.
 ///
 /// WHAT: reports the `LocalSpan` of the reactive head token without advancing
 /// the stream.
-/// WHY: subscription payloads join with `file_id` at the diagnostic site; a
-/// short `DeclarationCursor` keeps that fact read-only and drops before the
-/// grammar advance. Compatibility-only streams have no canonical provenance,
-/// so the checked vector lane stays as the documented fallback; the current
-/// token is guaranteed at every subscription read, so a missing entry is an
-/// invariant failure rather than a silent span.
-fn current_token_local_span(token_stream: &FileTokens) -> LocalSpan {
-    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
-        if let Some(span) = cursor.current_span() {
-            return span.local();
-        }
-    }
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| token.span)
-        .expect("reactive subscription span requires a current token")
+/// WHY: subscription payloads join with `source_id` at the diagnostic site.
+fn current_token_local_span(token_stream: &AstCursor) -> LocalSpan {
+    token_stream.current_span().local()
 }
+

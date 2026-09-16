@@ -7,6 +7,7 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveEffects, StyleDirectiveHandlerSpec,
     StyleDirectiveRegistry, StyleDirectiveSpec, TemplateHeadCompatibility,
 };
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
@@ -53,16 +54,18 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream = template_tokens_from_source_with_style_directives("[$brand: body]",
+    let mut file_tokens = template_tokens_from_source_with_style_directives("[$brand: body]",
     &tokenization_registry,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context = new_constant_context_with_style_directives(
-        token_stream.src_path.to_owned(),
+        source_path,
         &parser_registry,
         &path_fork,
     );
-    let fallback_error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let fallback_error = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("template-head fallback should reject missing registry directives");
     let fallback_error = expect_template_diagnostic(fallback_error);
 
@@ -91,14 +94,16 @@ fn builder_registered_style_directive_parses_as_noop_scaffold() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut token_stream = template_tokens_from_source_with_directives("[$brand: body]",
+    let mut file_tokens = template_tokens_from_source_with_directives("[$brand: body]",
     &directives,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context =
-        new_constant_context(token_stream.src_path.to_owned(), &path_fork).with_style_directives(&registry);
+        new_constant_context(source_path, &path_fork).with_style_directives(&registry);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("builder-registered directives should parse in scaffold mode");
 
     assert_eq!(effective_tir_style(&template, &context).id, "");
@@ -128,14 +133,16 @@ fn builder_effects_only_handler_updates_style_without_formatter() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut token_stream = template_tokens_from_source_with_directives("[$brand: body]",
+    let mut file_tokens = template_tokens_from_source_with_directives("[$brand: body]",
     &directives,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context =
-        new_constant_context(token_stream.src_path.to_owned(), &path_fork).with_style_directives(&registry);
+        new_constant_context(source_path, &path_fork).with_style_directives(&registry);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("effects-only directive should parse");
 
     let effective_style = effective_tir_style(&template, &context);
@@ -154,14 +161,16 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut token_stream = template_tokens_from_source_with_directives("[$brand(\"tone\"): body]",
+    let mut file_tokens = template_tokens_from_source_with_directives("[$brand(\"tone\"): body]",
     &directives,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context =
-        new_constant_context(token_stream.src_path.to_owned(), &path_fork).with_style_directives(&registry);
+        new_constant_context(source_path, &path_fork).with_style_directives(&registry);
 
-    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let error = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("default no-op directives should reject parenthesized arguments");
     let error = expect_template_diagnostic(error);
 
@@ -191,14 +200,16 @@ fn builder_registered_handler_directive_accepts_declared_optional_argument_type(
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut token_stream = template_tokens_from_source_with_directives("[$brand(\"theme\"): body]",
+    let mut file_tokens = template_tokens_from_source_with_directives("[$brand(\"theme\"): body]",
     &directives,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context =
-        new_constant_context(token_stream.src_path.to_owned(), &path_fork).with_style_directives(&registry);
+        new_constant_context(source_path, &path_fork).with_style_directives(&registry);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("provided directives should parse optional arguments when configured");
 
     assert!(matches!(
@@ -224,14 +235,16 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut token_stream = template_tokens_from_source_with_directives("[$brand(\"theme\", \"extra\"): body]",
+    let mut file_tokens = template_tokens_from_source_with_directives("[$brand(\"theme\", \"extra\"): body]",
     &directives,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context =
-        new_constant_context(token_stream.src_path.to_owned(), &path_fork).with_style_directives(&registry);
+        new_constant_context(source_path, &path_fork).with_style_directives(&registry);
 
-    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let error = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("handler directives should reject multiple arguments");
     let error = expect_template_diagnostic(error);
     assert!(matches!(
@@ -258,18 +271,20 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut token_stream = template_tokens_from_source_with_directives("[$brand(value): body]",
+    let mut file_tokens = template_tokens_from_source_with_directives("[$brand(value): body]",
     &directives,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context = runtime_template_context_with_style_directives(
-        &token_stream.src_path,
+        &source_path,
         &registry,
         &mut string_table,
         &mut path_fork,
     );
 
-    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let error = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect_err("handler directives should reject runtime-only argument values");
     let error = expect_template_diagnostic(error);
     assert!(matches!(
@@ -292,14 +307,16 @@ fn builder_registered_style_directive_preserves_raw_body_whitespace() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut token_stream = template_tokens_from_source_with_directives("[$brand:\n    Hello\n    World\n]",
+    let mut file_tokens = template_tokens_from_source_with_directives("[$brand:\n    Hello\n    World\n]",
     &directives,
     &mut string_table,
     &mut span_builder, &mut path_fork);
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
     let context =
-        new_constant_context(token_stream.src_path.to_owned(), &path_fork).with_style_directives(&registry);
+        new_constant_context(source_path, &path_fork).with_style_directives(&registry);
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
         .expect("builder-registered directives should parse in scaffold mode");
     let folded = fold_template_in_context(&template, &context, &mut string_table);
 
