@@ -308,11 +308,8 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
 
     // Header-built dependency visibility is consumed directly; AST does not rebuild dependency bindings.
     pub(crate) binding_environment: HeaderBindingEnvironment,
-    /// One shared canonical owner plus explicit side maps used for bounded parser adapters.
-    pub(crate) source_token_streams:
-        FxHashMap<SourceId, Arc<crate::compiler_frontend::tokenizer::tokens::SourceTokens>>,
-    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
-    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
+    /// One canonical token owner per source, used for bounded parser adapters.
+    pub(crate) source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
 
     // Mutable environment-building state.
     pub(crate) warnings: Vec<CompilerDiagnostic>,
@@ -383,9 +380,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             path_fork,
             module_symbols: ModuleSymbols::empty(),
             binding_environment: HeaderBindingEnvironment::default(),
-            source_token_streams: FxHashMap::default(),
-            source_token_paths: FxHashMap::default(),
-            source_token_os_paths: FxHashMap::default(),
+            source_token_owners: FxHashMap::default(),
             warnings: Vec::new(),
             declaration_table: Rc::new(TopLevelDeclarationTable::empty()),
             resolved_module_constants: Rc::new(ResolvedConstantSet::default()),
@@ -421,15 +416,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let AstEnvironmentInput {
             mut module_symbols,
             binding_environment,
-            source_token_streams,
-            source_token_paths,
-            source_token_os_paths,
+            source_token_owners,
         } = input;
-        self.source_token_streams = source_token_streams;
-        self.source_token_paths = source_token_paths;
-        self.source_token_os_paths = source_token_os_paths;
-
         // Move header-owned data into the builder state.
+        self.source_token_owners = source_token_owners;
         let ordered_semantic_declarations =
             std::mem::take(&mut module_symbols.ordered_semantic_declarations);
         let compiler_owned_declarations =
@@ -817,7 +807,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .source_path_for_header(header)
             .expect("header body range has no prepared source-path identity")
     }
-
+    pub(crate) fn token_owner_parts(
+        &self,
+        source: SourceId,
+    ) -> Option<(
+        Arc<crate::compiler_frontend::tokenizer::tokens::SourceTokens>,
+        Option<std::path::PathBuf>,
+    )> {
+        self.source_token_owners
+            .get(&source)
+            .map(|owner| (Arc::clone(owner.tokens()), owner.os_path_cloned()))
+    }
     /// Resolve the declaration-site generic parameter scope for one declaration.
     ///
     /// WHAT: names every generic parameter the declaration introduces, gated by the file's

@@ -35,10 +35,8 @@ use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use crate::header_log;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::Arc;
 
 /// Dependency-sorted module headers with a finalized symbol package.
 ///
@@ -48,11 +46,7 @@ use std::sync::Arc;
 /// without re-sorting or re-packaging the top-level symbol data.
 #[derive(Debug)]
 pub(crate) struct SortedHeaders {
-    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
-    /// Logical source path per retained canonical owner.
-    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
-    /// Canonical OS filesystem path per retained canonical owner, if available.
-    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
+    pub(crate) source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     pub(crate) headers: Vec<Header>,
     pub(crate) source_build_config_contracts:
         Vec<crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract>,
@@ -512,9 +506,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
 ) -> Result<SortedHeaders, PremergeFailure> {
     let BoundModuleHeaders {
         headers,
-        source_token_streams,
-        source_token_paths,
-        source_token_os_paths,
+        source_token_owners,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
@@ -524,7 +516,6 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
         binding_environment,
         ..
     } = parsed;
-
     // Partition: StartFunction headers are appended last, not sorted.
     // WHY: start is build-system-only and has no dependents. Module-root declarations remain graph
     // participants because other modules can depend on their public constants and type surfaces;
@@ -625,9 +616,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     );
 
     Ok(SortedHeaders {
-        source_token_streams,
-        source_token_paths,
-        source_token_os_paths,
+        source_token_owners,
         headers: sorted,
         source_build_config_contracts,
         top_level_const_fragments,

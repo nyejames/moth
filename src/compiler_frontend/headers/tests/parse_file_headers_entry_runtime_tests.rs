@@ -81,9 +81,10 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
         .token_sequence
         .expect("active start function should retain a source sequence");
     let source = headers
-        .source_token_streams
+        .source_token_owners
         .get(&start_header.tokens.source())
         .expect("start sequence should retain its canonical source owner");
+    let source = source.tokens_ref();
     let view = source
         .token_sequence(sequence)
         .expect("start sequence handle should resolve");

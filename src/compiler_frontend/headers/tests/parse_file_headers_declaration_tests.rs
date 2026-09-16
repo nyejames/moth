@@ -843,17 +843,19 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
     let start_header = start_function_header(&headers);
 
     let function_owner = headers
-        .source_token_streams
+        .source_token_owners
         .get(&function_header.tokens.source())
         .expect("function header source owner");
     let start_owner = headers
-        .source_token_streams
+        .source_token_owners
         .get(&start_header.tokens.source())
         .expect("start header source owner");
     let function_table = function_owner
+        .tokens_ref()
         .path_syntax_arc()
         .expect("prepared function source should receive the frozen file table");
     let start_table = start_owner
+        .tokens_ref()
         .path_syntax_arc()
         .expect("prepared start source should receive the frozen file table");
     assert!(

@@ -216,9 +216,10 @@ fn token_slice_for_header(
     header: &Header,
 ) -> Vec<crate::compiler_frontend::tokenizer::tokens::Token> {
     let source = headers
-        .source_token_streams
+        .source_token_owners
         .get(&header.tokens.source())
         .expect("every retained header should have a token owner");
+    let source = source.tokens_ref();
     if let Some(sequence) = header.token_sequence {
         return source
             .materialize_token_sequence(sequence)

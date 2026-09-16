@@ -1097,9 +1097,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
             template_ir_store: Rc::clone(&self.context.template_ir_store),
             build_profile: self.context.build_profile,
-            source_token_streams: self.source_token_streams.clone(),
-            source_token_paths: self.source_token_paths.clone(),
-            source_token_os_paths: self.source_token_os_paths.clone(),
+            source_token_owners: self.source_token_owners.clone(),
         });
 
         let mut aliases_left = aliases_waiting_for_constants.len();
@@ -1213,9 +1211,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Parse each field inside a temporary scope so that type-resolution errors
         // can be remapped to the appropriate diagnostic for struct defaults vs choice payloads.
         let conversion_result = (|| -> Result<Vec<Declaration>, ExpressionParseError> {
-            let file_owner = self
-                .source_token_streams
-                .get(&header.tokens.source())
+            let (owner_tokens, os_path) = self
+                .token_owner_parts(header.tokens.source())
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
                         "member-bearing header has no prepared source token owner",
@@ -1225,21 +1222,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             // cursor spans the full canonical source so nested default ranges stay
             // inside its bounds for this member-shell parse only. `from_source_tokens`
             // retains the canonical owner for later bounded expression handoffs.
-            let full = file_owner.full_range().map_err(|error| {
+            let full = owner_tokens.full_range().map_err(|error| {
                 CompilerError::compiler_error(format!(
                     "member-bearing header source range could not be constructed: {error:?}"
                 ))
             })?;
-            let os_path = self
-                .source_token_os_paths
-                .get(&header.tokens.source())
-                .and_then(|path| path.clone());
-            let source_arc = self
-                .source_token_streams
-                .get(&header.tokens.source())
-                .expect("member-bearing header source owner vanished during cursor construction");
-            let source_owner =
-                AstCursor::from_source_tokens(source_arc, os_path, full).map_err(|error| {
+            let source_owner = AstCursor::from_source_tokens(&owner_tokens, os_path, full)
+                .map_err(|error| {
                     CompilerError::compiler_error(format!(
                         "member-bearing header source range is outside its source owner: {error:?}"
                     ))

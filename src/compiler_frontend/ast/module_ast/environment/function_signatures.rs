@@ -137,9 +137,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .environment_header_scope(header, string_table)
                     .with_file_visibility(Arc::clone(&visibility))
                     .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
-                let file_owner = self
-                    .source_token_streams
-                    .get(&header.tokens.source())
+                let (owner_tokens, owner_os_path) = self
+                    .token_owner_parts(header.tokens.source())
                     .ok_or_else(|| {
                         self.error_messages(
                             CompilerError::compiler_error(
@@ -152,7 +151,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 // cursor spans the full canonical source so nested default ranges stay
                 // inside its bounds for this signature parse only. `from_source_tokens`
                 // retains the canonical owner for later bounded expression handoffs.
-                let full = file_owner.full_range().map_err(|error| {
+                let full = owner_tokens.full_range().map_err(|error| {
                     self.error_messages(
                         CompilerError::compiler_error(format!(
                             "function header source range could not be constructed: {error:?}"
@@ -160,25 +159,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         string_table,
                     )
                 })?;
-                let os_path = self
-                    .source_token_os_paths
-                    .get(&header.tokens.source())
-                    .and_then(|path| path.clone());
-                let source_owner = AstCursor::from_source_tokens(
-                    self.source_token_streams
-                        .get(&header.tokens.source())
-                        .expect("function header source owner vanished during cursor construction"),
-                    os_path,
-                    full,
-                )
-                .map_err(|error| {
-                    self.error_messages(
+                let source_owner =
+                    AstCursor::from_source_tokens(&owner_tokens, owner_os_path, full).map_err(
+                        |error| {
+                            self.error_messages(
                         CompilerError::compiler_error(format!(
                             "function header source range is outside its source owner: {error:?}"
                         )),
                         string_table,
                     )
-                })?;
+                        },
+                    )?;
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
@@ -290,22 +281,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         string_table,
                     ));
                 };
-                let canonical_owner = Arc::clone(
-                    self.source_token_streams
-                        .get(&header.tokens.source())
-                        .ok_or_else(|| {
-                            self.error_messages(
-                                CompilerError::compiler_error(
-                                    "generic function header has no prepared source token owner",
-                                ),
-                                string_table,
-                            )
-                        })?,
-                );
-                let canonical_os_path = self
-                    .source_token_os_paths
-                    .get(&header.tokens.source())
-                    .and_then(|path| path.clone());
+                let (canonical_owner, canonical_os_path) = self
+                    .token_owner_parts(header.tokens.source())
+                    .ok_or_else(|| {
+                        self.error_messages(
+                            CompilerError::compiler_error(
+                                "generic function header has no prepared source token owner",
+                            ),
+                            string_table,
+                        )
+                    })?;
                 let body = GenericFunctionBody::source(
                     canonical_owner,
                     header.tokens,

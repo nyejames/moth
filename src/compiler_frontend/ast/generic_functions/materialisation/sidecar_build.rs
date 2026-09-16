@@ -487,8 +487,6 @@ where
             1,
             path_fork,
             FxHashMap::default(),
-            FxHashMap::default(),
-            FxHashMap::default(),
         )
         .with_generic_call_site_identity_handle(requester_context.frozen_identity_handle.clone())
         .emit_generated_request(request, string_table)?

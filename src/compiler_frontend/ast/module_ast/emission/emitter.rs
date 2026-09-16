@@ -210,9 +210,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     context: &'context AstPhaseContext<'services>,
     path_fork: &'services mut PathInternerFork,
     environment: &'environment mut AstModuleEnvironment,
-    source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
-    source_token_paths: FxHashMap<SourceId, PathId>,
-    source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
+    source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     const_templates_by_path: FxHashMap<PathId, FoldedConstTemplateResult>,
     compatibility_cache: TypeCompatibilityCache,
     generic_function_instantiation_requests: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
@@ -228,17 +226,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         environment: &'environment mut AstModuleEnvironment,
         header_count: usize,
         path_fork: &'services mut PathInternerFork,
-        source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
-        source_token_paths: FxHashMap<SourceId, PathId>,
-        source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
+        source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     ) -> Self {
         let warnings = environment.lookups.warnings.clone();
         Self {
             context,
             path_fork,
-            source_token_streams,
-            source_token_paths,
-            source_token_os_paths,
+            source_token_owners,
             environment,
             ast: Vec::with_capacity(header_count * settings::TOKEN_TO_NODE_RATIO),
             warnings,
@@ -332,8 +326,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     }
 
     fn source_path_for_header(&self, header: &Header) -> Result<PathId, CompilerError> {
-        if let Some(path) = self.source_token_paths.get(&header.tokens.source()) {
-            return Ok(*path);
+        if let Some(owner) = self.source_token_owners.get(&header.tokens.source()) {
+            return Ok(owner.logical_path());
         }
 
         // Plain Markdown contributes an explicit payload without a canonical token stream.
@@ -367,19 +361,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &self,
         header: &Header,
     ) -> Result<(Arc<SourceTokens>, Option<std::path::PathBuf>), CompilerError> {
-        let source = self
-            .source_token_streams
+        let owner = self
+            .source_token_owners
             .get(&header.tokens.source())
             .ok_or_else(|| {
                 CompilerError::compiler_error(
                     "header body range has no canonical prepared source stream",
                 )
             })?;
-        let os_path = self
-            .source_token_os_paths
-            .get(&header.tokens.source())
-            .and_then(|path| path.clone());
-        Ok((Arc::clone(source), os_path))
+        Ok((Arc::clone(owner.tokens()), owner.os_path_cloned()))
     }
 
     fn body_parser_stream(&self, header: &Header) -> Result<FileTokens, CompilerError> {

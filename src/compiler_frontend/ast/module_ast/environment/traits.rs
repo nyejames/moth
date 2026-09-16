@@ -558,22 +558,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .environment_header_scope(header, string_table)
             .with_file_visibility(Arc::clone(visibility));
 
-        let file_owner = self
-            .source_token_streams
-            .get(&header.tokens.source())
-            .ok_or_else(|| {
-                self.error_messages(
-                    CompilerError::compiler_error(
-                        "trait requirement header has no prepared source token owner",
-                    ),
-                    string_table,
-                )
-            })?;
+        let (owner_tokens, os_path) =
+            self.token_owner_parts(header.tokens.source())
+                .ok_or_else(|| {
+                    self.error_messages(
+                        CompilerError::compiler_error(
+                            "trait requirement header has no prepared source token owner",
+                        ),
+                        string_table,
+                    )
+                })?;
         // Live parser state stays on the canonical source owner. The transient
         // cursor spans the full canonical source so nested default ranges stay
         // inside its bounds for this signature parse only. `from_source_tokens`
         // retains the canonical owner for later bounded expression handoffs.
-        let full = file_owner.full_range().map_err(|error| {
+        let full = owner_tokens.full_range().map_err(|error| {
             self.error_messages(
                 CompilerError::compiler_error(format!(
                     "trait requirement source range could not be constructed: {error:?}"
@@ -581,25 +580,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )
         })?;
-        let os_path = self
-            .source_token_os_paths
-            .get(&header.tokens.source())
-            .and_then(|path| path.clone());
-        let source_owner = AstCursor::from_source_tokens(
-            self.source_token_streams
-                .get(&header.tokens.source())
-                .expect("trait requirement source owner vanished during cursor construction"),
-            os_path,
-            full,
-        )
-        .map_err(|error| {
-            self.error_messages(
-                CompilerError::compiler_error(format!(
-                    "trait requirement source range is outside its source owner: {error:?}"
-                )),
-                string_table,
-            )
-        })?;
+        let source_owner =
+            AstCursor::from_source_tokens(&owner_tokens, os_path, full).map_err(|error| {
+                self.error_messages(
+                    CompilerError::compiler_error(format!(
+                        "trait requirement source range is outside its source owner: {error:?}"
+                    )),
+                    string_table,
+                )
+            })?;
         let mut compatibility_cache = TypeCompatibilityCache::new();
         let mut type_interner =
             AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);

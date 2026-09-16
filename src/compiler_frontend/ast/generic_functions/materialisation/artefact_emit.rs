@@ -346,9 +346,7 @@ impl GenericTemplateArtefact {
                 AstEnvironmentInput {
                     module_symbols,
                     binding_environment,
-                    source_token_streams: FxHashMap::default(),
-                    source_token_paths: FxHashMap::default(),
-                    source_token_os_paths: FxHashMap::default(),
+                    source_token_owners: FxHashMap::default(),
                 },
                 string_table_ref,
             )?;

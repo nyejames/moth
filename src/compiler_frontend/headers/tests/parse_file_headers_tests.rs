@@ -625,9 +625,10 @@ fn non_start_header_names(headers: &BoundModuleHeaders, string_table: &StringTab
 /// source owner; production headers retain the checked sequence ID instead of a token vector.
 fn header_body_tokens(headers: &BoundModuleHeaders, header: &Header) -> Vec<Token> {
     let source = headers
-        .source_token_streams
+        .source_token_owners
         .get(&header.tokens.source())
         .expect("header body range has no prepared source token owner");
+    let source = source.tokens_ref();
     if let Some(sequence) = header.token_sequence {
         return source
             .materialize_token_sequence(sequence)
@@ -640,9 +641,10 @@ fn header_body_tokens(headers: &BoundModuleHeaders, header: &Header) -> Vec<Toke
 fn default_tokens(headers: &BoundModuleHeaders, range: Option<TokenRange>) -> Vec<Token> {
     let range = range.expect("expected a retained default-expression range");
     headers
-        .source_token_streams
+        .source_token_owners
         .get(&range.source())
         .expect("default range has no prepared source owner")
+        .tokens_ref()
         .materialize_range(range)
         .expect("default range should materialize")
 }

@@ -240,9 +240,7 @@ pub(crate) fn parse_single_file_ast_build_result(
     let build_result = Ast::new(
         AstBuildInput {
             headers: sorted.headers,
-            source_token_streams: sorted.source_token_streams,
-            source_token_paths: sorted.source_token_paths,
-            source_token_os_paths: sorted.source_token_os_paths,
+            source_token_owners: sorted.source_token_owners,
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,

@@ -905,19 +905,17 @@ fn synthetic_prepared_identity_snapshot(
                 assert_eq!(header.tokens.source(), file_id);
                 let syntax = &prepared.semantic.prepared_header_syntax;
                 let source_owner = syntax
-                    .source_token_streams
+                    .source_token_owners
                     .get(&header.tokens.source())
                     .expect("header should have its source token owner");
-                assert_eq!(source_owner.source(), file_id);
+                assert_eq!(source_owner.tokens_ref().source(), file_id);
                 assert_eq!(
-                    syntax
-                        .source_token_os_paths
-                        .get(&header.tokens.source())
-                        .and_then(|path| path.as_deref()),
+                    source_owner.os_path(),
                     identity.canonical_os_path.as_deref()
                 );
                 assert_eq!(
                     source_owner
+                        .tokens_ref()
                         .path_syntax_arc()
                         .expect("header source should retain its path table")
                         .owner_source(),

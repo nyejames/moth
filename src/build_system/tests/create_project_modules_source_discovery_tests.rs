@@ -182,17 +182,18 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
         .iter()
         .find(|header| {
             prepared_header_syntax
-                .source_token_os_paths
+                .source_token_owners
                 .get(&header.tokens.source())
-                .and_then(|path| path.as_deref())
+                .and_then(|owner| owner.os_path())
                 == Some(reachable_path.as_path())
         })
         .expect("reachable source should retain one header stream");
     let reachable_owner = prepared_header_syntax
-        .source_token_streams
+        .source_token_owners
         .get(&reachable_header.tokens.source())
         .expect("reachable source should retain its token owner");
     let reachable_table = reachable_owner
+        .tokens_ref()
         .path_syntax_arc()
         .expect("reachable source should retain its path table");
     assert!(

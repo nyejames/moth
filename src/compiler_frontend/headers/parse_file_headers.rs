@@ -286,9 +286,8 @@ pub fn prepare_header_syntax(
         collect_source_build_config_contracts(prepared_files, string_table, capture, path_fork)?;
     let module_symbols = build_module_symbols(prepared_files, string_table, capture, path_fork)?;
     let mut headers: Vec<Header> = Vec::new();
-    let mut source_token_streams = FxHashMap::default();
-    let mut source_token_paths = FxHashMap::default();
-    let mut source_token_os_paths = FxHashMap::default();
+    let mut source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners =
+        FxHashMap::default();
     let mut top_level_const_fragments = Vec::new();
     let mut runtime_fragment_count = 0usize;
     let mut has_non_trivial_root_body = false;
@@ -297,18 +296,18 @@ pub fn prepare_header_syntax(
     for output in prepared_files {
         token_stats.add(&output.token_stats);
         if let Some(stream) = output.source_token_stream.take() {
-            if source_token_streams
-                .insert(output.file_id, stream)
-                .is_some()
-            {
+            let owner = crate::compiler_frontend::headers::SourceTokenOwner::new(
+                stream,
+                output.source_file,
+                output.canonical_os_path.clone(),
+            );
+            if source_token_owners.insert(output.file_id, owner).is_some() {
                 return Err(HeaderPreparationFailure::Infrastructure(
                     CompilerError::compiler_error(
                         "multiple canonical source token streams were prepared for one SourceId",
                     ),
                 ));
             }
-            source_token_paths.insert(output.file_id, output.source_file);
-            source_token_os_paths.insert(output.file_id, output.canonical_os_path.clone());
         }
         headers.extend(mem::take(&mut output.headers));
         top_level_const_fragments.extend(mem::take(&mut output.top_level_const_fragments));
@@ -327,9 +326,7 @@ pub fn prepare_header_syntax(
 
     Ok(PreparedHeaderSyntax {
         headers,
-        source_token_streams,
-        source_token_paths,
-        source_token_os_paths,
+        source_token_owners,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count: runtime_fragment_count,
@@ -682,9 +679,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 ) -> Result<BoundModuleHeaders, HeaderPreparationFailure> {
     let PreparedHeaderSyntax {
         mut headers,
-        source_token_streams,
-        source_token_paths,
-        source_token_os_paths,
+        source_token_owners,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
@@ -761,9 +756,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 
     Ok(BoundModuleHeaders {
         headers,
-        source_token_streams,
-        source_token_paths,
-        source_token_os_paths,
+        source_token_owners,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,

@@ -44,7 +44,62 @@ use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
+
+/// One canonical source-token owner plus its path identities.
+///
+/// WHAT: bundles the sole canonical `SourceTokens` allocation for a `SourceId` with the
+/// logical `PathId` and the optional canonical OS `PathBuf` for that source.
+/// WHY: `SourceTokens` carries no path identity and must not store an OS path, so the
+/// header stage retains those identities alongside the owner in one table instead of three
+/// parallel maps keyed by `SourceId`.
+#[derive(Clone, Debug)]
+pub(crate) struct SourceTokenOwner {
+    tokens: Arc<SourceTokens>,
+    logical_path: PathId,
+    canonical_os_path: Option<PathBuf>,
+}
+
+impl SourceTokenOwner {
+    pub(crate) fn new(
+        tokens: Arc<SourceTokens>,
+        logical_path: PathId,
+        canonical_os_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            tokens,
+            logical_path,
+            canonical_os_path,
+        }
+    }
+
+    pub(crate) fn tokens(&self) -> &Arc<SourceTokens> {
+        &self.tokens
+    }
+
+    pub(crate) fn tokens_ref(&self) -> &SourceTokens {
+        &self.tokens
+    }
+
+    pub(crate) fn logical_path(&self) -> PathId {
+        self.logical_path
+    }
+
+    #[cfg(test)]
+    pub(crate) fn os_path(&self) -> Option<&Path> {
+        self.canonical_os_path.as_deref()
+    }
+
+    pub(crate) fn os_path_cloned(&self) -> Option<PathBuf> {
+        self.canonical_os_path.clone()
+    }
+}
+
+/// One canonical token owner per tokenized `SourceId`.
+pub(crate) type SourceTokenOwners = FxHashMap<SourceId, SourceTokenOwner>;
 
 /// Provider-independent retained header syntax produced before provider interfaces exist.
 ///
@@ -61,20 +116,12 @@ pub struct PreparedHeaderSyntax {
     pub headers: Vec<Header>,
     /// One canonical source owner per tokenized `SourceId`.
     ///
-    /// Each owner is the sole canonical `SourceTokens` allocation, Arc-cloned from the
-    /// transient lexer `FileTokens` at publication and never rebuilt from slices. The map
-    /// remains available only so bounded parser adapters can materialize retained ranges
+    /// Each owner bundles the sole canonical `SourceTokens` allocation (Arc-cloned from
+    /// the transient lexer `FileTokens` at publication and never rebuilt from slices)
+    /// with its logical path and optional canonical OS path. The table remains
+    /// available only so bounded parser adapters can materialize retained ranges
     /// or sequences.
-    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
-    /// Logical source path per retained canonical owner.
-    ///
-    /// `SourceTokens` carries no path identity, so the header stage retains the explicit
-    /// side map consumed by path queries instead of a `FileTokens::src_path` shell.
-    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
-    /// Canonical OS filesystem path per retained canonical owner, if available.
-    ///
-    /// `SourceTokens` must not store an OS path; IO/path-resolution identity travels here.
-    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
+    pub(crate) source_token_owners: SourceTokenOwners,
     /// Provider-independent source `#Config` declarations, normalized from top-level constant
     /// shells before any provider binding or AST expression resolution.
     ///
@@ -126,11 +173,7 @@ pub struct PreparedHeaderSyntax {
 pub struct BoundModuleHeaders {
     pub headers: Vec<Header>,
     /// The same one-owner canonical sources carried through provider binding for AST body adapters.
-    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
-    /// Logical source path per retained canonical owner (see `PreparedHeaderSyntax`).
-    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
-    /// Canonical OS filesystem path per retained canonical owner (see `PreparedHeaderSyntax`).
-    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
+    pub(crate) source_token_owners: SourceTokenOwners,
     /// Provider-independent source `#Config` declarations retained through binding for the
     /// module-local static-value projection in AST construction.
     pub source_build_config_contracts: Vec<SourceBuildConfigContract>,
@@ -527,7 +570,7 @@ pub struct Header {
     pub synthetic_content_payload: Option<SyntheticContentPayload>,
 
     // Contiguous retained body syntax is a source-qualified range. The source token owner lives
-    // once in `PreparedHeaderSyntax::source_token_streams`.
+    // once in `PreparedHeaderSyntax::source_token_owners`.
     pub tokens: TokenRange,
     /// Complete declaration path (the former `FileTokens::src_path` field).
     pub declaration_path: PathId,

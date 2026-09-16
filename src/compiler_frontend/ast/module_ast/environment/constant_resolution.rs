@@ -57,7 +57,7 @@ use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, SourceTokens};
+use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -91,12 +91,8 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub template_ir_store: Rc<RefCell<TemplateIrStore>>,
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
     pub file_value_resolution: Option<Rc<FileValueResolutionServices>>,
-    /// Canonical source owners plus explicit side maps used for bounded adapters.
-    pub source_token_streams:
-        FxHashMap<crate::compiler_frontend::source::SourceId, Arc<SourceTokens>>,
-    pub source_token_paths: FxHashMap<crate::compiler_frontend::source::SourceId, PathId>,
-    pub source_token_os_paths:
-        FxHashMap<crate::compiler_frontend::source::SourceId, Option<std::path::PathBuf>>,
+    /// One canonical token owner per source, used for bounded adapters.
+    pub source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     pub build_profile: FrontendBuildProfile,
     pub template_const_loop_iteration_limit: usize,
 }
@@ -203,19 +199,11 @@ impl ConstantResolutionSession {
             AstTypeInterner::new(type_environment, &mut self.compatibility_cache);
         let file_owner = self
             .module_view
-            .source_token_streams
-            .get(&header.tokens.source())
-            .map(|owner| owner.as_ref());
-        let file_os_path = self
-            .module_view
-            .source_token_os_paths
-            .get(&header.tokens.source())
-            .and_then(|path| path.clone());
-        let file_source_path = self
-            .module_view
-            .source_token_paths
-            .get(&header.tokens.source())
-            .copied()
+            .source_token_owners
+            .get(&header.tokens.source());
+        let file_tokens = file_owner.map(|owner| owner.tokens_ref());
+        let file_source_path = file_owner
+            .map(|owner| owner.logical_path())
             .unwrap_or(source_file_scope);
         let payload = header.synthetic_content_payload;
         if matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) && file_owner.is_some()
@@ -226,7 +214,7 @@ impl ConstantResolutionSession {
             .into());
         }
 
-        let fallback_path_syntax = if file_owner.is_none() {
+        let fallback_path_syntax = if file_tokens.is_none() {
             if !matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) {
                 return Err(CompilerError::compiler_error(
                     "constant header has no canonical source token owner for its retained syntax",
@@ -237,7 +225,7 @@ impl ConstantResolutionSession {
         } else {
             None
         };
-        let owned_path_syntax = if let Some(owner) = file_owner {
+        let owned_path_syntax = if let Some(owner) = file_tokens {
             Some(owner.path_syntax_arc()?)
         } else {
             None
@@ -253,10 +241,10 @@ impl ConstantResolutionSession {
         let initializer_override = if let Some(payload) = payload {
             let initializer_tokens = materialize_synthetic_content_initializer(
                 payload,
-                file_owner,
+                file_tokens,
                 header.tokens,
                 file_source_path,
-                file_os_path,
+                file_owner.and_then(|owner| owner.os_path_cloned()),
             )
             .map_err(ExpressionParseError::from)?;
             Some(
@@ -279,29 +267,20 @@ impl ConstantResolutionSession {
         // alongside its explicit `FileTokens`.
         let body_cursor = file_owner
             .map(|owner| -> Result<AstCursor<'_>, ExpressionParseError> {
-                let full = owner.full_range().map_err(|error| {
+                let tokens = owner.tokens_ref();
+                let full = tokens.full_range().map_err(|error| {
                     ExpressionParseError::from(CompilerError::compiler_error(format!(
                         "constant header source range could not be constructed: {error:?}"
                     )))
                 })?;
-                let os_path = self
-                    .module_view
-                    .source_token_os_paths
-                    .get(&header.tokens.source())
-                    .and_then(|path| path.clone());
-                AstCursor::from_source_tokens_for_handoff(
-                    self.module_view
-                        .source_token_streams
-                        .get(&header.tokens.source())
-                        .expect("constant header source owner vanished during cursor construction"),
-                    os_path,
-                    full,
+                let os_path = owner.os_path_cloned();
+                AstCursor::from_source_tokens_for_handoff(owner.tokens(), os_path, full).map_err(
+                    |error| {
+                        ExpressionParseError::from(CompilerError::compiler_error(format!(
+                            "constant header source range is outside its source owner: {error:?}"
+                        )))
+                    },
                 )
-                .map_err(|error| {
-                    ExpressionParseError::from(CompilerError::compiler_error(format!(
-                        "constant header source range is outside its source owner: {error:?}"
-                    )))
-                })
             })
             .transpose()?;
         let source_owner = body_cursor;

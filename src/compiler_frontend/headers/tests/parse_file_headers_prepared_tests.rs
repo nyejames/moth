@@ -3,9 +3,10 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 fn prepared_header_body_tokens(prepared: &PreparedHeaderSyntax, header: &Header) -> Vec<Token> {
     let source = prepared
-        .source_token_streams
+        .source_token_owners
         .get(&header.tokens.source())
         .expect("header body range has no prepared source token owner");
+    let source = source.tokens_ref();
     if let Some(sequence) = header.token_sequence {
         return source
             .materialize_token_sequence(sequence)
