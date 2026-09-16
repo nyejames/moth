@@ -265,12 +265,7 @@ impl<'a> AstCursor<'a> {
         }
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => {
-                let token = if cursor.is_segmented() {
-                    cursor.parser_token_at(index)?
-                } else {
-                    let index = TokenIndex::try_from_index(index)?;
-                    cursor.source_tokens().token(index).ok()?
-                };
+                let token = cursor.parser_token_at(index)?;
                 token
                     .to_token_kind()
                     .ok()
@@ -425,17 +420,41 @@ impl<'a> AstCursor<'a> {
             }),
         }
     }
-    /// Create a nested canonical cursor while preserving this cursor's provenance metadata.
+    /// Create a nested canonical cursor while preserving this cursor's provenance metadata and
+    /// active parser limit.
     ///
-    /// The nested cursor keeps the raw range view used by range consumers, but owner-retaining
-    /// metadata remains available for bounded parser handoffs from the nested parser.
+    /// The nested range must fit inside both the current canonical range and any active parser
+    /// limit. A child built from a bounded parent therefore cannot widen ordinary parser reads.
     pub(crate) fn nested_cursor(&self, range: TokenRange) -> Result<Self, TokenRangeError> {
+        if let Some(limit) = self.limit {
+            if let AstCursorBacking::Canonical(cursor) = &self.backing {
+                if cursor
+                    .parser_position_at_range_end(range)
+                    .is_none_or(|range_end| range_end > limit)
+                {
+                    return Err(TokenRangeError::OutOfBounds {
+                        start: range.start().raw(),
+                        end: range.end().raw(),
+                        len: limit,
+                    });
+                }
+            }
+        }
         let nested = self.nested(range)?;
-        Ok(Self::new_with_owner(
+        let nested_limit = match (&self.backing, self.limit) {
+            (AstCursorBacking::Canonical(cursor), Some(_)) if cursor.is_segmented() => {
+                Some(range.end().index())
+            }
+            (_, limit) => limit,
+        };
+        let mut cursor = Self::new_with_owner(
             nested,
             self.canonical_owner.clone(),
             self.canonical_os_path.clone(),
-        ))
+        );
+        cursor.limit = nested_limit;
+        cursor.refresh_facts();
+        Ok(cursor)
     }
 
     pub(crate) fn current_span(&self) -> SourceSpan {

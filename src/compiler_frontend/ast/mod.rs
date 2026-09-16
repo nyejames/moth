@@ -540,3 +540,7 @@ mod type_alias_resolution_tests;
 #[cfg(test)]
 #[path = "tests/file_value_resolution_tests.rs"]
 mod file_value_resolution_tests;
+
+#[cfg(test)]
+#[path = "tests/cursor_tests.rs"]
+mod cursor_tests;

@@ -47,6 +47,43 @@ fn cursor_observes_half_open_boundaries_and_stable_eof() {
     assert_eq!(cursor.position().raw(), 2);
 }
 
+#[test]
+fn contiguous_parser_reads_respect_a_nonzero_active_range() {
+    let tokens = mutable_file_tokens();
+    let source = SourceId::COMPILATION_ROOT;
+    let range = token_range(source, 1, 3);
+    let owner = tokens
+        .source_tokens()
+        .expect("file fixture should own canonical source tokens");
+    let cursor = owner.cursor(range).expect("bounded range should construct");
+
+    assert_eq!(cursor.parser_position(), 1);
+    assert_eq!(cursor.parser_length(), 3);
+    assert!(
+        cursor.parser_token_at(0).is_none(),
+        "parser reads must not escape below the active range"
+    );
+    assert_eq!(cursor.parser_token_at(1).unwrap().index().raw(), 1);
+    assert_eq!(cursor.parser_token_at(2).unwrap().index().raw(), 2);
+    assert!(
+        cursor.parser_token_at(3).is_none(),
+        "the half-open active range excludes its end"
+    );
+    assert!(
+        cursor.parser_token_at(4).is_none(),
+        "parser reads must not escape beyond the active range"
+    );
+    assert_eq!(cursor.parser_peek_next().unwrap().index().raw(), 2);
+    assert!(cursor.parser_previous().is_none());
+
+    let mut at_end = cursor;
+    at_end
+        .set_position(TokenIndex::try_from_raw(2).unwrap())
+        .expect("position inside range should be accepted");
+    assert!(at_end.parser_peek_next().is_none());
+    assert_eq!(at_end.parser_previous().unwrap().index().raw(), 1);
+}
+
 fn mutable_file_tokens() -> FileTokens {
     let source = SourceId::COMPILATION_ROOT;
     FileTokens::new(
@@ -208,6 +245,7 @@ fn segmented_cursor_marks_only_the_first_token_after_a_source_gap() {
             Token::new(TokenKind::Eof, LocalSpan::source_start()),
         ],
     );
+
     let segments = [token_range(source, 0, 2), token_range(source, 3, 5)];
     let sequence = file_tokens
         .try_register_token_sequence(&segments)
@@ -242,6 +280,88 @@ fn segmented_cursor_marks_only_the_first_token_after_a_source_gap() {
         !cursor.is_at_segment_start(),
         "later tokens in a gapped range are ordinary adjacent tokens"
     );
+}
+#[test]
+fn segmented_cursor_many_gaps_matches_flattened_reference() {
+    let source = SourceId::COMPILATION_ROOT;
+    let token_count = 129usize;
+    let mut file_tokens = FileTokens::new(
+        PathId::ROOT,
+        source,
+        (0..token_count)
+            .map(|index| {
+                let kind = if index + 1 == token_count {
+                    TokenKind::Eof
+                } else {
+                    TokenKind::BoolLiteral(index % 2 == 0)
+                };
+                Token::new(kind, LocalSpan::source_start())
+            })
+            .collect(),
+    );
+    let mut segments = (0..64)
+        .map(|segment| {
+            let start = (segment * 2) as u32;
+            token_range(source, start, start + 1)
+        })
+        .collect::<Vec<_>>();
+    segments.push(token_range(source, 128, 129));
+    let sequence = file_tokens
+        .try_register_token_sequence(&segments)
+        .expect("many ordered gapped ranges should register");
+    let owner = file_tokens
+        .source_tokens()
+        .expect("file fixture should own canonical source tokens");
+    let view = owner
+        .token_sequence(sequence)
+        .expect("registered sequence should resolve");
+    let expected = view
+        .ranges()
+        .flat_map(|range| range.start().index()..range.end().index())
+        .collect::<Vec<_>>();
+    assert_eq!(view.len(), expected.len());
+
+    let mut cursor = view.cursor().expect("segmented cursor should construct");
+    for (position, expected_index) in expected.iter().copied().enumerate() {
+        assert_eq!(cursor.parser_position(), position);
+        assert_eq!(cursor.parser_length(), expected.len());
+        assert_eq!(cursor.current().unwrap().index().index(), expected_index);
+        assert_eq!(
+            cursor.parser_peek_next().map(|token| token.index().index()),
+            expected.get(position + 1).copied()
+        );
+        assert_eq!(
+            cursor.parser_previous().map(|token| token.index().index()),
+            position
+                .checked_sub(1)
+                .and_then(|previous| expected.get(previous).copied())
+        );
+        let current = cursor.advance().expect("flattened reference has a token");
+        assert_eq!(current.index().index(), expected_index);
+        if current.is_eof() {
+            break;
+        }
+    }
+
+    let mut seek = view.cursor().expect("segmented cursor should construct");
+    for position in [0, 1, expected.len() / 2, expected.len()] {
+        seek.set_parser_position(position)
+            .expect("dense positions should be seekable");
+        assert_eq!(seek.parser_position(), position);
+        assert_eq!(
+            seek.current().map(|token| token.index().index()),
+            expected.get(position).copied()
+        );
+    }
+    for position in [expected.len(), expected.len() / 2, 1, 0] {
+        seek.set_parser_position(position)
+            .expect("dense positions should be seekable backwards");
+        assert_eq!(seek.parser_position(), position);
+        assert_eq!(
+            seek.current().map(|token| token.index().index()),
+            expected.get(position).copied()
+        );
+    }
 }
 
 #[test]

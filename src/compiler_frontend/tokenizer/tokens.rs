@@ -1178,6 +1178,16 @@ pub struct TokenCursor<'a> {
     bounds: TokenCursorBounds<'a>,
     segment_index: usize,
     next: TokenIndex,
+    /// Cached dense parser position and total length for segmented cursors.
+    ///
+    /// Contiguous cursors leave these fields unused so their hot advance path keeps only the
+    /// canonical source position and active range.
+    logical_position: usize,
+    logical_length: usize,
+    /// Cached adjacent non-empty segments for segmented traversal.
+    segment_start_position: usize,
+    previous_segment_index: Option<usize>,
+    next_segment_index: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1201,22 +1211,47 @@ impl<'a> TokenCursor<'a> {
 
     /// Return the parser-facing position while retaining raw source positions in `position`.
     ///
-    /// Contiguous cursors preserve their existing source-index semantics. Segmented cursors
-    /// expose a dense compatibility position that skips omitted source gaps.
+    /// Contiguous cursors use absolute source indexes inside their active range. Segmented
+    /// cursors expose a dense compatibility position that skips omitted source gaps.
     pub(crate) fn parser_position(self) -> usize {
         match self.bounds {
             TokenCursorBounds::Contiguous(_) => self.next.index(),
-            TokenCursorBounds::Segmented(_) => self
-                .compatibility_position()
-                .expect("validated segmented cursor has a logical position"),
+            TokenCursorBounds::Segmented(_) => self.logical_position,
+        }
+    }
+    /// Map the end of a checked nested range into this cursor's parser position space.
+    ///
+    /// Contiguous ranges use absolute source indexes. Segmented ranges use dense positions, so
+    /// the raw source offset is translated relative to the current segment without scanning
+    /// earlier segments.
+    pub(crate) fn parser_position_at_range_end(self, range: TokenRange) -> Option<usize> {
+        match self.bounds {
+            TokenCursorBounds::Contiguous(_) => Some(range.end().index()),
+            TokenCursorBounds::Segmented(_) => {
+                let current = self.current_range()?;
+                if range.source() != current.source()
+                    || range.start() < current.start()
+                    || range.end() > current.end()
+                {
+                    return None;
+                }
+                let current_offset = self.next.index().checked_sub(current.start().index())?;
+                let range_offset = range.end().index().checked_sub(current.start().index())?;
+                self.logical_position
+                    .checked_sub(current_offset)?
+                    .checked_add(range_offset)
+            }
         }
     }
 
     /// Return the parser-facing length while retaining raw source ranges in `range`.
+    ///
+    /// Contiguous cursors report their active range end. Segmented cursors report the cached
+    /// total logical length.
     pub(crate) fn parser_length(self) -> usize {
         match self.bounds {
             TokenCursorBounds::Contiguous(range) => range.end().index(),
-            TokenCursorBounds::Segmented(view) => view.len(),
+            TokenCursorBounds::Segmented(_) => self.logical_length,
         }
     }
 
@@ -1243,6 +1278,11 @@ impl<'a> TokenCursor<'a> {
             bounds: TokenCursorBounds::Contiguous(range),
             segment_index: 0,
             next: range.start,
+            logical_position: 0,
+            logical_length: 0,
+            segment_start_position: 0,
+            previous_segment_index: None,
+            next_segment_index: None,
         })
     }
 
@@ -1277,6 +1317,11 @@ impl<'a> TokenCursor<'a> {
             bounds: TokenCursorBounds::Contiguous(range),
             segment_index: 0,
             next: position,
+            logical_position: 0,
+            logical_length: 0,
+            segment_start_position: 0,
+            previous_segment_index: None,
+            next_segment_index: None,
         })
     }
 
@@ -1287,13 +1332,28 @@ impl<'a> TokenCursor<'a> {
     fn from_sequence_position(
         view: TokenSequenceView<'a>,
         compatibility_position: usize,
+        logical_length: usize,
     ) -> Result<Self, TokenSequenceError> {
         let ranges = view.tokens.sequence_store.ranges(view.id)?;
-        let mut remaining = compatibility_position;
+        if compatibility_position > logical_length {
+            return Err(TokenSequenceError::OutOfRange {
+                raw: u32::try_from(compatibility_position).unwrap_or(u32::MAX),
+                len: logical_length,
+            });
+        }
+
+        let mut logical_start = 0usize;
+        let mut previous_segment_index = None;
         for (segment_index, entry) in ranges.iter().enumerate() {
             let segment_len = entry.len() as usize;
-            if remaining < segment_len {
-                let offset = u32::try_from(remaining).map_err(|_| TokenSequenceError::Capacity)?;
+            let segment_end = logical_start
+                .checked_add(segment_len)
+                .ok_or(TokenSequenceError::Capacity)?;
+            if compatibility_position < segment_end {
+                let offset = compatibility_position
+                    .checked_sub(logical_start)
+                    .ok_or(TokenSequenceError::Capacity)?;
+                let offset = u32::try_from(offset).map_err(|_| TokenSequenceError::Capacity)?;
                 let next = TokenIndex(
                     entry
                         .start()
@@ -1306,16 +1366,20 @@ impl<'a> TokenCursor<'a> {
                     bounds: TokenCursorBounds::Segmented(view),
                     segment_index,
                     next,
+                    logical_position: compatibility_position,
+                    logical_length,
+                    segment_start_position: logical_start,
+                    previous_segment_index,
+                    next_segment_index: Self::next_non_empty_segment(ranges, segment_index + 1),
                 });
             }
-            remaining = remaining.saturating_sub(segment_len);
+            logical_start = segment_end;
+            if entry.start() != entry.end() {
+                previous_segment_index = Some(segment_index);
+            }
         }
-        if remaining != 0 {
-            return Err(TokenSequenceError::OutOfRange {
-                raw: u32::try_from(compatibility_position).unwrap_or(u32::MAX),
-                len: compatibility_position.saturating_sub(remaining),
-            });
-        }
+
+        debug_assert_eq!(logical_start, logical_length);
         let next = ranges
             .last()
             .map(|entry| entry.end())
@@ -1325,22 +1389,17 @@ impl<'a> TokenCursor<'a> {
             bounds: TokenCursorBounds::Segmented(view),
             segment_index: ranges.len(),
             next,
+            logical_position: logical_length,
+            logical_length,
+            segment_start_position: logical_length,
+            previous_segment_index,
+            next_segment_index: None,
         })
     }
 
     pub fn from_sequence(view: TokenSequenceView<'a>) -> Result<Self, TokenSequenceError> {
-        let next = view
-            .range_at(0)
-            .map(|range| range.start())
-            .unwrap_or(TokenIndex(0));
-        let mut cursor = Self {
-            tokens: view.tokens,
-            bounds: TokenCursorBounds::Segmented(view),
-            segment_index: 0,
-            next,
-        };
-        cursor.skip_empty_segments();
-        Ok(cursor)
+        let logical_length = view.len();
+        Self::from_sequence_position(view, 0, logical_length)
     }
 
     pub fn range(self) -> TokenRange {
@@ -1363,67 +1422,101 @@ impl<'a> TokenCursor<'a> {
     /// metadata to subtract its start. Segmented positions count sequence entries and intentionally
     /// skip source gaps.
     fn compatibility_position(self) -> Result<usize, TokenSequenceError> {
-        let TokenCursorBounds::Segmented(view) = self.bounds else {
-            return Ok(self.next.index());
-        };
-        let mut position = 0usize;
-        for index in 0..self.segment_index {
-            let range = view.range_at(index)?;
-            position = position
-                .checked_add(range.len() as usize)
-                .ok_or(TokenSequenceError::Capacity)?;
+        match self.bounds {
+            TokenCursorBounds::Contiguous(_) => Ok(self.next.index()),
+            TokenCursorBounds::Segmented(_) => Ok(self.logical_position),
         }
-        if let Ok(range) = view.range_at(self.segment_index) {
-            if self.next < range.start() || self.next > range.end() {
-                return Err(TokenSequenceError::OutOfRange {
-                    raw: self.next.raw(),
-                    len: range.end().index(),
-                });
-            }
-            position = position
-                .checked_add((self.next.raw() - range.start().raw()) as usize)
-                .ok_or(TokenSequenceError::Capacity)?;
-        }
-        Ok(position)
     }
-    /// Read a token in the dense parser-facing view.
+    fn next_non_empty_segment(ranges: &[TokenSequenceRange], start: usize) -> Option<usize> {
+        ranges
+            .iter()
+            .enumerate()
+            .skip(start)
+            .find_map(|(index, range)| (range.start() != range.end()).then_some(index))
+    }
+    fn previous_non_empty_segment(ranges: &[TokenSequenceRange], before: usize) -> Option<usize> {
+        let mut index = before;
+        while index > 0 {
+            index -= 1;
+            if ranges
+                .get(index)
+                .is_some_and(|range| range.start() != range.end())
+            {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    /// Read a token in the bounded parser-facing view.
     ///
-    /// Segmented cursors resolve the argument through sequence order, while contiguous cursors
-    /// retain their source-index view for callers that still use canonical positions.
+    /// Contiguous reads accept absolute source indexes inside the active range. Segmented
+    /// reads accept dense sequence positions that skip omitted source gaps.
     pub(crate) fn parser_token_at(self, index: usize) -> Option<TokenRef<'a>> {
         match self.bounds {
-            TokenCursorBounds::Contiguous(_) => {
+            TokenCursorBounds::Contiguous(range) => {
+                if index < range.start().index() || index >= range.end().index() {
+                    return None;
+                }
                 let index = TokenIndex::try_from_index(index)?;
                 self.tokens.token(index).ok()
             }
             TokenCursorBounds::Segmented(view) => {
-                Self::from_sequence_position(view, index).ok()?.current()
+                if index == self.logical_position {
+                    return self.current();
+                }
+                if index == self.logical_position.checked_add(1)? {
+                    return self.parser_peek_next();
+                }
+                if index.checked_add(1) == Some(self.logical_position) {
+                    return self.parser_previous();
+                }
+                Self::from_sequence_position(view, index, self.logical_length)
+                    .ok()?
+                    .current()
             }
         }
     }
 
     /// Peek one token ahead in the parser-facing view.
     pub(crate) fn parser_peek_next(self) -> Option<TokenRef<'a>> {
-        if self.is_segmented() {
-            let position = self.compatibility_position().ok()?;
-            return self.parser_token_at(position.checked_add(1)?);
+        let TokenCursorBounds::Segmented(view) = self.bounds else {
+            return self.peek_next();
+        };
+        let range = self.current_range()?;
+        if let Some(next) = self.next.raw().checked_add(1)
+            && next < range.end().raw()
+        {
+            return self.tokens.token(TokenIndex(next)).ok();
         }
-        self.peek_next()
+        let segment_index = self.next_segment_index?;
+        let next_range = view.range_at(segment_index).ok()?;
+        self.tokens.token(next_range.start()).ok()
     }
 
     /// Return the previous token in the parser-facing view.
     pub(crate) fn parser_previous(self) -> Option<TokenRef<'a>> {
-        if self.is_segmented() {
-            let position = self.compatibility_position().ok()?;
-            return self.parser_token_at(position.checked_sub(1)?);
-        }
-        let previous = TokenIndex::try_from_raw(self.next.raw().checked_sub(1)?)?;
-        if previous < self.range().start() {
+        let TokenCursorBounds::Segmented(view) = self.bounds else {
+            let previous = TokenIndex::try_from_raw(self.next.raw().checked_sub(1)?)?;
+            if previous < self.range().start() {
+                return None;
+            }
+            return self.tokens.token(previous).ok();
+        };
+        if self.logical_position == 0 {
             return None;
         }
+        if let Some(range) = self.current_range()
+            && self.next > range.start()
+        {
+            let previous = TokenIndex::try_from_raw(self.next.raw().checked_sub(1)?)?;
+            return self.tokens.token(previous).ok();
+        }
+        let previous_index = self.previous_segment_index?;
+        let previous_range = view.range_at(previous_index).ok()?;
+        let previous = TokenIndex::try_from_raw(previous_range.end().raw().checked_sub(1)?)?;
         self.tokens.token(previous).ok()
     }
-
     /// Move a segmented cursor to a dense parser-facing position.
     pub(crate) fn set_parser_position(
         &mut self,
@@ -1432,8 +1525,102 @@ impl<'a> TokenCursor<'a> {
         let TokenCursorBounds::Segmented(view) = self.bounds else {
             return Err(TokenSequenceError::Absent);
         };
-        *self = Self::from_sequence_position(view, position)?;
-        Ok(())
+        if position > self.logical_length {
+            return Err(TokenSequenceError::OutOfRange {
+                raw: u32::try_from(position).unwrap_or(u32::MAX),
+                len: self.logical_length,
+            });
+        }
+        if position == self.logical_position {
+            return Ok(());
+        }
+        let ranges = view
+            .tokens
+            .sequence_store
+            .ranges(view.id)
+            .expect("validated token sequence view has a valid handle");
+
+        if position > self.logical_position {
+            loop {
+                let Some(range) = ranges.get(self.segment_index).copied() else {
+                    return Err(TokenSequenceError::OutOfRange {
+                        raw: u32::try_from(position).unwrap_or(u32::MAX),
+                        len: self.logical_length,
+                    });
+                };
+                let segment_end = self
+                    .segment_start_position
+                    .checked_add(range.len() as usize)
+                    .ok_or(TokenSequenceError::Capacity)?;
+                if position <= segment_end {
+                    let offset = position
+                        .checked_sub(self.segment_start_position)
+                        .ok_or(TokenSequenceError::Capacity)?;
+                    let offset = u32::try_from(offset).map_err(|_| TokenSequenceError::Capacity)?;
+                    self.next = TokenIndex(
+                        range
+                            .start()
+                            .raw()
+                            .checked_add(offset)
+                            .ok_or(TokenSequenceError::Capacity)?,
+                    );
+                    self.logical_position = position;
+                    if position == segment_end {
+                        self.skip_empty_segments();
+                    }
+                    return Ok(());
+                }
+                let next_segment_index =
+                    self.next_segment_index
+                        .ok_or(TokenSequenceError::OutOfRange {
+                            raw: u32::try_from(position).unwrap_or(u32::MAX),
+                            len: self.logical_length,
+                        })?;
+                self.previous_segment_index = Some(self.segment_index);
+                self.segment_index = next_segment_index;
+                self.segment_start_position = segment_end;
+                self.next = ranges[next_segment_index].start();
+                self.next_segment_index =
+                    Self::next_non_empty_segment(ranges, next_segment_index + 1);
+            }
+        }
+
+        loop {
+            if let Some(range) = ranges.get(self.segment_index).copied()
+                && position >= self.segment_start_position
+            {
+                let offset = position
+                    .checked_sub(self.segment_start_position)
+                    .ok_or(TokenSequenceError::Capacity)?;
+                let offset = u32::try_from(offset).map_err(|_| TokenSequenceError::Capacity)?;
+                self.next = TokenIndex(
+                    range
+                        .start()
+                        .raw()
+                        .checked_add(offset)
+                        .ok_or(TokenSequenceError::Capacity)?,
+                );
+                self.logical_position = position;
+                return Ok(());
+            }
+            let previous_segment_index =
+                self.previous_segment_index
+                    .ok_or(TokenSequenceError::OutOfRange {
+                        raw: u32::try_from(position).unwrap_or(u32::MAX),
+                        len: self.logical_length,
+                    })?;
+            let previous_range = ranges[previous_segment_index];
+            self.segment_index = previous_segment_index;
+            self.segment_start_position = self
+                .segment_start_position
+                .checked_sub(previous_range.len() as usize)
+                .ok_or(TokenSequenceError::Capacity)?;
+            self.next = previous_range.start();
+            self.next_segment_index =
+                Self::next_non_empty_segment(ranges, previous_segment_index + 1);
+            self.previous_segment_index =
+                Self::previous_non_empty_segment(ranges, previous_segment_index);
+        }
     }
 
     /// Return the position of the cursor within its active compatibility view.
@@ -1474,21 +1661,12 @@ impl<'a> TokenCursor<'a> {
         if self.next != current.start() {
             return false;
         }
-        let Some(mut previous_index) = self.segment_index.checked_sub(1) else {
+        let Some(previous_index) = self.previous_segment_index else {
             return false;
         };
-        loop {
-            let Some(previous) = view.range_at(previous_index).ok() else {
-                return false;
-            };
-            if !previous.is_empty() {
-                return previous.end() != current.start();
-            }
-            let Some(next_previous_index) = previous_index.checked_sub(1) else {
-                return false;
-            };
-            previous_index = next_previous_index;
-        }
+        view.range_at(previous_index)
+            .ok()
+            .is_some_and(|previous| previous.end() != current.start())
     }
 
     fn current_range(self) -> Option<TokenRange> {
@@ -1499,21 +1677,39 @@ impl<'a> TokenCursor<'a> {
     }
 
     fn skip_empty_segments(&mut self) {
-        while let TokenCursorBounds::Segmented(view) = self.bounds {
-            let Some(range) = view.range_at(self.segment_index).ok() else {
+        let TokenCursorBounds::Segmented(view) = self.bounds else {
+            return;
+        };
+        let ranges = view
+            .tokens
+            .sequence_store
+            .ranges(view.id)
+            .expect("validated token sequence view has a valid handle");
+        loop {
+            let Some(range) = ranges.get(self.segment_index).copied() else {
+                self.segment_start_position = self.logical_length;
+                self.next_segment_index = None;
                 return;
             };
-            if self.next < range.start {
-                self.next = range.start;
+            if self.next < range.start() {
+                self.next = range.start();
             }
-            if self.next < range.end {
+            if self.next < range.end() {
+                self.next_segment_index =
+                    Self::next_non_empty_segment(ranges, self.segment_index + 1);
                 return;
+            }
+            if range.start() != range.end() {
+                self.previous_segment_index = Some(self.segment_index);
             }
             self.segment_index = self.segment_index.saturating_add(1);
-            let Some(next_range) = view.range_at(self.segment_index).ok() else {
-                return;
-            };
-            self.next = next_range.start;
+            self.segment_start_position = self
+                .segment_start_position
+                .saturating_add(range.len() as usize);
+            self.next = ranges
+                .get(self.segment_index)
+                .map(|next_range| next_range.start())
+                .unwrap_or(range.end());
         }
     }
 
@@ -1565,18 +1761,44 @@ impl<'a> TokenCursor<'a> {
                 Ok(())
             }
             TokenCursorBounds::Segmented(view) => {
-                for (segment_index, range) in view.ranges().enumerate() {
-                    if position >= range.start() && position <= range.end() {
-                        self.segment_index = segment_index;
-                        self.next = position;
-                        self.skip_empty_segments();
+                let ranges = view
+                    .tokens
+                    .sequence_store
+                    .ranges(view.id)
+                    .expect("validated token sequence view has a valid handle");
+                let logical_length = self.logical_length;
+                let mut logical_start = 0usize;
+                let mut previous_segment_index = None;
+                for (segment_index, entry) in ranges.iter().copied().enumerate() {
+                    if position >= entry.start() && position <= entry.end() {
+                        let offset = (position.raw() - entry.start().raw()) as usize;
+                        let mut candidate = Self {
+                            tokens: view.tokens,
+                            bounds: TokenCursorBounds::Segmented(view),
+                            segment_index,
+                            next: position,
+                            logical_position: logical_start.saturating_add(offset),
+                            logical_length,
+                            segment_start_position: logical_start,
+                            previous_segment_index,
+                            next_segment_index: Self::next_non_empty_segment(
+                                ranges,
+                                segment_index + 1,
+                            ),
+                        };
+                        candidate.skip_empty_segments();
+                        *self = candidate;
                         return Ok(());
+                    }
+                    logical_start = logical_start.saturating_add(entry.len() as usize);
+                    if entry.start() != entry.end() {
+                        previous_segment_index = Some(segment_index);
                     }
                 }
                 Err(TokenRangeError::OutOfBounds {
                     start: position.raw(),
                     end: position.raw(),
-                    len: view.len(),
+                    len: logical_length,
                 })
             }
         }
@@ -1598,6 +1820,9 @@ impl<'a> TokenCursor<'a> {
         let range = self
             .current_range()
             .expect("a current token always belongs to a cursor range");
+        if matches!(self.bounds, TokenCursorBounds::Segmented(_)) {
+            self.logical_position = self.logical_position.saturating_add(1);
+        }
         if let Some(next) = self.next.raw().checked_add(1)
             && next < range.end.raw()
         {
@@ -1605,7 +1830,11 @@ impl<'a> TokenCursor<'a> {
         } else {
             self.next = range.end;
             if matches!(self.bounds, TokenCursorBounds::Segmented(_)) {
+                self.previous_segment_index = Some(self.segment_index);
                 self.segment_index = self.segment_index.saturating_add(1);
+                self.segment_start_position = self
+                    .segment_start_position
+                    .saturating_add(range.len() as usize);
                 self.skip_empty_segments();
             }
         }
@@ -2788,11 +3017,13 @@ impl FileTokens {
                             "segmented token adapter length does not match its canonical sequence",
                         ));
                     }
-                    TokenCursor::from_sequence_position(view, self.index).map_err(|error| {
-                        CompilerError::compiler_error(format!(
-                            "segmented canonical cursor handoff failed: {error:?}"
-                        ))
-                    })
+                    TokenCursor::from_sequence_position(view, self.index, self.length).map_err(
+                        |error| {
+                            CompilerError::compiler_error(format!(
+                                "segmented canonical cursor handoff failed: {error:?}"
+                            ))
+                        },
+                    )
                 }
             },
         }
