@@ -100,14 +100,15 @@ ACTIVE_PLAN:
   current-main comparison remains `n^1.77`. This is an explicitly accepted independent baseline
   exception for Phase 3; do not raise or loosen the budget, and Phase 3 must prove no worsening.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
-  `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`.
+  `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
   Phase 3); Wiring V1 and native result-slot/Core const-eval work (separate plans that run after
   this plan's Phase 3 and before Phase 4).
 
 Phase 1 code closeout is `3c9c776a8`; Phase 2 continuation acceptance is `c17672bb5`, with
-diagnostic correction `e7d9a7ab5`. Detailed implementation and review checkpoints remain in Git
-history; the summaries below retain only contracts and evidence needed by later phases.
+diagnostic correction `e7d9a7ab5`; Phase 3F5/3G acceptance is `98040fbd0`. Detailed implementation
+and review checkpoints remain in Git history; the summaries below retain only contracts and evidence
+needed by later phases.
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 remains complete. Phase 2 PathId cutover, generated identity pairing and report-owner
