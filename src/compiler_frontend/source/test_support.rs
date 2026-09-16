@@ -8,7 +8,11 @@
 
 use super::span::ExtendedSpanResolver;
 use super::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, tokenize};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
 use std::path::{Path, PathBuf};
 
 /// One focused-test source context with an explicit identity and one live span owner.
@@ -60,6 +64,44 @@ impl TestSourceContext {
         self.span_builder.resolver_for(self.source_id)
     }
 
+    /// Tokenize `source` through the real lexer with this context's identity, path, string
+    /// table and live span builder.
+    ///
+    /// WHY: focused header/parser tests need the canonical `FileTokens` owner without
+    /// rebuilding identical path-intern and lexer scaffolding per fixture. The caller keeps
+    /// owning `path_fork` (so downstream preparation reuses the issuing table) while this
+    /// context keeps owning its string table and span builder; only the returned stream is
+    /// moved out. Path handling keeps the exact filesystem interning of the existing
+    /// fixtures, and lexer failures keep their `TokenizeFailure` lanes for the caller to map.
+    pub(crate) fn tokenize(
+        &mut self,
+        source: &str,
+        path_fork: &mut PathInternerFork,
+        style_directives: &StyleDirectiveRegistry,
+        entry_mode: TokenizerEntryMode,
+    ) -> TokenizeResult<FileTokens> {
+        let source_id = self.source_id;
+        let Self {
+            path,
+            string_table,
+            span_builder,
+            ..
+        } = &mut *self;
+        let interned_path = path_fork
+            .try_intern_filesystem_path(path, string_table)
+            .expect("test path should be UTF-8");
+        tokenize(
+            source,
+            interned_path,
+            entry_mode,
+            style_directives,
+            string_table,
+            path_fork,
+            source_id,
+            span_builder,
+        )
+    }
+
     /// Borrow the two mutable producer-owned tables together for tokenization/preparation calls.
     pub(crate) fn preparation_parts(&mut self) -> (&mut StringTable, &mut ExtendedSpanBuilder) {
         (&mut self.string_table, &mut self.span_builder)
@@ -109,5 +151,55 @@ mod tests {
         assert_eq!(range.start(), 11);
         assert_eq!(range.end(), 1311);
         assert_eq!(context.span_builder().len(), 1);
+    }
+
+    #[test]
+    fn tokenize_keeps_source_identity_and_live_span_ownership() {
+        let source = "value = 1\n";
+        let source_id = SourceId::from_index(3);
+        let mut context =
+            TestSourceContext::with_source_id(source_id, PathBuf::from("src/token.moth"));
+        let mut path_fork = PathInternerFork::empty();
+        let style_directives = StyleDirectiveRegistry::built_ins();
+
+        let file_tokens = context
+            .tokenize(
+                source,
+                &mut path_fork,
+                &style_directives,
+                TokenizerEntryMode::SourceFile,
+            )
+            .expect("source should tokenize");
+
+        assert_eq!(file_tokens.file_id, source_id);
+        assert_eq!(context.source_id(), source_id);
+        assert_eq!(
+            file_tokens
+                .source_tokens()
+                .expect("freshly tokenized stream owns its canonical source")
+                .source(),
+            source_id
+        );
+        assert!(
+            path_fork.try_depth(file_tokens.src_path).is_some(),
+            "the interned path must come from the caller-owned fork"
+        );
+        let first_span = file_tokens
+            .tokens
+            .iter()
+            .find(|token| {
+                matches!(
+                    token.kind,
+                    crate::compiler_frontend::tokenizer::tokens::TokenKind::Symbol(_)
+                )
+            })
+            .expect("source should tokenize a symbol")
+            .span;
+        let range = first_span.resolve_with(context.span_resolver());
+        assert_eq!(
+            source.get(range.start() as usize..range.end() as usize),
+            Some("value"),
+            "token spans must resolve through the context's live builder"
+        );
     }
 }

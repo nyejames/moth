@@ -35,7 +35,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRef, TokenTag, TokenViewError};
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompilerDiagnostic {
     pub kind: DiagnosticKind,
@@ -140,6 +140,71 @@ impl CompilerDiagnostic {
             },
         )
     }
+    /// Tag-based `ExpectedToken` for callsites that already classified both tokens.
+    ///
+    /// WHAT: retains the expected static/path descriptor plus the found compact
+    ///       projection without cloning `TokenKind`.
+    /// WHY: header/type parsers classify through `TokenRef`/`TokenTag` while the
+    ///      legacy `TokenKind` lane remains for parser-owned values.
+    pub(crate) fn expected_token_from_tags(
+        expected: TokenTag,
+        found: Option<DiagnosticToken>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedToken),
+            span,
+            DiagnosticPayload::ExpectedToken {
+                expected: DiagnosticToken::from_static_tag(expected),
+                found,
+            },
+        )
+    }
+
+    /// Infallible `ExpectedToken` over validated source token views.
+    pub(crate) fn expected_token_from_ref(
+        expected: TokenTag,
+        found: Option<TokenRef<'_>>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        let found = found.map(DiagnosticToken::from_token_ref);
+        Self::expected_token_from_tags(expected, found, span)
+    }
+
+    /// Tag-based `UnexpectedToken` for callsites holding a canonical view.
+    pub(crate) fn unexpected_token_from_tag(
+        found: DiagnosticToken,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken),
+            span,
+            DiagnosticPayload::UnexpectedToken { found },
+        )
+    }
+
+    /// Infallible `UnexpectedToken` over validated source token views.
+    pub(crate) fn unexpected_token_from_ref(
+        found: TokenRef<'_>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::unexpected_token_from_tag(DiagnosticToken::from_token_ref(found), span)
+    }
+
+    /// Map a token-view failure into the compiler-invariant error lane.
+    ///
+    /// WHAT: keeps malformed compact payloads as infrastructure failures.
+    /// WHY: a malformed canonical view means the validated source-token
+    ///      invariant broke; it must not become a fabricated source diagnostic.
+    pub(crate) fn token_view_invariant_error(
+        error: TokenViewError,
+        context: &'static str,
+    ) -> CompilerError {
+        CompilerError::compiler_error(format!(
+            "{context} token payload was malformed: {error:?}"
+        ))
+    }
+
 
     pub(crate) fn unexpected_trailing_comma(span: Option<SourceSpan>) -> Self {
         Self::new(

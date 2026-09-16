@@ -18,7 +18,7 @@
 //! - expression typing/coercion policy
 //! - call-site/feature-specific diagnostic framing outside type syntax itself
 
-use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::reserved_trait_keyword_or_dispatch_mismatch;
+use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::reserved_trait_keyword_or_dispatch_mismatch_for_tag;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, GenericApplicationErrorReason, InvalidCollectionTypeReason,
     InvalidMapTypeReason,

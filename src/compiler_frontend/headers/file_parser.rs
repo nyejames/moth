@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword, reserved_trait_keyword_error,
+    reserved_trait_keyword_error, reserved_trait_keyword_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason, InvalidDeclarationReason,
@@ -43,8 +43,7 @@ use crate::compiler_frontend::source_packages::root_file::file_name_is_config_fi
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenKind, TokenRange, TokenRef,
-    TokenTag,
+    FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::{ScannedToken, TokenFactView};
 use rustc_hash::FxHashSet;
@@ -256,8 +255,7 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::ReservedTraitSyntax => {
-                let current_token = token_stream.tokens[current_index].clone();
-                handle_trait_keyword_header_item(&current_token, current_span)?;
+                handle_trait_keyword_header_item(current_tag, current_span)?;
             }
 
             HeaderFileItem::RuntimeTemplate => {
@@ -294,9 +292,10 @@ fn reject_non_block_export(
 
     // Without the block delimiter, the token is not an export target. Keep this diagnostic in
     // header parsing instead of interpreting the following tokens through another syntax path.
-    Err(diagnostic_failure(CompilerDiagnostic::expected_token(
-        TokenKind::Colon,
-        Some(token_stream.current_token_kind().to_owned()),
+    let found = source_token_at_index(token_stream, token_stream.index, "export-block")?;
+    Err(diagnostic_failure(CompilerDiagnostic::expected_token_from_ref(
+        TokenTag::COLON,
+        Some(found),
         Some(export_span),
     )))
 }
@@ -321,13 +320,15 @@ fn handle_export_block(
 
     // The classifier only produces ExportBlock when the current token is `:`, but consume it
     // here so the item parser starts at the first ordinary top-level item.
-    let colon_tag = source_token_at_index(token_stream, token_stream.index, "export-block")?.tag();
-    if colon_tag != TokenTag::COLON {
-        return Err(diagnostic_failure(CompilerDiagnostic::expected_token(
-            TokenKind::Colon,
-            Some(token_stream.current_token_kind().to_owned()),
-            Some(export_span),
-        )));
+    let colon = source_token_at_index(token_stream, token_stream.index, "export-block")?;
+    if colon.tag() != TokenTag::COLON {
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::expected_token_from_ref(
+                TokenTag::COLON,
+                Some(colon),
+                Some(export_span),
+            ),
+        ));
     }
     state.seen_export_block = Some(export_span);
     state.export_mode = HeaderExportMode::Public;
@@ -345,7 +346,7 @@ fn handle_export_block(
         }
 
         let current_index = token_stream.index;
-        let (current_span, item) = {
+        let (current_span, current_tag, item) = {
             let canonical = token_stream.source_tokens().map_err(|error| {
                 HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
                     "export-block walk is missing its source token owner: {error:?}"
@@ -379,13 +380,13 @@ fn handle_export_block(
             let follower = canonical.token(follower_position).ok();
             (
                 current.source_span(),
+                current.tag(),
                 classify_export_block_item_ref(current, follower),
             )
         };
         let current_token = match &item {
             HeaderFileItem::Symbol(_)
-            | HeaderFileItem::BuiltinTypeConformanceTarget(_)
-            | HeaderFileItem::ReservedTraitSyntax => {
+            | HeaderFileItem::BuiltinTypeConformanceTarget(_) => {
                 Some(token_stream.tokens[current_index].clone())
             }
             _ => None,
@@ -397,6 +398,7 @@ fn handle_export_block(
             context,
             item,
             current_token,
+            current_tag,
             current_span,
         )?;
         state.export_block_item_count = state
@@ -439,6 +441,7 @@ fn parse_export_block_item(
     context: &mut HeaderParseContext<'_>,
     item: HeaderFileItem,
     current_token: Option<Token>,
+    current_tag: TokenTag,
     current_span: SourceSpan,
 ) -> FileParserResult<()> {
     match item {
@@ -500,12 +503,7 @@ fn parse_export_block_item(
         }
 
         HeaderFileItem::ReservedTraitSyntax => {
-            let Some(current_token) = current_token else {
-                return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export trait item lost its compatibility token handoff",
-                )));
-            };
-            if let Some(keyword) = reserved_trait_keyword(&current_token.kind) {
+            if let Some(keyword) = reserved_trait_keyword_for_tag(current_tag) {
                 return Err(diagnostic_failure(reserved_trait_keyword_error(
                     keyword,
                     Some(current_span),
@@ -1016,10 +1014,10 @@ fn handle_symbol_item_with_export_mode(
 }
 
 fn handle_trait_keyword_header_item(
-    current_token: &Token,
+    current_tag: TokenTag,
     current_span: SourceSpan,
 ) -> FileParserResult<()> {
-    if let Some(keyword) = reserved_trait_keyword(&current_token.kind) {
+    if let Some(keyword) = reserved_trait_keyword_for_tag(current_tag) {
         return Err(diagnostic_failure(reserved_trait_keyword_error(
             keyword,
             Some(current_span),

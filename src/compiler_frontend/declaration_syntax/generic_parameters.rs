@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidDeclarationReason, InvalidGenericParameterReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidDeclarationReason, InvalidGenericParameterReason,
 };
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, GenericParameterScope, GenericTraitBound,
@@ -67,24 +67,35 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
             }
 
             TokenKind::Symbol(_) => {
-                return Err(with_current_token_span(
-                    token_stream,
-                    CompilerDiagnostic::unexpected_token(
-                        token_stream.current_token_kind().to_owned(),
-                        current_source_span(token_stream),
-                    ),
+                let span = current_source_span(token_stream);
+                let Some(found) = token_stream.canonical_cursor().current() else {
+                    return Err(
+                        with_token_span(span, CompilerDiagnostic::unexpected_end_of_file(None, span))
+                            .into(),
+                    );
+                };
+                return Err(with_token_span(
+                    span,
+                    CompilerDiagnostic::unexpected_token_from_ref(found, span),
                 )
                 .into());
             }
 
             TokenKind::Comma => {
                 if expecting_parameter {
-                    return Err(with_current_token_span(
-                        token_stream,
-                        CompilerDiagnostic::unexpected_token(
-                            token_stream.current_token_kind().to_owned(),
-                            current_source_span(token_stream),
-                        ),
+                    let span = current_source_span(token_stream);
+                    let Some(found) = token_stream.canonical_cursor().current() else {
+                        return Err(
+                            with_token_span(
+                                span,
+                                CompilerDiagnostic::unexpected_end_of_file(None, span),
+                            )
+                            .into(),
+                        );
+                    };
+                    return Err(with_token_span(
+                        span,
+                        CompilerDiagnostic::unexpected_token_from_ref(found, span),
                     )
                     .into());
                 }
@@ -115,12 +126,19 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 }
 
                 if expecting_parameter {
-                    return Err(with_current_token_span(
-                        token_stream,
-                        CompilerDiagnostic::unexpected_token(
-                            token_stream.current_token_kind().to_owned(),
-                            current_source_span(token_stream),
-                        ),
+                    let span = current_source_span(token_stream);
+                    let Some(found) = token_stream.canonical_cursor().current() else {
+                        return Err(
+                            with_token_span(
+                                span,
+                                CompilerDiagnostic::unexpected_end_of_file(None, span),
+                            )
+                            .into(),
+                        );
+                    };
+                    return Err(with_token_span(
+                        span,
+                        CompilerDiagnostic::unexpected_token_from_ref(found, span),
                     )
                     .into());
                 }
@@ -184,13 +202,19 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
             }
 
             other => {
-                return Err(with_current_token_span(
-                    token_stream,
+                let span = current_source_span(token_stream);
+                let found = DiagnosticToken::from_token_ref(
+                    token_stream
+                        .canonical_cursor()
+                        .current()
+                        .expect("validated declaration cursor token"),
+                );
+                debug_assert_eq!(other.token_tag(), found.tag());
+                return Err(with_token_span(
+                    span,
                     CompilerDiagnostic::invalid_generic_parameter(
-                        InvalidGenericParameterReason::InvalidToken {
-                            found: other.into(),
-                        },
-                        current_source_span(token_stream),
+                        InvalidGenericParameterReason::InvalidToken { found },
+                        span,
                     ),
                 )
                 .into());
@@ -205,12 +229,15 @@ fn parse_trait_bounds_for_current_parameter(
     string_table: &StringTable,
 ) -> GenericParameterParseResult<()> {
     let Some(parameter) = parameters.last_mut() else {
-        return Err(with_current_token_span(
-            token_stream,
-            CompilerDiagnostic::unexpected_token(
-                token_stream.current_token_kind().to_owned(),
-                current_source_span(token_stream),
-            ),
+        let span = current_source_span(token_stream);
+        let Some(found) = token_stream.canonical_cursor().current() else {
+            return Err(
+                with_token_span(span, CompilerDiagnostic::unexpected_end_of_file(None, span)).into(),
+            );
+        };
+        return Err(with_token_span(
+            span,
+            CompilerDiagnostic::unexpected_token_from_ref(found, span),
         )
         .into());
     };
@@ -271,13 +298,19 @@ fn parse_trait_bounds_for_current_parameter(
                 .into());
             }
             other => {
-                return Err(with_current_token_span(
-                    token_stream,
+                let span = current_source_span(token_stream);
+                let found = DiagnosticToken::from_token_ref(
+                    token_stream
+                        .canonical_cursor()
+                        .current()
+                        .expect("validated declaration cursor token"),
+                );
+                debug_assert_eq!(other.token_tag(), found.tag());
+                return Err(with_token_span(
+                    span,
                     CompilerDiagnostic::invalid_generic_parameter(
-                        InvalidGenericParameterReason::InvalidToken {
-                            found: other.into(),
-                        },
-                        current_source_span(token_stream),
+                        InvalidGenericParameterReason::InvalidToken { found },
+                        span,
                     ),
                 )
                 .into());

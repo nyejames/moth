@@ -7,11 +7,11 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
+    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidFunctionSignatureReason,
-    InvalidSignatureMemberReason,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken,
+    InvalidFunctionSignatureReason, InvalidSignatureMemberReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -26,7 +26,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 use super::DeclarationCursor;
@@ -202,10 +202,14 @@ pub fn parse_function_signature_syntax(
         | TokenKind::DatatypeNone
         | TokenKind::OpenCurly
         | TokenKind::Symbol(_) => {
+            let found = DiagnosticToken::from_token_ref(
+                token_stream
+                    .canonical_cursor()
+                    .current()
+                    .expect("validated declaration cursor token"),
+            );
             return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::MissingArrowOrColon {
-                    found: token_stream.current_token_kind().clone().into(),
-                },
+                InvalidFunctionSignatureReason::MissingArrowOrColon { found },
                 current_source_span(token_stream),
             )
             .into());
@@ -220,10 +224,14 @@ pub fn parse_function_signature_syntax(
         }
 
         _ => {
+            let found = DiagnosticToken::from_token_ref(
+                token_stream
+                    .canonical_cursor()
+                    .current()
+                    .expect("validated declaration cursor token"),
+            );
             return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::MissingArrowOrColon {
-                    found: token_stream.current_token_kind().clone().into(),
-                },
+                InvalidFunctionSignatureReason::MissingArrowOrColon { found },
                 current_source_span(token_stream),
             )
             .into());
@@ -259,9 +267,10 @@ pub fn parse_signature_members_syntax(
         token_stream: &DeclarationCursor<'_>,
     ) -> SignatureMemberParseResult<()> {
         if !expecting_member {
-            return Err(CompilerDiagnostic::expected_token(
-                TokenKind::Comma,
-                Some(token_stream.current_token_kind().to_owned()),
+            let found = token_stream.canonical_cursor().current();
+            return Err(CompilerDiagnostic::expected_token_from_ref(
+                TokenTag::COMMA,
+                found,
                 current_source_span(token_stream),
             )
             .into());
@@ -285,12 +294,21 @@ pub fn parse_signature_members_syntax(
             }
 
             TokenKind::Arrow | TokenKind::Colon => {
-                return Err(CompilerDiagnostic::unexpected_token(
-                    token_stream.current_token_kind().to_owned(),
-                    current_source_span(token_stream),
-                )
-                .into());
-            }
+                let Some(found) = token_stream.canonical_cursor().current() else {
+                    return Err(CompilerDiagnostic::unexpected_end_of_file(
+                        None,
+                        current_source_span(token_stream),
+                    )
+                    .into());
+                };
+                return Err(
+                    CompilerDiagnostic::unexpected_token_from_ref(
+                        found,
+                        current_source_span(token_stream),
+                    )
+                    .into(),
+                );
+            },
 
             TokenKind::Symbol(member_name) => {
                 ensure_member_slot(expecting_member, token_stream)?;
@@ -438,8 +456,13 @@ pub fn parse_signature_members_syntax(
             }
 
             TokenKind::Must | TokenKind::TraitThis => {
-                let keyword = reserved_trait_keyword_or_dispatch_mismatch(
-                    token_stream.current_token_kind(),
+                let tag = token_stream
+                    .canonical_cursor()
+                    .current()
+                    .map(|token| token.tag())
+                    .expect("validated declaration cursor token");
+                let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+                    tag,
                     current_source_span(token_stream),
                     "Struct/Parameter Parsing",
                     "signature member parsing",
@@ -480,11 +503,11 @@ pub fn parse_signature_members_syntax(
                     );
                 }
 
-                return Err(CompilerDiagnostic::unexpected_token(
-                    token_stream.current_token_kind().to_owned(),
-                    current_source_span(token_stream),
-                )
-                .into());
+                let span = current_source_span(token_stream);
+                let Some(found) = token_stream.canonical_cursor().current() else {
+                    return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
+                };
+                return Err(CompilerDiagnostic::unexpected_token_from_ref(found, span).into());
             }
         }
     }
@@ -646,19 +669,28 @@ fn parse_signature_member_syntax(
         | TokenKind::TypeParameterBracket => None,
 
         TokenKind::As => {
-            return Err(CompilerDiagnostic::unexpected_token(
-                token_stream.current_token_kind().to_owned(),
-                current_source_span(token_stream),
-            )
-            .into());
+            let Some(found) = token_stream.canonical_cursor().current() else {
+                return Err(CompilerDiagnostic::unexpected_end_of_file(
+                    None,
+                    current_source_span(token_stream),
+                )
+                .into());
+            };
+            return Err(
+                CompilerDiagnostic::unexpected_token_from_ref(
+                    found,
+                    current_source_span(token_stream),
+                )
+                .into(),
+            );
         }
 
         _ => {
-            return Err(CompilerDiagnostic::unexpected_token(
-                token_stream.current_token_kind().to_owned(),
-                current_source_span(token_stream),
-            )
-            .into());
+            let span = current_source_span(token_stream);
+            let Some(found) = token_stream.canonical_cursor().current() else {
+                return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
+            };
+            return Err(CompilerDiagnostic::unexpected_token_from_ref(found, span).into());
         }
     };
 
@@ -776,11 +808,11 @@ fn collect_member_default_range(
         )))
     })?;
     if range.is_empty() {
-        return Err(CompilerDiagnostic::unexpected_token(
-            token_stream.current_token_kind().to_owned(),
-            current_source_span(token_stream),
-        )
-        .into());
+        let span = current_source_span(token_stream);
+        let Some(found) = token_stream.canonical_cursor().current() else {
+            return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
+        };
+        return Err(CompilerDiagnostic::unexpected_token_from_ref(found, span).into());
     }
 
     Ok(Some(range))
@@ -833,10 +865,15 @@ fn parse_trait_requirement_return_list(
             }
 
             unexpected_token => {
+                let found = DiagnosticToken::from_token_ref(
+                    token_stream
+                        .canonical_cursor()
+                        .current()
+                        .expect("validated declaration cursor token"),
+                );
+                debug_assert_eq!(unexpected_token.token_tag(), found.tag());
                 return Err(CompilerDiagnostic::invalid_function_signature(
-                    InvalidFunctionSignatureReason::MissingCommaOrColon {
-                        found: unexpected_token.clone().into(),
-                    },
+                    InvalidFunctionSignatureReason::MissingCommaOrColon { found },
                     current_source_span(token_stream),
                 )
                 .into());
@@ -988,10 +1025,15 @@ fn parse_return_list_syntax(
                 .into());
             }
             unexpected_token => {
+                let found = DiagnosticToken::from_token_ref(
+                    token_stream
+                        .canonical_cursor()
+                        .current()
+                        .expect("validated declaration cursor token"),
+                );
+                debug_assert_eq!(unexpected_token.token_tag(), found.tag());
                 return Err(CompilerDiagnostic::invalid_function_signature(
-                    InvalidFunctionSignatureReason::MissingCommaOrColon {
-                        found: unexpected_token.clone().into(),
-                    },
+                    InvalidFunctionSignatureReason::MissingCommaOrColon { found },
                     current_source_span(token_stream),
                 )
                 .into());

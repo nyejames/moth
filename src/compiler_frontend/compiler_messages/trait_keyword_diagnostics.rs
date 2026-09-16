@@ -68,6 +68,52 @@ pub(crate) fn reserved_trait_keyword_or_dispatch_mismatch(
         reserved_trait_dispatch_mismatch_error(token_kind, span, compilation_stage, parser_context)
     })
 }
+/// Tag-based reserved-keyword resolution for callsites holding a canonical tag.
+///
+/// WHAT: converts an already-classified `must`/`This` tag into its reserved
+///       variant without cloning `TokenKind`.
+/// WHY: source-view header walks dispatch on `TokenTag`; drift still returns
+///      the structured internal compiler diagnostic with the same message.
+pub(crate) fn reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+    tag: TokenTag,
+    span: Option<SourceSpan>,
+    compilation_stage: &'static str,
+    parser_context: &'static str,
+) -> Result<ReservedTraitKeyword, CompilerError> {
+    reserved_trait_keyword_for_tag(tag).ok_or_else(|| {
+        reserved_trait_dispatch_mismatch_error_for_tag(tag, span, compilation_stage, parser_context)
+    })
+}
+
+/// Tag-based dispatch-mismatch error with the legacy message shape.
+pub(crate) fn reserved_trait_dispatch_mismatch_error_for_tag(
+    tag: TokenTag,
+    span: Option<SourceSpan>,
+    compilation_stage: &'static str,
+    parser_context: &'static str,
+) -> CompilerError {
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        CompilerErrorMetadataKey::CompilationStage,
+        compilation_stage.to_owned(),
+    );
+    metadata.insert(
+        CompilerErrorMetadataKey::PrimarySuggestion,
+        String::from("This indicates parser dispatch drift. Please report this compiler bug."),
+    );
+
+    let mut error = CompilerError::new(
+        format!(
+            "Reserved trait token dispatch mismatch in {parser_context}: {}",
+            tag.descriptor().text()
+        ),
+        span,
+        ErrorType::Compiler,
+    );
+    error.metadata = metadata;
+    error
+}
+
 
 pub(crate) fn reserved_trait_keyword_error(
     keyword: ReservedTraitKeyword,

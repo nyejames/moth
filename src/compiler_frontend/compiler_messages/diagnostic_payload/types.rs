@@ -802,6 +802,14 @@ pub enum InvalidGenericParameterReason {
     ListMustStayWithHeader,
     InvalidToken { found: DiagnosticToken },
 }
+impl InvalidGenericParameterReason {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if let Self::InvalidToken { found } = self {
+            found.remap_string_ids(remap);
+        }
+    }
+}
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTemplateDirectiveReason {

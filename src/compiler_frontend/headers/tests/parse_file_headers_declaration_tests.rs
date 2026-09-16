@@ -279,13 +279,17 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let mut path_fork = PathInternerFork::empty();
     let file_path = source_context.path().to_path_buf();
     let source_id = source_context.source_id();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let file_tokens = source_context
+        .tokenize(
+            &source,
+            &mut path_fork,
+            &style_directives,
+            TokenizerEntryMode::SourceFile,
+        )
+        .expect("source should tokenize");
     let tokenizer_span_count = {
         let (string_table, span_builder) = source_context.preparation_parts();
-        let interned_path = path_fork
-            .try_intern_filesystem_path(&file_path, string_table)
-            .expect("test path fits");
-        let file_tokens = tokenize(&source, interned_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), string_table, &mut path_fork, source_id, span_builder)
-            .expect("source should tokenize");
         let count = span_builder.len();
         let output = prepare_file_from_tokens(
             file_tokens,
@@ -298,7 +302,6 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
             &mut path_fork,
         )
         .expect("headers should prepare");
-
         let header_name_span = output
             .headers
             .iter()
@@ -370,15 +373,18 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
 fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     let source = "#[value]\n";
     let mut source_context = TestSourceContext::new("src/@page.moth");
-    let source_id = source_context.source_id();
-    let source_path = source_context.path().to_path_buf();
     let mut path_fork = PathInternerFork::empty();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut token_stream = source_context
+        .tokenize(
+            source,
+            &mut path_fork,
+            &style_directives,
+            TokenizerEntryMode::SourceFile,
+        )
+        .expect("source should tokenize");
+    let scope = token_stream.src_path;
     let (string_table, span_builder) = source_context.preparation_parts();
-    let scope = path_fork
-        .try_intern_filesystem_path(&source_path, string_table)
-        .expect("test path fits");
-    let mut token_stream = tokenize(source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), string_table, &mut path_fork, source_id, span_builder)
-    .expect("source should tokenize");
     let opening_index = token_stream
         .tokens
         .iter()

@@ -7,7 +7,9 @@
 
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::{TokenDescriptorPayload, TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::{
+    TokenDescriptorPayload, TokenKind, TokenRef, TokenTag, TokenViewError,
+};
 
 const TAG_MASK: u32 = u16::MAX as u32;
 const FLAGS_SHIFT: u32 = u16::BITS;
@@ -35,6 +37,91 @@ impl DiagnosticToken {
     }
     fn string_token(tag: TokenTag, value: StringId) -> Self {
         Self::new(tag, 0, value.index())
+    }
+
+    /// Project a static/path descriptor without touching cold payload rows.
+    /// WHAT: builds the retained token for expected delimiters/keywords whose
+    ///       descriptor payload is `Static` or `Path`.
+    /// WHY: expected-token diagnostics name a stable spelling; path handles and
+    ///      string identities are never retained for the expected side.
+    pub(crate) fn from_static_tag(tag: TokenTag) -> Self {
+        debug_assert!(
+            matches!(
+                tag.descriptor().payload(),
+                TokenDescriptorPayload::Static | TokenDescriptorPayload::Path
+            ),
+            "diagnostic expected token must be a static/path descriptor"
+        );
+        Self::static_token(tag)
+    }
+
+    /// Checked projection from a short-lived canonical token view.
+    ///
+    /// WHAT: copies only the stable tag plus the one immediate payload the
+    ///       renderer needs, borrowing cold numeric rows instead of cloning them.
+    /// WHY: diagnostics must outlive the source token buffer without retaining
+    ///      its lifetime, cloning `TokenKind`, or materializing path tables.
+    ///      `Path` keeps only its stable tag; the dense path handle is dropped.
+    pub(crate) fn try_from_token_ref(token: TokenRef<'_>) -> Result<Self, TokenViewError> {
+        let tag = token.tag();
+        match tag.descriptor().payload() {
+            TokenDescriptorPayload::Static => {
+                let shape = token.shape();
+                if shape.flags() != 0 || shape.data() != 0 {
+                    return Err(TokenViewError::MalformedNumericHandle);
+                }
+                Ok(Self::static_token(tag))
+            }
+            TokenDescriptorPayload::Path => {
+                token
+                    .path_syntax_id()
+                    .ok_or(TokenViewError::MalformedPathHandle)?;
+                Ok(Self::static_token(tag))
+            }
+            TokenDescriptorPayload::Symbol
+            | TokenDescriptorPayload::StyleDirective
+            | TokenDescriptorPayload::StringLiteral
+            | TokenDescriptorPayload::RawStringLiteral => {
+                let value = token
+                    .string_id()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?;
+                Ok(Self::string_token(tag, value))
+            }
+            TokenDescriptorPayload::NumericLiteral => {
+                let literal = token
+                    .numeric_literal()?
+                    .ok_or(TokenViewError::MalformedNumericHandle)?;
+                Ok(Self::new(
+                    tag,
+                    numeric_kind_flags(literal.kind),
+                    literal.source_text.index(),
+                ))
+            }
+            TokenDescriptorPayload::CharLiteral => {
+                let value = token
+                    .char_value()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?;
+                Ok(Self::new(tag, 0, value as u32))
+            }
+            TokenDescriptorPayload::BoolLiteral => {
+                let value = token
+                    .bool_value()
+                    .ok_or(TokenViewError::MalformedNumericHandle)?;
+                Ok(Self::new(tag, 0, u32::from(value)))
+            }
+        }
+    }
+
+    /// Infallible projection over validated source token stores.
+    ///
+    /// WHAT: copies the compact tag/payload pair without cloning `TokenKind`.
+    /// WHY: `SourceTokens` validates every shape and cold-store handle at
+    ///      construction/publication, so the checked views above hold. Callers
+    ///      with unvalidated views must use `try_from_token_ref` and map the
+    ///      `TokenViewError` into the compiler-invariant error lane.
+    pub(crate) fn from_token_ref(token: TokenRef<'_>) -> Self {
+        Self::try_from_token_ref(token)
+            .expect("validated source token view must project to a diagnostic token")
     }
 
     pub(crate) fn tag(self) -> TokenTag {

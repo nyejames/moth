@@ -615,7 +615,7 @@ impl SourceTokens {
         spans: Box<[LocalSpan]>,
         mut numeric_literals: NumericLiteralStore,
         mut path_syntax: PathSyntaxTable,
-        token_stats: TokenStats,
+        mut token_stats: TokenStats,
     ) -> Result<Self, CompilerError> {
         if shapes.len() != spans.len() {
             return Err(CompilerError::compiler_error(
@@ -662,6 +662,13 @@ impl SourceTokens {
                             "source token path handle at index {index} is invalid"
                         ))
                     })?;
+            }
+        }
+        // Match the legacy-adapter constructor: a default seed means the caller has not counted
+        // these packed shapes yet, while a non-default seed is an intentional pre-count.
+        if token_stats == TokenStats::default() {
+            for shape in &shapes {
+                token_stats.accumulate_shape(*shape);
             }
         }
         numeric_literals.freeze();
@@ -750,6 +757,12 @@ impl SourceTokens {
         }
         let mut shapes = Vec::with_capacity(tokens.len());
         let mut spans = Vec::with_capacity(tokens.len());
+        // Stats accumulate from the canonical shapes packed here, so every constructed owner
+        // carries the same tag-authority counts. A non-default seed is preserved for callers
+        // that already counted alongside construction; fresh construction starts from default
+        // and fills each bucket from the packed shapes below.
+        let mut token_stats = token_stats;
+        let count_from_shapes = token_stats == TokenStats::default();
         for (index, token) in tokens.iter().enumerate() {
             let numeric_id = numeric_literal_ids[index].unwrap_or(NumericLiteralId::NONE);
             let shape = TokenShape::from_token_kind_with_numeric_id(&token.kind, numeric_id)
@@ -766,6 +779,9 @@ impl SourceTokens {
                             "legacy token path handle at index {index} is invalid"
                         ))
                     })?;
+            }
+            if count_from_shapes {
+                token_stats.accumulate_shape(shape);
             }
             shapes.push(shape);
             spans.push(token.span);
@@ -845,9 +861,6 @@ impl SourceTokens {
         self.token_stats
     }
 
-    pub(crate) fn set_token_stats(&mut self, token_stats: TokenStats) {
-        self.token_stats = token_stats;
-    }
 
     pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
         self.path_syntax.as_deref().ok_or_else(|| {
@@ -1801,15 +1814,6 @@ impl FileTokenOwner {
         }
     }
 
-    fn set_owner_token_stats(&mut self, token_stats: TokenStats) {
-        match self {
-            Self::Canonical(owner) => Arc::get_mut(owner)
-                .expect("canonical source owner must be uniquely mutable before adapter handoff")
-                .set_token_stats(token_stats),
-            // Adapter stats live only on the parser shell.
-            Self::Adapter { .. } => {}
-        }
-    }
 
     fn attach_owner_shared_path_syntax(&mut self, table: Arc<PathSyntaxTable>) {
         match self {
@@ -2107,6 +2111,9 @@ impl FileTokens {
             staged_ids, numeric_literal_ids,
             "source-token and parser numeric handle lanes must stay aligned"
         );
+        // The canonical owner counted from its packed shapes during construction, so the
+        // shell shares that exact snapshot instead of re-running a default-then-rewrite pass.
+        let token_stats = source_tokens.token_stats();
         FileTokens {
             length: tokens.len(),
             token_owner: FileTokenOwner::Canonical(Arc::new(source_tokens)),
@@ -2116,7 +2123,7 @@ impl FileTokens {
             file_id,
             canonical_os_path,
             tokens,
-            token_stats: TokenStats::default(),
+            token_stats,
             index: 0,
         }
     }
@@ -2937,10 +2944,6 @@ impl FileTokens {
         self.token_owner.is_canonical()
     }
 
-    pub(crate) fn set_token_stats(&mut self, token_stats: TokenStats) {
-        self.token_stats = token_stats;
-        self.token_owner.set_owner_token_stats(token_stats);
-    }
     /// Return the numeric cold store for this stream.
     ///
     /// Canonical owners expose the SoA cold store; adapters expose their numeric side store with
@@ -3776,6 +3779,78 @@ macro_rules! token_schema {
                 self.schema().is_some_and(|schema| {
                     schema.has_class(TOKEN_CLASS_DELIMITER)
                 })
+            }
+
+            /// Whether this tag counts toward the stats symbol bucket.
+            ///
+            /// WHAT: the schema-owned fact behind `TokenStats::symbols`.
+            /// WHY: capacity seeds must read one taxonomy authority instead of a second
+            ///      hand-maintained symbol table.
+            pub(crate) fn is_stats_symbol(self) -> bool {
+                self == Self::SYMBOL
+            }
+
+            /// Whether this tag counts toward the stats literal bucket.
+            ///
+            /// WHAT: the schema-owned fact behind `TokenStats::literals`. It covers the string,
+            ///      raw-string, numeric, char, bool, and `none` value spellings that the legacy
+            ///      classifier counted.
+            /// WHY: capacity seeds must read one taxonomy authority instead of a second
+            ///      hand-maintained literal table.
+            pub(crate) fn is_stats_literal(self) -> bool {
+                matches!(
+                    self,
+                    Self::STRING_SLICE_LITERAL
+                        | Self::RAW_STRING_LITERAL
+                        | Self::NUMERIC_LITERAL
+                        | Self::CHAR_LITERAL
+                        | Self::BOOL_LITERAL
+                        | Self::NONE_LITERAL
+                )
+            }
+
+            /// Whether this tag counts toward the stats operator bucket.
+            ///
+            /// WHAT: the schema-owned fact behind `TokenStats::operators`. It preserves the exact
+            ///      legacy operator set, including expression-continuing punctuation (`->`),
+            ///      word operators, postfix markers (`!`, `?`), `copy`, channels, `&`, and `=>`.
+            /// WHY: capacity seeds must read one taxonomy authority instead of a second
+            ///      hand-maintained operator table.
+            pub(crate) fn is_stats_operator(self) -> bool {
+                matches!(
+                    self,
+                    Self::ARROW
+                        | Self::ADD
+                        | Self::SUBTRACT
+                        | Self::MULTIPLY
+                        | Self::DIVIDE
+                        | Self::MODULUS
+                        | Self::INT_DIVIDE
+                        | Self::EXPONENT
+                        | Self::NEGATIVE
+                        | Self::ADD_ASSIGN
+                        | Self::SUBTRACT_ASSIGN
+                        | Self::MULTIPLY_ASSIGN
+                        | Self::DIVIDE_ASSIGN
+                        | Self::MODULUS_ASSIGN
+                        | Self::EXPONENT_ASSIGN
+                        | Self::INT_DIVIDE_ASSIGN
+                        | Self::LESS_THAN
+                        | Self::LESS_THAN_OR_EQUAL
+                        | Self::GREATER_THAN
+                        | Self::GREATER_THAN_OR_EQUAL
+                        | Self::IS
+                        | Self::AND
+                        | Self::OR
+                        | Self::NOT
+                        | Self::BANG
+                        | Self::QUESTION_MARK
+                        | Self::COPY
+                        | Self::CHANNEL_SEND
+                        | Self::CHANNEL_RECEIVE
+                        | Self::AMPERSAND
+                        | Self::FAT_ARROW
+                )
             }
 
             pub(crate) fn precedence(self) -> Option<u8> {

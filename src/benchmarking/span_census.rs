@@ -819,11 +819,7 @@ fn relative_portable_path(workspace_root: &Path, path: &Path) -> Result<String, 
     Ok(segments.join("/"))
 }
 
+/// Stable schema-owned spelling for a census token, including dynamic payload tokens.
 fn token_kind_name(kind: &TokenKind) -> String {
-    let rendered = format!("{kind:?}");
-
-    match rendered.find(['(', '{']) {
-        Some(index) => rendered[..index].to_string(),
-        None => rendered,
-    }
+    kind.token_tag().descriptor().text().to_string()
 }

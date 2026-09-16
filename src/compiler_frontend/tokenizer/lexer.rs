@@ -4,7 +4,6 @@
 //! WHY: lexing owns the first precise source-location mapping and all delimiter-balancing rules;
 //! callers can run it against worker-local string tables before deterministic module aggregation.
 
-use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
@@ -537,12 +536,13 @@ pub fn tokenize(
     );
     let mut last_meaningful_token_kind: Option<TokenKind> = None;
     let mut meaningful_token_before_last_kind: Option<TokenKind> = None;
-    let mut token_stats = TokenStats::default();
 
     loop {
-        token_log!(#token);
-        token_stats.accumulate(&token.kind);
-
+        // Compact tag/canonical logging keeps `show_tokens` on the stable taxonomy
+        // instead of the legacy `Token`/`TokenKind` Debug value. Tag and canonical text come
+        // from the shared descriptor authority, and no cursor or token reference is retained
+        // beyond this statement.
+        token_log!(token.kind.token_tag().raw(), " ", token.kind.token_tag().descriptor().text());
         if token.kind == TokenKind::Eof {
             break;
         }
@@ -583,7 +583,10 @@ pub fn tokenize(
         crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
     );
     let numeric_literals = std::mem::take(&mut stream.numeric_literals);
-    let mut file_tokens = FileTokens::new_with_identity_and_numeric_store(
+    // Stats install from the canonical shapes packed inside the constructor below, so this
+    // loop owns no separate `TokenKind` classification pass and performs no
+    // default-then-rewrite on the returned stats.
+    let file_tokens = FileTokens::new_with_identity_and_numeric_store(
         src_path,
         file_id,
         None,
@@ -591,7 +594,6 @@ pub fn tokenize(
         path_syntax,
         numeric_literals,
     );
-    file_tokens.set_token_stats(token_stats);
     Ok(file_tokens)
 }
 

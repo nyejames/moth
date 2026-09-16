@@ -6,14 +6,16 @@
 //!      callers can share syntax without rebuilding type-environment policy here.
 
 use super::*;
-use crate::compiler_frontend::compiler_messages::InvalidTypeAnnotationReason;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticToken, InvalidTypeAnnotationReason,
+};
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tokenizer::tokens::{
     FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenKind, TokenRange, TokenRangeError,
     TokenRef, TokenTag,
@@ -112,9 +114,11 @@ impl<'a> TypeTokenWindow<'a> {
     }
 
     fn token_tag_at(self, index: usize) -> Option<TokenTag> {
-        self.token_kind_at(index)
-            .map(|kind| kind.token_tag())
-            .or_else(|| self.get(index).map(TokenRef::tag))
+        // The tag is stable across the remapped compatibility lane, so read the
+        // canonical view first and only fall back to the cloned lane.
+        self.get(index)
+            .map(TokenRef::tag)
+            .or_else(|| self.token_kind_at(index).map(|kind| kind.token_tag()))
     }
 
     fn token_string_id_at(self, index: usize) -> Option<StringId> {
@@ -272,13 +276,21 @@ fn parse_type_atom(
 
         TokenKind::Must | TokenKind::TraitThis => {
             if matches!(context, TypeAnnotationContext::TraitRequirement)
-                && token_stream.current_token_kind() == &TokenKind::TraitThis
+                && token_stream
+                    .canonical_cursor()
+                    .current()
+                    .is_some_and(|token| token.tag() == TokenTag::TRAIT_THIS)
             {
                 token_stream.advance();
                 return Ok(ParsedTypeRef::This { span });
             }
-            let _keyword = reserved_trait_keyword_or_dispatch_mismatch(
-                token_stream.current_token_kind(),
+            let tag = token_stream
+                .canonical_cursor()
+                .current()
+                .map(|token| token.tag())
+                .expect("validated declaration cursor token");
+            let _keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+                tag,
                 current_source_span(token_stream),
                 compilation_stage(context),
                 "type annotation parsing",
@@ -314,12 +326,22 @@ fn parse_type_atom(
             token_stream,
             context,
         ))),
-        TokenKind::Of => Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::unexpected_token(
-                token_stream.current_token_kind().to_owned(),
-                current_source_span(token_stream),
-            ),
-        )),
+        TokenKind::Of => {
+            let Some(found) = token_stream.canonical_cursor().current() else {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::unexpected_end_of_file(
+                        None,
+                        current_source_span(token_stream),
+                    ),
+                ));
+            };
+            Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::unexpected_token_from_ref(
+                    found,
+                    current_source_span(token_stream),
+                ),
+            ))
+        },
         TokenKind::Symbol(type_name) => {
             let type_name = type_name.to_owned();
             token_stream.advance();
@@ -339,13 +361,19 @@ fn parse_type_atom(
                             token_stream.advance();
                         }
                         other => {
+                            let span = current_source_span(token_stream);
+                            let found = DiagnosticToken::from_token_ref(
+                                token_stream
+                                    .canonical_cursor()
+                                    .current()
+                                    .expect("validated declaration cursor token"),
+                            );
+                            debug_assert_eq!(other.token_tag(), found.tag());
                             return Err(HeaderParseFailure::Diagnostic(
                                 CompilerDiagnostic::invalid_type_annotation(
                                     context,
-                                    InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                                        found: other.into(),
-                                    },
-                                    current_source_span(token_stream),
+                                    InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
+                                    span,
                                 ),
                             ));
                         }
@@ -379,26 +407,38 @@ fn parse_type_atom(
                         | TokenKind::MultiplyAssign
                 ) =>
         {
+            let found = DiagnosticToken::from_token_ref(
+                token_stream
+                    .canonical_cursor()
+                    .current()
+                    .expect("validated declaration cursor token"),
+            );
+            debug_assert_eq!(other.token_tag(), found.tag());
             Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::invalid_type_annotation(
                     context,
-                    InvalidTypeAnnotationReason::InvalidTokenAfterName {
-                        token: other.to_owned().into(),
-                    },
+                    InvalidTypeAnnotationReason::InvalidTokenAfterName { token: found },
                     current_source_span(token_stream),
                 ),
             ))
         }
-        _ => Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_type_annotation(
-                context,
-                InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                    found: token_stream.current_token_kind().to_owned().into(),
-                },
-                current_source_span(token_stream),
-            ),
-        )),
-    }
+        _ => {
+            let span = current_source_span(token_stream);
+            let Some(token) = token_stream.canonical_cursor().current() else {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::unexpected_end_of_file(None, span),
+                ));
+            };
+            let found = DiagnosticToken::from_token_ref(token);
+            Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_type_annotation(
+                    context,
+                    InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
+                    span,
+                ),
+            ))
+        },
+}
 }
 
 fn parse_type_postfixes(
@@ -500,10 +540,18 @@ fn parse_collection_type(
     if collection_type_slice_can_start_type(inner, context, string_table) {
         let parsed_slice = parse_type_slice(inner, context, string_table)?;
         if let Some(extra_token) = parsed_slice.next_token {
+            let found = DiagnosticToken::try_from_token_ref(extra_token.view).map_err(|error| {
+                HeaderParseFailure::Infrastructure(
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "collection element trailing token",
+                    ),
+                )
+            })?;
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::expected_token(
-                    TokenKind::CloseCurly,
-                    Some(extra_token.kind),
+                CompilerDiagnostic::expected_token_from_tags(
+                    TokenTag::CLOSE_CURLY,
+                    Some(found),
                     Some(SourceSpan::new(inner.source_id(), extra_token.span)),
                 ),
             ));
@@ -589,9 +637,9 @@ fn collect_collection_inner_range(
             }
             TokenKind::Eof => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::expected_token(
-                        TokenKind::CloseCurly,
-                        Some(TokenKind::Eof),
+                    CompilerDiagnostic::expected_token_from_tags(
+                        TokenTag::CLOSE_CURLY,
+                        Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
                         current_source_span(token_stream),
                     ),
                 ));
@@ -782,10 +830,15 @@ fn try_parse_map_side(
 
     let parsed_slice = parse_type_slice(tokens, context, string_table)?;
     if let Some(extra_token) = parsed_slice.next_token {
+        let found = DiagnosticToken::try_from_token_ref(extra_token.view).map_err(|error| {
+            HeaderParseFailure::Infrastructure(
+                CompilerDiagnostic::token_view_invariant_error(error, "map side trailing token"),
+            )
+        })?;
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::expected_token(
-                TokenKind::CloseCurly,
-                Some(extra_token.kind),
+            CompilerDiagnostic::expected_token_from_tags(
+                TokenTag::CLOSE_CURLY,
+                Some(found),
                 Some(SourceSpan::new(tokens.source_id(), extra_token.span)),
             ),
         ));
@@ -850,17 +903,22 @@ fn map_side_looks_like_postfix_capacity(
     false
 }
 
-struct ParsedTypeSlice {
+struct ParsedTypeSlice<'a> {
     parsed_type: ParsedTypeRef,
-    next_token: Option<Token>,
+    next_token: Option<ParsedTypeSliceToken<'a>>,
+}
+
+struct ParsedTypeSliceToken<'a> {
+    view: TokenRef<'a>,
+    span: LocalSpan,
 }
 
 /// Parse a bounded canonical range as a type annotation.
-fn parse_type_slice(
-    tokens: TypeTokenWindow<'_>,
+fn parse_type_slice<'a>(
+    tokens: TypeTokenWindow<'a>,
     context: TypeAnnotationContext,
     string_table: &StringTable,
-) -> TypeParseResult<ParsedTypeSlice> {
+) -> TypeParseResult<ParsedTypeSlice<'a>> {
     let cursor = tokens.cursor().map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "type slice range was invalid: {error:?}",
@@ -887,10 +945,14 @@ fn parse_type_slice(
         DeclarationCursor::new(cursor).map_err(HeaderParseFailure::Infrastructure)?
     };
     let parsed_type = parse_required_type(&mut stream, context, string_table)?;
-    let next_token = if stream.current_token_kind() == &TokenKind::Eof {
-        None
-    } else {
-        Some(stream.current_token())
+    let next_token = match stream.canonical_cursor().current() {
+        Some(view) if stream.current_token_kind() != &TokenKind::Eof => {
+            Some(ParsedTypeSliceToken {
+                view,
+                span: view.span(),
+            })
+        }
+        _ => None,
     };
 
     Ok(ParsedTypeSlice {
@@ -1033,11 +1095,16 @@ fn parse_generic_arguments(
                 ));
             }
             other => {
+                let span = current_source_span(token_stream);
+                let found = DiagnosticToken::from_token_ref(
+                    token_stream
+                        .canonical_cursor()
+                        .current()
+                        .expect("validated declaration cursor token"),
+                );
+                debug_assert_eq!(other.token_tag(), found.tag());
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token(
-                        other.to_owned(),
-                        current_source_span(token_stream),
-                    ),
+                    CompilerDiagnostic::unexpected_token_from_tag(found, span),
                 ));
             }
         }
@@ -1189,7 +1256,7 @@ fn type_keyword_deferred_error(
     CompilerDiagnostic::invalid_type_annotation(
         context,
         InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-            found: TokenKind::Type.into(),
+            found: DiagnosticToken::from_static_tag(TokenTag::TYPE),
         },
         current_source_span(token_stream),
     )

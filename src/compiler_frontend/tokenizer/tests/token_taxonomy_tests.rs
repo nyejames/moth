@@ -332,3 +332,105 @@ fn schema_classifications_match_frontend_semantics() {
     assert_eq!(TokenKind::Or.precedence(), Some(0));
     assert_eq!(TokenKind::Assign.precedence(), None);
 }
+
+#[test]
+fn stats_classification_uses_schema_authority_with_legacy_parity() {
+    use crate::compiler_frontend::arena::TokenStats;
+
+    // Every tag funnels through the schema-owned stats facts, so representative and
+    // boundary tags share one decision with no hand-maintained operator table.
+    for tag in TokenTag::all() {
+        let mut from_tag = TokenStats::default();
+        from_tag.accumulate_tag(*tag);
+        assert_eq!(from_tag.total_tokens, 1);
+
+        let mut from_shape = TokenStats::default();
+        // `TokenShape::new` rejects packed payload handles, so only static tags round-trip
+        // here; payload tags assert through their tag path above plus the kind parity below.
+        if let Some(shape) = TokenShape::new(*tag, 0, 0) {
+            from_shape.accumulate_shape(shape);
+            assert_eq!(from_shape, from_tag);
+        }
+    }
+
+    // Legacy operator/literal sets keep their exact bucket semantics through tags.
+    for kind in [
+        TokenKind::Add,
+        TokenKind::Subtract,
+        TokenKind::Multiply,
+        TokenKind::Divide,
+        TokenKind::Modulus,
+        TokenKind::IntDivide,
+        TokenKind::Exponent,
+        TokenKind::Negative,
+        TokenKind::AddAssign,
+        TokenKind::SubtractAssign,
+        TokenKind::MultiplyAssign,
+        TokenKind::DivideAssign,
+        TokenKind::ModulusAssign,
+        TokenKind::ExponentAssign,
+        TokenKind::IntDivideAssign,
+        TokenKind::LessThan,
+        TokenKind::LessThanOrEqual,
+        TokenKind::GreaterThan,
+        TokenKind::GreaterThanOrEqual,
+        TokenKind::Is,
+        TokenKind::And,
+        TokenKind::Or,
+        TokenKind::Not,
+        TokenKind::Bang,
+        TokenKind::QuestionMark,
+        TokenKind::Copy,
+        TokenKind::ChannelSend,
+        TokenKind::ChannelReceive,
+        TokenKind::Ampersand,
+        TokenKind::Arrow,
+        TokenKind::FatArrow,
+    ] {
+        assert!(kind.token_tag().is_stats_operator(), "{kind:?} stays an operator");
+        let mut stats = TokenStats::default();
+        stats.accumulate_tag(kind.token_tag());
+        assert_eq!(stats.operators, 1, "{kind:?} fills the operator bucket");
+    }
+
+    for kind in [
+        TokenKind::StringSliceLiteral(StringId::from_index(0)),
+        TokenKind::RawStringLiteral(StringId::from_index(0)),
+        TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut Default::default())),
+        TokenKind::CharLiteral('x'),
+        TokenKind::BoolLiteral(true),
+        TokenKind::NoneLiteral,
+    ] {
+        assert!(kind.token_tag().is_stats_literal(), "{kind:?} stays a literal");
+    }
+    // Raw strings stay literal-adjacent in the expression taxonomy only by exclusion from
+    // `is_operand_start`; the stats bucket keeps the legacy literal count.
+    assert!(!TokenKind::RawStringLiteral(StringId::from_index(0)).is_operand_start());
+    let mut raw_stats = TokenStats::default();
+    raw_stats.accumulate_tag(TokenKind::RawStringLiteral(StringId::from_index(0)).token_tag());
+    assert_eq!(raw_stats.literals, 1);
+    // Delimiter-adjacent `FatArrow` counts as an operator (not a delimiter bucket), while the
+    // collection delimiters keep their own bucket.
+    assert!(TokenKind::FatArrow.token_tag().is_stats_operator());
+    assert!(TokenKind::FatArrow.token_tag().is_delimiter());
+    for kind in [TokenKind::OpenCurly, TokenKind::CloseCurly, TokenKind::Comma] {
+        assert!(!kind.token_tag().is_stats_operator());
+        let mut stats = TokenStats::default();
+        stats.accumulate_tag(kind.token_tag());
+        assert_eq!(stats.map_or_collection_delimiters, 1);
+    }
+
+    // Keyword-adjacent operators (`copy`) and bang spellings keep their legacy buckets.
+    assert!(TokenKind::Copy.token_tag().is_keyword());
+    assert!(TokenKind::Copy.token_tag().is_stats_operator());
+    for kind in [TokenKind::Return, TokenKind::ReturnBang] {
+        let mut stats = TokenStats::default();
+        stats.accumulate_tag(kind.token_tag());
+        assert_eq!(stats.return_tokens, 1);
+    }
+    for kind in [TokenKind::Cast, TokenKind::CastBang] {
+        let mut stats = TokenStats::default();
+        stats.accumulate_tag(kind.token_tag());
+        assert_eq!(stats.cast_tokens, 1);
+    }
+}

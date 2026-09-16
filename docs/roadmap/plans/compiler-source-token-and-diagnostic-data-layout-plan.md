@@ -12,11 +12,11 @@
 > plus validation-lane stabilization). The bounded pre-Phase-3 validation restoration is complete:
 > warning-denied native Clippy and the integration suite are green, and the only remaining red gate
 > is the explicitly accepted inherited generic-instantiation scaling exception recorded below.
-> Phase 3 fixed-token/source-owned migration is active: Slices 3A–3E and 3F1–3F4 are accepted,
-> with 3F5 support-surface migration next. Package work stays paused until accepted Phase 3. After
-> Phase 3 this plan pauses: Wiring V1, then native result slots and Core const evaluation run first,
-> and Phase 4 resumes only after a rebase and explicit reactivation. The roadmap retains those
-> separate checkpoints.
+> Phase 3 fixed-token/source-owned migration is active: Slices 3A–3E, 3F1–3F5 and 3G are accepted,
+> with 3H old-token deletion next. Package work stays paused until accepted Phase 3. After Phase 3
+> this plan pauses: Wiring V1, then native result slots and Core const evaluation run first, and Phase
+> 4 resumes only after a rebase and explicit reactivation. The roadmap retains those separate
+> checkpoints.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -76,7 +76,7 @@ ACTIVE_PLAN:
 - Phase: Phase 2 complete-path interning remains accepted at continuation checkpoint `c17672bb5` on
   `diagnostic-data-layout-changes`, with diagnostic correction `e7d9a7ab5` and merged-revision
   validation-lane stabilization. Phase 3 fixed-token/source-owned migration is active; Slices 3A–3E
-  and 3F1–3F4 are accepted, and 3F5 support-surface migration is next.
+  and 3F1–3G are accepted, and 3H old-token deletion is next.
 - Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
   diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
 - Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
@@ -120,8 +120,8 @@ CURRENT_WORKSPACE_STATE:
   benchmark preflight cases. It remains red only because the inherited generic-instantiation
   series fits `n^1.81` in the dedicated baseline rerun (`n^1.80` in the later full-gate rerun)
   against its unchanged `n^1.70` budget; the recorded current-main comparison was `n^1.77`.
-- Phase 3 fixed-token/source-owned migration is active. Slices 3A–3E and 3F1–3F4 are accepted;
-  3F5 support-surface migration is the next implementation slice. The named generic-instantiation
+- Phase 3 fixed-token/source-owned migration is active. Slices 3A–3E and 3F1–3F5 plus 3G are
+  accepted; 3H old-token deletion is the next implementation slice. The named generic-instantiation
   scaling exception remains the baseline and is not raised or loosened.
 - After Phase 3, this plan pauses. Wiring V1 runs, then native result slots and Core const
   evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
@@ -1052,22 +1052,60 @@ mutation or recursive re-entry, and TIR/slot/formatter state retains only payloa
 Low-memory validation (`CARGO_BUILD_JOBS=1`, `CARGO_PROFILE_DEV_DEBUG=0`) passed `cargo check -p
 moth --lib` and the template AST suite (`696` tests). The independent Phase 3F4 audit passed
 after correcting diagnostic-span attachment and unchecked fallback paths.
-- [ ] **3F5 — support surfaces:** token-based diagnostics, tests, debug/show-token output, `TokenStats` and benchmark classification; extend the owning test source helper with token-store construction rather than adding parser-specific fixture builders
-- [ ] in every batch, use short-lived token views only; no durable Rust reference or self-referential structure may be introduced
+- [x] **3F5 — support surfaces:** token-based diagnostics, tests, debug/show-token output, `TokenStats` and benchmark classification; extend the owning test source helper with token-store construction rather than adding parser-specific fixture builders
+Slice 3F5 decision (2026-09-16): support surfaces now use canonical descriptor/tag facts for
+`TokenStats`, compact show-token output, and token-based diagnostics. The test source helper owns
+real lexer/token-store construction for focused suites; no parser-specific fixture builder or
+second source-token store was added. Low-memory validation passed the library check plus focused
+token statistics (`4`), diagnostic model (`80`), token taxonomy (`5`), lexer (`98`), declaration,
+header, source-helper, AST, template, parser, cursor, remap and show-token suites. Existing
+warnings remain unchanged.
+- [x] in every batch, use short-lived token views only; no durable Rust reference or self-referential structure may be introduced
 
 ### Slice 3G — Add the durable diagnostic token projection
 
-- [ ] implement exact 8-byte `DiagnosticToken`
-- [ ] reuse `TokenTag` and descriptor spelling; preserve only the one compact ID/immediate the
-  diagnostic needs (path category plus an optional `PathId`, numeric kind/text, string identity)
+- [x] implement exact 8-byte `DiagnosticToken`
+- [x] reuse `TokenTag` and descriptor spelling; preserve only the one compact ID/immediate the
+  diagnostic needs (path category, numeric kind/text, char/bool immediate, or string identity)
   and never the complete tokenizer record
-- [ ] inventory every surviving diagnostic query against `Token`/`TokenKind` and map each one to
+- [x] inventory every surviving diagnostic query against `Token`/`TokenKind` and map each one to
   the facts the projection and its typed side stores must preserve (tag, spelling, path identity,
   numeric text/kind, string identity); extend the typed side stores or the projection where a
   needed fact would otherwise be lost
-- [ ] prove diagnostics render after source token/cold stores are gone, with equivalence tests
+- [x] prove diagnostics render after source token/cold stores are gone, with equivalence tests
   over the full surviving diagnostic set comparing old-model and projected rendering while the
   source token/cold stores still exist and again after they are dropped
+
+Slice 3G decision (2026-09-16): `DiagnosticToken` is a checked eight-byte projection over the
+shared `TokenTag` descriptor authority. Static and path tokens retain only their tag; names,
+styles, strings and numeric authored text retain one `StringId`; numeric flags retain the
+whole/decimal/exponent kind; char and boolean literals retain one immediate. No surviving
+diagnostic query needs path spelling from a token, so path projections intentionally drop the
+`PathSyntaxId`; diagnostics that need semantic path identity retain their separate `PathId` payload.
+The surviving token-bearing payload set is `ExpectedToken`, `UnexpectedToken`,
+`InvalidTypeAnnotation::{InvalidTokenAfterName,ExpectedTypeAnnotation}`,
+`InvalidGenericParameter::InvalidToken`, and
+`InvalidFunctionSignature::{MissingArrowOrColon,MissingCommaOrColon}`. Legacy `TokenKind` queries
+remain only at explicit compatibility adapters until 3H removes that architecture; every query
+maps to one of the retained facts above or to the shared descriptor spelling.
+
+Inventory: direct legacy token-diagnostic constructors remain in
+`ast/expressions/{anonymous_const_record,call_arguments,choice_constructor,parse_expression,parse_expression_dispatch,parse_expression_places}.rs`,
+`templates/template_body_parser.rs` and `templates/template_head_parser/{directive_args,head_parser,reactive_subscriptions}.rs`,
+`declaration_syntax/{build_config_contract,choice,declaration_shell}.rs`, and the
+`ast/type_resolution/{lookup,resolve_type}.rs` compatibility paths. Canonical-view diagnostics
+already cover declaration/signature/type consumers in
+`declaration_syntax/{generic_parameters,signature_members}.rs` and `type_syntax/parse.rs`;
+the remaining constructors use the same immediate `TokenKind` adapter and are scheduled for 3H
+cutover rather than retaining a second durable token representation.
+
+The audit correction closes the default-seeded packed-store `TokenStats` parity, keeps export-block
+view failures on the infrastructure lane, and remaps projected generic-parameter symbol IDs with
+the other token-bearing payloads.
+Projection tests cover every descriptor payload class and every token-bearing payload variant,
+compare legacy and canonical-view rendering before source/cold-store release, and render the
+projected payloads again after the frozen `FileTokens` owner is dropped. The focused projection
+suite passes `6` tests, including cross-domain `StringId` remapping for generic-parameter tokens.
 
 ### Slice 3H — Delete the old token architecture
 

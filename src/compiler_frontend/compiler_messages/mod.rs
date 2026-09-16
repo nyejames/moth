@@ -78,6 +78,9 @@ pub(crate) use module_diagnostics::ModuleDiagnostics;
 #[cfg(test)]
 #[path = "tests/diagnostic_model_tests.rs"]
 mod diagnostic_model_tests;
+#[cfg(test)]
+#[path = "tests/diagnostic_token_projection_tests.rs"]
+mod diagnostic_token_projection_tests;
 
 #[cfg(test)]
 #[path = "tests/module_diagnostics_tests.rs"]

@@ -145,8 +145,10 @@ macro_rules! define_reasoned_diagnostic_registry {
             Syntax::InvalidGenericParameter => {
                 payload: InvalidGenericParameter;
                 fields: { reason: InvalidGenericParameterReason }
-                bindings: {}
-                remap: {}
+                bindings: { reason }
+                remap: {
+                    reason.remap_string_ids(remap);
+                }
                 descriptor: { "MOTH-SYNTAX-0020", "Invalid generic parameter", Error }
             },
             Syntax::InvalidTemplateDirective => {
