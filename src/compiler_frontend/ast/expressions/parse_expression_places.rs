@@ -31,7 +31,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 
 pub(super) struct ParsedCopyPlace {
     pub(super) place: PlaceExpression,
@@ -80,10 +80,10 @@ pub(super) fn parse_mutable_receiver_expression(
     // The mutable marker must be followed by a field-access chain; bare `~name` is not valid.
     // When the author wrote `~name = ...`, the intent was an assignment target, not a receiver
     // call, so report the assignment-target reason instead of the receiver-call reason.
-    if token_stream.peek_next_token() != Some(&TokenKind::Dot) {
+    if token_stream.peek_next_tag() != Some(TokenTag::DOT) {
         if token_stream
-            .peek_next_token()
-            .is_some_and(|token| token.is_assignment_operator())
+            .peek_next_tag()
+            .is_some_and(TokenTag::is_assignment_operator)
         {
             return Err(CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,

@@ -54,6 +54,13 @@ fn next_token_kind(token_stream: &AstCursor<'_>) -> Option<TokenKind> {
         .token_kind_at(token_stream.position().saturating_add(1))
         .or_else(|| token_stream.peek_next_token().cloned())
 }
+/// Narrow tag boundary: classifies the already-cloned lookahead kind without re-reading
+/// the cursor, preserving the exact single-lookahead semantics.
+fn next_token_is_assignment_operator(next_token: &Option<TokenKind>) -> bool {
+    next_token
+        .as_ref()
+        .is_some_and(|kind| kind.token_tag().is_assignment_operator())
+}
 
 /// Builds the expression payload for a declaration reference without choosing an AST node shape.
 ///
@@ -308,7 +315,7 @@ fn parse_postfix_chain_typed(
             .is_some()
             && next_token != Some(TokenKind::OpenParenthesis)
         {
-            if next_token.is_some_and(|kind| kind.is_assignment_operator()) {
+            if next_token_is_assignment_operator(&next_token) {
                 InvalidFieldAccessReason::ChoicePayloadMutation
             } else {
                 InvalidFieldAccessReason::ChoicePayloadDeferred
@@ -333,7 +340,7 @@ fn parse_postfix_chain_typed(
     // ----------------------------
     //  Validate assignment receiver is a place
     // ----------------------------
-    if token_stream.current_token_kind().is_assignment_operator() {
+    if token_stream.current_tag().is_assignment_operator() {
         let receiver_expression = expression_from_postfix_node(&receiver_node)?;
         if place_expression_from_expression(&receiver_expression).is_none() {
             let diagnostic = CompilerDiagnostic::invalid_assignment_target(
@@ -356,7 +363,7 @@ fn parse_postfix_chain_typed(
         let marker_span = authored_marker_span.or(receiver_node.span);
         // When the chain is followed by an assignment operator, the author wrote `~place = ...`
         // and intended an assignment target, not a receiver call.
-        if token_stream.current_token_kind().is_assignment_operator() {
+        if token_stream.current_tag().is_assignment_operator() {
             return Err(CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
                 None,

@@ -80,13 +80,12 @@ fn deferred_block_error(
                 .position()
                 .checked_add(1)
                 .and_then(|next| cursor.token_kind_at(next))
-                .is_some_and(|kind| kind.is_assignment_operator())
+                .is_some_and(|kind| kind.token_tag().is_assignment_operator())
         })
         .unwrap_or_else(|_| {
-            matches!(
-                token_stream.peek_next_token(),
-                Some(token) if token.is_assignment_operator()
-            )
+            token_stream
+                .peek_next_tag()
+                .is_some_and(|tag| tag.is_assignment_operator())
         });
     if next_is_assignment {
         let keyword_id = string_table.intern(keyword);

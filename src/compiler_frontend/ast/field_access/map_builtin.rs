@@ -109,7 +109,7 @@ pub(super) fn parse_map_builtin_member_typed(
 
         // `length` is a property, not a call, so there are no arguments to parse.
         // Reject assignment through `map.length`.
-        if token_stream.current_token_kind().is_assignment_operator() {
+        if token_stream.current_tag().is_assignment_operator() {
             return Err(CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::ReadOnlyMapProperty,
                 None,
@@ -267,9 +267,7 @@ pub(super) fn parse_map_builtin_member_typed(
     };
 
     // Reject assignment through `map.get(...)`.
-    if matches!(builtin, MapBuiltinOp::Get)
-        && token_stream.current_token_kind().is_assignment_operator()
-    {
+    if matches!(builtin, MapBuiltinOp::Get) && token_stream.current_tag().is_assignment_operator() {
         return Err(CompilerDiagnostic::invalid_assignment_target(
             InvalidAssignmentTargetReason::MapGetTargetNotWritable,
             None,

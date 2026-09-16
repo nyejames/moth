@@ -464,7 +464,7 @@ fn inline_else_follows_before_statement_end(token_stream: &AstCursor) -> bool {
                     .is_some_and(|previous_index| {
                         cursor
                             .token_kind_at(previous_index)
-                            .is_some_and(|kind| kind.continues_expression())
+                            .is_some_and(|kind| kind.token_tag().continues_expression())
                     });
                 let mut next_non_newline_index = boundary_index.checked_add(1);
                 let mut next_kind = None;
@@ -489,7 +489,7 @@ fn inline_else_follows_before_statement_end(token_stream: &AstCursor) -> bool {
                 if next_kind == TokenKind::Else {
                     return true;
                 }
-                if !previous_continues && !next_kind.continues_expression() {
+                if !previous_continues && !next_kind.token_tag().continues_expression() {
                     return false;
                 }
 
@@ -534,7 +534,7 @@ fn inline_else_follows_before_statement_end_in_cursor(
                     .is_some_and(|previous_index| {
                         token_stream
                             .token_kind_at(previous_index)
-                            .is_some_and(|kind| kind.continues_expression())
+                            .is_some_and(|kind| kind.token_tag().continues_expression())
                     });
                 let mut next_non_newline_index = boundary_index.checked_add(1);
                 while token_stream.token_kind_at(next_non_newline_index.unwrap_or(usize::MAX))
@@ -553,7 +553,7 @@ fn inline_else_follows_before_statement_end_in_cursor(
                 if next_kind == TokenKind::Else {
                     return true;
                 }
-                if !previous_continues && !next_kind.continues_expression() {
+                if !previous_continues && !next_kind.token_tag().continues_expression() {
                     return false;
                 }
 

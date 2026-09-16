@@ -312,9 +312,13 @@ fn schema_classifications_match_frontend_semantics() {
         TokenKind::OpenCurly,
         TokenKind::Copy,
     ] {
-        assert!(kind.is_operand_start());
+        assert!(kind.token_tag().is_operand_start());
     }
-    assert!(!TokenKind::RawStringLiteral(StringId::from_index(0)).is_operand_start());
+    assert!(
+        !TokenKind::RawStringLiteral(StringId::from_index(0))
+            .token_tag()
+            .is_operand_start()
+    );
 
     assert!(TokenKind::ReturnBang.is_keyword());
     assert!(TokenKind::CastBang.is_keyword());
@@ -417,7 +421,11 @@ fn stats_classification_uses_schema_authority_with_legacy_parity() {
     }
     // Raw strings stay literal-adjacent in the expression taxonomy only by exclusion from
     // `is_operand_start`; the stats bucket keeps the legacy literal count.
-    assert!(!TokenKind::RawStringLiteral(StringId::from_index(0)).is_operand_start());
+    assert!(
+        !TokenKind::RawStringLiteral(StringId::from_index(0))
+            .token_tag()
+            .is_operand_start()
+    );
     let mut raw_stats = TokenStats::default();
     raw_stats.accumulate_tag(TokenKind::RawStringLiteral(StringId::from_index(0)).token_tag());
     assert_eq!(raw_stats.literals, 1);

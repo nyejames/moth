@@ -118,7 +118,7 @@ pub(crate) fn parse_this_statement(
 
     match peek_next_kind(token_stream).as_ref() {
         // Direct reassignment of `this` is never allowed.
-        Some(next_token) if next_token.is_assignment_operator() => {
+        Some(next_token) if next_token.token_tag().is_assignment_operator() => {
             Err(CompilerDiagnostic::invalid_this_usage(
                 InvalidThisUsageReason::Reassignment,
                 Some(token_stream.current_span()),
@@ -139,7 +139,7 @@ pub(crate) fn parse_this_statement(
                 path_fork,
             )?;
 
-            if token_stream.current_token_kind().is_assignment_operator() {
+            if token_stream.current_tag().is_assignment_operator() {
                 let Some(target) = place_expression_from_expression(&accessed_node) else {
                     return Err(CompilerDiagnostic::invalid_assignment_target(
                         InvalidAssignmentTargetReason::TemporaryNotAssignable,
@@ -266,7 +266,7 @@ pub(crate) fn parse_symbol_statement(
     if let Some(existing_reference) = context.get_reference(&symbol_id) {
         match peek_next_kind(token_stream).as_ref() {
             // Direct reassignment of an existing local variable.
-            Some(next_token) if next_token.is_assignment_operator() => {
+            Some(next_token) if next_token.token_tag().is_assignment_operator() => {
                 token_stream.advance();
                 let mutation_node = handle_mutation(
                     token_stream,
@@ -294,7 +294,7 @@ pub(crate) fn parse_symbol_statement(
                     path_fork,
                 )?;
 
-                if token_stream.current_token_kind().is_assignment_operator() {
+                if token_stream.current_tag().is_assignment_operator() {
                     let Some(target) = place_expression_from_expression(&accessed_node) else {
                         return Err(CompilerDiagnostic::invalid_assignment_target(
                             InvalidAssignmentTargetReason::TemporaryNotAssignable,

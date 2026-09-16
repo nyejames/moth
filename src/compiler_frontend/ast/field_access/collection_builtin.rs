@@ -252,7 +252,7 @@ pub(super) fn parse_collection_builtin_member_typed(
     };
 
     if matches!(builtin, CollectionBuiltinOp::Get)
-        && token_stream.current_token_kind().is_assignment_operator()
+        && token_stream.current_tag().is_assignment_operator()
     {
         return Err(CompilerDiagnostic::invalid_assignment_target(
             InvalidAssignmentTargetReason::CollectionGetTargetNotWritable,

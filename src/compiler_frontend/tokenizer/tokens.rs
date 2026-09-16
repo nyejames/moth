@@ -5347,11 +5347,6 @@ impl TokenKind {
         self.token_tag().can_end_expression()
     }
 
-    /// Returns true when this token may begin a value operand in expression dispatch.
-    pub(crate) fn is_operand_start(&self) -> bool {
-        self.token_tag().is_operand_start()
-    }
-
     #[cfg(test)]
     /// Returns true for source words classified as ordinary language keywords.
     pub(crate) fn is_keyword(&self) -> bool {

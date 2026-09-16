@@ -112,10 +112,10 @@ fn unexpected_token_at_current(
     }
 }
 
-fn is_value_operand_start_token(token: &TokenKind) -> bool {
-    // The schema class is the canonical operand-start authority; `RawStringLiteral` keeps its
+fn is_value_operand_start_token(tag: TokenTag) -> bool {
+    // The schema class is the canonical operand-start authority; `RAW_STRING_LITERAL` keeps its
     // legacy exclusion because raw strings never appear in value-operand position here.
-    token.is_operand_start() && !matches!(token, TokenKind::RawStringLiteral(_))
+    tag.is_operand_start() && tag != TokenTag::RAW_STRING_LITERAL
 }
 /// Skips value-less comment templates before checking what follows a value template.
 fn reject_second_operand_after_value_template(
@@ -148,7 +148,7 @@ fn reject_second_operand_after_value_template(
         }
     }
 
-    if is_value_operand_start_token(token_stream.current_token_kind()) {
+    if is_value_operand_start_token(token_stream.current_tag()) {
         return Err(CompilerDiagnostic::invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
             Some(token_stream.current_span()),
@@ -439,10 +439,10 @@ pub(super) fn dispatch_expression_token(
     }
 
     // Reject definite adjacency before semantic name, call or constructor parsing.
-    if is_value_operand_start_token(&token) {
+    let token_tag = token.token_tag();
+    if is_value_operand_start_token(token_tag) {
         reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
     }
-    let token_tag = token.token_tag();
 
     // This state machine is intentionally flat: each token either appends one AST node, advances
     // past a nested parse, or signals the caller that the surrounding grammar owns the delimiter.
@@ -984,7 +984,7 @@ fn dispatch_newline(
     }
 
     if token_stream.position() < token_stream.length()
-        && token_stream.current_token_kind().continues_expression()
+        && token_stream.current_tag().continues_expression()
     {
         return Ok(ExpressionTokenStep::Continue);
     }
