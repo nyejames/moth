@@ -1,0 +1,32 @@
+**Accepted queued design.** Anonymous records using the notation below are not
+yet implemented. Calls and named constructors already use parentheses.
+
+MON means Moth Object Notation. MON syntax gives supplied arguments and record
+values a common notation. Pipes declare fields or parameters. Parentheses supply
+values or group an expression.
+
+[codeblock, $code("moth"):
+    Size = |
+        width Int,
+        height Int,
+    |
+
+    size = Size(width = 1280, height = 720)
+
+    settings #= (
+        title = "Strategy",
+        window = (width = 1280, height = 720),
+    )
+]
+
+Every anonymous field has a name and a value. Records can nest directly.
+`#=` requires all their values to be known during compilation.
+
+`(value)` groups an expression. `(name = value)` constructs a one-field record.
+Commas separate entries, and a final comma is optional. Moth has no tuple values.
+
+Named types still need their constructors. An anonymous record with matching
+fields does not become a `Size`.
+
+The MON serialisation format is separate future work. This syntax alone does
+not turn a record into text or make every Moth value serialisable.

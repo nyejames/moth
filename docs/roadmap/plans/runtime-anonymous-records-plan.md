@@ -2,8 +2,8 @@
 
 ## Status
 
-- Status: queued.
-- Current slice: not started.
+- Status: queued. The canonical and Basic runtime references are published.
+- Current slice: implementation not started.
 - Blockers: shared MON syntax with nested const records, accepted numeric semantics and the required ordinary-struct validation paths must be delivered.
 - Next action: establish the activation tree and complete Phase 0.
 
@@ -30,86 +30,23 @@ Use the activation tree's current APIs. Reuse delivered MON parsing rather than 
 
 Read `AGENTS.md`, the full style guide, the language cheatsheet, both compiler/build architecture references and the complete testing guide. Follow the validation guide for each final gate.
 
-Read `docs/src/developer-docs/language/overview.mtf` and its published MON syntax, const-record, struct, function, collection and Design Scope references. Read `docs/src/developer-docs/memory-management/overview.mtf` and the routed reference/access, copy, borrow, lifetime/escape and backend contracts.
+Read `docs/src/developer-docs/language/overview.mtf`, `docs/src/docs/language-overview/mon-syntax.mtf`, `docs/src/docs/structs/anonymous-records.mtf` and the routed const-record, struct, function, collection and Design Scope references. Read `docs/src/developer-docs/memory-management/overview.mtf` and the routed reference/access, copy, borrow, lifetime/escape and backend contracts.
 
-The accepted runtime contract is published in a canonical unsuffixed structs reference before implementation. That reference owns semantics. MON's shared grammar belongs to its language reference rather than this plan. The progress matrices report actual support.
+The accepted runtime contract is already published in `docs/src/docs/structs/anonymous-records.mtf`, with a Basic companion and a section on the Structs page. Those references own semantics and explicitly label runtime support as deferred. Contract publication is complete, not a task to repeat. The progress matrices continue to report actual support.
 
-## Accepted runtime model
+## Published contract and implementation decisions
 
-```moth
-Size = |
-    width Int,
-    height Int,
-|
+Use the canonical runtime reference for construction, hidden identity, recursive local composition, prohibited boundaries and capability restrictions. Shared grammar is owned by the MON reference. Keep these implementation consequences explicit:
 
-show_window ||:
-    window ~= (
-        title = "Strategy",
-        bounds = (
-            size = Size(width = 1280, height = 720),
-            visible = true,
-        ),
-    )
+- Each static literal site owns one hidden nominal type per owning compiled body. Repeated execution reuses that type, while different sites remain distinct. Aliases and copies preserve type identity.
+- Qualify the source-site key by its module/body and concrete materialisation identity where required. Reuse current retained source-site and instantiated-body identities. Runtime execution counters, field shape and rendered type names are not keys. The exact local Rust representation is an implementation choice, not a new public identity contract.
+- Resolve children before registering ordered parent fields. An anonymous parent may store a hidden child directly or by an existing local reference. Explicit nominal children remain ordinary typed values.
+- The composition exception applies to compiler-generated anonymous parent fields. It does not permit hidden types in authored nominal declarations, function arguments/returns, exported surfaces, collections/maps or generic arguments.
+- Apply those restrictions recursively, including through a containing parent, optional or captured value. An ordinary leaf extracted from a record keeps its ordinary permitted uses.
+- Constructing a local record inside an already concrete generic body differs from passing a hidden type as a generic argument. Only the former is permitted.
+- Empty runtime records remain invalid. Ordinary constant-looking fields do not select the const-record path. Wire and Route storage restrictions remain independent of shared syntax.
 
-    window.bounds.size.width = 1440
-    independent ~= copy window
-    independent.title = "Overview"
-;
-```
-
-### Construction and identity
-
-A runtime receiving context selects a runtime record. Fields are ordinary expressions and need not fold. Every field has a unique name and an initializer. At least one field is required. Parentheses around a single unnamed expression remain grouping and empty `()` is not a runtime record. Compile-time contexts retain their separate const-record behaviour.
-
-Each static literal site owns one hidden nominal identity within its owning compiled body. Repeated loop executions create values of that same site type, not new types. Distinct literal sites remain distinct even when their field names and types match. Copies and aliases preserve type identity.
-
-Phase 0 establishes a deterministic source-site key qualified by its owning module/body and any concrete generic materialisation needed to avoid collisions. Runtime executions, rendered names and structural shape are not identity keys. These identities remain module-local and require no persistent public identity scheme.
-
-Fields resolve in source order under normal expression and access rules. Field labels introduce no local bindings. Initializers run once using ordinary evaluation and error order. Mutable roots permit field mutation through the ordinary place model. A mutable record binding does not copy or grant new authority over an existing retained child.
-
-The hidden type has no source-visible type name, named constructor, receiver methods or conformance. Compatible reassignment uses the same resolved identity, not a new literal of matching shape. Nominal construction remains explicit: `(width = 1, height = 2)` is not an implicit `Size(...)`.
-
-### Recursive local composition
-
-An anonymous record may contain another anonymous record directly or through an already bound local. It may also contain ordinary supported values, including explicitly constructed named structs and choices. Nesting is part of the initial runtime implementation, not a follow-up restriction to remove later.
-
-```moth
-show_state ||:
-    child = (count = 3)
-    state = (
-        saved = child,
-        fresh = (enabled = true),
-    )
-
-    selected = state.fresh
-    count = state.saved.count
-;
-```
-
-The parent hidden struct's field stores the child's resolved hidden type identity. Recursive registration follows resolved child types without shape interning. An anonymous child's field may itself contain another anonymous record.
-
-The compiler-generated fields of hidden anonymous parents are the permitted composition boundary. This does not permit hidden types in authored nominal struct/choice declarations or allow anonymous values to satisfy named fields by shape. A named struct may be a child of an anonymous parent, but an unnamed child cannot bypass the named struct's declared field types.
-
-Extraction into another local preserves the child's type and ordinary alias relationship. Reading an ordinary named or scalar leaf is an ordinary value use. Reject prohibited hidden identities, not every value that once passed through an anonymous record.
-
-### Local-only boundary
-
-| Use | Initial runtime support |
-|---|---|
-| Local binding, compatible assignment, projection and explicit copy | Supported under ordinary struct rules |
-| Anonymous child inside an anonymous parent | Supported, recursively |
-| Explicit named struct or choice inside an anonymous record | Supported when ordinary field/value rules permit it |
-| Ordinary leaf extracted from a record | Ordinary rules for the leaf's type |
-| Function argument or return carrying a hidden identity | Rejected, including private functions |
-| Authored signature, alias, nominal struct/choice field, receiver method or trait evidence exposing a hidden identity | Rejected |
-| Exported value/interface exposing a hidden identity | Rejected |
-| Collection/map storage or a generic argument carrying a hidden identity | Rejected in this implementation |
-
-Apply these restrictions transitively. A wrapper, nested parent, optional or captured value cannot conceal a hidden identity at a prohibited boundary. Reuse ordinary recursive semantic type inspection rather than checking only the outer type. This is a bounded local-value feature, not shape polymorphism or type extraction.
-
-A generic body may construct a local record from its already resolved concrete values if ordinary compilation supports that body. It may not pass a hidden identity as a generic argument. Keep these cases distinct.
-
-Wiring capabilities retain their own storage restrictions. A shared argument parser does not make a wire or route storable in an anonymous field. MON syntax likewise grants no serialisation support to runtime records.
+The initial implementation includes nesting. It must not accept only a flat subset and leave parent/child support or recursive escape checks for later.
 
 ## Semantic and representation ownership
 
@@ -130,12 +67,12 @@ Borrow validation and lifetime topology apply to the actual retained graph. Inli
 
 Each code-bearing phase includes its focused tests and `AGENTS.md` Slice review. Commit accepted phases separately. Keep diagnostics and status truthful while backend support is incomplete.
 
-### Phase 0: Refresh ownership and publish the contract
+### Phase 0: Refresh ownership against the published contract
 
 1. Verify all prerequisites in the activation tree and record the baseline locally.
 2. Read the shared MON owner and existing const-record deferral boundary, ordinary nominal registration, HIR struct paths and recursive escape validators.
-3. Publish the runtime contract in the canonical structs reference and reconcile related architecture and Design Scope text.
-4. Decide the source-site identity key, including nested sites and concrete body materialisations. Inventory every prohibited boundary and its existing validation owner.
+3. Read the published runtime reference and confirm the current owner map. Identify remaining architecture, cheatsheet and status edits without rewriting the source contract or claiming runtime support.
+4. Select the existing source-site/body identities that implement the key above, including nested sites and concrete materialisations. Record the mapping locally. Inventory every prohibited boundary and its current recursive validation owner.
 5. Confirm ordinary struct representation can express nested children and all required access/copy/lifetime relationships without new runtime IR.
 
 Exit: one identity rule, one shared parse path and explicit recursive boundary coverage.
@@ -164,7 +101,7 @@ Exit: anonymous syntax produces no anonymous-specific HIR/backend representation
 1. Validate supported targets through ordinary struct lowering. Assert an explicit target/deferred rejection where a required ordinary capability is unavailable, rather than claiming executable parity from frontend-only tests.
 2. Add or consolidate end-to-end cases for nested output, mutation/copy, existing-child aliasing, duplicate inner labels, distinct-site mismatch and each materially different prohibited boundary.
 3. Keep grammar/separator tests with the shared MON owner. Runtime tests cover runtime policy, identity, value behaviour and escapes instead of duplicating that grammar suite.
-4. Update the structs reference, teaching pages, cheatsheet, compiler/build authorities where affected, Design Scope, progress matrices, comments and queued consumers. Replace blanket nesting/aggregate bans with the precise local-composition boundary.
+4. Update support notices in the published structs references and teaching page, then reconcile the cheatsheet, compiler/build authorities, Design Scope, progress matrices, comments and queued consumers. Preserve the precise local-composition boundary. Shared grammar remains with the delivered MON owner.
 5. Remove obsolete deferral paths, fixtures and temporary construction helpers. Rebuild generated docs.
 
 ### Phase 4: Final validation and Slice review

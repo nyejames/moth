@@ -1,0 +1,28 @@
+**Accepted deferred implementation.** Runtime anonymous records are planned and
+are not yet executable in the Alpha compiler.
+
+An anonymous record groups local values without declaring a named type:
+
+[codeblock, $code("moth"):
+    show_window ||:
+        window ~= (
+            title = "Strategy",
+            size = (width = 1280, height = 720),
+        )
+
+        window.size.width = 1440
+    ;
+]
+
+Every field needs a name and a value. Records can nest directly. Runtime fields
+may use ordinary runtime expressions and follow normal access and copy rules.
+
+Each literal site has its own hidden nominal type. Matching fields do not make
+two different sites interchangeable. Use explicit constructors for named types.
+
+The initial feature is local-only. Records carrying hidden types cannot be
+passed to functions, returned, exported or stored in collections or maps.
+Ordinary values extracted from their fields follow their normal rules.
+
+See @../constants/#const-records (Const records) for compile-time member groups
+and @../language-overview/#mon-syntax (MON syntax) for the shared notation.

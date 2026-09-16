@@ -1,0 +1,154 @@
+**Accepted queued design.** Parenthesised anonymous const records are queued for
+implementation. Runtime anonymous records are a separate later feature. Ordinary
+calls and named constructors already use parentheses. See @../progress (Progress)
+for implementation and target support.
+
+MON means Moth Object Notation. **MON syntax** names Moth's shared parenthesised
+argument and value-construction notation. **The MON format** is a future data
+profile with its own supported values and serialisation rules. Using MON syntax
+does not make a value serialisable or turn a call into a data document.
+
+This reference owns the shared notation and the distinction between grouping,
+supplied arguments and anonymous construction. Calls, constructors, directives
+and const or runtime records retain their own semantic contracts.
+
+### Declarations and supplied values
+
+Pipes enclose declared parameters and typed nominal fields. Parentheses supply
+values or group an expression.
+
+[codeblock, $code("moth"):
+    Size = |
+        width Int,
+        height Int,
+    |
+
+    size = Size(width = 1280, height = 720)
+]
+
+A nominal value uses its named constructor. Matching field names do not make
+an anonymous record a `Size`. MON syntax adds no implicit nominal construction,
+structural typing, argument spreading or tuple values.
+
+Declaration lists remain flat. A legal default expression may contain nested
+value construction without introducing a nested type declaration. Defaults
+still need the type and compile-time evidence their receiving declaration requires.
+
+### Grouping and records
+
+A single unnamed expression in parentheses is grouping. A named initializer
+selects anonymous record construction, including a record with one field.
+
+[codeblock, $code("moth"):
+    total #= (1 + 2)
+    label #= (name = "Moth")
+    labels #= (first = "Priya", second = "Rob",)
+    empty #= ()
+]
+
+A comma separates entries. It does not create a tuple or infer a field name.
+`(value,)`, `(first, second)` and `(,)` are invalid value constructions.
+Expression-position `()` is an empty const record when the receiving context
+requires a compile-time value. Empty runtime records are outside the initial
+runtime surface. Neither case introduces a unit type.
+
+`(calculate(x = 1, y = 2))` groups a call. Names and commas inside that inner
+call do not classify the outer parentheses. Grouping preserves ordinary
+precedence, place access, postfix operations and immediate cast-target rules.
+
+### Entries and layout
+
+Every anonymous entry has a unique identifier and an explicit `= expression`.
+Its type is inferred from that expression. Entries have no type annotation,
+declaration qualifier, default, omitted value or field-level mutable declaration.
+There are no positional anonymous fields or implicit name shorthands.
+
+Use commas between entries. One trailing comma is allowed. Blank lines and
+comments may separate entries, and a value may start on the line after `=`.
+The field label and `=` use the ordinary named-argument boundary. Newlines do
+not replace commas or join an incomplete label to a later assignment.
+
+A field label does not bind a local name. Every initializer resolves names in
+the surrounding scope. Earlier fields are not bare names visible to later fields.
+
+[codeblock, $code("moth"):
+    title #= "Strategy"
+    panel #= (
+        title = title,
+        details = (title = "Overview"),
+    )
+]
+
+The two `title` labels belong to different records and do not conflict. Duplicate
+labels within the same record are invalid.
+
+Each initializer supplies one value. Multiple return slots cannot become a tuple
+field or expand into several entries. A field label supplies no expected type
+for an otherwise untyped `none`, empty container or `cast`. Use an earlier typed
+value when its type cannot be inferred. The existing expression rules decide
+which empty literals can infer their own type.
+
+### Recursive construction
+
+Anonymous values nest directly. Named nominal children still use their constructors.
+
+[codeblock, $code("moth"):
+    Size = |
+        width Int,
+        height Int,
+    |
+
+    settings #= (
+        window = (
+            title = "Strategy",
+            size = Size(width = 1280, height = 720),
+        ),
+    )
+
+    width #= settings.window.size.width
+]
+
+`#=` requires the complete value to fold, including every nested field. It does
+not grant new compile-time execution capabilities. A runtime receiving context
+selects the separate runtime-record contract even when all fields look constant.
+
+@../constants/#const-records (Const records) owns folded fields and runtime-use
+restrictions. @../structs/#anonymous-records (Runtime anonymous records) owns
+hidden nominal identity, local composition and escape restrictions.
+
+### Context determines argument policy
+
+Calls, constructors and directives share MON list syntax without sharing every
+permitted argument or value category.
+
+- User calls and named constructors keep positional-then-named signature routing.
+- Host calls and builtin members keep their positional-only contracts.
+- Anonymous records require named entries and establish their own fields.
+- Directive arguments require compile-time values and their registered categories.
+
+A known signature supplies parameter names, types and defaults. An anonymous
+record has no callee signature or omitted default slots. Shared syntax changes
+neither evaluation order nor the ordinary access, coercion and error rules.
+
+`consume(x = 1)` supplies the argument named `x`. `consume((x = 1))` supplies one
+record expression, whose legality still depends on record and parameter rules.
+There is no automatic record-to-argument expansion.
+
+Ordinary `f()` is a zero-argument call. The accepted directive contract uses
+bare `$name` when no arguments are supplied and rejects `$name()`. Template
+labels, indices and helper wrappers retain their specialised meanings.
+
+### MON format boundary
+
+The future MON data profile uses named-only, const-required parsing through the
+same compiler owners. Its reader and compiler-native builder need a defined
+value domain and serialisation contract before implementation. The engine or
+application validates its own schema over that data.
+
+The format still needs decisions about root framing, scalars and numbers,
+optional values, collections and maps, tags, escaping, ordering, resources,
+round trips and input limits. Full compile-time Moth authoring expressions and
+the self-contained serialised representation are distinct surfaces.
+
+Templates remain ordinary strings. MON syntax adds no automatic record printing,
+implicit live bindings, stored Wire capabilities or executable Route values.

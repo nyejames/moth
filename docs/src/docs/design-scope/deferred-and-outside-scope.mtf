@@ -12,6 +12,8 @@ language design. Implementation may be absent, partial or target-limited. A
 deferred feature may appear in the progress matrix and may have a structured
 deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 
+- parenthesised MON construction with inline nested anonymous const records
+- local runtime anonymous records with recursive composition and hidden nominal identity
 - declared regions (`name:` / `into name`)
 - mandatory lifetime-region and escape validation
 - choice payload field access without pattern matching
@@ -28,6 +30,21 @@ deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 - an extensionless resource escape syntax
 - managed plain Markdown resource links and images
 - resource transforms and content-addressed output names
+
+### MON syntax and format boundaries
+
+@../language-overview/#mon-syntax (MON syntax) owns the accepted parenthesised
+notation. @../constants/#const-records (Const records) and
+@../structs/#anonymous-records (Runtime anonymous records) own the distinct
+compile-time and runtime contracts. Nominal construction stays explicit, and
+anonymous type declarations, structural conversion and tuples are not added.
+
+A compiler-native MON builder and reusable compiler services are the accepted
+future direction for a named-only, const-required data profile. Its supported
+values, authoring and serialised forms, read/write API and serialisation rules
+still need a separate design and hardening pass. That direction does not make
+the format implemented or give every MON-syntax value a serialisation guarantee.
+Engine and application schemas remain separate from the format contract.
 
 ### Open design question
 
@@ -63,7 +80,7 @@ Ordinary `$config` values and static `if` cannot remove declarations or
 dependencies. Future `$feature` may select source structure before graph and
 declaration publication from bootstrap-known feature data and high-level
 selected-builder identity. Known feature names must be distinguished from
-enabled features so typos cannot silently disable code; predicate, nesting and
+enabled features so typos cannot silently disable code. Predicate, nesting and
 config-declaration grammar belongs to the future plan.
 
 Physical backend, target, OS and architecture queries remain outside scope.
@@ -72,8 +89,8 @@ resolve contained builder directives against the active surface, but still need
 a sound structural boundary. Directive-controlled template lexing must be
 addressed before arbitrary unknown syntax can be skipped.
 
-Future `$layout` constrains representation while preserving nominal identity; C
-order alone is not a complete ABI contract, and SoA is not automatically a
+Future `$layout` constrains representation while preserving nominal identity.
+C order alone is not a complete ABI contract, and SoA is not automatically a
 scalar layout option. `$export` will replace rather than permanently duplicate
 export syntax, while block support remains undecided. `$test` is a deferred
 root-purpose direction with runner, command and lifecycle details undefined.
@@ -103,7 +120,7 @@ list.
 
 Ask whether Moth already has an accepted contract for the feature. If it does
 and implementation remains absent, partial or target-limited, the feature is
-deferred. If the mechanism conflicts with Moth's language model, it stays
+deferred. If the mechanism conflicts with the language model, it stays
 outside scope. A proposal with neither an accepted contract nor a conflict with
 that model remains an open design question.
 

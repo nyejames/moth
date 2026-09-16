@@ -1,0 +1,115 @@
+**Accepted deferred implementation.** Runtime anonymous records are queued after
+shared MON syntax and numeric semantics. The examples below describe the accepted
+contract, not current executable support. See @../progress (Progress).
+
+A runtime anonymous record is a local value backed by a hidden nominal struct.
+It uses the named-only form of @../language-overview/#mon-syntax (MON syntax).
+The ordinary struct owners provide construction, field access, copy, borrow
+validation and lifetime validation.
+
+### Construction
+
+[codeblock, $code("moth"):
+    Size = |
+        width Int,
+        height Int,
+    |
+
+    show_window ||:
+        window ~= (
+            title = "Strategy",
+            bounds = (
+                size = Size(width = 1280, height = 720),
+                visible = true,
+            ),
+        )
+
+        window.bounds.size.width = 1440
+        independent ~= copy window
+        independent.title = "Overview"
+    ;
+]
+
+A runtime receiving context selects a runtime record. Its field expressions
+need not fold. Every field has a unique name and an initializer. At least one
+field is required. Empty `()` is outside this runtime surface.
+
+Field initializers run once in source order under ordinary expression, access
+and error rules. Labels introduce no local names. A mutable root permits field
+writes only when ordinary access rules allow them. It does not copy an existing
+child or grant additional authority over one.
+
+### Hidden nominal identity
+
+Each static literal site owns one hidden nominal type within its compiled body.
+Repeated executions of that site produce values of the same type. Distinct
+sites remain different types even when their field names and types match.
+Aliases and copies preserve the type identity.
+
+Compatible assignment requires the same resolved identity. Another literal of
+matching shape is not a replacement value of that type. The hidden type has no
+source-visible name, constructor name, receiver methods or trait conformance.
+
+A named struct still uses its explicit constructor. An anonymous record does
+not satisfy a named field or parameter by matching its shape.
+
+### Recursive local composition
+
+Anonymous parents may contain anonymous children directly or through an
+already bound local. They may also contain ordinary supported values, including
+explicitly constructed nominal structs and choices.
+
+[codeblock, $code("moth"):
+    show_state ||:
+        child = (count = 3)
+        state = (
+            saved = child,
+            fresh = (enabled = true),
+        )
+
+        selected = state.fresh
+        count = state.saved.count
+    ;
+]
+
+A compiler-generated parent field carries the child's resolved hidden type.
+Nesting is supported recursively from the first runtime implementation.
+Extracting a child to another local preserves its type and alias relationship.
+An ordinary named or scalar leaf follows that leaf type's ordinary rules.
+
+This composition permission applies to compiler-generated anonymous parent
+fields. It does not make hidden types legal in authored nominal field declarations
+or permit an unnamed child to bypass a named parent's declared field types.
+
+### Local-only uses
+
+Supported uses are local binding, compatible assignment, projection, explicit
+copy and recursive composition inside anonymous parents. Normal type and
+access rules still apply.
+
+A hidden identity cannot cross a function argument or return boundary, including
+private functions. It cannot appear in an authored signature, type alias,
+nominal struct or choice field, receiver method, trait evidence or exported
+value/interface. The initial implementation also rejects collection/map storage
+and generic arguments carrying a hidden identity.
+
+These restrictions are transitive. A containing parent, optional or captured
+value cannot hide a prohibited identity. An ordinary leaf extracted from a
+record is not restricted merely because it came through that record.
+
+A generic body may construct a local record from its resolved concrete values
+where ordinary compilation supports that body. Passing the hidden type as a
+generic argument remains invalid.
+
+### Values and capabilities
+
+Records follow ordinary reference, copy, borrow and lifetime rules. Inline
+nesting creates no new region, implicit deep copy or escape exemption.
+
+Compile-time records remain separate folded member groups, with the whole-value
+runtime restrictions in @../constants/#const-records (Const records). A runtime
+record never uses the compile-time record marker as its runtime type.
+
+Wiring retains its own storage rules. MON construction does not turn wire
+identity or routes into ordinary storable field values. Runtime records gain no
+serialisation support from sharing MON syntax.
