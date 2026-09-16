@@ -7,6 +7,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
@@ -38,7 +39,6 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 

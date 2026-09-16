@@ -20,10 +20,20 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         .id;
     let options = HeaderParseOptions::default();
     let directives = StyleDirectiveRegistry::built_ins();
-    let scope =
-        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &directives, &mut strings, &mut path_fork, source_id, &mut spans)
+    let mut tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &directives,
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("source should tokenize");
     let mut prepared = parse_file_headers_with_table(
         &mut tokens,
@@ -156,10 +166,20 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .get_by_canonical_path(&canonical)
         .expect("source identity")
         .id;
-    let scope =
-        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let mut tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("source should tokenize");
     let mut prepared = parse_file_headers_with_table(
         &mut tokens,
@@ -369,10 +389,20 @@ Generic of A must {trait_name}\n"
         .get_by_canonical_path(&canonical)
         .expect("source identity")
         .id;
-    let scope =
-        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let mut tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("source should tokenize");
     let mut prepared = parse_file_headers_with_table(
         &mut tokens,

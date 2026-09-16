@@ -24,7 +24,9 @@ fn duplicate_public_export_retains_first_owner_span_across_passes() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let export_name = string_table.intern("greet");
-    let source_path = path_fork.try_intern_portable_path("src/greet", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("src/greet", &mut string_table)
+        .expect("test path fits");
     let first_span = span(5, 5, &mut span_builder);
     let duplicate_span = span(12, 5, &mut span_builder);
 
@@ -32,9 +34,7 @@ fn duplicate_public_export_retains_first_owner_span_across_passes() {
     first_pass
         .insert(
             export_name,
-            PublicExportTarget::SourceDeclaration {
-                path: source_path,
-            },
+            PublicExportTarget::SourceDeclaration { path: source_path },
             Some(first_span),
             &string_table,
         )

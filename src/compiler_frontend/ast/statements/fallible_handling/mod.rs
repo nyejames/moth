@@ -10,10 +10,10 @@ mod parser;
 mod success_types;
 mod validation;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 // --------------------------

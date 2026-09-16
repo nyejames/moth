@@ -5,7 +5,7 @@
 //! WHY: `#Config` is source syntax metadata, not a semantic type or expression category. Keeping
 //! its parser here lets source contracts and anonymous const-record fields use one grammar owner.
 
-use super::{cursor_current_span, DeclarationCursor};
+use super::{DeclarationCursor, cursor_current_span};
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuildInputType, PrimitiveBuildInputType, PrimitiveBuildValue,
 };
@@ -21,7 +21,7 @@ use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, TokenCursor, TokenIndex, TokenKind, TokenTag,
+    SourceTokens, TokenCursor, TokenIndex, TokenKind, TokenTag,
 };
 /// Syntax metadata retained for a declaration carrying `#Config of T`.
 ///
@@ -194,7 +194,11 @@ pub(crate) fn normalize_source_build_config_contract(
                     }
                 };
                 let materialized = materialized.map_err(|reason| {
-                    CompilerDiagnostic::invalid_number_literal(value.source_text, reason, Some(span))
+                    CompilerDiagnostic::invalid_number_literal(
+                        value.source_text,
+                        reason,
+                        Some(span),
+                    )
                 })?;
                 validate_source_default_primitive(
                     name,
@@ -262,7 +266,6 @@ fn source_default_type_mismatch(
     )
 }
 
-
 /// Bounded `#Config` marker scan over one source-owned cursor view.
 ///
 /// WHAT: inspects adjacent pairs from a checked cursor without materializing the
@@ -284,7 +287,9 @@ pub(crate) fn find_config_qualifier_marker_in_cursor(
         if !crosses_segment
             && previous.tag() == TokenTag::HASH
             && current.tag() == TokenTag::SYMBOL
-            && current.string_id().is_some_and(|name| string_table.resolve(name) == "Config")
+            && current
+                .string_id()
+                .is_some_and(|name| string_table.resolve(name) == "Config")
         {
             let marker = previous.source_span();
             let marker_range = previous.span().resolve_with(resolver);
@@ -334,25 +339,6 @@ pub(crate) fn find_invalid_config_qualifier_spacing_in_cursor(
     }
 }
 
-/// Returns whether a compatibility parser cursor begins the compiler-owned `#Config` spelling.
-///
-/// This remains a deliberate 3F2/3F3 parser boundary: declaration-shell and AST record parsing
-/// still consume the mutable compatibility stream, while Stage 3F1 header dispatch uses the
-/// canonical source-view helper below.
-pub(crate) fn starts_build_config_qualifier(
-    token_stream: &FileTokens,
-    string_table: &StringTable,
-) -> bool {
-    if token_stream.current_token_kind() != &TokenKind::Hash {
-        return false;
-    }
-
-    matches!(
-        token_stream.peek_next_token(),
-        Some(TokenKind::Symbol(name)) if string_table.resolve(*name) == "Config"
-    )
-}
-
 /// Canonical source-view entry for header-owned `#Config` dispatch.
 ///
 /// The declaration parser keeps its compatibility cursor for the deferred qualifier grammar, but
@@ -374,15 +360,12 @@ pub(crate) fn starts_build_config_qualifier_at_source(
     let Some(next_index) = TokenIndex::try_from_raw(next_raw) else {
         return false;
     };
-    source_tokens
-        .token(next_index)
-        .ok()
-        .is_some_and(|token| {
-            token.tag() == TokenTag::SYMBOL
-                && token
-                    .string_id()
-                    .is_some_and(|name| string_table.resolve(name) == "Config")
-        })
+    source_tokens.token(next_index).ok().is_some_and(|token| {
+        token.tag() == TokenTag::SYMBOL
+            && token
+                .string_id()
+                .is_some_and(|name| string_table.resolve(name) == "Config")
+    })
 }
 
 /// Return whether a canonical cursor begins the compiler-owned `#Config` spelling.

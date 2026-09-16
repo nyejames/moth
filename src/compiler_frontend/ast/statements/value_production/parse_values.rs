@@ -5,8 +5,8 @@
 //! WHY: this logic was previously catch-specific; generalising it lets value `if`,
 //! match, and catch share one arity/coercion path.
 
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::{

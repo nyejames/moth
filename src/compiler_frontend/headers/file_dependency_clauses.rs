@@ -29,9 +29,7 @@ use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 type FileDependencyClauseResult<T> = Result<T, HeaderParseFailure>;
 
-fn dependency_clause_token_index(
-    token_stream: &FileTokens,
-) -> FileDependencyClauseResult<usize> {
+fn dependency_clause_token_index(token_stream: &FileTokens) -> FileDependencyClauseResult<usize> {
     token_stream.index.checked_sub(1).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "dependency clause token preceded the source token index",
@@ -158,14 +156,15 @@ fn parse_and_record_dependency_clause(
         ))
     })?;
     let clause_shell_id = DependencyShellId::new(file_id, ordinal);
-    state.dependency_clause_count = state
-        .dependency_clause_count
-        .checked_add(1)
-        .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "dependency clause count overflowed its source state",
-            ))
-        })?;
+    state.dependency_clause_count =
+        state
+            .dependency_clause_count
+            .checked_add(1)
+            .ok_or_else(|| {
+                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                    "dependency clause count overflowed its source state",
+                ))
+            })?;
     add_frontend_counter(FrontendCounter::DependencyClauseCount, 1);
     add_frontend_counter(FrontendCounter::RetainedShellCount, 1);
     let selection_count = match &parsed.binding {
@@ -227,12 +226,8 @@ fn retain_scanned_clause(
         }
     };
 
-    let provider_target = checked_provider_target(
-        scanned.provider.path,
-        &target,
-        path_fork,
-        string_table,
-    )?;
+    let provider_target =
+        checked_provider_target(scanned.provider.path, &target, path_fork, string_table)?;
     let dependency = RetainedDependencyPath {
         dependency_shell_id: clause_shell_id,
         path: scanned.provider.path,
@@ -248,8 +243,7 @@ fn retain_scanned_clause(
         binding,
         export_mode,
     };
-    if let Some(name) =
-        retained_clause.effective_namespace_local_name(string_table, path_fork)
+    if let Some(name) = retained_clause.effective_namespace_local_name(string_table, path_fork)
         && let Some(span) = retained_clause.namespace_binding_span()
     {
         state.encountered_symbols.entry(name).or_insert(*span);

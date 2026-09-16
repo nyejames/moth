@@ -147,11 +147,7 @@ fn resolve_builtin_named_type(
     })
 }
 
-fn type_declaration(
-    id: PathId,
-    data_type: DataType,
-    span: Option<SourceSpan>,
-) -> Declaration {
+fn type_declaration(id: PathId, data_type: DataType, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
         value: Expression::new(

@@ -35,10 +35,20 @@ INFERRED #= 1\n"
         .get_by_canonical_path(&canonical)
         .expect("source identity")
         .id;
-    let scope =
-        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let mut tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("source should tokenize");
     let tokenizer_extended_span_count = spans.len();
     assert_eq!(
@@ -218,10 +228,20 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         .get_by_canonical_path(&canonical)
         .expect("source identity")
         .id;
-    let scope =
-        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let mut tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("source should tokenize");
     let tokenizer_extended_span_count = spans.len();
     assert_eq!(

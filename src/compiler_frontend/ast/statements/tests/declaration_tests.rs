@@ -19,8 +19,8 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
@@ -40,7 +40,8 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
 fn parses_mutable_and_explicitly_typed_declarations() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("count ~= 1\nname String = \"Ada\"\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("count ~= 1\nname String = \"Ada\"\n");
 
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -62,7 +63,8 @@ fn parses_mutable_and_explicitly_typed_declarations() {
 
 #[test]
 fn resolves_named_type_annotations_against_prior_structs() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int,\n|\n\norigin Point = Point(0)\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("Point = |\n    x Int,\n|\n\norigin Point = Point(0)\n");
 
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -261,10 +263,12 @@ fn shorthand_fixed_collection_declaration_infers_element_type() {
 
 #[test]
 fn fixed_collection_alias_literal_is_accepted() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(r#"
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        r#"
     Names as {2 String}
     names Names = {"Priya"}
-    "#);
+    "#,
+    );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -298,13 +302,15 @@ fn nested_fixed_collection_literal_is_accepted() {
 
 #[test]
 fn immutable_fixed_collection_from_function_call_is_allowed() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(r#"
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        r#"
     make || -> {2 Int}:
         return {1}
     ;
     
     items {2 Int} = make()
-    "#);
+    "#,
+    );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -321,14 +327,16 @@ fn immutable_fixed_collection_from_function_call_is_allowed() {
 
 #[test]
 fn generic_identity_preserves_fixed_collection_shape() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(r#"
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        r#"
     identity type Item |value Item| -> Item:
         return value
     ;
     
     items {2 Int} = {1}
     same = identity(items)
-    "#);
+    "#,
+    );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[1].kind else {
@@ -436,7 +444,9 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let source = format!("padding #= \"{padding}\"\nvalue {target}\n");
         let mut strings = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_path = path_fork.try_intern_portable_path("declarations.moth", &mut strings).expect("test path fits");
+        let source_path = path_fork
+            .try_intern_portable_path("declarations.moth", &mut strings)
+            .expect("test path fits");
         let canonical_path = PathBuf::from("declarations.moth");
         let mut sources =
             SourceDatabase::build([&canonical_path], &canonical_path, None, &mut strings)
@@ -447,7 +457,16 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             .expect("the original source snapshot must load");
         let source = sources.retained_text(file_id).unwrap();
         let mut builder = ExtendedSpanBuilder::new();
-        let mut tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, file_id, &mut builder)
+        let mut tokens = tokenize(
+            source,
+            source_path,
+            TokenizerEntryMode::SourceFile,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut strings,
+            &mut path_fork,
+            file_id,
+            &mut builder,
+        )
         .expect("the source must tokenize");
         let name = strings.intern("value");
         tokens.index = tokens
@@ -488,10 +507,13 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         );
 
         tokens.freeze_path_syntax_for_test();
-        let context = ScopeContext::new_for_tests(
+        let _context = ScopeContext::new_for_tests(
             ContextKind::Function,
             source_path,
-            Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+            Rc::new(TopLevelDeclarationTable::new(
+                vec![],
+                &PathInternerFork::empty(),
+            )),
             Arc::new(ExternalPackageRegistry::new()),
             vec![],
             0,

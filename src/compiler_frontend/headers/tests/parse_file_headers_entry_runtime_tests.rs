@@ -85,8 +85,6 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
         .get(&start_header.tokens.source())
         .expect("start sequence should retain its canonical source owner");
     let view = source
-        .source_tokens()
-        .expect("start source owner should expose canonical tokens")
         .token_sequence(sequence)
         .expect("start sequence handle should resolve");
     let ranges = view.ranges().collect::<Vec<_>>();

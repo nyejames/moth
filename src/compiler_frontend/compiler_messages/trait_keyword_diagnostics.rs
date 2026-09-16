@@ -114,7 +114,6 @@ pub(crate) fn reserved_trait_dispatch_mismatch_error_for_tag(
     error
 }
 
-
 pub(crate) fn reserved_trait_keyword_error(
     keyword: ReservedTraitKeyword,
     span: Option<SourceSpan>,

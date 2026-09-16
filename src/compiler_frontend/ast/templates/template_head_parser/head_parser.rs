@@ -35,10 +35,10 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 
 use crate::ast_log;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
@@ -66,7 +66,8 @@ pub(crate) struct TemplateHeadParseRequest<'a, 'types> {
     pub(crate) construction_context: &'a mut TemplateConstructionContext,
     pub(crate) control_flow_validation: TemplateControlFlowValidationMode,
     pub(crate) string_table: &'a mut StringTable,
-    pub(crate) path_fork: &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    pub(crate) path_fork:
+        &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -860,4 +861,3 @@ fn find_unseparated_control_flow_suffix_at_cursor(cursor: &AstCursor) -> Option<
 
     None
 }
-

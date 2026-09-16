@@ -18,8 +18,8 @@ use crate::compiler_frontend::module_compilation::{
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 
-use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 
 /// Preflight receipt proving one delta may be committed to a boundary store.
 #[derive(Debug)]

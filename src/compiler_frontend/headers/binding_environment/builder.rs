@@ -41,11 +41,11 @@ use super::{
     ModuleBoundaryCheckInput, NamespaceRecord, NamespaceRecordSource,
     NamespaceTargetResolutionInput, NamespaceTypeMember, NamespaceValueMember,
     PublicExportLookupResult, PublicExportResolutionInput, ReceiverMethodVisibility,
-    ResolvedDependencyTarget, ResolvedNamespaceTarget, SourceDeclarationTarget, SourceDependencyAccess,
-    SourceFunctionTarget, SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
-    check_alias_case_warning, check_module_boundary, check_source_package_boundary,
-    has_explicit_moth_extension, resolve_dependency_target, resolve_external_package_symbol,
-    resolve_namespace_target, resolve_public_export_boundary,
+    ResolvedDependencyTarget, ResolvedNamespaceTarget, SourceDeclarationTarget,
+    SourceDependencyAccess, SourceFunctionTarget, SourcePackageBoundaryCheckInput,
+    VisibleNameBinding, VisibleNameRegistry, check_alias_case_warning, check_module_boundary,
+    check_source_package_boundary, has_explicit_moth_extension, resolve_dependency_target,
+    resolve_external_package_symbol, resolve_namespace_target, resolve_public_export_boundary,
 };
 
 /// Result for the binding-environment builder family.
@@ -277,10 +277,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             )
             .into());
         };
-        let Some(target_source_id) = self
-            .module_symbols
-            .source_ids_by_source
-            .get(&target_path)
+        let Some(target_source_id) = self.module_symbols.source_ids_by_source.get(&target_path)
         else {
             return Err(CompilerError::compiler_error(
                 "retained local dependency target path has no prepared source identity",
@@ -830,10 +827,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let public_name_id = selection.source_name;
             let public_name = self.string_table.resolve(public_name_id);
             if view.exported_origin(public_name).is_some() {
-            let local_path = self
-                .path_fork
-                .try_intern_child(dependency.dependency.path, public_name_id)
-                .expect("path interner fork exhausted while binding provider declaration");
+                let local_path = self
+                    .path_fork
+                    .try_intern_child(dependency.dependency.path, public_name_id)
+                    .expect("path interner fork exhausted while binding provider declaration");
                 self.register_provider_declaration_binding(
                     file_visibility,
                     registry,
@@ -1128,9 +1125,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 },
                 span,
             )?;
-            file_visibility
-                .visible_declaration_paths_mut()
-                .insert(path);
+            file_visibility.visible_declaration_paths_mut().insert(path);
             file_visibility
                 .visible_source_names
                 .insert(name, SourceDeclarationTarget::Local(path));
@@ -1307,11 +1302,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
     }
 
-    fn symbol_origin_matches_source(
-        &self,
-        symbol_path: &PathId,
-        source_file: &PathId,
-    ) -> bool {
+    fn symbol_origin_matches_source(&self, symbol_path: &PathId, source_file: &PathId) -> bool {
         let Some(origin) = self
             .module_symbols
             .canonical_source_by_symbol_path
@@ -1495,7 +1486,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             path_fork: &mut *self.path_fork,
         };
 
-        if let Some(public_export_result) = resolve_public_export_boundary(&mut public_export_input) {
+        if let Some(public_export_result) = resolve_public_export_boundary(&mut public_export_input)
+        {
             match public_export_result {
                 PublicExportLookupResult::ExportedSource {
                     path,

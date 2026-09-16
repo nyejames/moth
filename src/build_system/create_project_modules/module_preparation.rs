@@ -16,11 +16,11 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
-    prepare_header_syntax, FileFrontendPrepareError, FileFrontendPrepareFailure,
-    FileFrontendPrepareOutput, FileRole, HeaderParseOptions, HeaderPreparationFailure,
-    PreparedHeaderSyntax, SourcePreparationDelta,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
+    HeaderParseOptions, HeaderPreparationFailure, PreparedHeaderSyntax, SourcePreparationDelta,
+    prepare_header_syntax,
 };
-use crate::compiler_frontend::instrumentation::{add_frontend_counter, FrontendCounter};
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReference, ResolvedFileReferenceTable,
@@ -824,7 +824,9 @@ impl ModulePreparationContext<'_> {
             batch.prepend_diagnostics(warnings);
             return Err(PremergeFailure::Diagnosed(batch));
         }
-        prepared_outputs.ensure_filled().map_err(PremergeFailure::Infrastructure)?;
+        prepared_outputs
+            .ensure_filled()
+            .map_err(PremergeFailure::Infrastructure)?;
         let ordered_slots = prepared_outputs.into_ordered_outputs();
         let mut filled_outputs: Vec<FileFrontendPrepareOutput> = ordered_slots
             .into_iter()
@@ -1042,7 +1044,6 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         &mut self.path_fork
     }
 
-
     pub(super) fn source_preparation_inputs_and_path_fork_mut(
         &mut self,
     ) -> (
@@ -1097,10 +1098,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         source: PreparedSourceInput,
         source_spans: &mut SourceSpanBuilders<'_>,
     ) -> Result<FileFrontendPrepareOutput, PremergeFailure> {
-        if matches!(
-            &source.source,
-            PreparedSourceKind::MothPrepared { .. }
-        ) {
+        if matches!(&source.source, PreparedSourceKind::MothPrepared { .. }) {
             return Err(CompilerError::compiler_error(
                 "indexed module syntax discovery received an already-prepared synthetic source",
             )

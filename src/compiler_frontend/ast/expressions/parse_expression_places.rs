@@ -7,6 +7,7 @@ use super::error::ExpressionParseError;
 use super::expression_rpn::ExpressionRpnItem;
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     ConstRecordState, Expression, ExpressionKind,
 };
@@ -30,7 +31,6 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 pub(super) struct ParsedCopyPlace {

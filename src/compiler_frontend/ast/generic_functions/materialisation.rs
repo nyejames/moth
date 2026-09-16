@@ -66,7 +66,8 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     /// A provider rebase may extend this table after the requester preparation was frozen. The
     /// generated sidecar must fork from this live table so path component IDs remain resolvable.
     pub(crate) boundary_string_table: &'a StringTable,
-    pub(crate) path_fork: &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    pub(crate) path_fork:
+        &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,

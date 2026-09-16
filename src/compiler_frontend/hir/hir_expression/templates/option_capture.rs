@@ -182,8 +182,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.register_local_in_block(block_id, local, span_ref)?;
-        self.side_table
-            .bind_local_name(local_id, *binding_path);
+        self.side_table.bind_local_name(local_id, *binding_path);
 
         Ok(local_id)
     }

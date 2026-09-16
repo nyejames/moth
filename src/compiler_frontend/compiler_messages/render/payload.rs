@@ -964,9 +964,7 @@ fn borrow_payload_message(
             place,
             reason,
             conflicting_place,
-        } => {
-            invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), context)
-        }
+        } => invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), context),
         DiagnosticPayload::UseOfUninitializedLocal { place } => {
             use_of_uninitialized_local_message(place, context)
         }

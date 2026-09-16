@@ -112,11 +112,7 @@ fn decode_keeps_remaining_provider_specific_components() {
         .expect("a valid provider prefix should decode")
         .expect("an explicit-extension path should decode as a provider target");
     assert_eq!(
-        path_fork.render_portable(
-            decoded.prefix_path_id(),
-            &string_table,
-            &mut Vec::new(),
-        ),
+        path_fork.render_portable(decoded.prefix_path_id(), &string_table, &mut Vec::new(),),
         "widgets/draw.js"
     );
     assert_eq!(decoded.remaining_components().len(), 1);

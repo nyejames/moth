@@ -18,10 +18,21 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, Tokeniz
 fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let file_tokens = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("statement diagnostic fixture should tokenize");
 
     (file_tokens, string_table)

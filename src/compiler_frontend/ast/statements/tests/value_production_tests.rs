@@ -332,7 +332,9 @@ fn branch_exits_combine_assert_false_branches_as_terminal() {
 
 #[test]
 fn inferred_block_value_if_stores_non_empty_result_type_ids() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("choose |ready Bool| -> String:\n    label = if ready:\n        then \"ready\"\n    else\n        then \"waiting\"\n    ;\n    return label\n;\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "choose |ready Bool| -> String:\n    label = if ready:\n        then \"ready\"\n    else\n        then \"waiting\"\n    ;\n    return label\n;\n",
+    );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "choose");
     let NodeKind::VariableDeclaration(declaration) = &body[0].kind else {
         panic!("expected inferred value-if declaration");

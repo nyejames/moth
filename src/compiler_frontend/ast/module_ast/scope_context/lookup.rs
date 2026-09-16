@@ -136,10 +136,7 @@ impl ScopeContext {
     /// module constants from either seeded header contexts or completed module lookups.
     /// WHY: fixed-capacity type syntax must reject foldable runtime bindings while still
     /// allowing visible explicit constants before and after the final lookup package exists.
-    pub(crate) fn is_explicit_compile_time_constant(
-        &self,
-        declaration: &Declaration,
-    ) -> bool {
+    pub(crate) fn is_explicit_compile_time_constant(&self, declaration: &Declaration) -> bool {
         if self
             .arena
             .borrow()

@@ -5,9 +5,9 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidDependencyClauseReason, PathKind,
 };
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -25,9 +25,20 @@ fn tokenize_named_source_with_id(
 ) -> (FileTokens, StringTable, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path(file_name, &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path(file_name, &mut string_table)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, source_id, &mut span_builder)
+    let tokens = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        source_id,
+        &mut span_builder,
+    )
     .expect("source should tokenize");
     (tokens, string_table, span_builder)
 }
@@ -239,7 +250,9 @@ fn corrupted_path_lookup_is_infrastructure_error() {
     }
     let mut one_row_table = PathSyntaxTable::new();
     one_row_table.push(
-        path_fork.try_intern_portable_path("only", &mut StringTable::new()).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("only", &mut StringTable::new())
+            .expect("test path fits"),
         SourceSpan::new(tokens.file_id, tokens.tokens[path_index].span),
     );
     let empty_table = PathSyntaxTable::new();
@@ -427,13 +440,14 @@ fn canonical_view_agrees_with_slice_scan() {
 
     assert_eq!(from_slice.1, from_source.1);
     assert_eq!(
-        from_slice.0.provider.path,
-        from_source.0.provider.path,
+        from_slice.0.provider.path, from_source.0.provider.path,
         "canonical scan must preserve the provider root"
     );
     match (&from_slice.0.binding, &from_source.0.binding) {
         (
-            ScannedDependencyBinding::DirectSelections { selections: expected },
+            ScannedDependencyBinding::DirectSelections {
+                selections: expected,
+            },
             ScannedDependencyBinding::DirectSelections { selections: actual },
         ) => assert_eq!(
             expected.len(),

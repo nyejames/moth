@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression_places::place_expression_from_expression;
@@ -18,7 +19,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -37,14 +37,12 @@ use super::{MemberStepContext, PostfixChainAccess, ReceiverAccessMode};
 /// WHY: missing-member and receiver base-span diagnostics need the owning dot or
 /// base token without retaining a borrowed view.
 fn previous_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
-    token_stream
-        .previous_span()
-        .or_else(|| {
-            token_stream
-                .position()
-                .checked_sub(1)
-                .and_then(|previous| token_stream.span_at(previous))
-        })
+    token_stream.previous_span().or_else(|| {
+        token_stream
+            .position()
+            .checked_sub(1)
+            .and_then(|previous| token_stream.span_at(previous))
+    })
 }
 
 fn current_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {

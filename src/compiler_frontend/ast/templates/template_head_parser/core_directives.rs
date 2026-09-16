@@ -14,6 +14,7 @@ use super::directive_args::{
     reject_unexpected_directive_arguments,
 };
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::styles::raw::configure_raw_style;
@@ -23,11 +24,10 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{CoreStyleDirectiveKind, StyleDirectiveKind};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Typed result for the connected core-directive family.
 type CoreDirectiveResult<T> = Result<T, TemplateError>;

@@ -217,8 +217,7 @@ pub(crate) struct ModuleSymbols {
     /// Header body ranges carry only `SourceId`; this map is the single source-path identity
     /// lookup used by later semantic passes instead of repeating the path on every header.
     pub(crate) source_paths_by_source_id: FxHashMap<SourceId, PathId>,
-    pub(crate) file_dependency_clauses_by_source:
-        FxHashMap<PathId, Vec<RetainedDependencyClause>>,
+    pub(crate) file_dependency_clauses_by_source: FxHashMap<PathId, Vec<RetainedDependencyClause>>,
     // One flat selection table per prepared source file. Clause ranges index this table.
     pub(crate) dependency_selections_by_source: FxHashMap<PathId, Vec<DependencySelection>>,
     // Source declarations eligible for dependency-binding surfaces. Private root-file
@@ -484,10 +483,7 @@ fn declaration_from_header(
             // The implicit start function is a compiler-owned synthetic declaration scoped under
             // the entry source file.
             let start_name = path_fork
-                .try_intern_child(
-                    source_file,
-                    string_table.intern(IMPLICIT_START_FUNC_NAME),
-                )
+                .try_intern_child(source_file, string_table.intern(IMPLICIT_START_FUNC_NAME))
                 .expect("path table exhausted while interning implicit start path");
             Some(Declaration {
                 id: start_name.to_owned(),

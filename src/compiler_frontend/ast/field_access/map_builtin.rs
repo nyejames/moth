@@ -10,6 +10,7 @@ use super::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::fallible_handling::token_stream_starts_fallible_handling_suffix;
@@ -23,9 +24,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 // --------------------------

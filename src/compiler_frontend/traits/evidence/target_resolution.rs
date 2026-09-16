@@ -149,8 +149,7 @@ pub(super) fn resolve_conformance_target(
                 is_generic_constructor: definition.generic_parameters.is_some(),
                 evidence_kind: TraitEvidenceKind::Canonical,
             })
-
-        },
+        }
         TypeDefinition::Choice(definition) => {
             let target_is_declared_here = context
                 .choice_source_by_path
@@ -173,8 +172,7 @@ pub(super) fn resolve_conformance_target(
                 is_generic_constructor: definition.generic_parameters.is_some(),
                 evidence_kind: TraitEvidenceKind::Canonical,
             })
-
-        },
+        }
         _ => Err(invalid_conformance(
             target.name,
             None,

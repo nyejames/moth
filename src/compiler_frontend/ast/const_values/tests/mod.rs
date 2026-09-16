@@ -44,7 +44,9 @@ fn make_environment_with(
     string_table: &mut StringTable,
 ) -> ConstValueEnvironment {
     let mut env = ConstValueEnvironment::default();
-    let interned_path = path_fork.try_intern_portable_path(path, string_table).expect("test path fits");
+    let interned_path = path_fork
+        .try_intern_portable_path(path, string_table)
+        .expect("test path fits");
     env.insert(interned_path, expression);
     env
 }
@@ -142,7 +144,9 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
     let rpn = ExpressionRpn {
         items: vec![
             rvalue_item(Expression::reference(
-                path_fork.try_intern_portable_path("x", &mut string_table).expect("test path fits"),
+                path_fork
+                    .try_intern_portable_path("x", &mut string_table)
+                    .expect("test path fits"),
                 DataType::Int,
                 None,
                 ValueMode::ImmutableReference,
@@ -181,7 +185,9 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let reference = Expression::reference(
-        path_fork.try_intern_portable_path("x", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("x", &mut string_table)
+            .expect("test path fits"),
         DataType::Int,
         None,
         ValueMode::ImmutableReference,
@@ -226,7 +232,9 @@ fn reference_to_known_const_resolves() {
     let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
-    let path = path_fork.try_intern_portable_path("ratio", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("ratio", &mut string_table)
+        .expect("test path fits");
     let expression = Expression::reference_with_type_id(path, DataType::Float, builtin_type_ids::FLOAT, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = make_environment_with(
@@ -256,7 +264,9 @@ fn unresolved_reference_fails() {
     let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
-    let path = path_fork.try_intern_portable_path("unknown", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("unknown", &mut string_table)
+        .expect("test path fits");
     let expression = Expression::reference_with_type_id(path, DataType::Int, builtin_type_ids::INT, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = ConstValueEnvironment::default();
@@ -280,7 +290,9 @@ fn function_call_fails_const_resolution() {
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let expression = Expression::function_call(
-        path_fork.try_intern_portable_path("foo", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("foo", &mut string_table)
+            .expect("test path fits"),
         vec![],
         vec![builtin_type_ids::INT],
         None,
@@ -307,7 +319,9 @@ fn mutable_declaration_fails_private_const_resolution() {
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
-        id: path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits"),
+        id: path_fork
+            .try_intern_portable_path("value", &mut string_table)
+            .expect("test path fits"),
         value: Expression::int(1, None, ValueMode::MutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -380,7 +394,9 @@ fn runtime_rpn_with_unresolved_reference_fails() {
     let rpn = ExpressionRpn {
         items: vec![
             rvalue_item(Expression::reference(
-                path_fork.try_intern_portable_path("missing", &mut string_table).expect("test path fits"),
+                path_fork
+                    .try_intern_portable_path("missing", &mut string_table)
+                    .expect("test path fits"),
                 DataType::Int,
                 None,
                 ValueMode::ImmutableReference,
@@ -418,7 +434,9 @@ fn body_local_immutable_literal_resolves() {
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
-        id: path_fork.try_intern_portable_path("local", &mut string_table).expect("test path fits"),
+        id: path_fork
+            .try_intern_portable_path("local", &mut string_table)
+            .expect("test path fits"),
         value: Expression::int(99, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -447,7 +465,9 @@ fn body_local_mutable_declaration_fails() {
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
-        id: path_fork.try_intern_portable_path("local", &mut string_table).expect("test path fits"),
+        id: path_fork
+            .try_intern_portable_path("local", &mut string_table)
+            .expect("test path fits"),
         value: Expression::int(99, None, ValueMode::MutableOwned),
         binding_span: None,
         config_qualifier: None,

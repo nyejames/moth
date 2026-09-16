@@ -117,8 +117,8 @@ fn same_module_dependency_creates_no_project_graph_edge() {
         1
     );
 
-    let helper_path = fs::canonicalize(src.join("helper.moth"))
-        .expect("helper source should canonicalize");
+    let helper_path =
+        fs::canonicalize(src.join("helper.moth")).expect("helper source should canonicalize");
     let helper_source_id = source_files
         .get_by_canonical_path(&helper_path)
         .expect("helper source should be in the boundary database")

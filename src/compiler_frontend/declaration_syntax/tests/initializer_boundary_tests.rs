@@ -44,20 +44,30 @@ fn label(kind: &TokenKind) -> &'static str {
 fn parse_shell(source: &str) -> Vec<&'static str> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, &mut span_builder)
+    let mut token_stream = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
     let name = string_table.intern("value");
     token_stream.index = 2; // skip ModuleStart and the declaration name, land on `=`
-    let mut declaration_cursor =
-        DeclarationCursor::new(
-            token_stream
-                .canonical_cursor_from_current()
-                .expect("tokenized test stream must expose canonical tokens"),
-        )
-            .expect("tokenized test stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(
+        token_stream
+            .canonical_cursor_from_current()
+            .expect("tokenized test stream must expose canonical tokens"),
+    )
+    .expect("tokenized test stream must expose canonical tokens");
     let declaration_syntax = parse_declaration_syntax(
         &mut declaration_cursor,
         name,
@@ -249,9 +259,20 @@ fn tokenize_for_declaration(
 ) -> (StringTable, FileTokens, StringId, Option<usize>) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let token_stream = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, span_builder)
+    let token_stream = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        span_builder,
+    )
     .expect("tokenization should succeed");
 
     let name = string_table.intern("value");
@@ -271,13 +292,12 @@ fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
         tokenize_for_declaration(source, &mut span_builder);
     token_stream.index = 2; // skip ModuleStart and the declaration name
 
-    let mut declaration_cursor =
-        DeclarationCursor::new(
-            token_stream
-                .canonical_cursor_from_current()
-                .expect("tokenized test stream must expose canonical tokens"),
-        )
-            .expect("tokenized test stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(
+        token_stream
+            .canonical_cursor_from_current()
+            .expect("tokenized test stream must expose canonical tokens"),
+    )
+    .expect("tokenized test stream must expose canonical tokens");
     let failure = parse_declaration_syntax(
         &mut declaration_cursor,
         name,

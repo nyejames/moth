@@ -6,8 +6,8 @@
 //!      a missing record is a compiler invariant violation.
 
 use super::*;
-use std::path::PathBuf;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use std::path::PathBuf;
 
 #[test]
 fn missing_constant_position_produces_infrastructure_error() {

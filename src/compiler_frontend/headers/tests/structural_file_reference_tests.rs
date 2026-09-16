@@ -111,8 +111,7 @@ fn site_root_and_quoted_urls_create_no_file_edge() {
 
 #[test]
 fn moth_value_paths_are_classified_without_becoming_dependency_clauses() {
-    let (output, _, _path_fork, _span_builder) =
-        prepare_source("helpers = @helpers.moth\n");
+    let (output, _, _path_fork, _span_builder) = prepare_source("helpers = @helpers.moth\n");
     assert!(output.file_dependency_clauses.is_empty());
     let references = output.structural_file_references.references();
     assert_eq!(references.len(), 1);
@@ -124,8 +123,7 @@ fn moth_value_paths_are_classified_without_becoming_dependency_clauses() {
 
 #[test]
 fn a_path_inside_a_broken_expression_is_still_graph_active() {
-    let (output, _, _path_fork, _span_builder) =
-        prepare_source("broken #= @assets/logo.svg foo\n");
+    let (output, _, _path_fork, _span_builder) = prepare_source("broken #= @assets/logo.svg foo\n");
     let references = output.structural_file_references.references();
     assert_eq!(references.len(), 1);
     assert_eq!(

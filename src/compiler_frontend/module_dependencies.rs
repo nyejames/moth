@@ -35,7 +35,7 @@ use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use crate::header_log;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
@@ -48,7 +48,11 @@ use std::sync::Arc;
 /// without re-sorting or re-packaging the top-level symbol data.
 #[derive(Debug)]
 pub(crate) struct SortedHeaders {
-    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<FileTokens>>,
+    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
+    /// Logical source path per retained canonical owner.
+    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
+    /// Canonical OS filesystem path per retained canonical owner, if available.
+    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
     pub(crate) headers: Vec<Header>,
     pub(crate) source_build_config_contracts:
         Vec<crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract>,
@@ -56,8 +60,6 @@ pub(crate) struct SortedHeaders {
     pub(crate) entry_runtime_fragment_count: usize,
     pub(crate) const_fragment_count: usize,
     pub(crate) has_non_trivial_root_body: bool,
-    pub(crate) token_stats: crate::compiler_frontend::arena::TokenStats,
-    pub(crate) header_stats: crate::compiler_frontend::arena::HeaderStats,
     pub(crate) module_symbols: ModuleSymbols,
     pub(crate) binding_environment: HeaderBindingEnvironment,
 }
@@ -246,9 +248,7 @@ impl<'a> DependencyGraph<'a> {
         // concrete root-file header path. Accept those public edges without treating them as
         // graph nodes.
         if self.is_source_package_public_export_path(requested_path, string_table, path_fork) {
-            return Some(ResolvedGraphPath::SourcePackagePublicExport(
-                requested_path,
-            ));
+            return Some(ResolvedGraphPath::SourcePackagePublicExport(requested_path));
         }
 
         None
@@ -260,11 +260,12 @@ impl<'a> DependencyGraph<'a> {
         string_table: &StringTable,
         path_fork: &PathInternerFork,
     ) -> Option<usize> {
-        let resolved_path = match self.resolve_requested_path(requested_path, string_table, path_fork)? {
-            ResolvedGraphPath::Header(path) => path,
-            ResolvedGraphPath::ProviderInterface(_)
-            | ResolvedGraphPath::SourcePackagePublicExport(_) => return None,
-        };
+        let resolved_path =
+            match self.resolve_requested_path(requested_path, string_table, path_fork)? {
+                ResolvedGraphPath::Header(path) => path,
+                ResolvedGraphPath::ProviderInterface(_)
+                | ResolvedGraphPath::SourcePackagePublicExport(_) => return None,
+            };
 
         self.source_order_by_path.get(&resolved_path).copied()
     }
@@ -384,7 +385,8 @@ impl<'a> DependencyGraph<'a> {
                     .get(&header.tokens.source())
                     .expect("header body range has no prepared source-path identity"),
                 path_fork,
-            ) => {
+            ) =>
+            {
                 ResolvedDependencyEdge {
                     requested_path,
                     resolved_path: None,
@@ -511,15 +513,16 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     let BoundModuleHeaders {
         headers,
         source_token_streams,
+        source_token_paths,
+        source_token_os_paths,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,
         has_non_trivial_root_body,
-        token_stats,
-        header_stats,
         mut module_symbols,
         binding_environment,
+        ..
     } = parsed;
 
     // Partition: StartFunction headers are appended last, not sorted.
@@ -579,7 +582,10 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                             drop(graph);
                             let table = std::mem::take(string_table);
                             let batch = PremergeDiagnosticBatch::from_bag(diagnostic_bag, table);
-                            PremergeFailure::Mixed { batch, error: Box::new(error) }
+                            PremergeFailure::Mixed {
+                                batch,
+                                error: Box::new(error),
+                            }
                         } else {
                             PremergeFailure::Infrastructure(error)
                         };
@@ -620,14 +626,14 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
 
     Ok(SortedHeaders {
         source_token_streams,
+        source_token_paths,
+        source_token_os_paths,
         headers: sorted,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,
         has_non_trivial_root_body,
-        token_stats,
-        header_stats,
         module_symbols,
         binding_environment,
     })

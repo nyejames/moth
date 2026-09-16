@@ -402,9 +402,7 @@ fn classify_source_declaration_reference(
             };
         }
 
-        return ConstantReferenceResolution::SourceConstant {
-            path: *target_path,
-        };
+        return ConstantReferenceResolution::SourceConstant { path: *target_path };
     }
 
     // Not a constant: check if it's a legitimate constructor-like reference.

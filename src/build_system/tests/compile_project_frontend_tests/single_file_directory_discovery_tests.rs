@@ -234,7 +234,6 @@ fn directory_project_discovers_multiple_entry_modules() {
         }),
         "all base modules in one boundary must share its final path table"
     );
-
 }
 #[test]
 fn directory_project_remaps_delta_collisions_across_modules() {
@@ -288,11 +287,11 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     let item_path = (0..second_module.executable.path_table.len())
         .filter_map(PathId::try_from_index)
         .find(|path| {
-            second_module
-                .executable
-                .path_table
-                .render_portable(*path, &string_table, &mut Vec::new())
-                == "second/@b.moth/Item"
+            second_module.executable.path_table.render_portable(
+                *path,
+                &string_table,
+                &mut Vec::new(),
+            ) == "second/@b.moth/Item"
         })
         .expect("Item path should exist in the published path table");
     let nominal_id = second_module

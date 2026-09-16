@@ -47,11 +47,15 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 fn runtime_expression(string_table: &mut StringTable) -> Expression {
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("main.moth", string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("main.moth", string_table)
+        .expect("test path fits");
     let name = string_table.intern("runtime_text");
     Expression::new(
         ExpressionKind::FunctionCall {
-            name: path_fork.try_intern_child(scope, name).expect("test path fits"),
+            name: path_fork
+                .try_intern_child(scope, name)
+                .expect("test path fits"),
             args: Vec::new(),
             result_type_ids: vec![builtin_type_ids::STRING],
         },
@@ -191,7 +195,9 @@ fn preparation_keeps_reactive_content_on_runtime_handoff() {
         TemplateType::String,
         |builder, table| {
             let source = ReactiveSource {
-                path: path_fork.try_intern_portable_path("main.moth/#reactive", table).expect("test path fits"),
+                path: path_fork
+                    .try_intern_portable_path("main.moth/#reactive", table)
+                    .expect("test path fits"),
                 kind: ReactiveSourceKind::Declaration,
             };
             let text = table.intern("reactive text");
@@ -771,7 +777,9 @@ fn preparation_propagates_reactive_facts_from_runtime_slot_contribution_roots() 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let reactive_source = ReactiveSource {
-        path: path_fork.try_intern_portable_path("main.moth/#reactive", &mut string_table).expect("test path fits"),
+        path: path_fork
+            .try_intern_portable_path("main.moth/#reactive", &mut string_table)
+            .expect("test path fits"),
         kind: ReactiveSourceKind::Declaration,
     };
     let contribution_root = {
@@ -887,7 +895,9 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
     let capture_name = string_table.intern("value");
-    let capture_path = path_fork.try_intern_portable_path("main.moth/#value", &mut string_table).expect("test path fits");
+    let capture_path = path_fork
+        .try_intern_portable_path("main.moth/#value", &mut string_table)
+        .expect("test path fits");
     let scrutinee = Expression::option_none_with_type_id(
         string_type_id,
         DataType::StringSlice,

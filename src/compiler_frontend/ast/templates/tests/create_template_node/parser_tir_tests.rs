@@ -1,6 +1,6 @@
 use super::*;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     ConstRecordState, Expression, ReactiveSource, ReactiveSourceKind,
 };
@@ -38,14 +38,23 @@ fn parse_template(
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let mut file_tokens = template_tokens_from_source(source, string_table, span_builder, path_fork);
+    let mut file_tokens =
+        template_tokens_from_source(source, string_table, span_builder, path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, path_fork);
     let template_ir_store = context.template_ir_store();
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], string_table, path_fork)
-        .expect("template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        string_table,
+        path_fork,
+    )
+    .expect("template should parse");
 
     (template, template_ir_store)
 }
@@ -56,15 +65,24 @@ fn parse_const_required_template(
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let mut file_tokens = template_tokens_from_source(source, string_table, span_builder, path_fork);
+    let mut file_tokens =
+        template_tokens_from_source(source, string_table, span_builder, path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, path_fork);
     let template_ir_store = context.template_ir_store();
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
 
-    let template = Template::new_const_required(&mut token_stream, source_path, &context, vec![], string_table, path_fork)
-        .expect("const-required template should parse")
-        .template;
+    let template = Template::new_const_required(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        string_table,
+        path_fork,
+    )
+    .expect("const-required template should parse")
+    .template;
 
     (template, template_ir_store)
 }
@@ -134,8 +152,12 @@ fn parser_tir_owns_contiguous_literal_body_text() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) =
-        parse_template("[:\nalpha\nbeta]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[:\nalpha\nbeta]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     assert_eq!(
@@ -150,7 +172,12 @@ fn parser_tir_records_quoted_and_raw_markers_as_body_text() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[: \"quoted\" `raw` plain]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[: \"quoted\" `raw` plain]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     assert_eq!(
@@ -164,8 +191,12 @@ fn parser_tir_records_suppressed_child_template_brackets_as_literal_text() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) =
-        parse_template("[$doc:\n[: child]\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$doc:\n[: child]\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     assert_eq!(
@@ -183,7 +214,12 @@ fn template_tir_folds_nested_child_as_child_template_boundary() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[: before [: child] after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[: before [: child] after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -223,7 +259,12 @@ fn parser_preserves_foldable_nested_child_as_template_boundary() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_const_required_template("[:before[:child]after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_const_required_template(
+        "[:before[:child]after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     // The foldable nested child is now TIR-owned: it appears as a
@@ -324,7 +365,12 @@ fn parser_tir_records_if_else_if_else_branch_chain() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[if true:\nfirst\n[else if false]\nsecond\n[else]\nthird\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[if true:\nfirst\n[else if false]\nsecond\n[else]\nthird\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let parent_template = store
@@ -362,7 +408,12 @@ fn template_tir_records_child_template_in_branch_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[if true:before [:child] after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[if true:before [:child] after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
@@ -445,7 +496,12 @@ fn branch_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[\"prefix\", if true:body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[\"prefix\", if true:body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let (branches, fallback) = branch_chain_from_root(&template, &store);
@@ -479,7 +535,12 @@ fn fallback_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[\"prefix\", if false:\nbranch\n[else]\nfallback\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[\"prefix\", if false:\nbranch\n[else]\nfallback\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let (branches, fallback) = branch_chain_from_root(&template, &store);
@@ -512,7 +573,12 @@ fn parser_tir_trims_loop_control_boundary_whitespace() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[loop true:\n    [continue]\n    visible\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[loop true:\n    [continue]\n    visible\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let loop_node = match parser_tir_control_flow_root_kind(&template, &store) {
@@ -541,8 +607,12 @@ fn parser_tir_records_loop_node() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) =
-        parse_template("[loop true: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[loop true: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let parent_template = store
@@ -587,7 +657,12 @@ fn template_tir_records_child_template_in_loop_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[loop true:before [:child] after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[loop true:before [:child] after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let loop_node = match parser_tir_control_flow_root_kind(&template, &store) {
@@ -616,7 +691,12 @@ fn parser_tir_records_loop_control_markers_inside_loop_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[loop true:\n    before\n    [break]\n    after\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[loop true:\n    before\n    [break]\n    after\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let loop_node = match parser_tir_control_flow_root_kind(&template, &store) {
@@ -646,7 +726,12 @@ fn parser_tir_records_continue_marker_inside_loop_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[loop true:\n    before\n    [continue]\n    after\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[loop true:\n    before\n    [continue]\n    after\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let loop_node = match parser_tir_control_flow_root_kind(&template, &store) {
@@ -690,7 +775,12 @@ fn parser_tir_records_default_slot_placeholder() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[: before [$slot] after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[: before [$slot] after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -726,7 +816,12 @@ fn parser_tir_records_named_slot_placeholder() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[: before [$slot(\"name\")] after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[: before [$slot(\"name\")] after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -750,7 +845,12 @@ fn parser_tir_records_positional_slot_placeholder() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[: before [$slot(1)] after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[: before [$slot(1)] after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -773,8 +873,12 @@ fn parser_tir_records_string_literal_head_before_body_with_head_origin() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) =
-        parse_template("[\"head\": body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[\"head\": body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -792,7 +896,12 @@ fn parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[42: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[42: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -816,9 +925,13 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
     let source_name = string_table.intern("source");
-    let source_path = path_fork.try_intern_child(scope, source_name).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_child(scope, source_name)
+        .expect("test path fits");
     let source_span = None;
     let source = ReactiveSource {
         path: source_path,
@@ -841,10 +954,15 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
         config_qualifier: None,
     };
 
-    let mut file_tokens =
-        template_tokens_from_source("[$(source): body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[$(source): body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let template_source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
         template_source_path,
@@ -855,8 +973,15 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     )
     .with_source_file_scope(template_source_path);
 
-    let template = Template::new(&mut token_stream, template_source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("reactive head template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        template_source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("reactive head template should parse");
     let store = context.template_ir_store();
     let store = store.borrow();
 
@@ -918,7 +1043,12 @@ fn formatter_inline_code_literal_preserves_code_markup_in_parser_tir() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$md: `literal code`]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md: `literal code`]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let tir_reference = &template.tir_reference;
@@ -944,7 +1074,9 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
     let value_name = string_table.intern("value");
     let declarations = vec![Declaration {
         id: path_fork
@@ -959,14 +1091,25 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
         config_qualifier: None,
     }];
 
-    let mut file_tokens = template_tokens_from_source("[$md: `before [value] after`]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[$md: `before [value] after`]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let context = constant_template_context(&source_path, &declarations, &path_fork);
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("markdown inline-code with body reference should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("markdown inline-code with body reference should parse");
     let store = context.template_ir_store();
     let store = store.borrow();
 
@@ -1012,7 +1155,12 @@ fn inline_code_head_insert_records_formatted_tir_phase() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$md:\nLiteral syntax `[\"[slot]\"]`\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md:\nLiteral syntax `[\"[slot]\"]`\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let tir_reference = &template.tir_reference;
@@ -1046,7 +1194,12 @@ fn head_stringslice_records_formatted_tir_phase() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) = parse_template("[\"prefix\", $md: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[\"prefix\", $md: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -1068,7 +1221,12 @@ fn style_child_wrapper_no_children_records_formatted_tir_phase() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) = parse_template("[$md, $children([:<b>[$slot]</b>]): body text]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[$md, $children([:<b>[$slot]</b>]): body text]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -1091,7 +1249,12 @@ fn style_child_wrapper_with_children_records_formatted_tir_phase() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) = parse_template("[$md, $children([:<b>[$slot]</b>]): hello [:child] ]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[$md, $children([:<b>[$slot]</b>]): hello [:child] ]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -1114,8 +1277,12 @@ fn head_only_literal_text_records_formatted_tir_phase() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) =
-        parse_template("[\"head\", $md:]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[\"head\", $md:]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -1176,7 +1343,12 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
     // via `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let context = new_constant_context(path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits"), &path_fork);
+    let context = new_constant_context(
+        path_fork
+            .try_intern_portable_path("main.moth", &mut string_table)
+            .expect("test path fits"),
+        &path_fork,
+    );
     let span = None;
     let style = Style {
         formatter: Some(markdown_formatter()),
@@ -1235,10 +1407,17 @@ fn reactive_body_segment_records_formatted_tir_phase() {
     // `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let context = new_constant_context(path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits"), &path_fork);
+    let context = new_constant_context(
+        path_fork
+            .try_intern_portable_path("main.moth", &mut string_table)
+            .expect("test path fits"),
+        &path_fork,
+    );
     let span = None;
 
-    let source_path = path_fork.try_intern_portable_path("main.moth/#reactive0", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth/#reactive0", &mut string_table)
+        .expect("test path fits");
     let expected_source_path = source_path;
     let source = ReactiveSource {
         path: source_path,
@@ -1341,10 +1520,17 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
     // payload is constructed directly via `TemplateIrBuilder`.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let context = new_constant_context(path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits"), &path_fork);
+    let context = new_constant_context(
+        path_fork
+            .try_intern_portable_path("main.moth", &mut string_table)
+            .expect("test path fits"),
+        &path_fork,
+    );
     let span = None;
 
-    let source_path = path_fork.try_intern_portable_path("main.moth/#reactive0", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth/#reactive0", &mut string_table)
+        .expect("test path fits");
     let expected_source_path = source_path;
     let subscription = ReactiveSubscription {
         source: ReactiveSource {
@@ -1435,7 +1621,12 @@ fn head_expression_folds_through_tir_formatter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) = parse_template("[42, $md:]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[42, $md:]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -1463,7 +1654,12 @@ fn raw_directive_preserves_whitespace_and_advances_through_formatter_adapter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$raw:\n    Hello\n    World\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$raw:\n    Hello\n    World\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let tir_reference = &template.tir_reference;
@@ -1521,7 +1717,12 @@ fn parent_formatter_does_not_leak_into_nested_child_without_formatter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$md: outer [: <b>inner</b> ]]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md: outer [: <b>inner</b> ]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let parent_reference = &template.tir_reference;
@@ -1563,7 +1764,12 @@ fn nested_child_with_own_formatter_is_formatted_independently() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$md: outer [$md: <b>inner</b>]]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md: outer [$md: <b>inner</b>]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let parent_reference = &template.tir_reference;
@@ -1607,7 +1813,12 @@ fn formatted_tir_reference_installs_formatted_output_for_simple_template() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$md: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
     let tir_reference = &template.tir_reference;
 
@@ -1628,7 +1839,12 @@ fn formatted_tir_reference_installs_with_opaque_body_child_template() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$md: before [: child] after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md: before [: child] after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
     let tir_reference = &template.tir_reference;
 
@@ -1681,19 +1897,33 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
-    let wrapper_scope =
-        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let wrapper_scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
     let wrapper_name = string_table.intern("wrapper");
-    let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
+    let wrapper_path = path_fork
+        .try_intern_child(wrapper_scope, wrapper_name)
+        .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source("[:<article>[$slot]</article>]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut wrapper_file_tokens = template_tokens_from_source(
+        "[:<article>[$slot]</article>]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let wrapper_source_path = wrapper_file_tokens.src_path;
-    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(
+        &mut wrapper_tokens,
+        wrapper_source_path,
+        &wrapper_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("head-chain wrapper should parse");
 
     let declaration = Declaration {
@@ -1703,13 +1933,25 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
         config_qualifier: None,
     };
 
-    let mut parent_file_tokens =
-        template_tokens_from_source("[wrapper, $md: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut parent_file_tokens = template_tokens_from_source(
+        "[wrapper, $md: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let parent_source_path = parent_file_tokens.src_path;
-    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let parent_context = constant_template_context(&parent_source_path, &[declaration], &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(&mut parent_tokens, parent_source_path, &parent_context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(
+        &mut parent_tokens,
+        parent_source_path,
+        &parent_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("formatted head-chain template should parse");
 
     let reference = &template.tir_reference;
@@ -1735,19 +1977,33 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
-    let wrapper_scope =
-        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let wrapper_scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
     let wrapper_name = string_table.intern("wrapper");
-    let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
+    let wrapper_path = path_fork
+        .try_intern_child(wrapper_scope, wrapper_name)
+        .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source("[:\n    [$children([:H: [$slot]]):[$slot(1)]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut wrapper_file_tokens = template_tokens_from_source(
+        "[:\n    [$children([:H: [$slot]]):[$slot(1)]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let wrapper_source_path = wrapper_file_tokens.src_path;
-    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(
+        &mut wrapper_tokens,
+        wrapper_source_path,
+        &wrapper_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("slot wrapper should parse");
 
     let declaration = Declaration {
@@ -1757,14 +2013,25 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
         config_qualifier: None,
     };
 
-    let mut parent_file_tokens = template_tokens_from_source("[wrapper:\n    [: First]\n    [: Second]\n    [: Third]\n]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut parent_file_tokens = template_tokens_from_source(
+        "[wrapper:\n    [: First]\n    [: Second]\n    [: Third]\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let parent_source_path = parent_file_tokens.src_path;
-    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let parent_context = constant_template_context(&parent_source_path, &[declaration], &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(&mut parent_tokens, parent_source_path, &parent_context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(
+        &mut parent_tokens,
+        parent_source_path,
+        &parent_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("slot application should parse");
 
     let folded = fold_template_in_context(&template, &parent_context, &mut string_table);
@@ -1781,7 +2048,12 @@ fn formatter_children_wrapper_composition_keeps_formatted_reference() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) = parse_template("[$md, $children([:<b>[$slot]</b>]): hello [:child] ]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[$md, $children([:<b>[$slot]</b>]): hello [:child] ]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
 
@@ -1807,16 +2079,29 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source("[$md:title[$slot(\"title\")]body[$slot]]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut wrapper_file_tokens = template_tokens_from_source(
+        "[$md:title[$slot(\"title\")]body[$slot]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let wrapper_source_path = wrapper_file_tokens.src_path;
-    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(
+        &mut wrapper_tokens,
+        wrapper_source_path,
+        &wrapper_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("formatted named-slot wrapper should parse");
 
     let wrapper_reference = &wrapper.tir_reference;
@@ -1826,14 +2111,25 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         "explicit formatter named-slot receivers can install formatted TIR"
     );
 
-    let mut insert_file_tokens = template_tokens_from_source("[$md, $insert(\"title\"):Heading]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut insert_file_tokens = template_tokens_from_source(
+        "[$md, $insert(\"title\"):Heading]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let insert_source_path = insert_file_tokens.src_path;
-    let mut insert_tokens = AstCursor::from_file_tokens(&mut insert_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut insert_tokens = AstCursor::from_file_tokens(&mut insert_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let insert_context = new_constant_context(insert_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let insert = Template::new(&mut insert_tokens, insert_source_path, &insert_context, vec![], &mut string_table, &mut path_fork)
+    let insert = Template::new(
+        &mut insert_tokens,
+        insert_source_path,
+        &insert_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("formatted named insert should parse");
 
     let insert_reference = &insert.tir_reference;
@@ -1862,14 +2158,25 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         },
     ];
 
-    let mut parent_file_tokens = template_tokens_from_source("[wrapper, heading:Body]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut parent_file_tokens = template_tokens_from_source(
+        "[wrapper, heading:Body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let parent_source_path = parent_file_tokens.src_path;
-    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let parent_context = constant_template_context(&parent_source_path, &declarations, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let template = Template::new(&mut parent_tokens, parent_source_path, &parent_context, vec![], &mut string_table, &mut path_fork)
+    let template = Template::new(
+        &mut parent_tokens,
+        parent_source_path,
+        &parent_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("formatted named-slot application should parse");
 
     let folded = fold_template_in_context(&template, &parent_context, &mut string_table);
@@ -1885,7 +2192,12 @@ fn no_formatter_slot_receiver_does_not_claim_formatted_phase() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) = parse_template("[:before[$slot]after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[:before[$slot]after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
 
@@ -1906,7 +2218,12 @@ fn no_formatter_child_wrapper_reaches_formatted_phase_through_tir() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) = parse_template("[$children([:<b>[$slot]</b>]): hello [:child] ]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[$children([:<b>[$slot]</b>]): hello [:child] ]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
 
@@ -1926,8 +2243,12 @@ fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) =
-        parse_template("[$md, if true: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md, if true: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let parent_template = store
@@ -1962,7 +2283,12 @@ fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$md, if false:\nbody\n[else]\nfallback\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md, if false:\nbody\n[else]\nfallback\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let parent_template = store
@@ -2034,7 +2360,12 @@ fn formatted_tir_reference_installs_formatted_loop_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[$md, loop true: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$md, loop true: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let parent_template = store
@@ -2094,8 +2425,12 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
 
-    let (branch_template, store) =
-        parse_template("[if true: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (branch_template, store) = parse_template(
+        "[if true: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
     let branch_chain = match parser_tir_control_flow_root_kind(&branch_template, &store) {
         TemplateIrNodeKind::BranchChain { branches, .. } => branches,
@@ -2112,7 +2447,12 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
         TemplateTirPhase::Formatted,
     );
 
-    let (fallback_template, store) = parse_template("[if false:\nbranch\n[else]\nfallback\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (fallback_template, store) = parse_template(
+        "[if false:\nbranch\n[else]\nfallback\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
     let (branches, fallback) = branch_chain_from_root(&fallback_template, &store);
     assert_eq!(branches.len(), 1);
@@ -2132,8 +2472,12 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
         TemplateTirPhase::Formatted,
     );
 
-    let (loop_template, store) =
-        parse_template("[loop true: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (loop_template, store) = parse_template(
+        "[loop true: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
     let loop_node = match parser_tir_control_flow_root_kind(&loop_template, &store) {
         TemplateIrNodeKind::Loop { body, .. } => body,
@@ -2149,7 +2493,12 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
         TemplateTirPhase::Formatted,
     );
 
-    let (raw_template, store) = parse_template("[$raw, if true:\n    raw\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (raw_template, store) = parse_template(
+        "[$raw, if true:\n    raw\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
     let raw_branch_chain = match parser_tir_control_flow_root_kind(&raw_template, &store) {
         TemplateIrNodeKind::BranchChain { branches, .. } => branches,
@@ -2178,7 +2527,12 @@ fn default_whitespace_linear_records_formatted_tir_phase() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, _store) = parse_template("[:\n    Hello\n    World\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, _store) = parse_template(
+        "[:\n    Hello\n    World\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -2198,7 +2552,12 @@ fn parser_tir_records_finalized_child_template_as_child_template_node() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_const_required_template("[:before[:child]after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_const_required_template(
+        "[:before[:child]after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -2243,18 +2602,33 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
-    let wrapper_scope =
-        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let wrapper_scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
     let wrapper_name = string_table.intern("wrapper");
-    let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
+    let wrapper_path = path_fork
+        .try_intern_child(wrapper_scope, wrapper_name)
+        .expect("test path fits");
 
-    let mut wrapper_file_tokens =
-        template_tokens_from_source("[:head]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut wrapper_file_tokens = template_tokens_from_source(
+        "[:head]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let wrapper_source_path = wrapper_file_tokens.src_path;
-    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(
+        &mut wrapper_tokens,
+        wrapper_source_path,
+        &wrapper_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("wrapper template should parse");
 
     let declaration = Declaration {
@@ -2263,10 +2637,15 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         binding_span: None,
         config_qualifier: None,
     };
-    let mut parent_file_tokens =
-        template_tokens_from_source("[wrapper: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut parent_file_tokens = template_tokens_from_source(
+        "[wrapper: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let parent_source_path = parent_file_tokens.src_path;
-    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let parent_context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         parent_source_path,
@@ -2324,18 +2703,33 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
-    let wrapper_scope =
-        path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let wrapper_scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
     let wrapper_name = string_table.intern("wrapper");
-    let wrapper_path = path_fork.try_intern_child(wrapper_scope, wrapper_name).expect("test path fits");
+    let wrapper_path = path_fork
+        .try_intern_child(wrapper_scope, wrapper_name)
+        .expect("test path fits");
 
-    let mut wrapper_file_tokens =
-        template_tokens_from_source("[:head]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut wrapper_file_tokens = template_tokens_from_source(
+        "[:head]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let wrapper_source_path = wrapper_file_tokens.src_path;
-    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut wrapper_tokens = AstCursor::from_file_tokens(&mut wrapper_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
         .with_template_ir_store(Rc::clone(&shared_store));
-    let wrapper = Template::new(&mut wrapper_tokens, wrapper_source_path, &wrapper_context, vec![], &mut string_table, &mut path_fork)
+    let wrapper = Template::new(
+        &mut wrapper_tokens,
+        wrapper_source_path,
+        &wrapper_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("wrapper template should parse");
 
     let declaration = Declaration {
@@ -2345,10 +2739,15 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         config_qualifier: None,
     };
 
-    let mut parent_file_tokens =
-        template_tokens_from_source("[wrapper: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut parent_file_tokens = template_tokens_from_source(
+        "[wrapper: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let parent_source_path = parent_file_tokens.src_path;
-    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens).expect("test token stream must expose an AST cursor");
+    let mut parent_tokens = AstCursor::from_file_tokens(&mut parent_file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let parent_context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         parent_source_path,
@@ -2358,7 +2757,14 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         0,
     )
     .with_template_ir_store(Rc::clone(&shared_store));
-    let parent = Template::new(&mut parent_tokens, parent_source_path, &parent_context, vec![], &mut string_table, &mut path_fork)
+    let parent = Template::new(
+        &mut parent_tokens,
+        parent_source_path,
+        &parent_context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("parent template should parse");
     let store = shared_store.borrow();
     let parent_child_ids = tir_root_child_ids(&parent, &store);
@@ -2396,7 +2802,12 @@ fn parser_tir_skips_conditional_child_wrappers_for_fresh_control_flow_child() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (parent, store) = parse_template("[$children([:wrap]): [$fresh, if true: body]]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (parent, store) = parse_template(
+        "[$children([:wrap]): [$fresh, if true: body]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     let parent_child_ids = tir_root_child_ids(&parent, &store);
@@ -2432,8 +2843,12 @@ fn doc_comment_with_formatter_records_comment_kind() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) =
-        parse_template("[$doc: doc body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[$doc: doc body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
     let template_kind = store
         .get_template(template.tir_reference.root)
@@ -2457,7 +2872,12 @@ fn no_prefix_if_finalizes_with_direct_branch_chain_root() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[if true: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[if true: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     // After render-unit preparation refreshes every branch body, the owner
@@ -2476,8 +2896,12 @@ fn no_prefix_loop_finalizes_with_direct_loop_root() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) =
-        parse_template("[loop true: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[loop true: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     // After render-unit preparation refreshes the loop body, the owner root is
@@ -2496,7 +2920,12 @@ fn linear_template_preserves_sequence_root_shape() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template("[: before [: child] after]", &mut string_table, &mut span_builder, &mut path_fork);
+    let (template, store) = parse_template(
+        "[: before [: child] after]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let store = store.borrow();
 
     // Linear templates (no control flow) always finalize with a Sequence root,

@@ -157,20 +157,21 @@ fn shape_payload_decoding_validates_packed_handles_and_scalars() {
     let mut strings = StringTable::new();
     let symbol = strings.intern("alpha");
     let path_id = PathSyntaxId::try_from_raw(3).expect("checked path handle");
-    let numeric_id = crate::compiler_frontend::numeric_text::store::NumericLiteralId::try_from_raw(2)
-        .expect("checked numeric handle");
+    let numeric_id =
+        crate::compiler_frontend::numeric_text::store::NumericLiteralId::try_from_raw(2)
+            .expect("checked numeric handle");
     let numeric_token = NumericLiteralToken::test_new("1.5", &mut strings);
 
-    let symbol_shape = TokenShape::from_token_kind(&TokenKind::Symbol(symbol))
-        .expect("symbol shape should pack");
+    let symbol_shape =
+        TokenShape::from_token_kind(&TokenKind::Symbol(symbol)).expect("symbol shape should pack");
     assert_eq!(symbol_shape.string_id(), Some(symbol));
     assert_eq!(symbol_shape.path_syntax_id(), None);
     assert_eq!(symbol_shape.numeric_literal_id(), None);
     assert_eq!(symbol_shape.bool_value_checked(), None);
     assert_eq!(symbol_shape.char_value_checked(), None);
 
-    let path_shape = TokenShape::from_token_kind(&TokenKind::Path(path_id))
-        .expect("path shape should pack");
+    let path_shape =
+        TokenShape::from_token_kind(&TokenKind::Path(path_id)).expect("path shape should pack");
     assert_eq!(path_shape.path_syntax_id(), Some(path_id));
     assert_eq!(path_shape.string_id(), None);
     assert_eq!(
@@ -183,11 +184,16 @@ fn shape_payload_decoding_validates_packed_handles_and_scalars() {
         None,
         "path shapes carry no flags"
     );
-    let numeric_shape =
-        TokenShape::from_token_kind_with_numeric_id(&TokenKind::NumericLiteral(numeric_token.clone()), numeric_id)
-            .expect("numeric shape should pack");
+    let numeric_shape = TokenShape::from_token_kind_with_numeric_id(
+        &TokenKind::NumericLiteral(numeric_token.clone()),
+        numeric_id,
+    )
+    .expect("numeric shape should pack");
     assert_eq!(numeric_shape.numeric_literal_id(), Some(numeric_id));
-    assert_eq!(numeric_shape.numeric_kind(), Some(NumericLiteralKind::DecimalPoint));
+    assert_eq!(
+        numeric_shape.numeric_kind(),
+        Some(NumericLiteralKind::DecimalPoint)
+    );
     assert_eq!(
         TokenShape::from_raw_parts(TokenTag::NUMERIC_LITERAL.raw(), 0, 0),
         None,
@@ -211,8 +217,8 @@ fn shape_payload_decoding_validates_packed_handles_and_scalars() {
         None,
         "absent path handle must not pack"
     );
-    let bool_shape = TokenShape::from_token_kind(&TokenKind::BoolLiteral(true))
-        .expect("bool shape should pack");
+    let bool_shape =
+        TokenShape::from_token_kind(&TokenKind::BoolLiteral(true)).expect("bool shape should pack");
     assert_eq!(bool_shape.bool_value_checked(), Some(true));
     assert_eq!(
         TokenShape::from_raw_parts(TokenTag::BOOL_LITERAL.raw(), 0, 2),
@@ -220,8 +226,8 @@ fn shape_payload_decoding_validates_packed_handles_and_scalars() {
         "bool payloads are only 0 or 1"
     );
 
-    let char_shape = TokenShape::from_token_kind(&TokenKind::CharLiteral('x'))
-        .expect("char shape should pack");
+    let char_shape =
+        TokenShape::from_token_kind(&TokenKind::CharLiteral('x')).expect("char shape should pack");
     assert_eq!(char_shape.char_value_checked(), Some('x'));
     assert_eq!(
         TokenShape::from_raw_parts(TokenTag::CHAR_LITERAL.raw(), 0, 0xD800),
@@ -387,7 +393,10 @@ fn stats_classification_uses_schema_authority_with_legacy_parity() {
         TokenKind::Arrow,
         TokenKind::FatArrow,
     ] {
-        assert!(kind.token_tag().is_stats_operator(), "{kind:?} stays an operator");
+        assert!(
+            kind.token_tag().is_stats_operator(),
+            "{kind:?} stays an operator"
+        );
         let mut stats = TokenStats::default();
         stats.accumulate_tag(kind.token_tag());
         assert_eq!(stats.operators, 1, "{kind:?} fills the operator bucket");
@@ -401,7 +410,10 @@ fn stats_classification_uses_schema_authority_with_legacy_parity() {
         TokenKind::BoolLiteral(true),
         TokenKind::NoneLiteral,
     ] {
-        assert!(kind.token_tag().is_stats_literal(), "{kind:?} stays a literal");
+        assert!(
+            kind.token_tag().is_stats_literal(),
+            "{kind:?} stays a literal"
+        );
     }
     // Raw strings stay literal-adjacent in the expression taxonomy only by exclusion from
     // `is_operand_start`; the stats bucket keeps the legacy literal count.
@@ -413,7 +425,11 @@ fn stats_classification_uses_schema_authority_with_legacy_parity() {
     // collection delimiters keep their own bucket.
     assert!(TokenKind::FatArrow.token_tag().is_stats_operator());
     assert!(TokenKind::FatArrow.token_tag().is_delimiter());
-    for kind in [TokenKind::OpenCurly, TokenKind::CloseCurly, TokenKind::Comma] {
+    for kind in [
+        TokenKind::OpenCurly,
+        TokenKind::CloseCurly,
+        TokenKind::Comma,
+    ] {
         assert!(!kind.token_tag().is_stats_operator());
         let mut stats = TokenStats::default();
         stats.accumulate_tag(kind.token_tag());

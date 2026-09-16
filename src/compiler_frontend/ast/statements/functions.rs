@@ -32,8 +32,8 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
     parse_function_signature_syntax,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -108,17 +108,18 @@ impl FunctionSignature {
     ) -> SignatureResult<Self> {
         let mut span_builder = ExtendedSpanBuilder::new();
         let signature_syntax = {
-            let mut declaration_cursor = token_stream.declaration_cursor()?;
-            let syntax = parse_function_signature_syntax(
-                &mut declaration_cursor,
-                warnings,
-                string_table,
-                *function_path,
-                path_fork,
-                &mut span_builder,
-            )?;
-            let next_index = declaration_cursor.position();
-            drop(declaration_cursor);
+            let (syntax, next_index) = {
+                let mut declaration_cursor = token_stream.declaration_cursor()?;
+                let syntax = parse_function_signature_syntax(
+                    &mut declaration_cursor,
+                    warnings,
+                    string_table,
+                    *function_path,
+                    path_fork,
+                    &mut span_builder,
+                )?;
+                (syntax, declaration_cursor.position())
+            };
             token_stream.set_position(next_index)?;
             syntax
         };

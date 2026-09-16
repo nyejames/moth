@@ -217,8 +217,6 @@ fn display_type_identity_key_with_resolver<R: PathNameResolver>(
     }
 }
 
-
-
 // -----------------------------------------------------------
 //  DataType -> Identity Key Bridge
 // -----------------------------------------------------------

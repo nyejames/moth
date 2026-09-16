@@ -94,6 +94,8 @@ pub(crate) struct ModuleMaterialisationContext {
     /// own strings while rebasing a published context.
     pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
 }
+
+type RetainedIdentityArcs<'a> = Option<(&'a Arc<PathTable>, &'a Arc<FrozenStringTable>)>;
 impl ModuleMaterialisationContext {
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.semantic_closure.remap_path_ids(remap);
@@ -179,15 +181,7 @@ impl ModuleMaterialisationContext {
             )),
         }
     }
-    pub(crate) fn retained_identity_arcs(
-        &self,
-    ) -> Result<
-        Option<(
-            &Arc<PathTable>,
-            &Arc<FrozenStringTable>,
-        )>,
-        CompilerError,
-    > {
+    pub(crate) fn retained_identity_arcs(&self) -> Result<RetainedIdentityArcs<'_>, CompilerError> {
         match (&self.path_table, &self.source_string_table) {
             (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
             (None, None) => Ok(None),
@@ -283,9 +277,9 @@ impl GenericTemplateArtefact {
         let source_file = self.source_file;
         let function_path = self.function_path;
         let entry_dir = path_fork.parent(source_file).unwrap_or(PathId::ROOT);
-        let identity_tables = context.retained_identity_arcs().map_err(|error| {
-            CompilerMessages::from_error_ref(error, &string_table)
-        })?;
+        let identity_tables = context
+            .retained_identity_arcs()
+            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let materialised_body = self
             .body
             .materialise(source_file, path_fork, &mut string_table, identity_tables)
@@ -353,6 +347,8 @@ impl GenericTemplateArtefact {
                     module_symbols,
                     binding_environment,
                     source_token_streams: FxHashMap::default(),
+                    source_token_paths: FxHashMap::default(),
+                    source_token_os_paths: FxHashMap::default(),
                 },
                 string_table_ref,
             )?;
@@ -505,9 +501,7 @@ impl GenericTemplateArtefact {
                 declarations
                     .entry(local_path)
                     .or_insert_with(|| kind.clone());
-                declarations
-                    .entry(generated_nominal_path)
-                    .or_insert(kind);
+                declarations.entry(generated_nominal_path).or_insert(kind);
             }
             if !lookups
                 .resolved_struct_fields_by_path

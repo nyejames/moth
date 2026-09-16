@@ -6,7 +6,7 @@
 //! WHY: keyword policy is user-visible and must not drift between the tokenizer,
 //! dependency alias validation, reserved-name diagnostics and code highlighting.
 
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 
 /// Keywords that may not be shadowed by identifiers after case folding and
 /// stripping leading underscores.
@@ -131,9 +131,34 @@ pub(crate) fn classify_source_word(text: &str) -> Option<ClassifiedSourceWord> {
     }
 }
 
+/// Returns the stable taxonomy tag for an exact source keyword spelling.
+///
+/// WHAT: classifies through the same direct spelling match as [`classify_source_word`]
+///       and then reads the canonical schema tag, keeping schema-classification
+///       callers off the transient `TokenKind` compatibility enum.
+/// WHY: presentation-only consumers (highlighting, scanning) need only class/tag
+///      facts; lexer construction still needs `TokenKind` payloads until its
+///      consumers migrate, so both spellings share this one match.
+#[cfg(test)]
+pub(crate) fn keyword_token_tag(text: &str) -> Option<TokenTag> {
+    classify_source_word(text).map(|classified| classified.token_kind.token_tag())
+}
+
 /// Returns the tokenizer token kind for an exact source keyword spelling.
 pub(crate) fn keyword_token_kind(text: &str) -> Option<TokenKind> {
     classify_source_word(text).map(|classified| classified.token_kind)
+}
+
+/// Returns the stable taxonomy tag for a keyword form requiring an attached `!`.
+///
+/// WHAT: tag projection of [`attached_bang_keyword_token_kind`] for presentation
+///       consumers that classify `return!`/`cast!` spans without constructing
+///       the transient `TokenKind` compatibility enum.
+/// WHY: highlighting must share keyword policy without growing a second word
+///      list; lexer construction keeps the `TokenKind` lane until its consumers
+///      migrate.
+pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
+    attached_bang_keyword_token_kind(text).map(|kind| kind.token_tag())
 }
 
 /// Returns the compound token for keyword forms that require an attached `!`.

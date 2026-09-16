@@ -166,15 +166,12 @@ impl CheckedExternalProviderTarget {
             ));
         }
         let extension_spelling = self.extension_spelling(string_table)?;
-        let prefix_component = string_table.resolve(
-            *prefix_components
-                .last()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "checked provider target prefix has no final component",
-                    )
-                })?,
-        );
+        let prefix_component =
+            string_table.resolve(*prefix_components.last().ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "checked provider target prefix has no final component",
+                )
+            })?);
         if explicit_non_source_extension(prefix_component) != Some(extension_spelling) {
             return Err(CompilerError::compiler_error(
                 "checked provider target prefix does not end with its classified extension",
@@ -300,22 +297,20 @@ pub(crate) fn decode_dependency_target<'a>(
         DependencyTargetKind::ExternalProvider {
             prefix_component_count,
             extension,
-        } => {
-            validate_external_provider_parts(
-                path,
-                *prefix_component_count,
-                *extension,
-                path_fork,
-                string_table,
-            )
-            .map(|(prefix, remaining_components, extension_spelling)| {
-                Some(DecodedExternalProviderTarget {
-                    prefix,
-                    remaining_components,
-                    extension_spelling,
-                })
+        } => validate_external_provider_parts(
+            path,
+            *prefix_component_count,
+            *extension,
+            path_fork,
+            string_table,
+        )
+        .map(|(prefix, remaining_components, extension_spelling)| {
+            Some(DecodedExternalProviderTarget {
+                prefix,
+                remaining_components,
+                extension_spelling,
             })
-        }
+        }),
     }
 }
 

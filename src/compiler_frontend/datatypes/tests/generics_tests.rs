@@ -954,22 +954,20 @@ fn type_id_bindings_rollback_generic_instance_mismatch_after_partial_binding() {
     let box_list = register_single_parameter_list(&mut type_environment, &mut string_table, "Item");
     let wrapper_list =
         register_single_parameter_list(&mut type_environment, &mut string_table, "Item");
-    let pair_nominal =
-        register_empty_generic_struct(
-            &mut type_environment,
-            &mut path_builder,
-            &mut string_table,
-            "Pair",
-            pair_list,
-        );
-    let box_nominal =
-        register_empty_generic_struct(
-            &mut type_environment,
-            &mut path_builder,
-            &mut string_table,
-            "Box",
-            box_list,
-        );
+    let pair_nominal = register_empty_generic_struct(
+        &mut type_environment,
+        &mut path_builder,
+        &mut string_table,
+        "Pair",
+        pair_list,
+    );
+    let box_nominal = register_empty_generic_struct(
+        &mut type_environment,
+        &mut path_builder,
+        &mut string_table,
+        "Box",
+        box_list,
+    );
     let wrapper_nominal = register_empty_generic_struct(
         &mut type_environment,
         &mut path_builder,

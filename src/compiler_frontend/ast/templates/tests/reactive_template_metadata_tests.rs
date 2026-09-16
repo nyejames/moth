@@ -343,8 +343,7 @@ fn non_template_coercion_is_resolved_at_the_outer_expression_boundary() {
 fn wrapper_transition_contributes_metadata_through_exact_view() {
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (expression, subscription) =
-        reactive_expression(&mut strings, &mut path_fork, "wrapper");
+    let (expression, subscription) = reactive_expression(&mut strings, &mut path_fork, "wrapper");
     let mut store = TemplateIrStore::new();
     let wrapper_site_id = store.next_expression_site_id();
     let wrapper_node = store.push_node(TemplateIrNode::new(
@@ -405,8 +404,7 @@ fn wrapper_transition_contributes_metadata_through_exact_view() {
 fn owned_runtime_handoff_metadata_is_traversed() {
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (expression, subscription) =
-        reactive_expression(&mut strings, &mut path_fork, "handoff");
+    let (expression, subscription) = reactive_expression(&mut strings, &mut path_fork, "handoff");
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(expression),

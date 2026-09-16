@@ -16,8 +16,8 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
@@ -187,8 +187,7 @@ pub(super) fn canonicalize_local_ordering_hints(
                 }
 
                 if let Some(selection) = selections.iter().find(|selection| {
-                    path_fork
-                        .try_intern_child(dependency.dependency.path, selection.source_name)
+                    path_fork.try_intern_child(dependency.dependency.path, selection.source_name)
                         == Some(hint.path())
                 }) {
                     matching_dependency = Some((dependency, selection.local_name()));

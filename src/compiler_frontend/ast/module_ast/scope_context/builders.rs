@@ -93,10 +93,7 @@ impl ScopeContext {
     /// resolved.
     /// WHY: file/start contexts set this to enforce dependency-binding semantics and
     /// prevent same-file references from bypassing the visibility system.
-    pub fn with_visible_declarations(
-        mut self,
-        visible: Arc<FxHashSet<PathId>>,
-    ) -> ScopeContext {
+    pub fn with_visible_declarations(mut self, visible: Arc<FxHashSet<PathId>>) -> ScopeContext {
         self.visible_declaration_ids = Some(visible);
         self
     }

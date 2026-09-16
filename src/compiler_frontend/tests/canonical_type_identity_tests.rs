@@ -172,7 +172,9 @@ fn register_struct(
     name: &str,
 ) -> (NominalTypeId, TypeId) {
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
     env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path,
@@ -191,7 +193,9 @@ fn register_generic_struct(
     param_list_id: GenericParameterListId,
 ) -> (NominalTypeId, TypeId) {
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
     env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path,
@@ -207,7 +211,9 @@ fn register_choice(
     name: &str,
 ) -> (NominalTypeId, TypeId) {
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path(name, string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
     env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
         path,

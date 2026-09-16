@@ -7,6 +7,7 @@
 //! function return contract before HIR lowers the control-flow edge.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -14,7 +15,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 

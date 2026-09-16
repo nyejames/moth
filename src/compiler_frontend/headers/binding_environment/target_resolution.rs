@@ -322,11 +322,7 @@ fn resolve_virtual_package_dependency(
     path_fork: &PathInternerFork,
 ) -> VirtualPackageMatch {
     let Some(package_match) =
-        registry.longest_package_prefix_for_dependency(
-            *requested_path,
-            path_fork,
-            string_table,
-        )
+        registry.longest_package_prefix_for_dependency(*requested_path, path_fork, string_table)
     else {
         return VirtualPackageMatch::NoMatch;
     };

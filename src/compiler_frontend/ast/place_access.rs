@@ -79,4 +79,3 @@ fn root_binding_name(place: &PlaceExpression, path_fork: &PathInternerFork) -> O
         PlaceExpressionKind::Field { base, .. } => root_binding_name(base, path_fork),
     }
 }
-

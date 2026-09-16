@@ -7,12 +7,13 @@
 //! keeping each parsing phase focused and testable.
 
 use crate::ast_log;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
+use crate::compiler_frontend::ast::templates::create_template_node::TemplatePathTables;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
-    CommentDirectiveKind, SlotPlaceholder, Style, TemplateParsingMode, TemplateSegmentOrigin,
-    TemplateType,
+    CommentDirectiveKind, SlotPlaceholder, Style, Template, TemplateParsingMode,
+    TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_body_sentinels::{
     BodySentinelTarget, DirectLoopControlMarker, ElseSentinelPolicy, TemplateBodyBoundary,
@@ -39,13 +40,12 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::utilities::token_scan::TemplateBalance;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 /// Template-body parsing owns recursive template construction, so it carries the template error
 /// boundary rather than reducing an inner retained-data failure to a user diagnostic.
@@ -602,9 +602,11 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             input.context,
             self.type_interner,
             nested_direct_child_wrappers,
-            self.string_table,
             parse_options,
-            self.path_fork,
+            TemplatePathTables {
+                string_table: self.string_table,
+                path_fork: self.path_fork,
+            },
         )?;
         let child_template = child_construction.template;
 

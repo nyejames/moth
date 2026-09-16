@@ -17,7 +17,9 @@ use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenTag};
+#[cfg(test)]
+use crate::compiler_frontend::tokenizer::tokens::Token;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::utilities::token_scan::{ScannedToken, TokenFactView};
 use rustc_hash::FxHashSet;
 
@@ -143,6 +145,7 @@ pub struct ScannedDependencyClause {
     pub binding: ScannedDependencyBinding,
 }
 
+#[cfg(test)]
 pub(crate) fn parse_dependency_clause(
     tokens: &[Token],
     start_index: usize,
@@ -199,7 +202,6 @@ fn checked_next_clause_index(index: usize) -> DependencyClauseResult<usize> {
 ///       tokens are read; no per-query whole-source projection occurs.
 /// WHY: the same indexed body serves bounded slices and canonical `SourceTokens` without a
 ///      second scan body or durable references.
-
 pub(crate) fn parse_dependency_clause_scanned(
     tokens: TokenFactView<'_>,
     start_offset: usize,
@@ -215,7 +217,9 @@ pub(crate) fn parse_dependency_clause_scanned(
         .into());
     };
 
-    let Some(path_id) = path_token.path_syntax_id.filter(|_| path_token.tag == TokenTag::PATH)
+    let Some(path_id) = path_token
+        .path_syntax_id
+        .filter(|_| path_token.tag == TokenTag::PATH)
     else {
         return Err(CompilerDiagnostic::invalid_dependency_clause(
             DependencyClauseKind::Namespace,
@@ -245,7 +249,10 @@ pub(crate) fn parse_dependency_clause_scanned(
         ));
     }
 
-    if tokens.get(index).is_some_and(|token| token.tag == TokenTag::AS) {
+    if tokens
+        .get(index)
+        .is_some_and(|token| token.tag == TokenTag::AS)
+    {
         let Some(alias_keyword) = tokens.get(index) else {
             return Err(dependency_clause_error(
                 DependencyClauseKind::NamespaceAlias,
@@ -262,7 +269,9 @@ pub(crate) fn parse_dependency_clause_scanned(
                 Some(alias_keyword_span),
             ));
         };
-        let Some(alias_name) = alias_token.symbol.filter(|_| alias_token.tag == TokenTag::SYMBOL)
+        let Some(alias_name) = alias_token
+            .symbol
+            .filter(|_| alias_token.tag == TokenTag::SYMBOL)
         else {
             return Err(dependency_clause_error(
                 DependencyClauseKind::NamespaceAlias,
@@ -299,7 +308,6 @@ pub(crate) fn parse_dependency_clause_scanned(
             index,
         ));
     }
-
 
     reject_legacy_or_delimited_selection_scanned(tokens.get(index), source_id)?;
 
@@ -341,7 +349,10 @@ pub(crate) fn parse_dependency_clause_scanned(
         let source_span = SourceSpan::new(source_id, selection_token.span);
         index = checked_next_clause_index(index)?;
 
-        let local_alias = if tokens.get(index).is_some_and(|token| token.tag == TokenTag::AS) {
+        let local_alias = if tokens
+            .get(index)
+            .is_some_and(|token| token.tag == TokenTag::AS)
+        {
             index = checked_next_clause_index(index)?;
             let Some(alias_token) = tokens.get(index) else {
                 return Err(dependency_clause_error(
@@ -399,7 +410,10 @@ pub(crate) fn parse_dependency_clause_scanned(
                 let comma_span = SourceSpan::new(source_id, comma_token.span);
                 continuation_comma = Some(comma_span);
                 index = checked_next_clause_index(index)?;
-                while tokens.get(index).is_some_and(|token| token.tag == TokenTag::NEWLINE) {
+                while tokens
+                    .get(index)
+                    .is_some_and(|token| token.tag == TokenTag::NEWLINE)
+                {
                     index = checked_next_clause_index(index)?;
                 }
                 if clause_ended_scanned(tokens.get(index)) {
@@ -444,12 +458,7 @@ pub(crate) fn parse_dependency_clause_scanned(
 }
 
 fn clause_ended_scanned(token: Option<ScannedToken>) -> bool {
-    token.is_none_or(|token| {
-        matches!(
-            token.tag,
-            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF
-        )
-    })
+    token.is_none_or(|token| matches!(token.tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF))
 }
 
 fn reject_legacy_or_delimited_selection_scanned(

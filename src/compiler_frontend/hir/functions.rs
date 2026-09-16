@@ -119,10 +119,7 @@ impl HirFunctionOriginLookup {
     /// implicit start).
     /// WHY: tracking consumption lets the lowering boundary detect unused seeds without keeping a
     /// second parallel origin set.
-    pub(crate) fn consume_origin_for(
-        &mut self,
-        path: &PathId,
-    ) -> Option<HirStableFunctionOrigin> {
+    pub(crate) fn consume_origin_for(&mut self, path: &PathId) -> Option<HirStableFunctionOrigin> {
         if let Some(origin) = self.by_path.get(path) {
             self.consumed_paths.insert(*path);
             return Some(HirStableFunctionOrigin::Public(origin.clone()));

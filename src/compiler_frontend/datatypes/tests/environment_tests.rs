@@ -18,9 +18,7 @@ use crate::compiler_frontend::datatypes::{
 };
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathInternerBuilder, PathTable,
-};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::FxHashMap;
 
@@ -31,7 +29,6 @@ fn single_generic_parameter_list(name: StringId) -> [(TypeParameterId, StringId)
 fn empty_path_table() -> PathTable {
     PathInternerBuilder::new().freeze()
 }
-
 
 fn test_path(
     path_builder: &mut PathInternerBuilder,
@@ -570,7 +567,7 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Record {
                 fields: vec![FieldDefinition {
-                        name: test_path(&mut path_builder, &mut table, "inner"),
+                    name: test_path(&mut path_builder, &mut table, "inner"),
                     type_id: state_parameter_type_id,
                     span: None,
                 }]
@@ -938,8 +935,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
         Some(box_nominal_id)
     );
     let mut remapped_path_builder = PathInternerBuilder::new();
-    let remapped_box_path =
-        test_path(&mut remapped_path_builder, &mut merged_table, "Box");
+    let remapped_box_path = test_path(&mut remapped_path_builder, &mut merged_table, "Box");
     assert_eq!(
         env.nominal_id_for_path(&remapped_box_path),
         Some(box_nominal_id)
@@ -1657,8 +1653,7 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
             generic_parameters: None,
             const_record: false,
         });
-    let point_alias_path =
-        test_path(&mut path_builder, &mut local_table, "PointAlias");
+    let point_alias_path = test_path(&mut path_builder, &mut local_table, "PointAlias");
     requester
         .register_nominal_path_alias(point_alias_path, point_type_id)
         .expect("point alias should target the registered nominal");
@@ -1718,12 +1713,7 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
             Some(state_nominal_id)
         );
         assert_eq!(
-            display_type(
-                point_type_id,
-                generated,
-                &local_table,
-                path_builder.paths(),
-            ),
+            display_type(point_type_id, generated, &local_table, path_builder.paths(),),
             "Point"
         );
 

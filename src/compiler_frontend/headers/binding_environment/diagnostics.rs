@@ -81,10 +81,7 @@ pub(super) fn direct_special_file_dependency(
 }
 
 /// Diagnostic when a dependency path matches a source file but not a symbol.
-pub(super) fn bare_file_dependency(
-    path: &PathId,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
+pub(super) fn bare_file_dependency(path: &PathId, span: Option<SourceSpan>) -> CompilerDiagnostic {
     CompilerDiagnostic::bare_file_import(*path, span)
 }
 

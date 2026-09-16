@@ -9,13 +9,15 @@
 //! owns that span's source identity and extended table; AST forwards the anchor to initializer EOF.
 //! MUST NOT: perform type checking, constant folding, or semantic validation.
 
+use super::DeclarationCursor;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    BuildConfigQualifierSyntax, parse_build_config_qualifier, starts_build_config_qualifier_at_cursor,
+    BuildConfigQualifierSyntax, parse_build_config_qualifier,
+    starts_build_config_qualifier_at_cursor,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation_cursor,
@@ -28,7 +30,6 @@ use crate::compiler_frontend::utilities::token_scan::{
     TokenScanFailure, collect_declaration_initializer_range,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use super::DeclarationCursor;
 
 pub use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 
@@ -86,7 +87,6 @@ impl DeclarationSyntax {
         }
     }
 }
-
 
 pub fn parse_declaration_syntax(
     token_stream: &mut DeclarationCursor<'_>,
@@ -265,10 +265,7 @@ pub(crate) fn require_binding_marker_adjacent(
             BindingMode::ImmutableRuntime => return Ok(()),
         };
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::common_syntax_mistake(
-                reason,
-                Some(current_token.source_span()),
-            ),
+            CompilerDiagnostic::common_syntax_mistake(reason, Some(current_token.source_span())),
         ));
     }
 

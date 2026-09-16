@@ -10,32 +10,42 @@ use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
-use crate::compiler_frontend::symbols::path_interner::PathId;
-
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
+use crate::compiler_frontend::symbols::string_interning::{
+    FrozenStringTable, StringTable, StringTableResolver,
+};
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
+use crate::compiler_frontend::tokenizer::tokens::TokenRange;
+use crate::compiler_frontend::tokenizer::tokens::TokenSequenceId;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// One generic function body backed by one canonical source owner.
 ///
-/// WHAT: retains only the canonical `FileTokens` owner, a checked contiguous range or segmented
+/// WHAT: retains only the canonical source owner, a checked contiguous range or segmented
 /// sequence and the declaration/donor identities needed by later parsers.
 /// WHY: generic syntax can outlive the declaring AST pass, but it must never retain another token
 /// vector or a second `SourceTokens` store. Parser consumers derive a bounded adapter on demand.
+/// Source bodies share the declaring module's canonical `SourceTokens` allocation directly.
+/// Materialised bodies keep the donor `FileTokens` shell (including its remapped compatibility
+/// lane) until H5 deletes the remaining adapters.
 #[derive(Clone)]
 pub(crate) enum GenericFunctionBody {
-    /// Source templates use the declaring module's canonical prepared source owner.
+    /// Source templates use the declaring module's canonical source owner.
     Source {
-        source_owner: Arc<FileTokens>,
-        token_range: crate::compiler_frontend::tokenizer::tokens::TokenRange,
-        token_sequence: Option<crate::compiler_frontend::tokenizer::tokens::TokenSequenceId>,
+        source_owner: Arc<SourceTokens>,
+        token_range: TokenRange,
+        token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
+        canonical_os_path: Option<PathBuf>,
     },
     /// Materialised bodies retain the donor owner and frozen Stage 0/identity context.
     Materialised {
         source_owner: Arc<FileTokens>,
-        token_range: crate::compiler_frontend::tokenizer::tokens::TokenRange,
-        token_sequence: Option<crate::compiler_frontend::tokenizer::tokens::TokenSequenceId>,
+        token_range: TokenRange,
+        token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
         resolution_facts: Arc<Stage0ResolutionFacts>,
         frozen_identity_handle: FrozenIdentityHandle,
@@ -50,14 +60,37 @@ pub(crate) enum GenericFunctionBody {
     },
 }
 
+/// Frozen Stage 0 and identity data retained by a materialised generic body.
+///
+/// The body owner and checked token bounds remain direct constructor inputs; these donor facts
+/// travel together so materialisation callers cannot accidentally mix identity domains.
+pub(crate) struct MaterialisedDonorContext {
+    pub(crate) resolution_facts: Arc<Stage0ResolutionFacts>,
+    pub(crate) frozen_identity_handle: FrozenIdentityHandle,
+    pub(crate) source_path_table: Option<Arc<PathTable>>,
+    pub(crate) source_string_table: Option<Arc<FrozenStringTable>>,
+}
+
+/// Borrowed identity data used while rebuilding a remapped parser adapter.
+///
+/// The destination tables remain borrowed mutably for the adapter's lifetime, matching the
+/// original helper's path/string remap behavior without retaining either table.
+pub(crate) struct RemappedAdapterContext<'a, S: StringTableResolver> {
+    pub(crate) source_path_table: Option<&'a PathTable>,
+    pub(crate) source_strings: &'a S,
+    pub(crate) destination_strings: &'a mut StringTable,
+    pub(crate) path_fork: Option<&'a mut PathInternerFork>,
+}
+
 impl GenericFunctionBody {
     pub(crate) fn source(
-        source_owner: Arc<FileTokens>,
-        token_range: crate::compiler_frontend::tokenizer::tokens::TokenRange,
-        token_sequence: Option<crate::compiler_frontend::tokenizer::tokens::TokenSequenceId>,
+        source_owner: Arc<SourceTokens>,
+        token_range: TokenRange,
+        token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
+        canonical_os_path: Option<PathBuf>,
     ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
-        validate_syntax_owner(
+        validate_source_owner(
             &source_owner,
             token_range,
             token_sequence,
@@ -68,19 +101,16 @@ impl GenericFunctionBody {
             token_range,
             token_sequence,
             declaration_path,
+            canonical_os_path,
         })
     }
 
     pub(crate) fn materialised(
         source_owner: Arc<FileTokens>,
-        token_range: crate::compiler_frontend::tokenizer::tokens::TokenRange,
-        token_sequence: Option<crate::compiler_frontend::tokenizer::tokens::TokenSequenceId>,
+        token_range: TokenRange,
+        token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
-        resolution_facts: Arc<Stage0ResolutionFacts>,
-        frozen_identity_handle: FrozenIdentityHandle,
-        source_path_table: Option<Arc<crate::compiler_frontend::symbols::path_interner::PathTable>>,
-        source_string_table:
-            Option<Arc<crate::compiler_frontend::symbols::string_interning::FrozenStringTable>>,
+        donor_context: MaterialisedDonorContext,
     ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
         validate_syntax_owner(
             &source_owner,
@@ -93,49 +123,61 @@ impl GenericFunctionBody {
             token_range,
             token_sequence,
             declaration_path,
-            resolution_facts,
-            frozen_identity_handle,
-            source_path_table,
-            source_string_table,
+            resolution_facts: donor_context.resolution_facts,
+            frozen_identity_handle: donor_context.frozen_identity_handle,
+            source_path_table: donor_context.source_path_table,
+            source_string_table: donor_context.source_string_table,
         })
     }
 
-    pub(crate) fn source_owner(&self) -> &Arc<FileTokens> {
+    /// Canonical source identity that owns every retained token of this body.
+    pub(crate) fn donor_source_id(&self) -> crate::compiler_frontend::source::SourceId {
         match self {
-            Self::Source { source_owner, .. }
-            | Self::Materialised { source_owner, .. } => source_owner,
+            Self::Source { source_owner, .. } => source_owner.source(),
+            Self::Materialised { source_owner, .. } => source_owner.file_id,
+        }
+    }
+    pub(crate) fn token_range(&self) -> TokenRange {
+        match self {
+            Self::Source { token_range, .. } | Self::Materialised { token_range, .. } => {
+                *token_range
+            }
         }
     }
 
-    pub(crate) fn token_range(
-        &self,
-    ) -> crate::compiler_frontend::tokenizer::tokens::TokenRange {
+    pub(crate) fn token_sequence(&self) -> Option<TokenSequenceId> {
         match self {
-            Self::Source { token_range, .. }
-            | Self::Materialised { token_range, .. } => *token_range,
-        }
-    }
-
-    pub(crate) fn token_sequence(
-        &self,
-    ) -> Option<crate::compiler_frontend::tokenizer::tokens::TokenSequenceId> {
-        match self {
-            Self::Source { token_sequence, .. }
-            | Self::Materialised { token_sequence, .. } => *token_sequence,
+            Self::Source { token_sequence, .. } | Self::Materialised { token_sequence, .. } => {
+                *token_sequence
+            }
         }
     }
 
     pub(crate) fn declaration_path(&self) -> PathId {
         match self {
-            Self::Source { declaration_path, .. }
-            | Self::Materialised { declaration_path, .. } => *declaration_path,
+            Self::Source {
+                declaration_path, ..
+            }
+            | Self::Materialised {
+                declaration_path, ..
+            } => *declaration_path,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn materialised_owner(&self) -> Option<&Arc<FileTokens>> {
+        match self {
+            Self::Source { .. } => None,
+            Self::Materialised { source_owner, .. } => Some(source_owner),
         }
     }
 
     /// Derive the bounded parser adapter for this body.
     ///
-    /// Materialised bodies additionally rebase donor payloads through their retained provider
-    /// identity pair. The returned adapter is intentionally short-lived and is never retained.
+    /// Source bodies share the canonical owner directly and never rebase payloads or mutate the
+    /// path fork. Materialised bodies additionally rebase donor payloads through their retained
+    /// provider identity pair. The returned adapter is intentionally short-lived and is never
+    /// retained.
     pub(crate) fn parser_stream(
         &self,
         string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
@@ -147,8 +189,10 @@ impl GenericFunctionBody {
                 token_range,
                 token_sequence,
                 declaration_path,
-            } => bounded_adapter(
+                canonical_os_path,
+            } => bounded_adapter_from_canonical(
                 source_owner,
+                canonical_os_path.clone(),
                 *token_range,
                 *token_sequence,
                 *declaration_path,
@@ -167,10 +211,12 @@ impl GenericFunctionBody {
                     *token_range,
                     *token_sequence,
                     *declaration_path,
-                    source_path_table.as_deref(),
-                    source_strings,
-                    string_table,
-                    Some(path_fork),
+                    RemappedAdapterContext {
+                        source_path_table: source_path_table.as_deref(),
+                        source_strings,
+                        destination_strings: string_table,
+                        path_fork: Some(path_fork),
+                    },
                 ),
                 None => bounded_adapter(
                     source_owner,
@@ -235,8 +281,9 @@ impl GenericFunctionBody {
     }
     /// Derive a bounded adapter for stable capture without mutating the active path fork.
     ///
-    /// Capture only needs donor path rows and payload spelling. Full path rebasing happens at the
-    /// generated parser boundary, after the provider identity tables are available.
+    /// Source bodies share the canonical owner directly. Capture only needs donor path rows and
+    /// payload spelling. Full path rebasing happens at the generated parser boundary, after the
+    /// provider identity tables are available.
     pub(crate) fn parser_stream_for_capture(
         &self,
         string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
@@ -247,8 +294,10 @@ impl GenericFunctionBody {
                 token_range,
                 token_sequence,
                 declaration_path,
-            } => bounded_adapter(
+                canonical_os_path,
+            } => bounded_adapter_from_canonical(
                 source_owner,
+                canonical_os_path.clone(),
                 *token_range,
                 *token_sequence,
                 *declaration_path,
@@ -266,10 +315,12 @@ impl GenericFunctionBody {
                     *token_range,
                     *token_sequence,
                     *declaration_path,
-                    None,
-                    source_strings,
-                    string_table,
-                    None,
+                    RemappedAdapterContext {
+                        source_path_table: None,
+                        source_strings,
+                        destination_strings: string_table,
+                        path_fork: None,
+                    },
                 ),
                 None => bounded_adapter(
                     source_owner,
@@ -289,11 +340,17 @@ pub(crate) fn validate_syntax_owner(
     role: &str,
 ) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
     if token_range.source() != source_owner.file_id {
-        return Err(crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-            format!("{role} token range has a foreign source identity"),
-        ));
+        return Err(
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
+                "{role} token range has a foreign source identity"
+            )),
+        );
     }
-    let canonical = source_owner.source_tokens()?;
+    let canonical = source_owner.canonical_source_tokens().map_err(|_| {
+        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
+            "{role} token range is outside its canonical source owner: parser adapter stream owns no canonical source-token store"
+        ))
+    })?;
     canonical.cursor(token_range).map_err(|error| {
         crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
             "{role} token range is outside its canonical source owner: {error:?}"
@@ -309,10 +366,62 @@ pub(crate) fn validate_syntax_owner(
     Ok(())
 }
 
+pub(crate) fn validate_source_owner(
+    source_owner: &SourceTokens,
+    token_range: TokenRange,
+    token_sequence: Option<TokenSequenceId>,
+    role: &str,
+) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
+    if token_range.source() != source_owner.source() {
+        return Err(
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
+                "{role} token range has a foreign source identity"
+            )),
+        );
+    }
+    source_owner.cursor(token_range).map_err(|error| {
+        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
+            "{role} token range is outside its canonical source owner: {error:?}"
+        ))
+    })?;
+    if let Some(sequence) = token_sequence {
+        source_owner.token_sequence(sequence).map_err(|error| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
+                "{role} token sequence is outside its canonical source owner: {error:?}"
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+pub(crate) fn bounded_adapter_from_canonical(
+    source_owner: &Arc<SourceTokens>,
+    canonical_os_path: Option<PathBuf>,
+    token_range: TokenRange,
+    token_sequence: Option<TokenSequenceId>,
+    declaration_path: PathId,
+) -> Result<FileTokens, crate::compiler_frontend::compiler_errors::CompilerError> {
+    if let Some(sequence) = token_sequence {
+        FileTokens::new_bounded_sequence_substream_from_canonical(
+            Arc::clone(source_owner),
+            canonical_os_path,
+            sequence,
+            declaration_path,
+        )
+    } else {
+        FileTokens::new_bounded_substream_from_canonical(
+            Arc::clone(source_owner),
+            canonical_os_path,
+            token_range,
+            declaration_path,
+        )
+    }
+}
+
 pub(crate) fn bounded_adapter(
     source_owner: &FileTokens,
-    token_range: crate::compiler_frontend::tokenizer::tokens::TokenRange,
-    token_sequence: Option<crate::compiler_frontend::tokenizer::tokens::TokenSequenceId>,
+    token_range: TokenRange,
+    token_sequence: Option<TokenSequenceId>,
     declaration_path: PathId,
 ) -> Result<FileTokens, crate::compiler_frontend::compiler_errors::CompilerError> {
     if let Some(sequence) = token_sequence {
@@ -322,17 +431,19 @@ pub(crate) fn bounded_adapter(
     }
 }
 
-
-pub(crate) fn remapped_bounded_adapter(
+pub(crate) fn remapped_bounded_adapter<S: StringTableResolver>(
     source_owner: &FileTokens,
     token_range: crate::compiler_frontend::tokenizer::tokens::TokenRange,
     token_sequence: Option<crate::compiler_frontend::tokenizer::tokens::TokenSequenceId>,
     declaration_path: PathId,
-    source_path_table: Option<&crate::compiler_frontend::symbols::path_interner::PathTable>,
-    source_strings: &impl crate::compiler_frontend::symbols::string_interning::StringTableResolver,
-    destination_strings: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    path_fork: Option<&mut crate::compiler_frontend::symbols::path_interner::PathInternerFork>,
+    rebase: RemappedAdapterContext<'_, S>,
 ) -> Result<FileTokens, crate::compiler_frontend::compiler_errors::CompilerError> {
+    let RemappedAdapterContext {
+        source_path_table,
+        source_strings,
+        destination_strings,
+        path_fork,
+    } = rebase;
     let mut adapter = bounded_adapter(source_owner, token_range, token_sequence, declaration_path)?;
     let mut path_remap = None;
     if let Some(source_path_table) = source_path_table {
@@ -378,7 +489,7 @@ impl fmt::Debug for GenericFunctionBody {
             Self::Materialised { .. } => "Materialised",
         });
         debug
-            .field("source", &self.source_owner().file_id)
+            .field("source", &self.donor_source_id())
             .field("range", &self.token_range())
             .field("sequence", &self.token_sequence())
             .field("declaration_path", &self.declaration_path());

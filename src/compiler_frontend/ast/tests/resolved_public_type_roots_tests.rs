@@ -48,7 +48,9 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 fn path(name: &str, string_table: &mut StringTable, path_fork: &mut PathInternerFork) -> PathId {
-    path_fork.try_intern_portable_path(name, string_table).expect("test path fits")
+    path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits")
 }
 
 fn header(
@@ -59,7 +61,8 @@ fn header(
     _string_table: &mut StringTable,
     _path_fork: &mut PathInternerFork,
 ) -> Header {
-    let token_index = TokenIndex::try_from_raw(0).expect("zero token index should be representable");
+    let token_index =
+        TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind,
         file_role,
@@ -188,7 +191,9 @@ fn receiver_entry(
     ReceiverMethodEntry {
         function_path,
         receiver,
-        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
+        source_file: path_fork
+            .try_intern_portable_path("root.moth", string_table)
+            .expect("test path fits"),
         receiver_mutable: false,
         signature,
     }
@@ -938,7 +943,9 @@ fn register_source_trait(
     let definition = ResolvedTraitDefinition {
         id: trait_id,
         name: string_table.intern(trait_name),
-        canonical_path: path_fork.try_intern_portable_path(trait_name, string_table).expect("test path fits"),
+        canonical_path: path_fork
+            .try_intern_portable_path(trait_name, string_table)
+            .expect("test path fits"),
         source_file: PathId::ROOT,
         this_type,
         requirements: Vec::new(),
@@ -1011,7 +1018,9 @@ fn retains_source_trait_fact_for_generic_struct_bound() {
     )
     .expect("a generic struct with a source trait bound should retain its root and facts");
 
-    let source_path = path_fork.try_intern_portable_path("RENDERABLE", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("RENDERABLE", &mut string_table)
+        .expect("test path fits");
     assert_eq!(
         table.trait_source_facts.get(&source_trait_id),
         Some(&ResolvedTraitSourceFact::Source(source_path)),

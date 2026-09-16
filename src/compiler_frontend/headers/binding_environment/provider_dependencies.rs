@@ -191,9 +191,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         };
 
         let mut scratch = Vec::new();
-        let source_str = self
-            .path_fork
-            .render_portable(*source_file, self.string_table, &mut scratch);
+        let source_str =
+            self.path_fork
+                .render_portable(*source_file, self.string_table, &mut scratch);
         let Some(entry) = self
             .external_dependency_resolution_table
             .get(&source_str, provider_target.raw_prefix())

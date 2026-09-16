@@ -24,8 +24,8 @@ use crate::compiler_frontend::paths::resource_identity::{
     StableResourceOwnerId,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::PathBuf;
 use std::sync::Arc;
 

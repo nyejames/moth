@@ -59,12 +59,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             }
 
-            let exported_name = self.path_fork.component(header.declaration_path).ok_or_else(|| {
-                self.error_messages(
-                    CompilerError::compiler_error("Public export header had no source-path name."),
-                    string_table,
-                )
-            })?;
+            let exported_name = self
+                .path_fork
+                .component(header.declaration_path)
+                .ok_or_else(|| {
+                    self.error_messages(
+                        CompilerError::compiler_error(
+                            "Public export header had no source-path name.",
+                        ),
+                        string_table,
+                    )
+                })?;
 
             match &header.kind {
                 HeaderKind::Function { .. } => {
@@ -335,11 +340,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
     }
 
-    fn nominal_id_is_public(
-        &self,
-        nominal_id: NominalTypeId,
-        public_root_file: &PathId,
-    ) -> bool {
+    fn nominal_id_is_public(&self, nominal_id: NominalTypeId, public_root_file: &PathId) -> bool {
         self.type_environment
             .nominal_path_by_id(nominal_id)
             .is_some_and(|path| self.source_path_is_public_from_root_file(path, public_root_file))

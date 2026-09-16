@@ -7,6 +7,7 @@
 //! and rejection behavior is owned by canonical integration cases under
 //!      `tests/cases/function_call_*`.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, CallPassingMode,
 };
@@ -30,7 +31,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -44,11 +44,22 @@ fn parse_args(
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
-    let mut tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let file_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test path fits");
+    let mut tokens = tokenize(
+        source,
+        file_path,
+        TokenizerEntryMode::SourceFile,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
-    let mut token_stream =
-        AstCursor::from_file_tokens(&mut tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut tokens)
+        .expect("test token stream must expose an AST cursor");
 
     while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
         token_stream.advance();
@@ -57,7 +68,10 @@ fn parse_args(
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         PathId::ROOT,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -73,18 +87,29 @@ fn parse_args(
         &mut string_table,
         &mut path_fork,
     )
-        .expect("call arguments should parse")
+    .expect("call arguments should parse")
 }
 
 fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Vec<CallArgument> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
+    let file_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let mut tokens = tokenize(
+        source,
+        file_path,
+        TokenizerEntryMode::SourceFile,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
-    let mut token_stream =
-        AstCursor::from_file_tokens(&mut tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut tokens)
+        .expect("test token stream must expose an AST cursor");
 
     while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
         token_stream.advance();
@@ -93,7 +118,10 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         PathId::ROOT,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -153,12 +181,23 @@ fn parse_raw_call_args_for_test(
 fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
+    let file_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let mut tokens = tokenize(
+        source,
+        file_path,
+        TokenizerEntryMode::SourceFile,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
-    let mut token_stream =
-        AstCursor::from_file_tokens(&mut tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut tokens)
+        .expect("test token stream must expose an AST cursor");
 
     while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
         token_stream.advance();
@@ -167,7 +206,10 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         PathId::ROOT,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -176,15 +218,14 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-    let error =
-        parse_raw_call_args_for_test(
-            &mut token_stream,
-            &context,
-            &mut type_interner,
-            &mut string_table,
-            &mut path_fork,
-        )
-            .expect_err("call arguments should fail");
+    let error = parse_raw_call_args_for_test(
+        &mut token_stream,
+        &context,
+        &mut type_interner,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("call arguments should fail");
     match error {
         ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
@@ -282,12 +323,23 @@ fn retains_parser_selected_parameter_slots_for_named_and_positional_arguments() 
 fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = path_fork.try_intern_portable_path("@page.moth", &mut string_table).expect("test path fits");
+    let file_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize("call(1, third = 3)", file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let mut tokens = tokenize(
+        "call(1, third = 3)",
+        file_path,
+        TokenizerEntryMode::SourceFile,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
-    let mut token_stream =
-        AstCursor::from_file_tokens(&mut tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut tokens)
+        .expect("test token stream must expose an AST cursor");
 
     while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
         token_stream.advance();
@@ -296,7 +348,10 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         PathId::ROOT,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,

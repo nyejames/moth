@@ -59,16 +59,18 @@ fn config_dependency_classification_uses_the_source_component() {
         &string_table
     ));
 
-    let nested_config_folder =
-        path(&["config", "settings"], &mut string_table, &mut path_fork);
+    let nested_config_folder = path(&["config", "settings"], &mut string_table, &mut path_fork);
     assert!(!dependency_path_references_config_file(
         nested_config_folder,
         &path_fork,
         &string_table
     ));
 
-    let ordinary_config_folder =
-        path(&["config", "settings", "project"], &mut string_table, &mut path_fork);
+    let ordinary_config_folder = path(
+        &["config", "settings", "project"],
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(!dependency_path_references_config_file(
         ordinary_config_folder,
         &path_fork,
@@ -81,24 +83,25 @@ fn support_root_dependency_classification_uses_the_source_component() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let bare_support_root =
-        path(&["modules", "+pkg"], &mut string_table, &mut path_fork);
+    let bare_support_root = path(&["modules", "+pkg"], &mut string_table, &mut path_fork);
     assert!(dependency_path_references_support_root_file(
         bare_support_root,
         &path_fork,
         &string_table
     ));
 
-    let ordinary_module =
-        path(&["modules", "+pkg.moth", "symbol"], &mut string_table, &mut path_fork);
+    let ordinary_module = path(
+        &["modules", "+pkg.moth", "symbol"],
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(!dependency_path_references_support_root_file(
         ordinary_module,
         &path_fork,
         &string_table
     ));
 
-    let ordinary_plus_extension =
-        path(&["modules", "+pkg.js"], &mut string_table, &mut path_fork);
+    let ordinary_plus_extension = path(&["modules", "+pkg.js"], &mut string_table, &mut path_fork);
     assert!(!dependency_path_references_support_root_file(
         ordinary_plus_extension,
         &path_fork,

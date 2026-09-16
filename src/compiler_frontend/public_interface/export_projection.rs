@@ -527,7 +527,7 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
                 header.declaration_path, existing, origin
             )));
         }
-            origins.insert(header.declaration_path, origin);
+        origins.insert(header.declaration_path, origin);
     }
 
     Ok(origins)
@@ -584,7 +584,7 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
                 header.declaration_path, existing, origin
             )));
         }
-            origins.insert(header.declaration_path, origin);
+        origins.insert(header.declaration_path, origin);
     }
 
     Ok(origins)

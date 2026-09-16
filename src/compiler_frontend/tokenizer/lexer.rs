@@ -542,7 +542,11 @@ pub fn tokenize(
         // instead of the legacy `Token`/`TokenKind` Debug value. Tag and canonical text come
         // from the shared descriptor authority, and no cursor or token reference is retained
         // beyond this statement.
-        token_log!(token.kind.token_tag().raw(), " ", token.kind.token_tag().descriptor().text());
+        token_log!(
+            token.kind.token_tag().raw(),
+            " ",
+            token.kind.token_tag().descriptor().text()
+        );
         if token.kind == TokenKind::Eof {
             break;
         }
@@ -560,7 +564,13 @@ pub fn tokenize(
             last_meaningful_token_kind: last_meaningful_token_kind.as_ref(),
             meaningful_token_before_last_kind: meaningful_token_before_last_kind.as_ref(),
         };
-        token = match get_token_kind(&mut stream, style_directives, string_table, path_fork, context) {
+        token = match get_token_kind(
+            &mut stream,
+            style_directives,
+            string_table,
+            path_fork,
+            context,
+        ) {
             Ok(next_token) => next_token,
             Err(TokenizeFailure::Diagnosed(mut diagnostic)) => {
                 // Every lexical failure crosses this boundary while its original source

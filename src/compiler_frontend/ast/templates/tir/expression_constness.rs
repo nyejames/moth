@@ -120,10 +120,7 @@ pub(crate) fn effective_loop_header_for_view(
 pub(crate) fn classify_expression_const_evaluable_with_nested_template(
     expression: &Expression,
     loop_binding_paths: &[PathId],
-    nested_template: &mut impl FnMut(
-        TemplateTirReference,
-        &[PathId],
-    ) -> Result<bool, TemplateError>,
+    nested_template: &mut impl FnMut(TemplateTirReference, &[PathId]) -> Result<bool, TemplateError>,
 ) -> Result<bool, TemplateError> {
     match &expression.kind {
         ExpressionKind::Int(_)
@@ -601,7 +598,7 @@ fn selector_is_const(
     store: &TemplateIrStore,
     string_table: &StringTable,
     visiting_templates: &mut HashSet<TemplateIrId>,
-)-> Result<Option<Vec<PathId>>, TemplateError> {
+) -> Result<Option<Vec<PathId>>, TemplateError> {
     match selector {
         TemplateBranchSelector::Bool(condition) => Ok(expression_is_const_evaluable(
             condition,

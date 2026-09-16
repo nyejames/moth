@@ -10,17 +10,18 @@
 //!      semantic stages behind that call are tested with their own owners.
 
 use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
-use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::SourceFileKindRegistry;
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    parse_file_headers_with_table, prepare_header_syntax, FileFrontendPrepareOutput, Header,
-    HeaderKind, HeaderParseOptions, PreparedHeaderSyntax, SourcePreparationDelta,
+    FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
+    SourcePreparationDelta, parse_file_headers_with_table, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
-    compile_module, ModuleCompilationContext, ModuleCompilationOutcome,
-    ProviderMaterialisationRegistry,
+    ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
+    compile_module,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -39,7 +40,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
-use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -211,16 +211,22 @@ fn source_path_for_header(headers: &PreparedHeaderSyntax, header: &Header) -> Pa
         .expect("every retained header should have a source-path owner")
 }
 
-fn token_slice_for_header<'a>(
-    headers: &'a PreparedHeaderSyntax,
+fn token_slice_for_header(
+    headers: &PreparedHeaderSyntax,
     header: &Header,
-) -> &'a [crate::compiler_frontend::tokenizer::tokens::Token] {
+) -> Vec<crate::compiler_frontend::tokenizer::tokens::Token> {
     let source = headers
         .source_token_streams
         .get(&header.tokens.source())
         .expect("every retained header should have a token owner");
-    let range = header.tokens;
-    &source.tokens[range.start().index()..range.end().index()]
+    if let Some(sequence) = header.token_sequence {
+        return source
+            .materialize_token_sequence(sequence)
+            .expect("header sequence should resolve through its source owner");
+    }
+    source
+        .materialize_range(header.tokens)
+        .expect("header range should resolve through its source owner")
 }
 
 fn header_source_file_names(
@@ -646,10 +652,9 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         .prepared_header_syntax
         .headers
         .iter()
-        .flat_map(|header| token_slice_for_header(
-            &prepared.semantic.prepared_header_syntax,
-            header,
-        ))
+        .flat_map(|header| {
+            token_slice_for_header(&prepared.semantic.prepared_header_syntax, header)
+        })
         .find_map(|token| match token.kind {
             TokenKind::Symbol(id)
                 if prepared.semantic.string_table.resolve(id) == parameter_name =>
@@ -912,16 +917,18 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     assert_eq!(draft.public_interface.export_bindings.len(), 1);
     assert_eq!(draft.module.executable.hir.start_function, None);
     assert!(draft.module.executable.hir.functions.is_empty());
-    assert!(draft
-        .module
-        .executable
-        .hir
-        .function_origins
-        .values()
-        .all(|origin| !matches!(
-            origin,
-            crate::compiler_frontend::hir::functions::HirFunctionOrigin::EntryStart
-        )));
+    assert!(
+        draft
+            .module
+            .executable
+            .hir
+            .function_origins
+            .values()
+            .all(|origin| !matches!(
+                origin,
+                crate::compiler_frontend::hir::functions::HirFunctionOrigin::EntryStart
+            ))
+    );
 }
 
 #[test]
@@ -1003,9 +1010,11 @@ fn chunk_planning_is_bounded_by_thread_policy_and_minimum_chunk_size() {
     assert_eq!(four_thread_plans.last().unwrap().file_range, 35..40);
 
     assert_eq!(uneven_plans.len(), 2);
-    assert!(uneven_plans
-        .iter()
-        .all(|plan| plan.file_range.len() >= super::FILE_PREPARATION_MIN_CHUNK_SIZE));
+    assert!(
+        uneven_plans
+            .iter()
+            .all(|plan| plan.file_range.len() >= super::FILE_PREPARATION_MIN_CHUNK_SIZE)
+    );
 }
 
 #[test]

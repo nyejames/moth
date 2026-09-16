@@ -207,14 +207,21 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
         vec!["local.moth"]
     );
     assert_eq!(file_tokens.canonical_os_path, Some(canonical_path));
-    let first_token = file_tokens.tokens.first().expect("first token should exist");
+    let first_token = file_tokens
+        .tokens
+        .first()
+        .expect("first token should exist");
     assert!(matches!(
         first_token.kind,
         TokenKind::Symbol(id) if global_table.resolve(id) == "my_symbol"
     ));
     assert_eq!(first_token.span, LocalSpan::source_start());
     assert!(matches!(
-        file_tokens.tokens.get(1).expect("second token should exist").kind,
+        file_tokens
+            .tokens
+            .get(1)
+            .expect("second token should exist")
+            .kind,
         TokenKind::NumericLiteral(_)
     ));
 }
@@ -238,10 +245,7 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
     );
     let utils_helper = path_syntax.push(
         local_paths
-            .try_intern_components(&[
-                local_table.intern("utils"),
-                local_table.intern("helper"),
-            ])
+            .try_intern_components(&[local_table.intern("utils"), local_table.intern("helper")])
             .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
@@ -268,12 +272,18 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
         file_tokens.tokens[0].kind,
         TokenKind::Path(id) if id == ui_button
     ));
-    let first = file_tokens.path_syntax.try_path(ui_button).expect("valid path handle");
+    let first = file_tokens
+        .path_syntax
+        .try_path(ui_button)
+        .expect("valid path handle");
     assert_eq!(
         path_strings(&global_paths, first.root, &global_table),
         vec!["ui", "Button"]
     );
-    let second = file_tokens.path_syntax.try_path(utils_helper).expect("valid path handle");
+    let second = file_tokens
+        .path_syntax
+        .try_path(utils_helper)
+        .expect("valid path handle");
     assert_eq!(
         path_strings(&global_paths, second.root, &global_table),
         vec!["utils", "helper"]
@@ -315,7 +325,10 @@ fn file_tokens_preparing_remap_updates_owned_path_table() {
     file_tokens
         .remap_preparing_path_ids(&path_remap)
         .expect("the preparing path table should remap");
-    let path = file_tokens.path_syntax.try_path(button).expect("valid path handle");
+    let path = file_tokens
+        .path_syntax
+        .try_path(button)
+        .expect("valid path handle");
     assert_eq!(
         path_strings(&global_paths, path.root, &global_table),
         vec!["ui", "Button"]
@@ -327,19 +340,22 @@ fn rebind_source_identity_updates_source_spans_without_changing_paths() {
     let mut table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let original_scope = path_fork.try_intern_portable_path("stage0_absolute.moth", &mut table).expect("test path fits");
-    let logical_scope = path_fork.try_intern_portable_path("module/logical.moth", &mut table).expect("test path fits");
+    let original_scope = path_fork
+        .try_intern_portable_path("stage0_absolute.moth", &mut table)
+        .expect("test path fits");
+    let logical_scope = path_fork
+        .try_intern_portable_path("module/logical.moth", &mut table)
+        .expect("test path fits");
 
     let mut path_syntax = PathSyntaxTable::new();
     let helper_util = path_syntax.push(
-        path_fork.try_intern_components(&[table.intern("helper"), table.intern("util")]).expect("test path fits"),
+        path_fork
+            .try_intern_components(&[table.intern("helper"), table.intern("util")])
+            .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let tokens = vec![
-        make_token(
-            TokenKind::Symbol(table.intern("alpha")),
-            original_scope,
-        ),
+        make_token(TokenKind::Symbol(table.intern("alpha")), original_scope),
         make_token(TokenKind::Path(helper_util), original_scope),
     ];
 
@@ -443,7 +459,10 @@ fn frozen_numeric_store_rejects_post_publication_remap() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         file_tokens.remap_string_ids(&remap);
     }));
-    assert!(result.is_err(), "post-freeze remap must not silently mutate");
+    assert!(
+        result.is_err(),
+        "post-freeze remap must not silently mutate"
+    );
 }
 
 #[test]

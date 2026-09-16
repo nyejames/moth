@@ -171,10 +171,7 @@ impl ReactiveTemplateMetadata {
         }
     }
 
-    pub fn from_template_value_parameter(
-        parameter: PathId,
-        span: Option<SourceSpan>,
-    ) -> Self {
+    pub fn from_template_value_parameter(parameter: PathId, span: Option<SourceSpan>) -> Self {
         let mut metadata = Self::template_backed();
         metadata.push_template_value_parameter(ReactiveTemplateParameterDependency::new(
             parameter, span,
@@ -276,7 +273,9 @@ impl ReactiveTemplateMetadata {
 }
 
 fn parameter_index_by_path(parameters: &[Declaration], path: &PathId) -> Option<usize> {
-    parameters.iter().position(|parameter| parameter.id == *path)
+    parameters
+        .iter()
+        .position(|parameter| parameter.id == *path)
 }
 
 /// Canonical and diagnostic type data for a collection expression.

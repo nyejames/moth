@@ -222,13 +222,17 @@ pub(super) fn build_module(
         variants: vec![],
     }];
 
-    let function_path = path_fork.try_intern_portable_path(function_name, string_table).expect("test path fits");
+    let function_path = path_fork
+        .try_intern_portable_path(function_name, string_table)
+        .expect("test path fits");
     module
         .side_table
         .bind_function_name(function_id, function_path);
 
     for (local_id, local_name) in local_names {
-        let local_path = path_fork.try_intern_portable_path(local_name, string_table).expect("test path fits");
+        let local_path = path_fork
+            .try_intern_portable_path(local_name, string_table)
+            .expect("test path fits");
         module.side_table.bind_local_name(*local_id, local_path);
     }
 
@@ -259,14 +263,23 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
         return_type: types.unit,
     };
 
-    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        function_name,
+        vec![block],
+        function,
+        &[],
+    );
 
-    lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    JsLoweringConfig::direct_js(false),
-    &type_environment,
-    &path_fork.snapshot_table())
+    lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed")
     .source
 }
@@ -307,14 +320,23 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
         return_type: types.unit,
     };
 
-    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        function_name,
+        vec![block],
+        function,
+        &[],
+    );
 
-    lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    JsLoweringConfig::direct_js(false),
-    &type_environment,
-    &path_fork.snapshot_table())
+    lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed")
     .source
 }
@@ -368,14 +390,23 @@ fn lower_minimal_module_with_cast(
         return_type: types.unit,
     };
 
-    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        function_name,
+        vec![block],
+        function,
+        &[],
+    );
 
-    lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    JsLoweringConfig::direct_js(false),
-    &type_environment,
-    &path_fork.snapshot_table())
+    lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed")
     .source
 }
@@ -471,14 +502,23 @@ pub(super) fn lower_minimal_module_with_io_call(
         return_type: types.unit,
     };
 
-    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        function_name,
+        vec![block],
+        function,
+        &[],
+    );
 
-    lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    JsLoweringConfig::direct_js(false),
-    &type_environment,
-    &path_fork.snapshot_table())
+    lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering with IO call should succeed")
     .source
 }
@@ -547,14 +587,23 @@ pub(super) fn lower_minimal_module_with_io_input_call(
         return_type: types.unit,
     };
 
-    let module = build_module(&mut path_fork, &mut string_table, function_name, vec![block], function, &[]);
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        function_name,
+        vec![block],
+        function,
+        &[],
+    );
 
-    lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    JsLoweringConfig::direct_js(false),
-    &type_environment,
-    &path_fork.snapshot_table())
+    lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering with input IO call should succeed")
     .source
 }

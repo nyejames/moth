@@ -199,8 +199,7 @@ pub(crate) fn compile_module(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
         )),
         Err(mut failure) => {
-            failure
-                .attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))?;
+            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))?;
             match failure {
                 PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
                     Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
@@ -211,7 +210,7 @@ pub(crate) fn compile_module(
                 // module compilation; abort through the typed lane if one ever does.
                 PremergeFailure::Mixed { error, .. } => Err(*error),
             }
-        },
+        }
     }
 }
 
@@ -708,12 +707,7 @@ fn run_semantic_stages(
         timing_context,
         check_borrows(compiler, &hir_module, &warnings, None)
     )?;
-    install_exact_concrete_call_summaries(
-        &mut materialisation_context_builder,
-        &hir_module,
-        &bootstrap_borrow_analysis,
-    )?;
-    timed_stage_attributed!(
+    let generated_materialisation = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendGeneratedMaterialise,
         timing_context,
         materialise_generated_request_roots(
@@ -726,7 +720,8 @@ fn run_semantic_stages(
             #[cfg(feature = "timers")]
             timing_context,
         )
-    )?;
+    );
+    generated_materialisation?;
     let borrow_analysis = run_generated_summary_convergence(
         compiler,
         &mut hir_module,
@@ -820,8 +815,9 @@ fn run_semantic_stages(
                     type_environment,
                     borrow_analysis,
                     path_table: Arc::new(
-                        crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
-                            .freeze(),
+                        crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new(
+                        )
+                        .freeze(),
                     ),
                 },
                 link_facts: ModuleLinkFacts {

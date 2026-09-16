@@ -83,7 +83,6 @@ impl HeaderFileParseState {
         }
     }
 
-
     pub(super) fn record_start_body_token_ref(
         &mut self,
         token: TokenRef<'_>,
@@ -95,9 +94,8 @@ impl HeaderFileParseState {
         .ok_or_else(|| {
             CompilerError::compiler_error("start-body token end exceeded its checked domain")
         })?;
-        let range = TokenRange::new(token.source(), start, end).ok_or_else(|| {
-            CompilerError::compiler_error("start-body token range was reversed")
-        })?;
+        let range = TokenRange::new(token.source(), start, end)
+            .ok_or_else(|| CompilerError::compiler_error("start-body token range was reversed"))?;
         self.record_start_body_range(range);
         self.observe_start_body_token_ref(token);
         Ok(())
@@ -171,7 +169,6 @@ impl HeaderFileParseState {
         self.top_level_const_fragments.push(fragment);
         self.headers.push(header);
     }
-
 
     pub(super) fn into_non_entry_output(
         self,

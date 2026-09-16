@@ -150,8 +150,12 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
         .into_iter()
         .enumerate()
         .map(|(index, source)| {
-            let scope =
-                path_fork.try_intern_portable_path(&format!("counter-fixture-{index}.moth"), &mut expected_token_string_table).expect("test path fits");
+            let scope = path_fork
+                .try_intern_portable_path(
+                    &format!("counter-fixture-{index}.moth"),
+                    &mut expected_token_string_table,
+                )
+                .expect("test path fits");
             let mut counter_span_builder = ExtendedSpanBuilder::new();
             crate::compiler_frontend::tokenizer::lexer::tokenize(
                 source,

@@ -16,7 +16,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{self, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fmt;
 use std::fs;
@@ -507,21 +507,28 @@ pub(super) fn tokenize_source(
     })?;
 
     let mut spans = Vec::with_capacity(file_tokens.tokens.len());
+    let source_tokens = file_tokens.source_tokens().ok();
 
-    for token in &file_tokens.tokens {
+    for (position, token) in file_tokens.tokens.iter().enumerate() {
         let resolved = token.span.resolve_with(span_builder.resolver());
         let start = resolved.start();
         let end = resolved.end();
+        let tag = source_tokens
+            .as_ref()
+            .and_then(|_| TokenIndex::try_from_index(position))
+            .and_then(|index| source_tokens.as_ref()?.token(index).ok())
+            .map(|token_ref| token_ref.tag())
+            .unwrap_or_else(|| token.kind.token_tag());
 
         if end < start {
             return Err(format!(
-                "token {:?} has resolved end {end} before start {start}",
-                token_kind_name(&token.kind)
+                "token {} has resolved end {end} before start {start}",
+                tag.descriptor().text()
             ));
         }
 
         let length = end - start;
-        consider_long_span(longest_spans, relative, start, length, &token.kind);
+        consider_long_span(longest_spans, relative, start, length, tag);
         spans.push((start, length));
     }
 
@@ -664,7 +671,7 @@ fn consider_long_span(
     path: &str,
     start: u32,
     length: u32,
-    kind: &TokenKind,
+    tag: TokenTag,
 ) {
     if longest.len() >= LONGEST_SPAN_LIMIT {
         let Some(minimum_length) = longest.iter().map(|span| span.length).min() else {
@@ -680,7 +687,7 @@ fn consider_long_span(
         path: path.to_string(),
         length,
         start,
-        token_kind: token_kind_name(kind),
+        token_kind: token_tag_name(tag),
     };
 
     if longest.len() < LONGEST_SPAN_LIMIT {
@@ -818,8 +825,7 @@ fn relative_portable_path(workspace_root: &Path, path: &Path) -> Result<String, 
 
     Ok(segments.join("/"))
 }
-
 /// Stable schema-owned spelling for a census token, including dynamic payload tokens.
-fn token_kind_name(kind: &TokenKind) -> String {
-    kind.token_tag().descriptor().text().to_string()
+fn token_tag_name(tag: TokenTag) -> String {
+    tag.descriptor().text().to_string()
 }

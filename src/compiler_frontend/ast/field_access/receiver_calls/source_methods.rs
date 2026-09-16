@@ -10,6 +10,7 @@ use super::ReceiverAccessMode;
 use super::shared::{TraitSurfaceReceiverMethod, receiver_result_type_ids_for_call};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
 };
@@ -42,7 +43,6 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 pub(super) fn lookup_receiver_method<'a>(
@@ -311,10 +311,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         }
     };
 
-    let expectations = expectations_from_receiver_method_signature(
-        &call_signature.parameters[1..],
-        path_fork,
-    );
+    let expectations =
+        expectations_from_receiver_method_signature(&call_signature.parameters[1..], path_fork);
     let type_check_context = type_interner.type_check_context();
     let args = resolve_call_arguments(
         CallDiagnosticContext::receiver_method(&method_name),

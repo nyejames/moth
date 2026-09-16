@@ -18,7 +18,6 @@ use crate::compiler_frontend::ast::expressions::parse_expression::{
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_loop_condition;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -32,6 +31,7 @@ use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;

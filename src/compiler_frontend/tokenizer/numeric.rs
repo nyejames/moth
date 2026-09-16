@@ -11,9 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError;
-use crate::compiler_frontend::numeric_text::token::{
-    NumericLiteralSign, NumericLiteralToken,
-};
+use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};

@@ -5,11 +5,11 @@ use super::discovery_provider_imports::{
 };
 use super::*;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
-use crate::compiler_frontend::symbols::path_interner::{
-    NonUtf8PathComponent, PathId, PathInternerFork,
-};
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
+};
+use crate::compiler_frontend::symbols::path_interner::{
+    NonUtf8PathComponent, PathId, PathInternerFork,
 };
 /// Resolve provider-backed and binding-backed dependency classes before indexed source resolution.
 ///
@@ -630,8 +630,7 @@ fn resolve_module_root_bare_dependency(
         return Ok(None);
     };
 
-    let root_candidate =
-        join_and_normalize_path(&module_root, provider, &*path_fork, string_table);
+    let root_candidate = join_and_normalize_path(&module_root, provider, &*path_fork, string_table);
     if let Some(root_file) = project_path_resolver.module_root_file_for_directory(&root_candidate) {
         return Ok(Some(ResolvedDependencyFile {
             path: root_file,
@@ -695,8 +694,6 @@ fn resolve_module_root_bare_dependency(
         )
         .map(Some)
         .map_err(SourceDiscoveryError::from)
-
-
 }
 fn handle_provider_capable_dependency(
     input: ProviderCapableDependencyInput<'_>,
@@ -724,8 +721,9 @@ fn handle_provider_capable_dependency(
     // root out of filesystem discovery and external-package registration only for the owning
     // project boundary; source packages must receive the structured reserved-path diagnostic.
     if is_project_globals_namespace(dependency_path, path_fork, string_table) {
-        let is_owning_project_root =
-            resolution.as_ref().is_none_or(|resolution| resolution.is_project_boundary());
+        let is_owning_project_root = resolution
+            .as_ref()
+            .is_none_or(|resolution| resolution.is_project_boundary());
         if is_project_globals_dependency(dependency_path, path_fork, string_table)
             && is_owning_project_root
         {
@@ -744,12 +742,9 @@ fn handle_provider_capable_dependency(
         .external_packages
         .is_virtual_package_dependency(dependency_path, path_fork, string_table)
     {
-        if resolution
-            .as_ref()
-            .is_some_and(|resolution| {
-                resolution.has_binding_package_dependency(dependency_path, string_table)
-            })
-        {
+        if resolution.as_ref().is_some_and(|resolution| {
+            resolution.has_binding_package_dependency(dependency_path, string_table)
+        }) {
             return Ok(DependencyPolicyAction::QueueLocal);
         }
         // Extensionless binding-package clauses bind through the external package registry.
@@ -765,7 +760,7 @@ fn handle_provider_capable_dependency(
         return Err(SourceDiscoveryError::from(
             unsupported_builder_package_error(package_path, dependency_span, string_table),
         ));
-}
+    }
     if matches!(target, DependencyTargetKind::ExternalProvider { .. }) {
         let checked = provider_target.ok_or_else(|| {
             SourceDiscoveryError::Infrastructure(CompilerError::compiler_error(
@@ -805,8 +800,13 @@ fn handle_provider_capable_dependency(
             };
             // The single-file traversal has no directory namespace; target resolution falls
             // through to the filesystem lane inside `resolve_provider_backed_import`.
-            resolve_provider_backed_import(request, directory_target, external_imports, string_table)
-                .map_err(|error| with_provider_dependency_error(error, dependency_span))?;
+            resolve_provider_backed_import(
+                request,
+                directory_target,
+                external_imports,
+                string_table,
+            )
+            .map_err(|error| with_provider_dependency_error(error, dependency_span))?;
             counter_observation!("stage0.reachable_discovery.provider_imports", 1.0);
             // Explicit-extension registered-provider clauses bind through the provider registry.
             add_frontend_counter(FrontendCounter::ResolvedProviderClauseCount, 1);

@@ -19,7 +19,7 @@ use crate::compiler_frontend::tokenizer::tokens::{
     FileTokens, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::{
-    collect_scanned_symbol_references, InitializerReference, NestingDepth, TokenFactView,
+    InitializerReference, NestingDepth, TokenFactView, collect_scanned_symbol_references,
 };
 use crate::projects::settings::TOP_LEVEL_CONST_TEMPLATE_NAME;
 use std::collections::HashSet;
@@ -33,9 +33,11 @@ fn canonical_token_at<'a>(
         .source_tokens()
         .map_err(HeaderParseFailure::Infrastructure)?;
     if canonical.source() != token_stream.file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            format!("{owner} source token owner does not match its file identity"),
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(format!(
+                "{owner} source token owner does not match its file identity"
+            )),
+        ));
     }
     let position = TokenIndex::try_from_index(index).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
@@ -106,13 +108,12 @@ pub(super) fn create_top_level_const_template(
             "const-template retained range exceeded its source owner: {error:?}",
         )))
     })?;
-    let template_facts = TokenFactView::from_source_range(canonical, template_range).map_err(
-        |error| {
+    let template_facts =
+        TokenFactView::from_source_range(canonical, template_range).map_err(|error| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
                 "const-template fact range exceeded its source owner: {error:?}",
             )))
-        },
-    )?;
+        })?;
 
     for index in 0..template_facts.len() {
         let Some(token) = template_facts.get(index) else {
@@ -164,12 +165,8 @@ pub(super) fn create_top_level_const_template(
         })?;
 
     let mut body_end = post_close_index;
-    let post_close_tag = canonical_token_at(
-        token_stream,
-        post_close_index,
-        "const-template post-close",
-    )?
-    .tag();
+    let post_close_tag =
+        canonical_token_at(token_stream, post_close_index, "const-template post-close")?.tag();
     if post_close_tag == TokenTag::EOF {
         body_end = body_end.checked_add(1).ok_or_else(|| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
@@ -202,7 +199,8 @@ pub(super) fn create_top_level_const_template(
             "const-template body range was reversed",
         ))
     })?;
-    canonical.range(retained_range.start(), retained_range.end())
+    canonical
+        .range(retained_range.start(), retained_range.end())
         .map_err(|error| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
                 "const-template body range exceeded its source owner: {error:?}",

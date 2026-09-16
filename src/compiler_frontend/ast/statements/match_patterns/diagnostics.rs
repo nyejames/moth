@@ -4,11 +4,11 @@
 //! WHY: centralising deferred-pattern checks ensures every parser entry point
 //! rejects unsupported lead tokens with identical wording.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Reject match-pattern lead tokens that are unsupported or deferred.

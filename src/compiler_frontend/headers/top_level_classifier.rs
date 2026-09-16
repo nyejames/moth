@@ -6,9 +6,9 @@
 
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::line_scanning::find_top_level_fat_arrow_on_line_in_scanned_tokens;
-use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, Token, TokenIndex, TokenRef, TokenTag,
-};
+#[cfg(test)]
+use crate::compiler_frontend::tokenizer::tokens::Token;
+use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, TokenRef, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::TokenFactView;
 
 pub(super) enum HeaderFileItem {
@@ -37,10 +37,8 @@ pub(super) fn classify_tagged_item(
     at_statement_boundary: bool,
 ) -> HeaderFileItem {
     if current_tag == TokenTag::SYMBOL {
-        if at_statement_boundary {
-            if let Some(name_id) = current_symbol {
-                return HeaderFileItem::Symbol(name_id);
-            }
+        if at_statement_boundary && let Some(name_id) = current_symbol {
+            return HeaderFileItem::Symbol(name_id);
         }
         return HeaderFileItem::StartBodyToken;
     }
@@ -142,10 +140,7 @@ pub(super) fn classify_export_block_item_ref(
 ///       (`ModuleStart`/`Newline`/`End`) or absent at the start of the source.
 /// WHY: the outer walk keeps its source index in `FileTokens.index` while reading
 ///      boundary facts from canonical shapes instead of the compatibility vector.
-pub(super) fn statement_boundary_at_source(
-    canonical: &SourceTokens,
-    current_index: usize,
-) -> bool {
+pub(super) fn statement_boundary_at_source(canonical: &SourceTokens, current_index: usize) -> bool {
     let Some(previous) = current_index.checked_sub(1) else {
         return true;
     };
@@ -199,10 +194,11 @@ pub(super) enum SymbolStatementStart {
     Other,
 }
 
-/// Classify a follower token in a bounded token slice.
+/// Classify a follower token in a bounded token slice (classifier tests only).
 ///
 /// WHAT: reads only the follower and its bounded lookahead without projecting the source owner.
 /// WHY: bounded slice callers reuse the same classification core without a second implementation.
+#[cfg(test)]
 pub(crate) fn classify_symbol_statement_start_at(
     tokens: &[Token],
     follower_index: usize,
@@ -299,7 +295,8 @@ pub(super) fn starts_duplicate_top_level_header_declaration_at_source(
     tokens: &SourceTokens,
     follower_index: TokenIndex,
 ) -> bool {
-    classify_symbol_statement_start_at_source(tokens, follower_index.index()).starts_header_declaration()
+    classify_symbol_statement_start_at_source(tokens, follower_index.index())
+        .starts_header_declaration()
 }
 
 /// Detect whether the current canonical `must` token starts a trait declaration rather than
@@ -352,7 +349,10 @@ fn starts_specialized_generic_conformance_at_scanned(
     tokens: TokenFactView<'_>,
     start_index: usize,
 ) -> bool {
-    if tokens.get(start_index).is_none_or(|token| token.tag != TokenTag::OF) {
+    if tokens
+        .get(start_index)
+        .is_none_or(|token| token.tag != TokenTag::OF)
+    {
         return false;
     }
 

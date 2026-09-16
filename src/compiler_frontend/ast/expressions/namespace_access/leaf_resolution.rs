@@ -8,6 +8,7 @@
 //! misuse by the orchestration layer and never reach here.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::external_namespace_members::{
@@ -28,7 +29,6 @@ use crate::compiler_frontend::headers::binding_environment::NamespaceValueMember
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::ast::cursor::AstCursor;
 
 /// Shared mutable state passed to leaf resolution helpers.
 ///

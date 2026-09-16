@@ -174,23 +174,33 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
 
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("inner", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("inner", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_function_name(
         FunctionId(1),
-        path_fork.try_intern_portable_path("middle", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("middle", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_function_name(
         FunctionId(2),
-        path_fork.try_intern_portable_path("outer", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("outer", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(0),
-        path_fork.try_intern_portable_path("middle_result", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("middle_result", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(1),
-        path_fork.try_intern_portable_path("outer_result", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("outer_result", &mut string_table)
+            .expect("test path fits"),
     );
 
     module
@@ -203,12 +213,14 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         .function_origins
         .insert(FunctionId(2), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
 
     let try_count = output.source.matches("try {").count();
@@ -275,18 +287,22 @@ fn explicit_error_return_terminator_emits_err_carrier() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("fail", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("fail", &mut string_table)
+            .expect("test path fits"),
     );
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should emit ReturnError");
 
     assert!(
@@ -332,18 +348,22 @@ fn explicit_success_return_terminator_emits_ok_carrier() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("succeed", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("succeed", &mut string_table)
+            .expect("test path fits"),
     );
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should emit ReturnSuccess");
 
     assert!(
@@ -413,18 +433,22 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("branch_on_result", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("branch_on_result", &mut string_table)
+            .expect("test path fits"),
     );
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should emit FallibleBranch");
 
     assert!(
@@ -508,19 +532,27 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
     module.regions = vec![HirRegion::lexical(region, None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("main", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_function_name(
         FunctionId(1),
-        path_fork.try_intern_portable_path("aliasing_fallible", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("aliasing_fallible", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(1),
-        path_fork.try_intern_portable_path("source", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("source", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(2),
-        path_fork.try_intern_portable_path("result_carrier", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("result_carrier", &mut string_table)
+            .expect("test path fits"),
     );
     module
         .function_origins
@@ -529,12 +561,14 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
         .function_origins
         .insert(FunctionId(1), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should emit fallible alias-return call");
 
     let result_name = expected_dev_local_name("result_carrier", 2);

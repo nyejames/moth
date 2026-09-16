@@ -134,19 +134,25 @@ fn exposes_function_name_map_for_runtime_fragments() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("start", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("start", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_function_name(
         FunctionId(1),
-        path_fork.try_intern_portable_path("__moth_frag_0", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("__moth_frag_0", &mut string_table)
+            .expect("test path fits"),
     );
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
     let expected_start = expected_dev_function_name("start", 0);
     let expected_fragment = expected_dev_function_name("__moth_frag_0", 1);

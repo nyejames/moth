@@ -60,7 +60,6 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenRange};
-use std::sync::Arc;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -210,13 +209,31 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     let int_id = env.builtins().int;
 
     // Register a struct and a choice so the type-surface projection can resolve them.
-    let (_, struct_type_id) =
-        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None, &mut path_fork);
-    let (_, choice_type_id) = register_choice(&mut env, &mut string_table, "Status", &mut path_fork);
+    let (_, struct_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Counter",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
+    let (_, choice_type_id) =
+        register_choice(&mut env, &mut string_table, "Status", &mut path_fork);
 
     // Build roots for every non-trait category.
-    let function_root = function_root("render", empty_signature(), &mut string_table, &mut path_fork);
-    let struct_root = struct_root("Counter", struct_type_id, vec![], &mut string_table, &mut path_fork);
+    let function_root = function_root(
+        "render",
+        empty_signature(),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let struct_root = struct_root(
+        "Counter",
+        struct_type_id,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    );
     let choice_root = choice_root("Status", choice_type_id, &mut string_table, &mut path_fork);
     let alias_root = alias_root("IntAlias", int_id, &mut string_table, &mut path_fork);
     let constant_root = constant_root("MaxSize", int_id, &mut string_table, &mut path_fork);
@@ -267,13 +284,19 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         trait_binding("Shape"),
     ];
 
-    let nominal_origins = nominal_origins_map(vec![
-        ("Counter", struct_origin("Counter")),
-        ("Status", choice_origin("Status")),
-    ],
-    &mut string_table, &mut path_fork);
-    let trait_origins =
-        trait_origins_map(vec![("Shape", trait_origin("Shape"))], &mut string_table, &mut path_fork);
+    let nominal_origins = nominal_origins_map(
+        vec![
+            ("Counter", struct_origin("Counter")),
+            ("Status", choice_origin("Status")),
+        ],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let trait_origins = trait_origins_map(
+        vec![("Shape", trait_origin("Shape"))],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let export_seed = DirectExportSeed::new(module_origin(), bindings, nominal_origins.clone());
 
@@ -285,7 +308,9 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     };
 
     let max_size_constant = Declaration {
-        id: path_fork.try_intern_portable_path("MaxSize", &mut string_table).expect("test path fits"),
+        id: path_fork
+            .try_intern_portable_path("MaxSize", &mut string_table)
+            .expect("test path fits"),
         value: Expression::int(256, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -295,16 +320,19 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         .expect("test module constant should be representable in the value store");
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &nominal_origins,
-    public_source_trait_origins: &trait_origins,
-    type_environment: &env,
-    external_registry: &registry,
-    string_table: &string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &const_values,
-    module_resources: None, })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &nominal_origins,
+        public_source_trait_origins: &trait_origins,
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &const_values,
+        module_resources: None,
+    })
     .build()
     .expect("declaration-centric draft builds for all categories")
     .draft;
@@ -388,8 +416,14 @@ fn builder_attaches_receiver_methods_to_struct_record() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let (_, struct_type_id) =
-        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None, &mut path_fork);
+    let (_, struct_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Counter",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let receiver_path = path("Counter", &mut string_table, &mut path_fork);
     let method_fn_path = path("render", &mut string_table, &mut path_fork);
@@ -403,7 +437,13 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         signature,
     );
 
-    let root = struct_root("Counter", struct_type_id, vec![], &mut string_table, &mut path_fork);
+    let root = struct_root(
+        "Counter",
+        struct_type_id,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    );
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![root],
         receiver_methods: vec![entry.clone()],
@@ -422,8 +462,11 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         struct_origin("Counter"),
     );
 
-    let nominal_origins = nominal_origins_map(vec![("Counter", struct_origin("Counter"))],
-    &mut string_table, &mut path_fork);
+    let nominal_origins = nominal_origins_map(
+        vec![("Counter", struct_origin("Counter"))],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -439,16 +482,19 @@ fn builder_attaches_receiver_methods_to_struct_record() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &nominal_origins,
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &env,
-    external_registry: &registry,
-    string_table: &string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &ConstValueStore::default(),
-    module_resources: None, })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &nominal_origins,
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &ConstValueStore::default(),
+        module_resources: None,
+    })
     .build()
     .expect("draft with receiver method builds")
     .draft;
@@ -481,11 +527,14 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
 
     // Register a generic struct Box<A> whose generic parameter list matches the method
     // template below.
-    let (_, struct_type_id) = register_struct(&mut env,
-    &mut string_table,
-    "Box",
-    empty_fields(),
-    Some(list_id), &mut path_fork);
+    let (_, struct_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Box",
+        empty_fields(),
+        Some(list_id),
+        &mut path_fork,
+    );
 
     let receiver_path = path("Box", &mut string_table, &mut path_fork);
     let method_fn_path = path("render", &mut string_table, &mut path_fork);
@@ -530,8 +579,11 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     );
     let method_origin =
         OriginFunctionId::new_receiver(module_origin(), "render".to_owned(), struct_origin("Box"));
-    let nominal_origins =
-        nominal_origins_map(vec![("Box", struct_origin("Box"))], &mut string_table, &mut path_fork);
+    let nominal_origins = nominal_origins_map(
+        vec![("Box", struct_origin("Box"))],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -557,14 +609,13 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         generic_parameter_list_id: list_id,
         signature: FunctionSignature::default(),
         body_tokens: Some({
-            let body = Arc::new(FileTokens::new(
-                method_fn_path,
-                SourceId::COMPILATION_ROOT,
-                vec![],
-            ));
+            let shell = FileTokens::new(method_fn_path, SourceId::COMPILATION_ROOT, vec![]);
+            let body = shell
+                .canonical_source_tokens_arc()
+                .expect("test fixture must use a canonical source owner");
             let range = TokenRange::from_raw(SourceId::COMPILATION_ROOT, 0, 0)
                 .expect("empty body range ordering should be valid");
-            GenericFunctionBody::source(body, range, None, method_fn_path)
+            GenericFunctionBody::source(body, range, None, method_fn_path, None)
                 .expect("empty generic body should retain its checked range")
         }),
         declaration_span: None,
@@ -573,16 +624,19 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         [(method_fn_path, template)].into_iter().collect();
 
     let registry = ExternalPackageRegistry::new();
-    let build_result = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &nominal_origins,
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &env,
-    external_registry: &registry,
-    string_table: &string_table,
-    generic_function_templates: &template_map,
-    const_values: &ConstValueStore::default(),
-    module_resources: None, })
+    let build_result = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &nominal_origins,
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &template_map,
+        const_values: &ConstValueStore::default(),
+        module_resources: None,
+    })
     .build()
     .expect("generic receiver path should build");
 
@@ -640,16 +694,19 @@ fn module_origin_survives_empty_public_surface() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &FxHashMap::default(),
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &env,
-    external_registry: &registry,
-    string_table: &string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &ConstValueStore::default(),
-    module_resources: None, })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &FxHashMap::default(),
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &ConstValueStore::default(),
+        module_resources: None,
+    })
     .build()
     .expect("empty-surface draft builds")
     .draft;
@@ -667,7 +724,9 @@ fn receiver_method_semantics_from_seed_rejects_free_function_seed_without_panic(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let seed = CallableSeed {
-        path: path_fork.try_intern_portable_path("free_fn", &mut string_table).expect("test path fits"),
+        path: path_fork
+            .try_intern_portable_path("free_fn", &mut string_table)
+            .expect("test path fits"),
         origin: free_function_origin("free_fn"),
         generic_template: false,
         kind: CallableSeedKind::FreeFunction,
@@ -686,7 +745,9 @@ fn receiver_method_semantics_from_seed_rejects_missing_signature_without_panic()
     let mut path_fork = PathInternerFork::empty();
     let origin = struct_origin("Counter");
     let seed = CallableSeed {
-        path: path_fork.try_intern_portable_path("tick", &mut string_table).expect("test path fits"),
+        path: path_fork
+            .try_intern_portable_path("tick", &mut string_table)
+            .expect("test path fits"),
         origin: OriginFunctionId::new_receiver(module_origin(), "tick".to_owned(), origin),
         generic_template: false,
         kind: CallableSeedKind::ReceiverMethod {
@@ -744,12 +805,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
             &mut string_table,
             &mut path_fork,
         ),
-        field_declaration_no_default(
-            "subject",
-            string_id,
-            &mut string_table,
-            &mut path_fork,
-        ),
+        field_declaration_no_default("subject", string_id, &mut string_table, &mut path_fork),
     ];
 
     let signature = FunctionSignature {
@@ -780,16 +836,19 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &FxHashMap::default(),
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &env,
-    external_registry: &registry,
-    string_table: &string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &ConstValueStore::default(),
-    module_resources: None, })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &FxHashMap::default(),
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &ConstValueStore::default(),
+        module_resources: None,
+    })
     .build()
     .expect("draft with function defaults should build")
     .draft;
@@ -840,8 +899,14 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         field_def("label", string_id, &mut string_table, &mut path_fork),
     ]);
 
-    let (_, struct_type_id) =
-        register_struct(&mut env, &mut string_table, "Point", field_defs, None, &mut path_fork);
+    let (_, struct_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Point",
+        field_defs,
+        None,
+        &mut path_fork,
+    );
 
     let fields = vec![
         field_declaration_with_default(
@@ -858,15 +923,16 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
             &mut string_table,
             &mut path_fork,
         ),
-        field_declaration_no_default(
-            "label",
-            string_id,
-            &mut string_table,
-            &mut path_fork,
-        ),
+        field_declaration_no_default("label", string_id, &mut string_table, &mut path_fork),
     ];
 
-    let root = struct_root("Point", struct_type_id, fields, &mut string_table, &mut path_fork);
+    let root = struct_root(
+        "Point",
+        struct_type_id,
+        fields,
+        &mut string_table,
+        &mut path_fork,
+    );
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![root],
         receiver_methods: vec![],
@@ -879,8 +945,11 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         OriginDeclarationId::Type(struct_origin("Point")),
     );
 
-    let nominal_origins =
-        nominal_origins_map(vec![("Point", struct_origin("Point"))], &mut string_table, &mut path_fork);
+    let nominal_origins = nominal_origins_map(
+        vec![("Point", struct_origin("Point"))],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -893,16 +962,19 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &nominal_origins,
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &env,
-    external_registry: &registry,
-    string_table: &string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &ConstValueStore::default(),
-    module_resources: None, })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &nominal_origins,
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &ConstValueStore::default(),
+        module_resources: None,
+    })
     .build()
     .expect("draft with struct field defaults should build")
     .draft;
@@ -976,8 +1048,11 @@ fn choice_payload_fields_remain_default_free() {
         OriginDeclarationId::Type(choice_origin("Option")),
     );
 
-    let nominal_origins =
-        nominal_origins_map(vec![("Option", choice_origin("Option"))], &mut string_table, &mut path_fork);
+    let nominal_origins = nominal_origins_map(
+        vec![("Option", choice_origin("Option"))],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -990,16 +1065,19 @@ fn choice_payload_fields_remain_default_free() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &nominal_origins,
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &env,
-    external_registry: &registry,
-    string_table: &string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &ConstValueStore::default(),
-    module_resources: None, })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &nominal_origins,
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &ConstValueStore::default(),
+        module_resources: None,
+    })
     .build()
     .expect("draft with choice should build")
     .draft;
@@ -1023,8 +1101,14 @@ fn receiver_method_retains_folded_parameter_defaults() {
     let mut env = TypeEnvironment::new();
     let string_id = env.builtins().string;
 
-    let (_, struct_type_id) =
-        register_struct(&mut env, &mut string_table, "Counter", empty_fields(), None, &mut path_fork);
+    let (_, struct_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Counter",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let receiver_path = path("Counter", &mut string_table, &mut path_fork);
     let method_fn_path = path("render", &mut string_table, &mut path_fork);
@@ -1033,12 +1117,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
     // default. The second parameter is an ordinary parameter with a folded default.
     let signature = FunctionSignature {
         parameters: vec![
-            field_declaration_no_default(
-                "this",
-                struct_type_id,
-                &mut string_table,
-                &mut path_fork,
-            ),
+            field_declaration_no_default("this", struct_type_id, &mut string_table, &mut path_fork),
             field_declaration_with_default(
                 "label",
                 string_id,
@@ -1060,7 +1139,13 @@ fn receiver_method_retains_folded_parameter_defaults() {
         signature,
     );
 
-    let root = struct_root("Counter", struct_type_id, vec![], &mut string_table, &mut path_fork);
+    let root = struct_root(
+        "Counter",
+        struct_type_id,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    );
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![root],
         receiver_methods: vec![entry.clone()],
@@ -1073,8 +1158,11 @@ fn receiver_method_retains_folded_parameter_defaults() {
         OriginDeclarationId::Type(struct_origin("Counter")),
     );
 
-    let nominal_origins = nominal_origins_map(vec![("Counter", struct_origin("Counter"))],
-    &mut string_table, &mut path_fork);
+    let nominal_origins = nominal_origins_map(
+        vec![("Counter", struct_origin("Counter"))],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let export_seed =
         DirectExportSeed::new(module_origin(), vec![binding], nominal_origins.clone());
@@ -1092,16 +1180,19 @@ fn receiver_method_retains_folded_parameter_defaults() {
     };
 
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &nominal_origins,
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &env,
-    external_registry: &registry,
-    string_table: &string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &ConstValueStore::default(),
-    module_resources: None, })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &nominal_origins,
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &ConstValueStore::default(),
+        module_resources: None,
+    })
     .build()
     .expect("draft with receiver method defaults should build")
     .draft;

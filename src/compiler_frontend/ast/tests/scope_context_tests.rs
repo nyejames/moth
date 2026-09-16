@@ -36,7 +36,10 @@ fn scope_context_new_leaves_no_visibility_gate() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -64,7 +67,10 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -73,7 +79,9 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
     // Install an empty visibility gate.
     context = context.with_visible_declarations(Arc::new(FxHashSet::default()));
 
-    let variable_path = path_fork.try_intern_components(&[string_table.intern("my_var")]).expect("test path fits");
+    let variable_path = path_fork
+        .try_intern_components(&[string_table.intern("my_var")])
+        .expect("test path fits");
     let declaration = Declaration {
         id: variable_path.to_owned(),
         value: Expression::new(
@@ -116,7 +124,10 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -124,7 +135,9 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
     .with_visible_declarations(Arc::new(FxHashSet::default()));
 
     let constant_name = string_table.intern("local_const");
-    let constant_path = path_fork.try_intern_components(&[constant_name]).expect("test path fits");
+    let constant_path = path_fork
+        .try_intern_components(&[constant_name])
+        .expect("test path fits");
     let declaration = Declaration {
         id: constant_path.to_owned(),
         value: Expression::new(
@@ -168,7 +181,10 @@ fn new_template_parsing_context_preserves_constant_kind() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -189,7 +205,10 @@ fn new_template_parsing_context_converts_function_kind_to_template() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -210,7 +229,10 @@ fn new_template_parsing_context_propagates_expected_error_type() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -238,28 +260,25 @@ fn new_child_control_flow_increments_loop_depth_for_loop_kind() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
     assert_eq!(context.loop_depth, 0);
 
-    let loop_context = context.new_child_control_flow(
-        ContextKind::Loop,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let loop_context =
+        context.new_child_control_flow(ContextKind::Loop, &mut string_table, &mut path_fork);
     assert_eq!(
         loop_context.loop_depth, 1,
         "entering a Loop scope must increment loop_depth"
     );
 
-    let branch_context = loop_context.new_child_control_flow(
-        ContextKind::Branch,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let branch_context =
+        loop_context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
     assert_eq!(
         branch_context.loop_depth, 1,
         "entering a Branch scope must not change loop_depth"
@@ -278,18 +297,25 @@ fn new_constant_inherits_parent_visibility_gate() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope.to_owned(),
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
     let mut visibility_gate = FxHashSet::default();
-    let gated_path = path_fork.try_intern_components(&[string_table.intern("gated")]).expect("test path fits");
+    let gated_path = path_fork
+        .try_intern_components(&[string_table.intern("gated")])
+        .expect("test path fits");
     visibility_gate.insert(gated_path.to_owned());
     context = context.with_visible_declarations(Arc::new(visibility_gate));
 
-    let constant_scope = path_fork.try_intern_components(&[string_table.intern("const_scope")]).expect("test path fits");
+    let constant_scope = path_fork
+        .try_intern_components(&[string_table.intern("const_scope")])
+        .expect("test path fits");
     let constant_context = ScopeContext::new_constant(constant_scope, &context);
 
     assert!(
@@ -319,14 +345,19 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
     let name = string_table.intern("ancestor_var");
-    let variable_path = path_fork.try_intern_components(&[name]).expect("test path fits");
+    let variable_path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits");
     context.add_var(
         Declaration {
             id: variable_path.to_owned(),
@@ -344,11 +375,8 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
         &path_fork,
     );
 
-    let child = context.new_child_control_flow(
-        ContextKind::Branch,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let child =
+        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
     assert!(
         child.get_reference(&name).is_some(),
         "child frame must resolve names declared in the parent frame"
@@ -373,19 +401,21 @@ fn child_frame_declaration_is_not_visible_to_parent() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
-    let mut child = context.new_child_control_flow(
-        ContextKind::Branch,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let mut child =
+        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
     let name = string_table.intern("child_var");
-    let variable_path = path_fork.try_intern_components(&[name]).expect("test path fits");
+    let variable_path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits");
     child.add_var(
         Declaration {
             id: variable_path.to_owned(),
@@ -433,14 +463,19 @@ fn child_function_frame_does_not_capture_parent_locals() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
     let parent_name = string_table.intern("outer_local");
-    let parent_path = path_fork.try_intern_components(&[parent_name]).expect("test path fits");
+    let parent_path = path_fork
+        .try_intern_components(&[parent_name])
+        .expect("test path fits");
     context.add_var(
         Declaration {
             id: parent_path,
@@ -489,15 +524,22 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
     let name = string_table.intern("duplicated");
-    let first_path = path_fork.try_intern_components(&[string_table.intern("first"), name]).expect("test path fits");
-    let second_path = path_fork.try_intern_components(&[string_table.intern("second"), name]).expect("test path fits");
+    let first_path = path_fork
+        .try_intern_components(&[string_table.intern("first"), name])
+        .expect("test path fits");
+    let second_path = path_fork
+        .try_intern_components(&[string_table.intern("second"), name])
+        .expect("test path fits");
 
     context.add_var(
         Declaration {
@@ -554,14 +596,19 @@ fn no_shadowing_across_ancestor_frames() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
     let name = string_table.intern("shadowed");
-    let parent_path = path_fork.try_intern_components(&[string_table.intern("shadowed")]).expect("test path fits");
+    let parent_path = path_fork
+        .try_intern_components(&[string_table.intern("shadowed")])
+        .expect("test path fits");
     context.add_var(
         Declaration {
             id: parent_path.to_owned(),
@@ -579,11 +626,8 @@ fn no_shadowing_across_ancestor_frames() {
         &path_fork,
     );
 
-    let child = context.new_child_control_flow(
-        ContextKind::Branch,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let child =
+        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
     assert!(
         child.has_visible_local_declaration(&name),
         "ancestor declaration must be visible to child so redeclaration can be rejected"
@@ -602,22 +646,24 @@ fn new_child_control_flow_inherits_visibility_gate() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
     let mut gate = FxHashSet::default();
-    let gated_path = path_fork.try_intern_components(&[string_table.intern("gated")]).expect("test path fits");
+    let gated_path = path_fork
+        .try_intern_components(&[string_table.intern("gated")])
+        .expect("test path fits");
     gate.insert(gated_path.to_owned());
     context = context.with_visible_declarations(Arc::new(gate));
 
-    let child = context.new_child_control_flow(
-        ContextKind::Branch,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let child =
+        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
     assert!(
         child
             .visible_declaration_ids
@@ -641,7 +687,10 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -653,7 +702,9 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
     let shared_gate = Arc::new(FxHashSet::default());
     context = context.with_visible_declarations(Arc::clone(&shared_gate));
 
-    let local_path = path_fork.try_intern_components(&[string_table.intern("branch_local")]).expect("test path fits");
+    let local_path = path_fork
+        .try_intern_components(&[string_table.intern("branch_local")])
+        .expect("test path fits");
     let declaration = Declaration {
         id: local_path.to_owned(),
         value: Expression::new(
@@ -667,11 +718,8 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
         config_qualifier: None,
     };
 
-    let mut child = context.new_child_control_flow(
-        ContextKind::Branch,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let mut child =
+        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
     child.add_var(declaration, None, &path_fork);
 
     assert!(
@@ -704,7 +752,10 @@ fn new_child_expression_propagates_expected_result_type_ids() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -742,14 +793,19 @@ fn cloned_context_does_not_share_current_frame() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
     let name = string_table.intern("capture");
-    let path = path_fork.try_intern_components(&[name]).expect("test path fits");
+    let path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits");
 
     let mut clone = context.clone();
     clone.add_var(
@@ -792,14 +848,19 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
     );
 
     let parent_name = string_table.intern("parent_var");
-    let parent_path = path_fork.try_intern_components(&[parent_name]).expect("test path fits");
+    let parent_path = path_fork
+        .try_intern_components(&[parent_name])
+        .expect("test path fits");
     context.add_var(
         Declaration {
             id: parent_path,
@@ -817,13 +878,12 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
         &path_fork,
     );
 
-    let mut child = context.new_child_control_flow(
-        ContextKind::Branch,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let mut child =
+        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
     let child_name = string_table.intern("child_var");
-    let child_path = path_fork.try_intern_components(&[child_name]).expect("test path fits");
+    let child_path = path_fork
+        .try_intern_components(&[child_name])
+        .expect("test path fits");
     child.add_var(
         Declaration {
             id: child_path,

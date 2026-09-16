@@ -35,7 +35,6 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use super::resolve_type::resolve_diagnostic_type_to_type_id;
 
-
 /// Resolves a generic struct or choice annotation with concrete type arguments.
 ///
 /// WHAT: interns a canonical generic instance in `TypeEnvironment` and returns display

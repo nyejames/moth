@@ -18,22 +18,29 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenIndex, TokenTag};
 
 fn source_tag_at_cursor(token_stream: &FileTokens) -> Result<TokenTag, HeaderParseFailure> {
-    let canonical = token_stream.source_tokens().map_err(HeaderParseFailure::Infrastructure)?;
+    let canonical = token_stream
+        .source_tokens()
+        .map_err(HeaderParseFailure::Infrastructure)?;
     if canonical.source() != token_stream.file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "hash item source token owner does not match its file identity",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "hash item source token owner does not match its file identity",
+            ),
+        ));
     }
     let index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "hash item token index exceeded its checked domain",
         ))
     })?;
-    canonical.token(index).map(|token| token.tag()).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "hash item token index exceeded its source token owner: {error:?}",
-        )))
-    })
+    canonical
+        .token(index)
+        .map(|token| token.tag())
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "hash item token index exceeded its source token owner: {error:?}",
+            )))
+        })
 }
 
 fn record_start_body_token_from_source(
@@ -116,18 +123,21 @@ fn handle_top_level_const_template(
     if context.file_role == FileRole::ImportedModuleRoot {
         let template_index = token_stream.index;
         token_stream.advance();
-        let range = crate::compiler_frontend::headers::start_capture::capture_runtime_template_range(
-            template_index,
-            token_stream,
-            context.string_table,
-        )?;
+        let range =
+            crate::compiler_frontend::headers::start_capture::capture_runtime_template_range(
+                template_index,
+                token_stream,
+                context.string_table,
+            )?;
         let canonical = token_stream
             .source_tokens()
             .map_err(HeaderParseFailure::Infrastructure)?;
         if canonical.source() != token_stream.file_id {
-            return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "discarded template source token owner does not match its file identity",
-            )));
+            return Err(HeaderParseFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "discarded template source token owner does not match its file identity",
+                ),
+            ));
         }
         let cursor = canonical.cursor(range).map_err(|error| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
@@ -193,14 +203,11 @@ fn handle_top_level_const_template(
         context.span_builder,
     )?;
 
-    state.const_template_count = state
-        .const_template_count
-        .checked_add(1)
-        .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "const-template count overflowed its source state",
-            ))
-        })?;
+    state.const_template_count = state.const_template_count.checked_add(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "const-template count overflowed its source state",
+        ))
+    })?;
 
     // Record placement metadata: runtime_insertion_index is the count of runtime fragments
     // seen before this const fragment in source order.

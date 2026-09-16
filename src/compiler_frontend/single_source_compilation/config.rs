@@ -36,9 +36,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    find_invalid_config_qualifier_spacing_in_cursor,
-};
+use crate::compiler_frontend::declaration_syntax::build_config_contract::find_invalid_config_qualifier_spacing_in_cursor;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
@@ -57,9 +55,7 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathInternError, PathInternerFork,
-};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -136,7 +132,8 @@ pub(crate) fn compile_config_source(
     // Construct the authored logical identity in the config service's path domain before
     // tokenization and header preparation. The service is self-contained, so its fork owns the
     // complete config path table.
-    let authored_scope = match path_fork.try_intern_filesystem_path(request.authored_path, string_table)
+    let authored_scope = match path_fork
+        .try_intern_filesystem_path(request.authored_path, string_table)
     {
         Ok(scope) => scope,
         Err(PathInternError::NonUtf8(non_utf8)) => {
@@ -272,14 +269,13 @@ fn compile_prepared_config_source(
     })?;
 
     // Order local declarations.
-    let sorted =
-        resolve_module_dependencies(
-            bound_headers,
-            &ContentSourceTargets::empty(),
-            string_table,
-            path_fork,
-        )
-        .map_err(|failure| failure.into_messages(string_table))?;
+    let sorted = resolve_module_dependencies(
+        bound_headers,
+        &ContentSourceTargets::empty(),
+        string_table,
+        path_fork,
+    )
+    .map_err(|failure| failure.into_messages(string_table))?;
 
     // Preserve key-name spans before AST consumes the headers. The full header path becomes the
     // declaration ID, so every folded declaration can carry its exact authored name span.
@@ -299,6 +295,8 @@ fn compile_prepared_config_source(
         AstBuildInput {
             headers: sorted.headers,
             source_token_streams: sorted.source_token_streams,
+            source_token_paths: sorted.source_token_paths,
+            source_token_os_paths: sorted.source_token_os_paths,
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
@@ -371,7 +369,11 @@ fn reject_authored_config_dialect(
 ) -> Vec<CompilerDiagnostic> {
     let mut rejections =
         reject_authored_config_start_body(ast, authored_scope, path_fork, string_table);
-    rejections.extend(reject_mutable_config_bindings(ast, authored_scope, path_fork));
+    rejections.extend(reject_mutable_config_bindings(
+        ast,
+        authored_scope,
+        path_fork,
+    ));
     rejections
 }
 
@@ -393,7 +395,9 @@ fn reject_authored_config_start_body(
             continue;
         };
 
-        if path_fork.component(*path).map(|name| string_table.resolve(name))
+        if path_fork
+            .component(*path)
+            .map(|name| string_table.resolve(name))
             != Some(IMPLICIT_START_FUNC_NAME)
         {
             continue;

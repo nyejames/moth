@@ -15,6 +15,7 @@ use leaf_resolution::{LeafDispatchContext, resolve_namespace_value_member};
 use traversal::{NamespaceMemberLookup, lookup_namespace_member};
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -24,9 +25,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Input bundle for namespace access parsing.

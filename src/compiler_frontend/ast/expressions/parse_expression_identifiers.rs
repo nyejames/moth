@@ -18,6 +18,7 @@ use super::parse_expression_dispatch::{
 use super::source_function_calls::{SourceCallableMemberInput, parse_source_callable_member};
 use super::struct_instance::{StructConstructorParseInput, parse_struct_constructor_expression};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::receiver_methods::free_function_receiver_method_call_error;
 use crate::compiler_frontend::ast::statements::fallible_handling::fallible_catch_allowed_in_context;
@@ -33,7 +34,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalConstantValue;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 

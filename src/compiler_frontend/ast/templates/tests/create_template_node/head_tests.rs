@@ -1,6 +1,6 @@
 use super::*;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::template::{
@@ -57,6 +57,7 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility, TemplateHeadTag,
 };
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -64,7 +65,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 fn synthetic_source_span(start: u32, end: u32) -> SourceSpan {
     let mut span_builder = ExtendedSpanBuilder::new();
     SourceSpan::new(
@@ -157,7 +157,8 @@ fn imported_const_template_context(
         ..FileVisibility::default()
     };
 
-    constant_template_context(scope, &[declaration], path_fork).with_file_visibility(Arc::new(file_visibility))
+    constant_template_context(scope, &[declaration], path_fork)
+        .with_file_visibility(Arc::new(file_visibility))
 }
 
 /// Builds a const-required option-capture template fixture directly as a
@@ -406,9 +407,11 @@ fn parse_control_flow_template_after_composition(
         &context,
         &mut type_interner,
         Vec::new(),
-        &mut string_table,
         NestedTemplateParseOptions::runtime_capable(),
-        &mut path_fork,
+        TemplatePathTables {
+            string_table: &mut string_table,
+            path_fork: &mut path_fork,
+        },
     )
     .expect("control-flow template should parse through composition")
     .template;
@@ -438,9 +441,11 @@ fn parse_control_flow_template_after_composition_error(
             &context,
             &mut type_interner,
             Vec::new(),
-            &mut string_table,
             NestedTemplateParseOptions::runtime_capable(),
-            &mut path_fork,
+            TemplatePathTables {
+                string_table: &mut string_table,
+                path_fork: &mut path_fork,
+            },
         )
         .expect_err("control-flow template should fail during composition"),
     )

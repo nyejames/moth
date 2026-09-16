@@ -65,4 +65,3 @@ pub(super) fn validate_dependency_path(
 
     Ok(())
 }
-

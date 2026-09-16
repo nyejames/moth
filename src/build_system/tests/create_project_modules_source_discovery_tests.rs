@@ -176,18 +176,15 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
 
     let reachable_path =
         fs::canonicalize(src.join("reachable.moth")).expect("reachable source should canonicalize");
-    let prepared_header_syntax = &module
-        .prepared
-        .semantic
-        .prepared_header_syntax;
+    let prepared_header_syntax = &module.prepared.semantic.prepared_header_syntax;
     let reachable_header = prepared_header_syntax
         .headers
         .iter()
         .find(|header| {
             prepared_header_syntax
-                .source_token_streams
+                .source_token_os_paths
                 .get(&header.tokens.source())
-                .and_then(|owner| owner.canonical_os_path.as_deref())
+                .and_then(|path| path.as_deref())
                 == Some(reachable_path.as_path())
         })
         .expect("reachable source should retain one header stream");
@@ -195,8 +192,11 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
         .source_token_streams
         .get(&reachable_header.tokens.source())
         .expect("reachable source should retain its token owner");
+    let reachable_table = reachable_owner
+        .path_syntax_arc()
+        .expect("reachable source should retain its path table");
     assert!(
-        reachable_owner.path_syntax.paths().iter().any(|path| {
+        reachable_table.paths().iter().any(|path| {
             module.prepared.semantic.path_fork.render_portable(
                 path.root,
                 &module.prepared.semantic.string_table,
@@ -561,8 +561,7 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
         resolution_table: &mut resolution_table,
     };
     let mut string_table = StringTable::new();
-    let mut path_fork =
-        crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
 
     super::source_discovery::collect_reachable_input_files(
         &nested_entry,

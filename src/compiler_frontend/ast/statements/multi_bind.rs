@@ -40,10 +40,10 @@ use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
-use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::has_top_level_comma_before_statement_end;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::collections::HashSet;
@@ -236,15 +236,16 @@ fn parse_target_list(
         };
         token_stream.advance();
         let target_syntax = {
-            let mut declaration_cursor = token_stream.declaration_cursor()?;
-            let target_syntax = parse_binding_target_syntax(
-                name,
-                &mut declaration_cursor,
-                string_table,
-                &mut span_builder,
-            )?;
-            let next_index = declaration_cursor.position();
-            drop(declaration_cursor);
+            let (target_syntax, next_index) = {
+                let mut declaration_cursor = token_stream.declaration_cursor()?;
+                let target_syntax = parse_binding_target_syntax(
+                    name,
+                    &mut declaration_cursor,
+                    string_table,
+                    &mut span_builder,
+                )?;
+                (target_syntax, declaration_cursor.position())
+            };
             token_stream.set_position(next_index)?;
             target_syntax
         };
@@ -488,12 +489,8 @@ fn resolve_multi_bind_targets(
         rhs_slots.iter().zip(parsed_targets.iter()).enumerate()
     {
         let target_ownership = binding_target_ownership(target_syntax);
-        let explicit_type = resolve_target_explicit_type(
-            target_syntax,
-            context,
-            type_interner,
-            string_table,
-        )?;
+        let explicit_type =
+            resolve_target_explicit_type(target_syntax, context, type_interner, string_table)?;
         let explicit_type_id = explicit_type.as_ref().map(|(type_id, _)| *type_id);
         let explicit_diagnostic_type = explicit_type.map(|(_, diagnostic_type)| diagnostic_type);
 

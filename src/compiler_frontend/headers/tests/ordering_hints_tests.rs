@@ -33,12 +33,31 @@ fn prepare_source(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = Path::new("@page.moth");
-    let interned_path = path_fork.try_intern_filesystem_path(file_path, &mut string_table)
+    let interned_path = path_fork
+        .try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let file_tokens = tokenize(
+        source,
+        interned_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
-    let output = prepare_file_from_tokens(file_tokens, file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
+    let output = prepare_file_from_tokens(
+        file_tokens,
+        file_path,
+        &HeaderParseOptions::default(),
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+        &mut path_fork,
+    )
     .expect("preparation should succeed");
     (output, string_table, span_builder, path_fork)
 }
@@ -54,7 +73,9 @@ fn content_hint(
         .map(|component| strings.intern(component))
         .collect::<Vec<_>>();
     LocalDeclarationOrderingHint::content_source(
-        path_fork.try_intern_components(&components).expect("test path fits"),
+        path_fork
+            .try_intern_components(&components)
+            .expect("test path fits"),
         occurrence,
     )
 }
@@ -107,7 +128,8 @@ fn assert_hints(header: &Header, expected: &HashSet<LocalDeclarationOrderingHint
 
 #[test]
 fn constant_initializer_content_value_records_content_hint() {
-    let (output, mut strings, _span_builder, mut path_fork) = prepare_source("intro #= @docs/intro.mtf\n");
+    let (output, mut strings, _span_builder, mut path_fork) =
+        prepare_source("intro #= @docs/intro.mtf\n");
 
     let header = header_of_kind(&output.headers, "constant", |kind| {
         matches!(kind, HeaderKind::Constant { .. })
@@ -195,7 +217,8 @@ fn struct_field_default_records_content_hint() {
 
 #[test]
 fn top_level_const_fragment_records_content_hint() {
-    let (output, mut strings, _span_builder, mut path_fork) = prepare_source("#[: [@docs/intro.md]]\n");
+    let (output, mut strings, _span_builder, mut path_fork) =
+        prepare_source("#[: [@docs/intro.md]]\n");
 
     let fragment_header = header_of_kind(&output.headers, "const-template", |kind| {
         matches!(kind, HeaderKind::ConstTemplate { .. })

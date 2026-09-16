@@ -24,9 +24,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
 #[cfg(feature = "data_layout_memory_probe")]
-use crate::compiler_frontend::source::{
-    FrozenIdentityHandle, SourceDatabaseRetentionMetrics,
-};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabaseRetentionMetrics};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1033,8 +1031,10 @@ impl FrozenRenderRetentionMetrics {
                 add_identity(identity);
             }
             for label in &diagnostic.labels {
-                if let Some(identity) =
-                    label.frozen_identity_handle.as_ref().and_then(FrozenIdentityHandle::get)
+                if let Some(identity) = label
+                    .frozen_identity_handle
+                    .as_ref()
+                    .and_then(FrozenIdentityHandle::get)
                 {
                     add_identity(identity);
                 }

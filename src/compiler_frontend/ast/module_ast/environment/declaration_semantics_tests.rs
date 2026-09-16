@@ -27,7 +27,9 @@ fn declaration_semantics_preserves_missing_template_authority() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let declaration = Declaration {
-        id: path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits"),
+        id: path_fork
+            .try_intern_portable_path("value", &mut string_table)
+            .expect("test path fits"),
         value: Expression::template(
             Template {
                 tir_reference: TemplateTirReference {

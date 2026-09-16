@@ -7,6 +7,7 @@
 //! function calls.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallArgument, order_call_arguments_by_retained_slot,
 };
@@ -40,15 +41,14 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use rustc_hash::FxHashMap;
 
@@ -150,7 +150,8 @@ fn parse_generic_function_call(
         .component(template.function_path)
         .map(|name| string_table.resolve(name).to_owned())
         .unwrap_or_else(|| String::from("<generic function>"));
-    let expectations = expectations_from_user_parameters(&inference.signature.parameters, path_fork);
+    let expectations =
+        expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let type_check_context = type_interner.type_check_context();
     let arguments = resolve_call_arguments(
         CallDiagnosticContext::function(&callee_name),
@@ -253,7 +254,8 @@ fn validate_generic_function_template_call(
         .component(template.function_path)
         .map(|name| string_table.resolve(name).to_owned())
         .unwrap_or_else(|| String::from("<generic function>"));
-    let expectations = expectations_from_user_parameters(&inference.signature.parameters, path_fork);
+    let expectations =
+        expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let arguments = resolve_call_arguments_shape_and_access(
         CallDiagnosticContext::function(&callee_name),
         &raw_arguments,
@@ -733,20 +735,17 @@ fn collect_binding_evidence(
             // mismatch, not a repeated-parameter conflict.
             Ok(())
         }
-        Err(conflict) => Err(
-            binding_conflict_diagnostic(
-                context.template,
-                conflict,
-                &*context.evidence_locations,
-                context.type_environment,
-                &mut *context.string_table,
-                context.path_fork,
-                span,
-            )
-            .into(),
-        ),
+        Err(conflict) => Err(binding_conflict_diagnostic(
+            context.template,
+            conflict,
+            &*context.evidence_locations,
+            context.type_environment,
+            &mut *context.string_table,
+            context.path_fork,
+            span,
+        )
+        .into()),
     }
-
 }
 fn binding_conflict_diagnostic(
     template: &GenericFunctionTemplate,
@@ -881,7 +880,11 @@ pub(crate) fn generic_function_instance_path(
         .collect::<Vec<_>>()
         .join("_");
     let component = string_table.intern(&format!("__generic_instance_{argument_suffix}"));
-    path_fork.try_intern_child(function_path, component).ok_or_else(|| {
-        CompilerError::compiler_error("path table exhausted while creating generic function instance")
-    })
+    path_fork
+        .try_intern_child(function_path, component)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path table exhausted while creating generic function instance",
+            )
+        })
 }

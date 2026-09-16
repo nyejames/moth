@@ -2,7 +2,8 @@
 
 use super::artefact_emit::ModuleMaterialisationContext;
 use super::nominal_blueprints::{
-    MaterialisationTypeBlueprint, NominalMaterialisationBlueprint, intern_generated_canonical_type,
+    MaterialisationTypeBlueprint, NominalMaterialisationBlueprint,
+    NominalMaterialisationDefinition, intern_generated_canonical_type,
     intern_materialisation_type_blueprint,
 };
 use super::preparation_freeze::ModuleMaterialisationPreparation;
@@ -705,11 +706,7 @@ impl ModuleMaterialisationPreparation {
             .collect::<FxHashSet<_>>();
         for (name, methods) in &visibility.visible_receiver_methods {
             if referenced_names.contains(self.string_table.resolve(*name)) {
-                selected.extend(
-                    methods
-                        .iter()
-                        .map(|method| *method.target.local_path()),
-                );
+                selected.extend(methods.iter().map(|method| *method.target.local_path()));
             }
         }
         for (name, record) in &visibility.visible_namespace_records {
@@ -905,9 +902,55 @@ impl ModuleMaterialisationPreparation {
             collect_reachable_nominal_identities(&evidence.target_type_identity, &mut identities);
         }
         let mut blueprints = FxHashMap::default();
-        for identity in identities {
+        let mut initial_identities = identities.into_iter().collect::<Vec<_>>();
+        initial_identities.sort();
+        for identity in initial_identities {
             if let Some(blueprint) = self.nominal_blueprints.get(&identity) {
                 blueprints.insert(identity, blueprint.clone());
+            }
+        }
+
+        // A retained nominal can mention another nominal only in its member blueprint. Keep
+        // following those member shapes against the module-wide source map until the closure is
+        // stable. Sort each frontier so retention does not depend on FxHashMap/FxHashSet order.
+        loop {
+            let mut discovered = FxHashSet::default();
+            let mut retained_identities = blueprints.keys().cloned().collect::<Vec<_>>();
+            retained_identities.sort();
+            for identity in retained_identities {
+                let blueprint = &blueprints[&identity];
+                match &blueprint.definition {
+                    NominalMaterialisationDefinition::Struct { fields, .. } => {
+                        for field in fields {
+                            field.field_type.collect_nominal_identities(&mut discovered);
+                        }
+                    }
+                    NominalMaterialisationDefinition::Choice { variants } => {
+                        for variant in variants {
+                            for field in &variant.payload_fields {
+                                field.field_type.collect_nominal_identities(&mut discovered);
+                            }
+                        }
+                    }
+                }
+            }
+            let mut frontier = discovered
+                .into_iter()
+                .filter(|identity| !blueprints.contains_key(identity))
+                .collect::<Vec<_>>();
+            frontier.sort();
+            if frontier.is_empty() {
+                break;
+            }
+            let mut retained = false;
+            for identity in frontier {
+                if let Some(blueprint) = self.nominal_blueprints.get(&identity) {
+                    blueprints.insert(identity, blueprint.clone());
+                    retained = true;
+                }
+            }
+            if !retained {
+                break;
             }
         }
         Ok(blueprints)

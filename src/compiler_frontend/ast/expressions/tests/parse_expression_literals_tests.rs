@@ -110,11 +110,16 @@ fn parse_whole_number_token(
 ) -> Result<LiteralParseOutcome, ExpressionParseError> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,

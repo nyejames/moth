@@ -38,7 +38,11 @@ fn cursor_observes_half_open_boundaries_and_stable_eof() {
     assert_eq!(cursor.advance().unwrap().index().raw(), 1);
     assert!(cursor.is_eof());
     assert_eq!(cursor.advance().unwrap().index().raw(), 2);
-    assert_eq!(cursor.position().raw(), 2, "EOF is a stable cursor boundary");
+    assert_eq!(
+        cursor.position().raw(),
+        2,
+        "EOF is a stable cursor boundary"
+    );
     assert_eq!(cursor.advance().unwrap().index().raw(), 2);
     assert_eq!(cursor.position().raw(), 2);
 }
@@ -449,22 +453,31 @@ fn nested_ranges_and_malformed_handles_are_checked() {
         TokenIndex::try_from_raw(1).unwrap(),
     )
     .unwrap();
-    assert!(matches!(cursor.nested(wrong_source), Err(TokenRangeError::ForeignSource { .. })));
-    assert!(TokenRange::new(
-        SourceId::COMPILATION_ROOT,
-        TokenIndex::try_from_raw(2).unwrap(),
-        TokenIndex::try_from_raw(1).unwrap(),
-    )
-    .is_none());
-    assert!(tokens
-        .token(TokenIndex::try_from_raw(u32::MAX).unwrap())
-        .is_err());
-    assert!(TokenCursor::from_bounds(
-        &tokens,
-        TokenIndex::try_from_raw(0).unwrap(),
-        TokenIndex::try_from_raw(4).unwrap(),
-    )
-    .is_err());
+    assert!(matches!(
+        cursor.nested(wrong_source),
+        Err(TokenRangeError::ForeignSource { .. })
+    ));
+    assert!(
+        TokenRange::new(
+            SourceId::COMPILATION_ROOT,
+            TokenIndex::try_from_raw(2).unwrap(),
+            TokenIndex::try_from_raw(1).unwrap(),
+        )
+        .is_none()
+    );
+    assert!(
+        tokens
+            .token(TokenIndex::try_from_raw(u32::MAX).unwrap())
+            .is_err()
+    );
+    assert!(
+        TokenCursor::from_bounds(
+            &tokens,
+            TokenIndex::try_from_raw(0).unwrap(),
+            TokenIndex::try_from_raw(4).unwrap(),
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -484,7 +497,10 @@ fn token_ref_exposes_shape_span_and_borrowed_cold_rows() {
     let tokens = SourceTokens::try_from_tokens(
         source,
         vec![
-            Token::new(TokenKind::NumericLiteral(numeric), LocalSpan::source_start()),
+            Token::new(
+                TokenKind::NumericLiteral(numeric),
+                LocalSpan::source_start(),
+            ),
             Token::new(TokenKind::Path(path_row), LocalSpan::source_start()),
         ],
         numeric_store,
@@ -496,7 +512,10 @@ fn token_ref_exposes_shape_span_and_borrowed_cold_rows() {
     let numeric_ref = tokens.token(TokenIndex::try_from_raw(0).unwrap()).unwrap();
     assert_eq!(numeric_ref.shape().numeric_literal_id().unwrap().raw(), 1);
     assert_eq!(numeric_ref.span(), LocalSpan::source_start());
-    assert_eq!(numeric_ref.numeric_literal().unwrap().unwrap().source_text, numeric_source_text);
+    assert_eq!(
+        numeric_ref.numeric_literal().unwrap().unwrap().source_text,
+        numeric_source_text
+    );
     let path_ref = tokens.token(TokenIndex::try_from_raw(1).unwrap()).unwrap();
     assert_eq!(path_ref.path_syntax().unwrap().unwrap().root, path_id);
 }
@@ -519,7 +538,10 @@ fn deferred_publication_attaches_the_shared_path_table_to_both_token_owners() {
         src_path,
         source,
         None,
-        vec![Token::new(TokenKind::Path(path_row), LocalSpan::source_start())],
+        vec![Token::new(
+            TokenKind::Path(path_row),
+            LocalSpan::source_start(),
+        )],
         path_syntax,
     );
     assert!(file_tokens.has_canonical_source_tokens());
@@ -600,7 +622,10 @@ fn ordinary_substream_exposes_no_second_canonical_owner() {
             .source(),
         rebound
     );
-    assert_eq!(substream.numeric_literal_store().owner_source(), Some(source));
+    assert_eq!(
+        substream.numeric_literal_store().owner_source(),
+        Some(source)
+    );
 }
 
 #[test]

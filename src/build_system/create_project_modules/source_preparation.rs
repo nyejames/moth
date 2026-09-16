@@ -7,8 +7,8 @@
 //! span builder and local preparation result on the same owner. Loading and registration failures
 //! precede that owner; later preparation failures retain the loaded snapshot.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
 };

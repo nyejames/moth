@@ -439,9 +439,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .module_file_paths
                 .contains(&boundary.root_file)
             {
-                return Some(ResolvedNamespaceTarget::SourceFile(
-                    boundary.root_file,
-                ));
+                return Some(ResolvedNamespaceTarget::SourceFile(boundary.root_file));
             }
         }
 

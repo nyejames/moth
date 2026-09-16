@@ -37,9 +37,20 @@ fn stream_positioned_at_open_bracket(
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> FileTokens {
-    let source_path = path_fork.try_intern_portable_path("test.moth", string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", string_table)
+        .expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut token_stream = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &style_directives, string_table, path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, span_builder)
+    let mut token_stream = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        string_table,
+        path_fork,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        span_builder,
+    )
     .expect("tokenization should succeed");
 
     let open_index = token_stream
@@ -77,7 +88,9 @@ fn duplicate_member_spans(
 }
 
 fn owner_path(path_fork: &mut PathInternerFork, string_table: &mut StringTable) -> PathId {
-    path_fork.try_intern_portable_path("test.moth", string_table).expect("test path fits")
+    path_fork
+        .try_intern_portable_path("test.moth", string_table)
+        .expect("test path fits")
 }
 
 /// Asserts `error` is the shared-parser duplicate-member diagnostic for `expected_name`:
@@ -160,7 +173,7 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = stream_positioned_at_open_bracket(
+    let token_stream = stream_positioned_at_open_bracket(
         "fn | value Int, value Int | -> Int :",
         &mut path_fork,
         &mut string_table,
@@ -170,13 +183,12 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
     let mut warnings = Vec::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
-    let mut declaration_cursor =
-        DeclarationCursor::new(
-            token_stream
-                .canonical_cursor_from_current()
-                .expect("test token stream must expose canonical tokens"),
-        )
-            .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(
+        token_stream
+            .canonical_cursor_from_current()
+            .expect("test token stream must expose canonical tokens"),
+    )
+    .expect("test token stream must expose canonical tokens");
     let error = parse_function_signature_syntax(
         &mut declaration_cursor,
         &mut warnings,
@@ -201,7 +213,7 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = stream_positioned_at_open_bracket(
+    let token_stream = stream_positioned_at_open_bracket(
         "| value Int, value Int |",
         &mut path_fork,
         &mut string_table,
@@ -211,13 +223,12 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
     let mut warnings = Vec::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
-    let mut declaration_cursor =
-        DeclarationCursor::new(
-            token_stream
-                .canonical_cursor_from_current()
-                .expect("test token stream must expose canonical tokens"),
-        )
-            .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(
+        token_stream
+            .canonical_cursor_from_current()
+            .expect("test token stream must expose canonical tokens"),
+    )
+    .expect("test token stream must expose canonical tokens");
     let error = parse_record_body(
         &mut declaration_cursor,
         &mut string_table,
@@ -243,7 +254,7 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = stream_positioned_at_open_bracket(
+    let token_stream = stream_positioned_at_open_bracket(
         "| message String, message Int |",
         &mut path_fork,
         &mut string_table,
@@ -253,13 +264,12 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
     let mut warnings = Vec::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "message");
-    let mut declaration_cursor =
-        DeclarationCursor::new(
-            token_stream
-                .canonical_cursor_from_current()
-                .expect("test token stream must expose canonical tokens"),
-        )
-            .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(
+        token_stream
+            .canonical_cursor_from_current()
+            .expect("test token stream must expose canonical tokens"),
+    )
+    .expect("test token stream must expose canonical tokens");
     let error = parse_record_body(
         &mut declaration_cursor,
         &mut string_table,
@@ -285,7 +295,7 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = stream_positioned_at_open_bracket(
+    let token_stream = stream_positioned_at_open_bracket(
         "| This, value Int, value Int | -> Int ;",
         &mut path_fork,
         &mut string_table,
@@ -295,13 +305,12 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
     let mut warnings = Vec::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
-    let mut declaration_cursor =
-        DeclarationCursor::new(
-            token_stream
-                .canonical_cursor_from_current()
-                .expect("test token stream must expose canonical tokens"),
-        )
-            .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(
+        token_stream
+            .canonical_cursor_from_current()
+            .expect("test token stream must expose canonical tokens"),
+    )
+    .expect("test token stream must expose canonical tokens");
     let error = parse_trait_requirement_signature_syntax(
         &mut declaration_cursor,
         &mut warnings,
@@ -326,7 +335,7 @@ fn distinct_members_parse_successfully_through_shared_parser() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = stream_positioned_at_open_bracket(
+    let token_stream = stream_positioned_at_open_bracket(
         "| first Int, second String |",
         &mut path_fork,
         &mut string_table,
@@ -334,13 +343,12 @@ fn distinct_members_parse_successfully_through_shared_parser() {
     );
     let struct_path = owner_path(&mut path_fork, &mut string_table);
     let mut warnings = Vec::new();
-    let mut declaration_cursor =
-        DeclarationCursor::new(
-            token_stream
-                .canonical_cursor_from_current()
-                .expect("test token stream must expose canonical tokens"),
-        )
-            .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(
+        token_stream
+            .canonical_cursor_from_current()
+            .expect("test token stream must expose canonical tokens"),
+    )
+    .expect("test token stream must expose canonical tokens");
     let fields = parse_record_body(
         &mut declaration_cursor,
         &mut string_table,

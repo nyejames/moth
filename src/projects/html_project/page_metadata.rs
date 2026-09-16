@@ -96,8 +96,8 @@ pub(crate) fn extract_html_page_metadata(
         .function_name_path(start_function)
         .and_then(|path| path_table.parent(path));
 
-    let entry_scope_prefix = entry_scope
-        .map(|path| path_table.render_portable(path, string_table, &mut Vec::new()));
+    let entry_scope_prefix =
+        entry_scope.map(|path| path_table.render_portable(path, string_table, &mut Vec::new()));
     let mut metadata = HtmlPageMetadata::default();
     let mut resource_uses = Vec::new();
     let mut uses_site_root = false;
@@ -115,11 +115,8 @@ pub(crate) fn extract_html_page_metadata(
             .declarations
             .values()
             .find(|fact| {
-                path_table.render_portable(
-                    fact.declaration_path,
-                    string_table,
-                    &mut Vec::new(),
-                ) == module_constant.name
+                path_table.render_portable(fact.declaration_path, string_table, &mut Vec::new())
+                    == module_constant.name
             })
             .and_then(|fact| fact.span);
         let value = match &module_constant.value {

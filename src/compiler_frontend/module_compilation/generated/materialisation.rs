@@ -115,8 +115,8 @@ fn materialise_generated_request<'build>(
     match result {
         Ok(()) => Ok(()),
         Err(mut failure) => {
-            if let Err(error) = failure
-                .attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
+            if let Err(error) =
+                failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
             {
                 return Err(PremergeFailure::Infrastructure(error));
             }
@@ -196,10 +196,9 @@ fn materialise_generated_request_inner<'build>(
             // fork was created. Its paths are then in the live boundary domain, but its retained
             // context deliberately has no growing table snapshot. Rebase from the boundary pair
             // for this request; only a completed package retains its own foreign pair.
-            let boundary_rebase_available =
-                retained_identity_tables.is_none()
-                    && context.global_path_table.is_some()
-                    && context.global_string_table.is_some();
+            let boundary_rebase_available = retained_identity_tables.is_none()
+                && context.global_path_table.is_some()
+                && context.global_string_table.is_some();
             let materialised = if *rebase_required || boundary_rebase_available {
                 let rebased_context = if let Some((path_table, source_strings)) =
                     retained_identity_tables
@@ -210,10 +209,9 @@ fn materialise_generated_request_inner<'build>(
                         &mut compiler.path_fork,
                         &mut compiler.string_table,
                     )
-                } else if let (Some(path_table), Some(source_strings)) = (
-                    context.global_path_table,
-                    context.global_string_table,
-                ) {
+                } else if let (Some(path_table), Some(source_strings)) =
+                    (context.global_path_table, context.global_string_table)
+                {
                     declaring_context.rebased_for_requester_with(
                         path_table,
                         source_strings,
@@ -221,10 +219,8 @@ fn materialise_generated_request_inner<'build>(
                         &mut compiler.string_table,
                     )
                 } else {
-                    declaring_context.rebased_for_requester(
-                        &mut compiler.path_fork,
-                        &mut compiler.string_table,
-                    )
+                    declaring_context
+                        .rebased_for_requester(&mut compiler.path_fork, &mut compiler.string_table)
                 }
                 .map_err(PremergeFailure::Infrastructure)?;
                 rebased_context.materialise_ast_at(
@@ -437,10 +433,9 @@ fn materialise_generated_request_inner<'build>(
             materialisation_context: None,
         },
     };
-    let generated_remap = compiler.string_table.merge_delta_from(
-        &generated_compiler.string_table,
-        string_table_base_len,
-    );
+    let generated_remap = compiler
+        .string_table
+        .merge_delta_from(&generated_compiler.string_table, string_table_base_len);
     let generated_path_remap = compiler
         .path_fork
         .merge_delta_from(&generated_compiler.path_fork, &generated_remap)

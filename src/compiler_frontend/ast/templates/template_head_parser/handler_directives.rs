@@ -12,6 +12,7 @@
 use super::directive_args::parse_optional_parenthesized_expression;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
@@ -19,14 +20,13 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveEffects,
     StyleDirectiveHandlerSpec,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// Typed result shared by handler-directive parsing helpers.
 type HandlerDirectiveResult<T> = Result<T, TemplateError>;
 

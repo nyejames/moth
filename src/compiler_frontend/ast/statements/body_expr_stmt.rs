@@ -6,6 +6,7 @@
 //! statement-position filtering and targeted diagnostics.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
@@ -18,9 +19,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+use crate::compiler_frontend::value_mode::ValueMode;
 /// Returns `true` if the given expression is valid in statement position.
 ///
 /// Direct calls and handled fallible calls are always valid statements.
@@ -136,7 +136,13 @@ pub(crate) fn parse_expression_statement_candidate(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    parse_and_validate_statement_expression(token_stream, context, type_interner, string_table, path_fork)
+    parse_and_validate_statement_expression(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )
 }
 pub(crate) fn parse_symbol_expression_statement_candidate(
     token_stream: &mut AstCursor,

@@ -284,7 +284,9 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
 fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let flag = path_fork.try_intern_portable_path("flag", &mut string_table).expect("test path fits");
+    let flag = path_fork
+        .try_intern_portable_path("flag", &mut string_table)
+        .expect("test path fits");
     let nodes = vec![
         ExpressionRpnItem::Operand(Expression::structural_string(
             vec![ConstStringPiece::SiteRoot],
@@ -681,7 +683,9 @@ fn constant_fold_reports_static_failure_inside_runtime_expression() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let runtime_var = Expression::reference(
-        path_fork.try_intern_portable_path("runtime_var", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("runtime_var", &mut string_table)
+            .expect("test path fits"),
         DataType::Int,
         None,
         ValueMode::ImmutableReference,
@@ -712,7 +716,9 @@ fn constant_fold_partially_folds_runtime_expression() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let runtime_var = Expression::reference(
-        path_fork.try_intern_portable_path("runtime_var", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("runtime_var", &mut string_table)
+            .expect("test path fits"),
         DataType::Int,
         None,
         ValueMode::ImmutableReference,
@@ -938,7 +944,9 @@ fn constant_fold_keeps_unary_not_when_operand_is_not_bool_literal() {
 fn constant_fold_preserves_runtime_operands_in_partial_fold() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let flag_name = path_fork.try_intern_portable_path("flag", &mut string_table).expect("test path fits");
+    let flag_name = path_fork
+        .try_intern_portable_path("flag", &mut string_table)
+        .expect("test path fits");
     let nodes = vec![
         rvalue_item(Expression::reference(
             flag_name,
@@ -992,7 +1000,9 @@ fn partial_fold_moves_non_foldable_operands_back_without_rebuilding_them() {
     // a rebuilt operand would carry defaults, not the values asserted below.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let flag_name = path_fork.try_intern_portable_path("flag", &mut string_table).expect("test path fits");
+    let flag_name = path_fork
+        .try_intern_portable_path("flag", &mut string_table)
+        .expect("test path fits");
     let flag_span = marked_span(70);
     let literal_span = marked_span(110);
     let operator_span = marked_span(230);
@@ -1044,7 +1054,9 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
     // their original order while the folded operand takes its own provenance from the fold.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let counter_name = path_fork.try_intern_portable_path("counter", &mut string_table).expect("test path fits");
+    let counter_name = path_fork
+        .try_intern_portable_path("counter", &mut string_table)
+        .expect("test path fits");
     let counter_span = marked_span(30);
     let left_literal_span = marked_span(50);
 
@@ -1289,7 +1301,9 @@ fn fold_cast_user_defined_evidence_rejected_in_const_context() {
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(42, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
-    let method_path = path_fork.try_intern_portable_path("to_string", &mut string_table).expect("test path fits");
+    let method_path = path_fork
+        .try_intern_portable_path("to_string", &mut string_table)
+        .expect("test path fits");
 
     let cast = cast_expression(
         source,
@@ -1489,7 +1503,9 @@ fn fold_cast_fallible_builtin_failure_with_non_foldable_catch_rejects_handler() 
     let target_type_id = type_environment.builtins().int;
 
     let handler_value = Expression::reference(
-        path_fork.try_intern_portable_path("runtime_value", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("runtime_value", &mut string_table)
+            .expect("test path fits"),
         DataType::Int,
         None,
         ValueMode::ImmutableReference,

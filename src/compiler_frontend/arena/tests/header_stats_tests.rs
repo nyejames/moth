@@ -75,12 +75,31 @@ fn multi_file_declarations_are_aggregated() {
         .id;
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut prepare_file = |source: &str, path: &PathBuf, source_id| {
-        let interned_path = path_fork.try_intern_filesystem_path(path, &mut string_table)
+        let interned_path = path_fork
+            .try_intern_filesystem_path(path, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let tokens = tokenize(source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, source_id, &mut span_builder)
+        let tokens = tokenize(
+            source,
+            interned_path,
+            TokenizerEntryMode::SourceFile,
+            &style_directives,
+            &mut string_table,
+            &mut path_fork,
+            source_id,
+            &mut span_builder,
+        )
         .expect("source should tokenize");
-        prepare_file_from_tokens(tokens, &entry_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
+        prepare_file_from_tokens(
+            tokens,
+            &entry_path,
+            &HeaderParseOptions::default(),
+            &mut string_table,
+            0,
+            0,
+            &mut span_builder,
+            &mut path_fork,
+        )
         .expect("source should prepare")
     };
     let entry_output = prepare_file("[runtime1]\n", &entry_path, entry_id);
@@ -90,9 +109,23 @@ fn multi_file_declarations_are_aggregated() {
         helper_id,
     );
 
-    let prepared_syntax = prepare_header_syntax(&mut [entry_output, helper_output], &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut path_fork)
+    let prepared_syntax = prepare_header_syntax(
+        &mut [entry_output, helper_output],
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut path_fork,
+    )
     .expect("header syntax should prepare");
-    let headers = bind_module_headers(prepared_syntax, &ExternalPackageRegistry::new(), &ExternalImportResolutionTable::default(), &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(), None, &source_files, &mut string_table, &mut path_fork)
+    let headers = bind_module_headers(
+        prepared_syntax,
+        &ExternalPackageRegistry::new(),
+        &ExternalImportResolutionTable::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
+        None,
+        &source_files,
+        &mut string_table,
+        &mut path_fork,
+    )
     .expect("headers should bind");
 
     assert_eq!(headers.header_stats.functions, 1);

@@ -44,8 +44,10 @@ fn qualified_match_arm_is_not_a_choice_declaration() {
     assert_eq!(classification, SymbolStatementStart::Other);
     assert!(!classification.starts_header_declaration());
 
-    let mut token_stream = FileTokens::new(
-        path_fork.try_intern_portable_path("src/@page.moth", &mut string_table).expect("test path fits"),
+    let token_stream = FileTokens::new(
+        path_fork
+            .try_intern_portable_path("src/@page.moth", &mut string_table)
+            .expect("test path fits"),
         SourceId::COMPILATION_ROOT,
         tokens,
     );
@@ -76,7 +78,9 @@ fn classifier_views_agree_without_whole_source_projection() {
     ];
     let expected = classify_symbol_statement_start_at(&tokens, 0);
     let from_stream_tokens = FileTokens::new(
-        path_fork.try_intern_portable_path("src/@page.moth", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("src/@page.moth", &mut string_table)
+            .expect("test path fits"),
         SourceId::COMPILATION_ROOT,
         tokens,
     );

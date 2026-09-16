@@ -125,10 +125,7 @@ fn capacity_only_shorthand(type_ref: &ParsedTypeRef) -> Option<&ParsedCollection
     }
 }
 /// Inspect the first authored initializer token without retaining a token vector on the shell.
-fn initializer_starts_with_type_parameter(
-    source: &AstCursor,
-    range: Option<TokenRange>,
-) -> bool {
+fn initializer_starts_with_type_parameter(source: &AstCursor, range: Option<TokenRange>) -> bool {
     let Some(range) = range else {
         return false;
     };
@@ -248,6 +245,16 @@ pub(crate) enum ResolvedDeclarationStatementKind {
     },
 }
 
+/// Mutable interner tables shared by declaration lowering.
+///
+/// WHAT: groups the string and path tables that every declaration-lowering call needs together.
+/// WHY: keeping them together keeps `resolve_declaration_syntax` under the argument-count lint
+/// without changing lowering behavior.
+pub(crate) struct DeclarationLoweringTables<'a> {
+    pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
+}
+
 /// Parse a new body-local declaration from the token stream.
 ///
 /// Handles function declarations as a fast path (they use a dedicated signature/body syntax)
@@ -364,15 +371,16 @@ pub(crate) fn new_declaration(
     // ----------------------------
     let mut span_builder = ExtendedSpanBuilder::new();
     let declaration_syntax = {
-        let mut declaration_cursor = token_stream.declaration_cursor()?;
-        let syntax = parse_declaration_syntax(
-            &mut declaration_cursor,
-            symbol_id,
-            string_table,
-            &mut span_builder,
-        )?;
-        let next_index = declaration_cursor.position();
-        drop(declaration_cursor);
+        let (syntax, next_index) = {
+            let mut declaration_cursor = token_stream.declaration_cursor()?;
+            let syntax = parse_declaration_syntax(
+                &mut declaration_cursor,
+                symbol_id,
+                string_table,
+                &mut span_builder,
+            )?;
+            (syntax, declaration_cursor.position())
+        };
         token_stream.set_position(next_index)?;
         syntax
     };
@@ -404,8 +412,10 @@ pub(crate) fn new_declaration(
         None,
         &mut *context,
         type_interner,
-        string_table,
-        path_fork,
+        DeclarationLoweringTables {
+            string_table,
+            path_fork,
+        },
     )?;
     // The binding anchor is the declaration-name token captured on entry, not the
     // initializer value span. `resolve_declaration_syntax` leaves it empty for this
@@ -453,9 +463,12 @@ pub fn resolve_declaration_syntax(
     initializer_override: Option<FileTokens>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
+    tables: DeclarationLoweringTables<'_>,
 ) -> DeclarationResult<Declaration> {
+    let DeclarationLoweringTables {
+        string_table,
+        path_fork,
+    } = tables;
     let mut initializer_override = initializer_override;
     let mut span_builder = ExtendedSpanBuilder::new();
     let config_qualifier = declaration_syntax.config_qualifier.clone();
@@ -708,21 +721,21 @@ pub fn resolve_declaration_syntax(
         {
             // Struct field defaults must be compile-time foldable, so they are parsed
             // in a dedicated constant context.
-            let constant_context =
-                ScopeContext::new_constant(qualified_name, context);
+            let constant_context = ScopeContext::new_constant(qualified_name, context);
             let mut field_warnings = Vec::new();
             let field_syntax = {
-                let mut declaration_cursor = initializer_stream.declaration_cursor()?;
-                let field_syntax = parse_struct_shell(
-                    &mut declaration_cursor,
-                    string_table,
-                    &mut field_warnings,
-                    qualified_name,
-                    path_fork,
-                    &mut span_builder,
-                )?;
-                let next_index = declaration_cursor.position();
-                drop(declaration_cursor);
+                let (field_syntax, next_index) = {
+                    let mut declaration_cursor = initializer_stream.declaration_cursor()?;
+                    let field_syntax = parse_struct_shell(
+                        &mut declaration_cursor,
+                        string_table,
+                        &mut field_warnings,
+                        qualified_name,
+                        path_fork,
+                        &mut span_builder,
+                    )?;
+                    (field_syntax, declaration_cursor.position())
+                };
                 initializer_stream.set_position(next_index)?;
                 field_syntax
             };

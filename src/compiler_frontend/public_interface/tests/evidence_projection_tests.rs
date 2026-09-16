@@ -287,7 +287,15 @@ fn project_label_display_evidence_with_method_origins(
     );
 
     let trait_id = TraitId(0);
-    let definition = trait_definition(trait_id, "DISPLAY_TEXT", this_id, 0, &[("display", type_environment.builtins().string)], &mut string_table, &mut path_fork);
+    let definition = trait_definition(
+        trait_id,
+        "DISPLAY_TEXT",
+        this_id,
+        0,
+        &[("display", type_environment.builtins().string)],
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.insert(definition);
 
@@ -371,13 +379,33 @@ fn evidence_identity_stable_across_local_allocations() {
 
         if allocate_waste {
             let _waste_type = this_type(&mut env, string_table);
-            let _ = register_struct(&mut env, string_table, "Waste", empty_fields(), None, path_fork);
+            let _ = register_struct(
+                &mut env,
+                string_table,
+                "Waste",
+                empty_fields(),
+                None,
+                path_fork,
+            );
         }
 
         let this_id = this_type(&mut env, string_table);
-        let (_, label_type_id) =
-            register_struct(&mut env, string_table, "Label", empty_fields(), None, path_fork);
-        let _ = register_struct(&mut env, string_table, "Other", empty_fields(), None, path_fork);
+        let (_, label_type_id) = register_struct(
+            &mut env,
+            string_table,
+            "Label",
+            empty_fields(),
+            None,
+            path_fork,
+        );
+        let _ = register_struct(
+            &mut env,
+            string_table,
+            "Other",
+            empty_fields(),
+            None,
+            path_fork,
+        );
 
         let mut trait_env = TraitEnvironment::new();
 
@@ -387,7 +415,15 @@ fn evidence_identity_stable_across_local_allocations() {
         // vector-index invariant.
         let trait_id = if allocate_waste {
             let dummy_this = this_type(&mut env, string_table);
-            let dummy_definition = trait_definition(TraitId(0), "DummyPrivateTrait", dummy_this, 0, &[("dummy_req", env.builtins().string)], string_table, path_fork);
+            let dummy_definition = trait_definition(
+                TraitId(0),
+                "DummyPrivateTrait",
+                dummy_this,
+                0,
+                &[("dummy_req", env.builtins().string)],
+                string_table,
+                path_fork,
+            );
             trait_env.insert(dummy_definition);
             TraitId(1)
         } else {
@@ -399,7 +435,15 @@ fn evidence_identity_stable_across_local_allocations() {
         // (TypeId, TraitId, TraitRequirementId, TraitEvidenceId) all
         // differ between the baseline and waste configurations.
         let real_start_requirement_id = if allocate_waste { 1 } else { 0 };
-        let definition = trait_definition(trait_id, "DISPLAY_TEXT", this_id, real_start_requirement_id, &[("display", string_type_id(&env))], string_table, path_fork);
+        let definition = trait_definition(
+            trait_id,
+            "DISPLAY_TEXT",
+            this_id,
+            real_start_requirement_id,
+            &[("display", string_type_id(&env))],
+            string_table,
+            path_fork,
+        );
         trait_env.insert(definition);
 
         let display_path = path("display", string_table, path_fork);
@@ -409,18 +453,41 @@ fn evidence_identity_stable_across_local_allocations() {
         // real_start_requirement_id, so its TraitEvidenceId differs from the
         // baseline configuration.
         if allocate_waste {
-            evidence_env.insert_validated(canonical_evidence(TraitId(0), label_type_id, &[(TraitRequirementId(0), "dummy_req")], string_table, path_fork));
+            evidence_env.insert_validated(canonical_evidence(
+                TraitId(0),
+                label_type_id,
+                &[(TraitRequirementId(0), "dummy_req")],
+                string_table,
+                path_fork,
+            ));
         }
-        evidence_env.insert_validated(canonical_evidence(trait_id, label_type_id, &[(TraitRequirementId(real_start_requirement_id), "display")], string_table, path_fork));
+        evidence_env.insert_validated(canonical_evidence(
+            trait_id,
+            label_type_id,
+            &[(TraitRequirementId(real_start_requirement_id), "display")],
+            string_table,
+            path_fork,
+        ));
 
-        let declarations = declarations_with_receiver_methods(&[(
-            display_path,
-            ReceiverKey::Struct(path("Label", string_table, path_fork)),
-        )], &env, string_table, path_fork);
+        let declarations = declarations_with_receiver_methods(
+            &[(
+                display_path,
+                ReceiverKey::Struct(path("Label", string_table, path_fork)),
+            )],
+            &env,
+            string_table,
+            path_fork,
+        );
 
         let mut nominal_origins = FxHashMap::default();
-        nominal_origins.insert(path("Label", string_table, path_fork), struct_origin("Label"));
-        nominal_origins.insert(path("Other", string_table, path_fork), struct_origin("Other"));
+        nominal_origins.insert(
+            path("Label", string_table, path_fork),
+            struct_origin("Label"),
+        );
+        nominal_origins.insert(
+            path("Other", string_table, path_fork),
+            struct_origin("Other"),
+        );
 
         let mut trait_origins = FxHashMap::default();
         trait_origins.insert(
@@ -441,10 +508,28 @@ fn evidence_identity_stable_across_local_allocations() {
     let config_a = build_config(&mut string_table, &mut path_fork, false);
     let config_b = build_config(&mut string_table, &mut path_fork, true);
 
-    let evidence_a = project_evidence(&config_a.0, &config_a.1, &config_a.2, &config_a.3, &config_a.4, &config_a.5, &string_table, &path_fork)
+    let evidence_a = project_evidence(
+        &config_a.0,
+        &config_a.1,
+        &config_a.2,
+        &config_a.3,
+        &config_a.4,
+        &config_a.5,
+        &string_table,
+        &path_fork,
+    )
     .expect("evidence projection A should succeed");
 
-    let evidence_b = project_evidence(&config_b.0, &config_b.1, &config_b.2, &config_b.3, &config_b.4, &config_b.5, &string_table, &path_fork)
+    let evidence_b = project_evidence(
+        &config_b.0,
+        &config_b.1,
+        &config_b.2,
+        &config_b.3,
+        &config_b.4,
+        &config_b.5,
+        &string_table,
+        &path_fork,
+    )
     .expect("evidence projection B should succeed");
 
     assert_eq!(evidence_a.len(), 1);
@@ -543,21 +628,41 @@ fn evidence_requirement_mappings_preserve_authored_order_and_exact_receiver_orig
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
-    let (_, label_type_id) =
-        register_struct(&mut env, &mut string_table, "Label", empty_fields(), None, &mut path_fork);
+    let (_, label_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Label",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let trait_id = TraitId(0);
-    let definition = trait_definition(trait_id, "NAMED", this_id, 0, &[("name", env.builtins().string), ("id", env.builtins().int)], &mut string_table, &mut path_fork);
+    let definition = trait_definition(
+        trait_id,
+        "NAMED",
+        this_id,
+        0,
+        &[("name", env.builtins().string), ("id", env.builtins().int)],
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut trait_env = TraitEnvironment::new();
     trait_env.insert(definition);
 
     let mut evidence_env = TraitEvidenceEnvironment::new();
-    evidence_env.insert_validated(canonical_evidence(trait_id, label_type_id, &[
-        // Deliberately reverse the evidence requirement vector so the output proves
-        // trait-definition authored order, not accidental evidence-vector order.
-        (TraitRequirementId(1), "id"),
-        (TraitRequirementId(0), "name"),
-    ], &mut string_table, &mut path_fork));
+    evidence_env.insert_validated(canonical_evidence(
+        trait_id,
+        label_type_id,
+        &[
+            // Deliberately reverse the evidence requirement vector so the output proves
+            // trait-definition authored order, not accidental evidence-vector order.
+            (TraitRequirementId(1), "id"),
+            (TraitRequirementId(0), "name"),
+        ],
+        &mut string_table,
+        &mut path_fork,
+    ));
 
     let label_path = path("Label", &mut string_table, &mut path_fork);
     let name_path = path("name", &mut string_table, &mut path_fork);
@@ -576,9 +681,21 @@ fn evidence_requirement_mappings_preserve_authored_order_and_exact_receiver_orig
     nominal_origins.insert(label_path, struct_origin("Label"));
 
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("NAMED", &mut string_table, &mut path_fork), trait_origin("NAMED"));
+    trait_origins.insert(
+        path("NAMED", &mut string_table, &mut path_fork),
+        trait_origin("NAMED"),
+    );
 
-    let evidence = project_evidence(&trait_env, &evidence_env, &declarations, &nominal_origins, &trait_origins, &env, &string_table, &path_fork)
+    let evidence = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &declarations,
+        &nominal_origins,
+        &trait_origins,
+        &env,
+        &string_table,
+        &path_fork,
+    )
     .expect("draft with two-requirement evidence should build");
 
     assert_eq!(evidence.len(), 1);
@@ -619,33 +736,67 @@ fn evidence_excludes_private_target_and_retains_public_target() {
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
-    let (_, public_type_id) =
-        register_struct(&mut env, &mut string_table, "Public", empty_fields(), None, &mut path_fork);
-    let (_, private_type_id) =
-        register_struct(&mut env, &mut string_table, "Private", empty_fields(), None, &mut path_fork);
+    let (_, public_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Public",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
+    let (_, private_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Private",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let trait_id = TraitId(0);
-    let definition = trait_definition(trait_id, "DISPLAY_TEXT", this_id, 0, &[("display", env.builtins().string)], &mut string_table, &mut path_fork);
+    let definition = trait_definition(
+        trait_id,
+        "DISPLAY_TEXT",
+        this_id,
+        0,
+        &[("display", env.builtins().string)],
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut trait_env = TraitEnvironment::new();
     trait_env.insert(definition);
 
     let mut evidence_env = TraitEvidenceEnvironment::new();
-    evidence_env.insert_validated(canonical_evidence(trait_id, public_type_id, &[(TraitRequirementId(0), "display")], &mut string_table, &mut path_fork));
-    evidence_env.insert_validated(canonical_evidence(trait_id, private_type_id, &[(TraitRequirementId(0), "display_private")], &mut string_table, &mut path_fork));
+    evidence_env.insert_validated(canonical_evidence(
+        trait_id,
+        public_type_id,
+        &[(TraitRequirementId(0), "display")],
+        &mut string_table,
+        &mut path_fork,
+    ));
+    evidence_env.insert_validated(canonical_evidence(
+        trait_id,
+        private_type_id,
+        &[(TraitRequirementId(0), "display_private")],
+        &mut string_table,
+        &mut path_fork,
+    ));
 
     let public_path = path("Public", &mut string_table, &mut path_fork);
     let display_path = path("display", &mut string_table, &mut path_fork);
     let display_private_path = path("display_private", &mut string_table, &mut path_fork);
-    let declarations = declarations_with_receiver_methods(&[
-        (
-            display_path,
-            ReceiverKey::Struct(public_path),
-        ),
-        (
-            display_private_path,
-            ReceiverKey::Struct(path("Private", &mut string_table, &mut path_fork)),
-        ),
-    ], &env, &string_table, &path_fork);
+    let declarations = declarations_with_receiver_methods(
+        &[
+            (display_path, ReceiverKey::Struct(public_path)),
+            (
+                display_private_path,
+                ReceiverKey::Struct(path("Private", &mut string_table, &mut path_fork)),
+            ),
+        ],
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let mut nominal_origins = FxHashMap::default();
     nominal_origins.insert(public_path, struct_origin("Public"));
@@ -656,7 +807,16 @@ fn evidence_excludes_private_target_and_retains_public_target() {
         trait_origin("DISPLAY_TEXT"),
     );
 
-    let evidence = project_evidence(&trait_env, &evidence_env, &declarations, &nominal_origins, &trait_origins, &env, &string_table, &path_fork)
+    let evidence = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &declarations,
+        &nominal_origins,
+        &trait_origins,
+        &env,
+        &string_table,
+        &path_fork,
+    )
     .expect("draft with mixed public/private evidence should build");
 
     assert_eq!(evidence.len(), 1);
@@ -677,23 +837,45 @@ fn evidence_excludes_private_source_trait() {
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
-    let (_, target_type_id) =
-        register_struct(&mut env, &mut string_table, "Label", empty_fields(), None, &mut path_fork);
+    let (_, target_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Label",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let trait_id = TraitId(0);
-    let definition = trait_definition(trait_id, "PrivateTrait", this_id, 0, &[("display", env.builtins().string)], &mut string_table, &mut path_fork);
+    let definition = trait_definition(
+        trait_id,
+        "PrivateTrait",
+        this_id,
+        0,
+        &[("display", env.builtins().string)],
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut trait_env = TraitEnvironment::new();
     trait_env.insert(definition);
 
     let mut evidence_env = TraitEvidenceEnvironment::new();
-    evidence_env.insert_validated(canonical_evidence(trait_id, target_type_id, &[(TraitRequirementId(0), "display")], &mut string_table, &mut path_fork));
+    evidence_env.insert_validated(canonical_evidence(
+        trait_id,
+        target_type_id,
+        &[(TraitRequirementId(0), "display")],
+        &mut string_table,
+        &mut path_fork,
+    ));
 
     let label_path = path("Label", &mut string_table, &mut path_fork);
     let display_path = path("display", &mut string_table, &mut path_fork);
-    let declarations = declarations_with_receiver_methods(&[(
-        display_path,
-        ReceiverKey::Struct(label_path),
-    )], &env, &string_table, &path_fork);
+    let declarations = declarations_with_receiver_methods(
+        &[(display_path, ReceiverKey::Struct(label_path))],
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let mut nominal_origins = FxHashMap::default();
     nominal_origins.insert(label_path, struct_origin("Label"));
@@ -701,7 +883,16 @@ fn evidence_excludes_private_source_trait() {
     // The trait is NOT in the public source-trait origin index, so it is private.
     let trait_origins = FxHashMap::default();
 
-    let evidence = project_evidence(&trait_env, &evidence_env, &declarations, &nominal_origins, &trait_origins, &env, &string_table, &path_fork)
+    let evidence = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &declarations,
+        &nominal_origins,
+        &trait_origins,
+        &env,
+        &string_table,
+        &path_fork,
+    )
     .expect("draft with private-trait evidence should build");
 
     assert_eq!(evidence.len(), 0);
@@ -713,8 +904,14 @@ fn evidence_excludes_builtin_from_direct_module_draft() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let (_, target_type_id) =
-        register_struct(&mut env, &mut string_table, "Label", empty_fields(), None, &mut path_fork);
+    let (_, target_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Label",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let trait_id = TraitId(0);
     let mut trait_env = TraitEnvironment::new();
@@ -738,7 +935,16 @@ fn evidence_excludes_builtin_from_direct_module_draft() {
     let mut nominal_origins = nominal_origins;
     nominal_origins.insert(label_path, struct_origin("Label"));
 
-    let evidence = project_evidence(&trait_env, &evidence_env, &[], &nominal_origins, &FxHashMap::default(), &env, &string_table, &path_fork)
+    let evidence = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &[],
+        &nominal_origins,
+        &FxHashMap::default(),
+        &env,
+        &string_table,
+        &path_fork,
+    )
     .expect("evidence projection with builtin evidence should succeed");
 
     assert_eq!(
@@ -754,8 +960,14 @@ fn evidence_retains_source_canonical_core_trait_evidence() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let (_, label_type_id) =
-        register_struct(&mut env, &mut string_table, "Label", empty_fields(), None, &mut path_fork);
+    let (_, label_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Label",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let mut trait_env = TraitEnvironment::new();
 
@@ -768,13 +980,21 @@ fn evidence_retains_source_canonical_core_trait_evidence() {
     // has no entry in public_source_trait_origins or trait_source_facts.
     let display_path = path("display", &mut string_table, &mut path_fork);
     let mut evidence_env = TraitEvidenceEnvironment::new();
-    evidence_env.insert_validated(canonical_evidence(displayable_id, label_type_id, &[(TraitRequirementId(0), "display")], &mut string_table, &mut path_fork));
+    evidence_env.insert_validated(canonical_evidence(
+        displayable_id,
+        label_type_id,
+        &[(TraitRequirementId(0), "display")],
+        &mut string_table,
+        &mut path_fork,
+    ));
 
     let label_path = path("Label", &mut string_table, &mut path_fork);
-    let declarations = declarations_with_receiver_methods(&[(
-        display_path,
-        ReceiverKey::Struct(label_path),
-    )], &env, &string_table, &path_fork);
+    let declarations = declarations_with_receiver_methods(
+        &[(display_path, ReceiverKey::Struct(label_path))],
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let mut nominal_origins = FxHashMap::default();
     nominal_origins.insert(label_path, struct_origin("Label"));
@@ -783,7 +1003,16 @@ fn evidence_retains_source_canonical_core_trait_evidence() {
     // always consumer-visible so the evidence is retained.
     let trait_origins = FxHashMap::default();
 
-    let evidence = project_evidence(&trait_env, &evidence_env, &declarations, &nominal_origins, &trait_origins, &env, &string_table, &path_fork)
+    let evidence = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &declarations,
+        &nominal_origins,
+        &trait_origins,
+        &env,
+        &string_table,
+        &path_fork,
+    )
     .expect("source canonical evidence for a core trait should be retained");
 
     assert_eq!(evidence.len(), 1);
@@ -821,25 +1050,47 @@ fn evidence_rejects_duplicate_stable_keys() {
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
-    let (_, label_type_id) =
-        register_struct(&mut env, &mut string_table, "Label", empty_fields(), None, &mut path_fork);
+    let (_, label_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Label",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let trait_id = TraitId(0);
-    let definition = trait_definition(trait_id, "DISPLAY_TEXT", this_id, 0, &[("display", env.builtins().string)], &mut string_table, &mut path_fork);
+    let definition = trait_definition(
+        trait_id,
+        "DISPLAY_TEXT",
+        this_id,
+        0,
+        &[("display", env.builtins().string)],
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut trait_env = TraitEnvironment::new();
     trait_env.insert(definition);
 
     let mut evidence_env = TraitEvidenceEnvironment::new();
-    let evidence = canonical_evidence(trait_id, label_type_id, &[(TraitRequirementId(0), "display")], &mut string_table, &mut path_fork);
+    let evidence = canonical_evidence(
+        trait_id,
+        label_type_id,
+        &[(TraitRequirementId(0), "display")],
+        &mut string_table,
+        &mut path_fork,
+    );
     evidence_env.insert_validated(evidence.clone());
     evidence_env.insert_validated(evidence);
 
     let label_path = path("Label", &mut string_table, &mut path_fork);
     let display_path = path("display", &mut string_table, &mut path_fork);
-    let declarations = declarations_with_receiver_methods(&[(
-        display_path,
-        ReceiverKey::Struct(label_path),
-    )], &env, &string_table, &path_fork);
+    let declarations = declarations_with_receiver_methods(
+        &[(display_path, ReceiverKey::Struct(label_path))],
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let mut nominal_origins = FxHashMap::default();
     nominal_origins.insert(label_path, struct_origin("Label"));
@@ -850,7 +1101,16 @@ fn evidence_rejects_duplicate_stable_keys() {
         trait_origin("DISPLAY_TEXT"),
     );
 
-    let result = project_evidence(&trait_env, &evidence_env, &declarations, &nominal_origins, &trait_origins, &env, &string_table, &path_fork);
+    let result = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &declarations,
+        &nominal_origins,
+        &trait_origins,
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let message = result
         .expect_err("duplicate evidence keys must be rejected")
@@ -871,8 +1131,14 @@ fn evidence_rejects_core_trait_without_classifier() {
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
-    let (_, label_type_id) =
-        register_struct(&mut env, &mut string_table, "Label", empty_fields(), None, &mut path_fork);
+    let (_, label_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Label",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let mut trait_env = TraitEnvironment::new();
     // Build a `Core` trait definition without recording any `CoreTraitKind`. The
@@ -903,20 +1169,37 @@ fn evidence_rejects_core_trait_without_classifier() {
 
     let mut evidence_env = TraitEvidenceEnvironment::new();
     let display_path = path("display", &mut string_table, &mut path_fork);
-    evidence_env.insert_validated(canonical_evidence(TraitId(0), label_type_id, &[(TraitRequirementId(0), "display")], &mut string_table, &mut path_fork));
+    evidence_env.insert_validated(canonical_evidence(
+        TraitId(0),
+        label_type_id,
+        &[(TraitRequirementId(0), "display")],
+        &mut string_table,
+        &mut path_fork,
+    ));
 
     let label_path = path("Label", &mut string_table, &mut path_fork);
-    let declarations = declarations_with_receiver_methods(&[(
-        display_path,
-        ReceiverKey::Struct(label_path),
-    )], &env, &string_table, &path_fork);
+    let declarations = declarations_with_receiver_methods(
+        &[(display_path, ReceiverKey::Struct(label_path))],
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let mut nominal_origins = FxHashMap::default();
     nominal_origins.insert(label_path, struct_origin("Label"));
     // No public source-trait origin and no `CoreTraitKind`; the projection must fail.
     let trait_origins = FxHashMap::default();
 
-    let result = project_evidence(&trait_env, &evidence_env, &declarations, &nominal_origins, &trait_origins, &env, &string_table, &path_fork);
+    let result = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &declarations,
+        &nominal_origins,
+        &trait_origins,
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let message = result
         .expect_err("a core trait without a CoreTraitKind must be rejected")
@@ -934,29 +1217,66 @@ fn evidence_rejects_requirement_count_mismatch() {
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
-    let (_, label_type_id) =
-        register_struct(&mut env, &mut string_table, "Label", empty_fields(), None, &mut path_fork);
+    let (_, label_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Label",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let trait_id = TraitId(0);
-    let definition = trait_definition(trait_id, "NAMED", this_id, 0, &[("name", env.builtins().string), ("id", env.builtins().int)], &mut string_table, &mut path_fork);
+    let definition = trait_definition(
+        trait_id,
+        "NAMED",
+        this_id,
+        0,
+        &[("name", env.builtins().string), ("id", env.builtins().int)],
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut trait_env = TraitEnvironment::new();
     trait_env.insert(definition);
 
     let mut evidence_env = TraitEvidenceEnvironment::new();
     // Evidence has only one requirement but the trait definition has two.
-    evidence_env.insert_validated(canonical_evidence(trait_id, label_type_id, &[(TraitRequirementId(0), "name")], &mut string_table, &mut path_fork));
+    evidence_env.insert_validated(canonical_evidence(
+        trait_id,
+        label_type_id,
+        &[(TraitRequirementId(0), "name")],
+        &mut string_table,
+        &mut path_fork,
+    ));
 
     let label_path = path("Label", &mut string_table, &mut path_fork);
     let name_path = path("name", &mut string_table, &mut path_fork);
-    let declarations = declarations_with_receiver_methods(&[(name_path, ReceiverKey::Struct(label_path))], &env, &string_table, &path_fork);
+    let declarations = declarations_with_receiver_methods(
+        &[(name_path, ReceiverKey::Struct(label_path))],
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let mut nominal_origins = FxHashMap::default();
     nominal_origins.insert(label_path, struct_origin("Label"));
 
     let mut trait_origins = FxHashMap::default();
-    trait_origins.insert(path("NAMED", &mut string_table, &mut path_fork), trait_origin("NAMED"));
+    trait_origins.insert(
+        path("NAMED", &mut string_table, &mut path_fork),
+        trait_origin("NAMED"),
+    );
 
-    let result = project_evidence(&trait_env, &evidence_env, &declarations, &nominal_origins, &trait_origins, &env, &string_table, &path_fork);
+    let result = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &declarations,
+        &nominal_origins,
+        &trait_origins,
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let message = result
         .expect_err("a requirement count mismatch must be rejected")
@@ -1040,23 +1360,45 @@ fn evidence_ownership_is_source_canonical_for_direct_drafts() {
     let mut env = TypeEnvironment::new();
 
     let this_id = this_type(&mut env, &mut string_table);
-    let (_, label_type_id) =
-        register_struct(&mut env, &mut string_table, "Label", empty_fields(), None, &mut path_fork);
+    let (_, label_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Label",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
 
     let trait_id = TraitId(0);
-    let definition = trait_definition(trait_id, "DISPLAY_TEXT", this_id, 0, &[("display", env.builtins().string)], &mut string_table, &mut path_fork);
+    let definition = trait_definition(
+        trait_id,
+        "DISPLAY_TEXT",
+        this_id,
+        0,
+        &[("display", env.builtins().string)],
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut trait_env = TraitEnvironment::new();
     trait_env.insert(definition);
 
     let mut evidence_env = TraitEvidenceEnvironment::new();
-    evidence_env.insert_validated(canonical_evidence(trait_id, label_type_id, &[(TraitRequirementId(0), "display")], &mut string_table, &mut path_fork));
+    evidence_env.insert_validated(canonical_evidence(
+        trait_id,
+        label_type_id,
+        &[(TraitRequirementId(0), "display")],
+        &mut string_table,
+        &mut path_fork,
+    ));
 
     let label_path = path("Label", &mut string_table, &mut path_fork);
     let display_path = path("display", &mut string_table, &mut path_fork);
-    let declarations = declarations_with_receiver_methods(&[(
-        display_path,
-        ReceiverKey::Struct(label_path),
-    )], &env, &string_table, &path_fork);
+    let declarations = declarations_with_receiver_methods(
+        &[(display_path, ReceiverKey::Struct(label_path))],
+        &env,
+        &string_table,
+        &path_fork,
+    );
 
     let mut nominal_origins = FxHashMap::default();
     nominal_origins.insert(label_path, struct_origin("Label"));
@@ -1067,7 +1409,16 @@ fn evidence_ownership_is_source_canonical_for_direct_drafts() {
         trait_origin("DISPLAY_TEXT"),
     );
 
-    let evidence = project_evidence(&trait_env, &evidence_env, &declarations, &nominal_origins, &trait_origins, &env, &string_table, &path_fork)
+    let evidence = project_evidence(
+        &trait_env,
+        &evidence_env,
+        &declarations,
+        &nominal_origins,
+        &trait_origins,
+        &env,
+        &string_table,
+        &path_fork,
+    )
     .expect("draft with source-canonical evidence should build");
 
     assert_eq!(evidence.len(), 1);

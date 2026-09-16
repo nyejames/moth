@@ -176,37 +176,8 @@ impl<'a> DeclarationCursor<'a> {
         self.token_at(index).map(|token| token.kind)
     }
 
-    pub(crate) fn span_at(&self, index: usize) -> Option<SourceSpan> {
-        self.token_at(index)
-            .map(|token| SourceSpan::new(self.source, token.span))
-    }
-
-    pub(crate) fn source_id(&self) -> crate::compiler_frontend::source::SourceId {
-        self.source
-    }
-
     pub(crate) fn position(&self) -> usize {
         self.index
-    }
-
-    pub(crate) fn is_at_end(&self) -> bool {
-        self.index >= self.length || self.current_token.is_none()
-    }
-
-    pub(crate) fn previous_token_kind(&self) -> Option<TokenKind> {
-        self.index
-            .checked_sub(1)
-            .and_then(|index| self.token_kind_at(index))
-    }
-
-    pub(crate) fn previous_token(&self) -> Option<Token> {
-        self.index
-            .checked_sub(1)
-            .and_then(|index| self.token_at(index))
-    }
-
-    pub(crate) fn current_postfix_operator_span(&self) -> Option<SourceSpan> {
-        self.current_span()
     }
 
     pub(crate) fn refresh(&mut self) {
@@ -243,15 +214,6 @@ impl<'a> DeclarationCursor<'a> {
 
     pub(crate) fn current_token_kind(&self) -> &TokenKind {
         &self.current_kind
-    }
-
-    pub(crate) fn current_token(&self) -> Token {
-        self.current_token.clone().unwrap_or_else(|| {
-            Token::new(
-                TokenKind::Eof,
-                crate::compiler_frontend::source::LocalSpan::source_start(),
-            )
-        })
     }
 
     pub(crate) fn current_span(&self) -> Option<SourceSpan> {

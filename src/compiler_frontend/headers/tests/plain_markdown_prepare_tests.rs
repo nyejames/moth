@@ -25,7 +25,9 @@ fn prepare(
 ) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("docs/intro.md", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("docs/intro.md", &mut string_table)
+        .expect("test path fits");
 
     let output = prepare_plain_markdown_file(
         PlainMarkdownPrepareInput {

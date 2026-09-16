@@ -56,13 +56,13 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceTokens};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::projects::settings::{self, IMPLICIT_START_FUNC_NAME};
 use rustc_hash::FxHashMap;
@@ -210,8 +210,9 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     context: &'context AstPhaseContext<'services>,
     path_fork: &'services mut PathInternerFork,
     environment: &'environment mut AstModuleEnvironment,
-    source_token_streams:
-        FxHashMap<SourceId, Arc<crate::compiler_frontend::tokenizer::tokens::FileTokens>>,
+    source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
+    source_token_paths: FxHashMap<SourceId, PathId>,
+    source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
     const_templates_by_path: FxHashMap<PathId, FoldedConstTemplateResult>,
     compatibility_cache: TypeCompatibilityCache,
     generic_function_instantiation_requests: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
@@ -221,23 +222,23 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     validated_generic_template_bodies: Vec<AstNode>,
     generic_call_site_identity_handle: Option<FrozenIdentityHandle>,
 }
-
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
     pub(in crate::compiler_frontend::ast) fn new(
         context: &'context AstPhaseContext<'services>,
         environment: &'environment mut AstModuleEnvironment,
         header_count: usize,
         path_fork: &'services mut PathInternerFork,
-        source_token_streams: FxHashMap<
-            SourceId,
-            Arc<crate::compiler_frontend::tokenizer::tokens::FileTokens>,
-        >,
+        source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
+        source_token_paths: FxHashMap<SourceId, PathId>,
+        source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
     ) -> Self {
         let warnings = environment.lookups.warnings.clone();
         Self {
             context,
             path_fork,
             source_token_streams,
+            source_token_paths,
+            source_token_os_paths,
             environment,
             ast: Vec::with_capacity(header_count * settings::TOKEN_TO_NODE_RATIO),
             warnings,
@@ -330,10 +331,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context
     }
 
-
     fn source_path_for_header(&self, header: &Header) -> Result<PathId, CompilerError> {
-        if let Some(stream) = self.source_token_streams.get(&header.tokens.source()) {
-            return Ok(stream.src_path);
+        if let Some(path) = self.source_token_paths.get(&header.tokens.source()) {
+            return Ok(*path);
         }
 
         // Plain Markdown contributes an explicit payload without a canonical token stream.
@@ -363,22 +363,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             })
     }
 
-    fn body_parser_stream(&self, header: &Header) -> Result<FileTokens, CompilerError> {
-        if let Some(sequence) = header.token_sequence {
-            let source = self
-                .source_token_streams
-                .get(&header.tokens.source())
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "header body sequence has no canonical prepared source stream",
-                    )
-                })?;
-            return FileTokens::new_bounded_sequence_substream(
-                source,
-                sequence,
-                header.declaration_path,
-            );
-        }
+    fn canonical_owner_for_header(
+        &self,
+        header: &Header,
+    ) -> Result<(Arc<SourceTokens>, Option<std::path::PathBuf>), CompilerError> {
         let source = self
             .source_token_streams
             .get(&header.tokens.source())
@@ -387,7 +375,29 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     "header body range has no canonical prepared source stream",
                 )
             })?;
-        FileTokens::new_bounded_substream(source, header.tokens, header.declaration_path)
+        let os_path = self
+            .source_token_os_paths
+            .get(&header.tokens.source())
+            .and_then(|path| path.clone());
+        Ok((Arc::clone(source), os_path))
+    }
+
+    fn body_parser_stream(&self, header: &Header) -> Result<FileTokens, CompilerError> {
+        let (source, os_path) = self.canonical_owner_for_header(header)?;
+        if let Some(sequence) = header.token_sequence {
+            return FileTokens::new_bounded_sequence_substream_from_canonical(
+                source,
+                os_path,
+                sequence,
+                header.declaration_path,
+            );
+        }
+        FileTokens::new_bounded_substream_from_canonical(
+            source,
+            os_path,
+            header.tokens,
+            header.declaration_path,
+        )
     }
     pub(in crate::compiler_frontend::ast) fn emit(
         mut self,
@@ -986,7 +996,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context = context.with_active_generic_type_context(generic_type_context);
         context.expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
         context.expected_error_type = resolved_signature.signature.error_return_type_id();
-        context.set_local_declarations(resolved_signature.signature.parameters.clone(), &*self.path_fork);
+        context.set_local_declarations(
+            resolved_signature.signature.parameters.clone(),
+            &*self.path_fork,
+        );
 
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
@@ -1063,7 +1076,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context.current_function_return_type_ids = expected_result_type_ids.clone();
         context.expected_result_type_ids = expected_result_type_ids;
         context.expected_error_type = expected_error_type;
-        context.set_local_declarations(resolved_signature.signature.parameters.to_owned(), &*self.path_fork);
+        context.set_local_declarations(
+            resolved_signature.signature.parameters.to_owned(),
+            &*self.path_fork,
+        );
 
         // --------------------------
         //  Parse body and emit node

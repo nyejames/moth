@@ -180,7 +180,9 @@ fn duplicate_top_level_function_names_error_during_header_parsing() {
 fn duplicate_header_detection_ignores_qualified_match_arms() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = path_fork.try_intern_portable_path("src/@page.moth", &mut string_table).expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("src/@page.moth", &mut string_table)
+        .expect("test path fits");
     let status = string_table.intern("Status");
     let ready = string_table.intern("Ready");
     let write = string_table.intern("write");
@@ -200,10 +202,9 @@ fn duplicate_header_detection_ignores_qualified_match_arms() {
     );
     token_stream.index = 1;
 
-    let current_index = crate::compiler_frontend::tokenizer::tokens::TokenIndex::try_from_index(
-        token_stream.index,
-    )
-    .expect("test cursor index should fit");
+    let current_index =
+        crate::compiler_frontend::tokenizer::tokens::TokenIndex::try_from_index(token_stream.index)
+            .expect("test cursor index should fit");
     let canonical = token_stream
         .source_tokens()
         .expect("test stream owns canonical source tokens");

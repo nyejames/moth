@@ -114,7 +114,6 @@ impl TokenStats {
         }
     }
 
-
     /// Merge another per-file snapshot into this one.
     ///
     /// WHAT: adds each bucket, producing a module-wide aggregate.

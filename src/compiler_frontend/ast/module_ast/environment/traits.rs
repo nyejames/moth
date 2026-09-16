@@ -174,9 +174,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerMessages> {
         for metadata in BUILTIN_CAST_TRAIT_ROWS {
-            let Some(success_type) =
-                type_id_for_builtin_target(metadata.target, type_environment, string_table, path_fork)
-            else {
+            let Some(success_type) = type_id_for_builtin_target(
+                metadata.target,
+                type_environment,
+                string_table,
+                path_fork,
+            ) else {
                 return Err(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(
                         "Core cast trait target type was not registered before trait metadata.",
@@ -568,29 +571,35 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             })?;
         // Live parser state stays on the canonical source owner. The transient
         // cursor spans the full canonical source so nested default ranges stay
-        // inside its bounds for this signature parse only. `from_file_tokens_range`
+        // inside its bounds for this signature parse only. `from_source_tokens`
         // retains the canonical owner for later bounded expression handoffs.
-        let full = file_owner
-            .canonical_source_tokens()
-            .map_err(|error| self.error_messages(error, string_table))?
-            .full_range()
-            .map_err(|error| {
-                self.error_messages(
-                    CompilerError::compiler_error(format!(
-                        "trait requirement source range could not be constructed: {error:?}"
-                    )),
-                    string_table,
-                )
-            })?;
-        let source_owner =
-            AstCursor::from_file_tokens_range(file_owner, full).map_err(|error| {
-                self.error_messages(
-                    CompilerError::compiler_error(format!(
-                        "trait requirement source range is outside its source owner: {error:?}"
-                    )),
-                    string_table,
-                )
-            })?;
+        let full = file_owner.full_range().map_err(|error| {
+            self.error_messages(
+                CompilerError::compiler_error(format!(
+                    "trait requirement source range could not be constructed: {error:?}"
+                )),
+                string_table,
+            )
+        })?;
+        let os_path = self
+            .source_token_os_paths
+            .get(&header.tokens.source())
+            .and_then(|path| path.clone());
+        let source_owner = AstCursor::from_source_tokens(
+            self.source_token_streams
+                .get(&header.tokens.source())
+                .expect("trait requirement source owner vanished during cursor construction"),
+            os_path,
+            full,
+        )
+        .map_err(|error| {
+            self.error_messages(
+                CompilerError::compiler_error(format!(
+                    "trait requirement source range is outside its source owner: {error:?}"
+                )),
+                string_table,
+            )
+        })?;
         let mut compatibility_cache = TypeCompatibilityCache::new();
         let mut type_interner =
             AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);

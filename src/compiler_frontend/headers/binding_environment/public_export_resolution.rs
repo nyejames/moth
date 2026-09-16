@@ -64,8 +64,7 @@ pub(crate) struct PublicExportResolutionInput<'a> {
     pub(crate) header_path: &'a PathId,
     pub(crate) source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
     pub(crate) file_package_membership: &'a FxHashMap<PathId, String>,
-    pub(crate) module_root_public_exports:
-        &'a FxHashMap<PathId, FxHashSet<PublicExportEntry>>,
+    pub(crate) module_root_public_exports: &'a FxHashMap<PathId, FxHashSet<PublicExportEntry>>,
     pub(crate) file_module_membership: &'a FxHashMap<PathId, PathId>,
     pub(crate) module_root_boundaries: &'a [ModuleRootBoundary],
     pub(crate) string_table: &'a StringTable,
@@ -222,7 +221,8 @@ fn try_resolve_module_root_public_export(
     for boundary in input.module_root_boundaries {
         if input
             .path_fork
-            .starts_with(effective_path, boundary.dependency_prefix) {
+            .starts_with(effective_path, boundary.dependency_prefix)
+        {
             // Internal dependencies within the same module root use normal resolution.
             let consumer_root = input.file_module_membership.get(input.consumer_file);
             if consumer_root == Some(&boundary.module_root) {
@@ -277,12 +277,12 @@ fn try_resolve_module_root_public_export(
 
                 for entry in exports {
                     if let Some(path) = entry.target.source_path()
-                    && suffix_matches_with_optional_source_extension(
-                        path,
-                        &effective_path,
-                        input.string_table,
-                        &*input.path_fork,
-                    )
+                        && suffix_matches_with_optional_source_extension(
+                            path,
+                            &effective_path,
+                            input.string_table,
+                            &*input.path_fork,
+                        )
                     {
                         return Some(PublicExportLookupResult::ExportedSource {
                             path: *path,
@@ -411,8 +411,7 @@ pub(crate) struct ModuleBoundaryCheckInput<'a> {
     pub(crate) symbol_path: &'a PathId,
     pub(crate) span: Option<SourceSpan>,
     pub(crate) file_module_membership: &'a FxHashMap<PathId, PathId>,
-    pub(crate) module_root_public_exports:
-        &'a FxHashMap<PathId, FxHashSet<PublicExportEntry>>,
+    pub(crate) module_root_public_exports: &'a FxHashMap<PathId, FxHashSet<PublicExportEntry>>,
 }
 
 /// Enforces module-private boundaries for cross-module-root dependencies.

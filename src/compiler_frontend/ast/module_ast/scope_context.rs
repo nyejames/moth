@@ -62,7 +62,6 @@ use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, increment_ast_counter, record_ast_counter_max,
 };
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReferenceOutcome, ResolvedFileReferenceTable,
@@ -70,6 +69,7 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
@@ -403,12 +403,9 @@ pub struct ScopeShared {
     // File-local visibility and resolved declarations.
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
     pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<PathId, ResolvedTypeAlias>>>,
-    pub(crate) generic_declarations_by_path:
-        Option<Rc<FxHashMap<PathId, GenericDeclarationKind>>>,
-    pub(crate) resolved_struct_fields_by_path:
-        Option<Rc<FxHashMap<PathId, Vec<Declaration>>>>,
-    pub(crate) choice_variant_shells_by_path:
-        Option<Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>>,
+    pub(crate) generic_declarations_by_path: Option<Rc<FxHashMap<PathId, GenericDeclarationKind>>>,
+    pub(crate) resolved_struct_fields_by_path: Option<Rc<FxHashMap<PathId, Vec<Declaration>>>>,
+    pub(crate) choice_variant_shells_by_path: Option<Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>>,
     pub(crate) resolved_module_constants_override: Option<Rc<ResolvedConstantSet>>,
     pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
     pub(crate) emitted_warnings: Rc<RefCell<Vec<CompilerDiagnostic>>>,
@@ -762,7 +759,6 @@ impl ScopeContext {
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
     ) -> ScopeContext {
-
         let child_frame_id = self
             .arena
             .borrow_mut()

@@ -87,7 +87,8 @@ fn authored_runtime_struct_default_remains_a_source_diagnostic() {
 
 #[test]
 fn parses_struct_definitions_with_field_defaults() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int,\n    y Int = 2,\n|\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("Point = |\n    x Int,\n    y Int = 2,\n|\n");
 
     let struct_node = ast
         .nodes
@@ -121,7 +122,8 @@ fn parses_struct_definitions_with_field_defaults() {
 
 #[test]
 fn struct_optional_string_default_preserves_canonical_string_type_id() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Label = |\n    text String? = \"fallback\",\n|\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("Label = |\n    text String? = \"fallback\",\n|\n");
 
     let struct_node = ast
         .nodes
@@ -147,7 +149,9 @@ fn struct_optional_string_default_preserves_canonical_string_type_id() {
 
 #[test]
 fn parses_struct_construction_and_field_access_in_declarations() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int,\n    y Int,\n|\n\npoint = Point(1, 2)\nvalue = point.x\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Point = |\n    x Int,\n    y Int,\n|\n\npoint = Point(1, 2)\nvalue = point.x\n",
+    );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
 

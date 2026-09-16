@@ -261,7 +261,8 @@ impl ProjectPathResolver {
         declaring_file: &Path,
         string_table: &mut StringTable,
     ) -> Result<(CompileTimePathBase, PathBuf), DependencyPathResolutionError> {
-        if let Some(extension) = explicit_source_extension(dependency_path, path_fork, string_table) {
+        if let Some(extension) = explicit_source_extension(dependency_path, path_fork, string_table)
+        {
             let diagnostic = if extension == SourceFileKind::Moth.extension() {
                 CompilerDiagnostic::explicit_moth_extension(dependency_path.to_owned(), None)
             } else {
@@ -412,7 +413,6 @@ impl ProjectPathResolver {
         let extension = path.extension().and_then(|extension| extension.to_str())?;
         SourceFileKind::from_extension(extension)
     }
-
 }
 fn explicit_source_extension(
     dependency_path: PathId,

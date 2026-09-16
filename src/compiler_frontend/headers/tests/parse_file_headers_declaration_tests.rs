@@ -1,7 +1,6 @@
 use super::*;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 
-
 #[test]
 fn exported_untyped_constant_has_no_header_provided_dependencies() {
     let headers = parse_single_file_headers("theme #= navbar\n");
@@ -697,10 +696,12 @@ fn function_parameter_default_stays_in_header_syntax_tokens() {
         ParsedTypeRef::BuiltinString { .. }
     ));
     assert!(
-        default_tokens(&headers, parameter.default_range).iter().any(|token| matches!(
-            token.kind,
-            TokenKind::StringSliceLiteral(id) if string_table.resolve(id) == "item"
-        )),
+        default_tokens(&headers, parameter.default_range)
+            .iter()
+            .any(|token| matches!(
+                token.kind,
+                TokenKind::StringSliceLiteral(id) if string_table.resolve(id) == "item"
+            )),
         "header should capture default expression tokens without building an AST expression"
     );
 }
@@ -726,10 +727,12 @@ fn struct_field_default_stays_in_header_syntax_tokens() {
         ParsedTypeRef::BuiltinInt { .. }
     ));
     assert!(
-        default_tokens(&headers, field.default_range).iter().any(|token| matches!(
-            token.kind,
-            TokenKind::Symbol(id) if string_table.resolve(id) == "DEFAULT_WIDTH"
-        )),
+        default_tokens(&headers, field.default_range)
+            .iter()
+            .any(|token| matches!(
+                token.kind,
+                TokenKind::Symbol(id) if string_table.resolve(id) == "DEFAULT_WIDTH"
+            )),
         "header should preserve struct default tokens for AST-time constant resolution"
     );
 }
@@ -847,14 +850,14 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
         .source_token_streams
         .get(&start_header.tokens.source())
         .expect("start header source owner");
-    let FilePathSyntax::Shared(function_table) = &function_owner.path_syntax else {
-        panic!("prepared function source should receive the frozen file table");
-    };
-    let FilePathSyntax::Shared(start_table) = &start_owner.path_syntax else {
-        panic!("prepared start source should receive the frozen file table");
-    };
+    let function_table = function_owner
+        .path_syntax_arc()
+        .expect("prepared function source should receive the frozen file table");
+    let start_table = start_owner
+        .path_syntax_arc()
+        .expect("prepared start source should receive the frozen file table");
     assert!(
-        Arc::ptr_eq(function_table, start_table),
+        Arc::ptr_eq(&function_table, &start_table),
         "ordinary retained header substreams must share one immutable file-owned path table"
     );
 

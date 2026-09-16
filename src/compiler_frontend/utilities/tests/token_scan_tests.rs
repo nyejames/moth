@@ -21,7 +21,9 @@ fn stream_from_kinds(kinds: Vec<TokenKind>, string_table: &mut StringTable) -> F
     let mut path_fork = PathInternerFork::empty();
     let tokens = kinds.into_iter().map(token).collect();
     FileTokens::new(
-        path_fork.try_intern_portable_path("token_scan_tests", string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("token_scan_tests", string_table)
+            .expect("test path fits"),
         SourceId::COMPILATION_ROOT,
         tokens,
     )

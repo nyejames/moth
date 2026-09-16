@@ -33,7 +33,9 @@ fn test_scope(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> (PathId, ScopeContext) {
-    let scope = path_fork.try_intern_portable_path("test.moth", string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", string_table)
+        .expect("test path fits");
     let mut scratch = Vec::new();
     assert_eq!(
         path_fork.render_portable(scope, string_table, &mut scratch),
@@ -43,7 +45,7 @@ fn test_scope(
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], path_fork) ),
+        Rc::new(TopLevelDeclarationTable::new(vec![], path_fork)),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,

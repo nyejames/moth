@@ -11,7 +11,7 @@ use super::{
 use crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME;
 use crate::compiler_frontend::external_packages::IO_NAMESPACE_NAME;
 use crate::compiler_frontend::keywords::{
-    SourceWordClass, attached_bang_keyword_token_kind, classify_source_word,
+    SourceWordClass, attached_bang_keyword_token_tag, classify_source_word,
 };
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 
@@ -91,7 +91,7 @@ impl<'source> CodeScanner<'source> {
         if self.language == CodeLanguage::Moth
             && end < self.bytes.len()
             && self.bytes[end] == b'!'
-            && attached_bang_keyword_token_kind(&self.source[start..end]).is_some()
+            && attached_bang_keyword_token_tag(&self.source[start..end]).is_some()
         {
             end += 1;
         }
@@ -112,7 +112,7 @@ impl<'source> CodeScanner<'source> {
 
         // Attached bang forms are keyword spans.
         if let Some(prefix) = word.strip_suffix('!')
-            && attached_bang_keyword_token_kind(prefix).is_some()
+            && attached_bang_keyword_token_tag(prefix).is_some()
         {
             self.reset_declaration_context();
             return Some(CodeHighlightRole::Keyword);

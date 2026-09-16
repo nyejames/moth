@@ -34,9 +34,9 @@ use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_com
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 use super::catch_handler::{

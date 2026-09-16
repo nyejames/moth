@@ -65,7 +65,7 @@ use crate::compiler_frontend::symbols::path_interner::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenIndex, TokenKind, TokenRange,
+    FileTokens, SourceTokens, Token, TokenIndex, TokenKind, TokenRange,
 };
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -95,10 +95,12 @@ fn sample_tokens(
     );
     let mut path_syntax = PathSyntaxTable::new();
     let path_id = path_syntax.push(
-        path_fork.try_intern_components(&[
-            string_table.intern("provider"),
-            string_table.intern("CONST"),
-        ]).expect("test path fits"),
+        path_fork
+            .try_intern_components(&[
+                string_table.intern("provider"),
+                string_table.intern("CONST"),
+            ])
+            .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, token_span()),
     );
     let tokens = vec![
@@ -172,9 +174,10 @@ fn resolved_token_text(
 }
 fn body_view(original: &FileTokens, declaration_path: PathId) -> GenericFunctionBody {
     // Test fixtures are often still in the mutable preparing state. Model the production
-    // post-publication handoff explicitly so the retained generic body owns a frozen canonical
-    // stream rather than a deferred/preparing adapter.
-    let owner = Arc::new(FileTokens::new_frozen(
+    // post-publication handoff explicitly: retain the canonical `SourceTokens` allocation
+    // directly (as `function_signatures.rs` does via `canonical_source_tokens_arc`) rather
+    // than a `FileTokens` shell.
+    let frozen = FileTokens::new_frozen(
         original.src_path,
         original.file_id,
         original.canonical_os_path.clone(),
@@ -183,19 +186,26 @@ fn body_view(original: &FileTokens, declaration_path: PathId) -> GenericFunction
             .path_syntax_table()
             .expect("test fixture should expose its path table")
             .clone(),
-    ));
-    let source_tokens = owner
-        .source_tokens()
+    );
+    let owner = frozen
+        .canonical_source_tokens_arc()
         .expect("test fixture must use a canonical source owner");
-    let end = TokenIndex::try_from_index(owner.tokens.len()).expect("test token range fits");
+    let source_tokens: &SourceTokens = owner.as_ref();
+    let end = TokenIndex::try_from_index(frozen.tokens.len()).expect("test token range fits");
     let range = TokenRange::try_new_for(
         source_tokens,
         TokenIndex::try_from_index(0).expect("test token range fits"),
         end,
     )
     .expect("test token range must be in bounds");
-    GenericFunctionBody::source(owner, range, None, declaration_path)
-        .expect("test generic body should retain its checked source range")
+    GenericFunctionBody::source(
+        owner,
+        range,
+        None,
+        declaration_path,
+        frozen.canonical_os_path.clone(),
+    )
+    .expect("test generic body should retain its checked source range")
 }
 fn capture_test_body(
     original: &FileTokens,
@@ -230,7 +240,7 @@ fn capture_test_body(
             "test body has no content value resolver",
         ))
     };
-    let body = body_view(original, *source_file);
+    let body = body_view(original, original.src_path);
     let mut capture_table = source_table.clone();
     StableBodySyntax::capture(
         &body,
@@ -269,7 +279,9 @@ fn direct_content_body_fixture() -> (
 ) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = path_fork.try_intern_portable_path("@mod.moth", &mut string_table).expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("@mod.moth", &mut string_table)
+        .expect("test path fits");
     let source_files = SourceDatabase::build(
         [PathBuf::from("@mod.moth"), PathBuf::from("@private.mtf")],
         Path::new("@mod.moth"),
@@ -284,12 +296,13 @@ fn direct_content_body_fixture() -> (
     let path_span = LocalSpan::source_start();
     let mut path_syntax = PathSyntaxTable::new();
     let path_id = path_syntax.push(
-        path_fork.try_intern_portable_path("@private.mtf", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("@private.mtf", &mut string_table)
+            .expect("test path fits"),
         SourceSpan::new(body_file_id, path_span),
     );
     let tokens = vec![Token::new(TokenKind::Path(path_id), path_span)];
-    let body =
-        FileTokens::new_with_identity(source_file, body_file_id, None, tokens, path_syntax);
+    let body = FileTokens::new_with_identity(source_file, body_file_id, None, tokens, path_syntax);
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
@@ -371,14 +384,19 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
         .expect("test path fits");
     let path_id = frozen.resolved_file_references[0].path_syntax;
     let materialised = frozen
-        .materialise(generated_source_file, &mut path_fork, &mut generated_table, None)
+        .materialise(
+            generated_source_file,
+            &mut path_fork,
+            &mut generated_table,
+            None,
+        )
         .expect("frozen content body should materialise");
     let Stage0ResolvedFileReferenceOutcome::Content {
         logical_path: None,
         value: Some(value),
     } = materialised
         .resolution_facts
-        .lookup(SourceId::COMPILATION_ROOT, path_id)
+        .lookup(frozen.canonical_donor_file_id(), path_id)
         .expect("materialised content row should be readable")
         .expect("materialised content row should be retained")
         .outcome
@@ -417,8 +435,7 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
 
 #[test]
 fn missing_content_fold_fails_loudly_during_capture() {
-    let (body, source_file, path_fork, source_table, facts, _, _) =
-        direct_content_body_fixture();
+    let (body, source_file, path_fork, source_table, facts, _, _) = direct_content_body_fixture();
     let body = body_view(&body, source_file);
     let mut capture_table = source_table.clone();
     let error = match StableBodySyntax::capture(
@@ -447,8 +464,7 @@ fn missing_content_fold_fails_loudly_during_capture() {
 
 #[test]
 fn non_string_content_fold_fails_loudly_during_capture() {
-    let (body, source_file, path_fork, source_table, facts, _, _) =
-        direct_content_body_fixture();
+    let (body, source_file, path_fork, source_table, facts, _, _) = direct_content_body_fixture();
     let body = body_view(&body, source_file);
     let mut capture_table = source_table.clone();
     let error = match StableBodySyntax::capture(
@@ -477,7 +493,9 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
     let mut path_fork = PathInternerFork::empty();
     let (tokens, path_syntax, _) = sample_tokens(&mut source_table, &mut path_fork);
     let original = FileTokens::new_with_identity(
-        path_fork.try_intern_portable_path("src/@mod.moth", &mut source_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("src/@mod.moth", &mut source_table)
+            .expect("test path fits"),
         SourceId::COMPILATION_ROOT,
         None,
         tokens.clone(),
@@ -511,8 +529,14 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
     let materialised_stream = materialised_body
         .parser_stream(&mut generated_table, &mut generated_path_fork)
         .expect("materialised body should derive a bounded parser adapter");
+    let canonical_len = materialised_body
+        .materialised_owner()
+        .expect("materialised body should retain a donor shell")
+        .canonical_source_tokens()
+        .expect("materialised donor shell should share a canonical owner")
+        .len();
     assert!(
-        materialised_body.source_owner().tokens.len() >= materialised_stream.tokens.len(),
+        canonical_len >= materialised_stream.tokens.len(),
         "the compatibility adapter must remain bounded by its canonical owner",
     );
     assert!(
@@ -571,7 +595,9 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
     let mut source_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (tokens, path_syntax, _) = sample_tokens(&mut source_table, &mut path_fork);
-    let source_file = path_fork.try_intern_portable_path("src/@mod.moth", &mut source_table).expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut source_table)
+        .expect("test path fits");
     let declaration_path = path_fork
         .try_intern_child(source_file, source_table.intern("generic_fn"))
         .expect("test declaration path fits");
@@ -590,7 +616,12 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
         .try_intern_portable_path("src/@mod.moth", &mut generated_table)
         .expect("test path fits");
     let materialised = frozen
-        .materialise(generated_source_file, &mut path_fork, &mut generated_table, None)
+        .materialise(
+            generated_source_file,
+            &mut path_fork,
+            &mut generated_table,
+            None,
+        )
         .expect("the frozen body should retain its distinct declaration and file identities");
 
     assert_eq!(
@@ -630,24 +661,32 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     // unreferenced, so retained facts must preserve the original donor handles and omit the
     // unreferenced row rather than inventing a second body-local handle domain.
     let first_donor_path = path_syntax.push(
-        path_fork.try_intern_components(&[
-            source_table.intern("provider"),
-            source_table.intern("first"),
-        ]).expect("test path fits"),
+        path_fork
+            .try_intern_components(&[
+                source_table.intern("provider"),
+                source_table.intern("first"),
+            ])
+            .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, base_span),
     );
     let _unreferenced_donor_path = path_syntax.push(
-        path_fork.try_intern_portable_path("provider/unused", &mut source_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("provider/unused", &mut source_table)
+            .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, base_span),
     );
     let second_donor_path = path_syntax.push(
-        path_fork.try_intern_components(&[
-            source_table.intern("provider"),
-            source_table.intern("second"),
-        ]).expect("test path fits"),
+        path_fork
+            .try_intern_components(&[
+                source_table.intern("provider"),
+                source_table.intern("second"),
+            ])
+            .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, base_span),
     );
-    let source_file = path_fork.try_intern_portable_path("src/@mod.moth", &mut source_table).expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut source_table)
+        .expect("test path fits");
     let original = FileTokens::new_with_identity(
         source_file,
         SourceId::COMPILATION_ROOT,
@@ -725,7 +764,12 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
         .try_intern_portable_path("src/@mod.moth", &mut generated_table)
         .expect("test path fits");
     let materialised = frozen
-        .materialise(generated_source_file, &mut path_fork, &mut generated_table, None)
+        .materialise(
+            generated_source_file,
+            &mut path_fork,
+            &mut generated_table,
+            None,
+        )
         .expect("remapping fixture body should materialise");
     let materialised_owner = materialised.source_owner.file_id;
     let materialised_body = materialised
@@ -802,7 +846,9 @@ fn repeated_spellings_share_one_frozen_string_entry() {
     let mut path_syntax = PathSyntaxTable::new();
     let path_span = token_span();
     let path_id = path_syntax.push(
-        path_fork.try_intern_components(&[symbol_id]).expect("test path fits"),
+        path_fork
+            .try_intern_components(&[symbol_id])
+            .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, path_span),
     );
     let tokens = vec![
@@ -811,7 +857,9 @@ fn repeated_spellings_share_one_frozen_string_entry() {
         Token::new(TokenKind::Path(path_id), path_span),
     ];
     let original = FileTokens::new_with_identity(
-        path_fork.try_intern_portable_path("src/@mod.moth", &mut source_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("src/@mod.moth", &mut source_table)
+            .expect("test path fits"),
         SourceId::COMPILATION_ROOT,
         None,
         tokens,
@@ -826,7 +874,7 @@ fn repeated_spellings_share_one_frozen_string_entry() {
         "repeated path spellings should retain one compact donor reference row",
     );
     assert_eq!(
-        frozen.source_owner.file_id,
+        frozen.canonical_donor_file_id(),
         SourceId::COMPILATION_ROOT,
         "stable syntax should retain the canonical donor owner",
     );
@@ -843,7 +891,9 @@ fn persistent_generic_subset_counts_stay_separate_from_authored_path_rows() {
     let mut source_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (tokens, path_syntax, _) = sample_tokens(&mut source_table, &mut path_fork);
-    let source_path = path_fork.try_intern_portable_path("src/@mod.moth", &mut source_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut source_table)
+        .expect("test path fits");
     let original = FileTokens::new_with_identity(
         source_path,
         SourceId::COMPILATION_ROOT,
@@ -1024,7 +1074,10 @@ fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationF
         .parameters
         .iter_mut()
         .find(|parameter| {
-            path_fork.component(parameter.id).map(|id| string_table.resolve(id)) == Some("suffix")
+            path_fork
+                .component(parameter.id)
+                .map(|id| string_table.resolve(id))
+                == Some("suffix")
         })
         .expect("the generic should retain its suffix parameter");
     // A resolved resource file value reaches the AST as a structural resource piece. Keep its
@@ -1297,18 +1350,21 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
         .context
         .materialise_ast_at(
             0,
-            ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
-            requester_context: &fixture.preparation,
-            requester_call_span: None,
-            boundary_string_table: &fixture.preparation.string_table,
-            external_package_registry: fixture.preparation.external_package_registry.as_ref(),
-            style_directives: &fixture.preparation.style_directives,
-            build_profile: fixture.preparation.build_profile,
-            template_const_loop_iteration_limit: fixture
-                .preparation
-                .template_const_loop_iteration_limit,
-            #[cfg(feature = "timers")]
-            timing_context: None, },
+            ModuleMaterialisationInput {
+                path_fork: &mut path_fork,
+                identity: &fixture.identity,
+                requester_context: &fixture.preparation,
+                requester_call_span: None,
+                boundary_string_table: &fixture.preparation.string_table,
+                external_package_registry: fixture.preparation.external_package_registry.as_ref(),
+                style_directives: &fixture.preparation.style_directives,
+                build_profile: fixture.preparation.build_profile,
+                template_const_loop_iteration_limit: fixture
+                    .preparation
+                    .template_const_loop_iteration_limit,
+                #[cfg(feature = "timers")]
+                timing_context: None,
+            },
         )
         .expect("the frozen generic should materialise");
     let generated_signature = materialised
@@ -1326,7 +1382,12 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
     let generated_parameter = generated_signature
         .parameters
         .iter()
-        .find(|parameter| matches!(parameter.value.kind, ExpressionKind::StructuralString { .. }))
+        .find(|parameter| {
+            matches!(
+                parameter.value.kind,
+                ExpressionKind::StructuralString { .. }
+            )
+        })
         .expect("the generated signature should retain its suffix resource parameter");
     let sidecar_resource = structural_resource_handle(&generated_parameter.value);
 
@@ -1367,11 +1428,15 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
     let capture = |relative_path: &str| {
         let mut source_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = path_fork.try_intern_portable_path("@body.moth", &mut source_table).expect("test path fits");
+        let source_file = path_fork
+            .try_intern_portable_path("@body.moth", &mut source_table)
+            .expect("test path fits");
         let path_span = token_span();
         let mut path_syntax = PathSyntaxTable::new();
         let path_id = path_syntax.push(
-            path_fork.try_intern_portable_path("@resource.bin", &mut source_table).expect("test path fits"),
+            path_fork
+                .try_intern_portable_path("@resource.bin", &mut source_table)
+                .expect("test path fits"),
             SourceSpan::new(SourceId::COMPILATION_ROOT, path_span),
         );
         let body = FileTokens::new_with_identity(
@@ -1435,19 +1500,23 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         "independent body captures should preserve the same source-owned handle when their row order matches"
     );
 
-    let materialise =
-        |(frozen, owner_path_fork, owner_string_table): (
-            StableBodySyntax,
-            PathInternerFork,
-            StringTable,
-        )| {
+    let materialise = |(frozen, owner_path_fork, owner_string_table): (
+        StableBodySyntax,
+        PathInternerFork,
+        StringTable,
+    )| {
         let (mut path_fork, mut generated_table) =
             generated_materialisation_domain(&owner_path_fork, &owner_string_table);
         let generated_source_file = path_fork
             .try_intern_portable_path("@body.moth", &mut generated_table)
             .expect("test path fits");
         let materialised = frozen
-            .materialise(generated_source_file, &mut path_fork, &mut generated_table, None)
+            .materialise(
+                generated_source_file,
+                &mut path_fork,
+                &mut generated_table,
+                None,
+            )
             .expect("collision fixture body should materialise");
         materialised
             .into_generic_body()
@@ -1460,7 +1529,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let reference = body
             .resolution_facts()
             .expect("materialised body should carry its Stage 0 facts")
-            .lookup(body.source_owner().file_id, path_id)
+            .lookup(body.donor_source_id(), path_id)
             .expect("materialised body facts should accept its donor handle")
             .expect("materialised body should retain its path row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
@@ -1493,18 +1562,21 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
         .context
         .materialise_ast_at(
             0,
-            ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
-            requester_context: &fixture.preparation,
-            requester_call_span: None,
-            boundary_string_table: &fixture.preparation.string_table,
-            external_package_registry: fixture.preparation.external_package_registry.as_ref(),
-            style_directives: &fixture.preparation.style_directives,
-            build_profile: fixture.preparation.build_profile,
-            template_const_loop_iteration_limit: fixture
-                .preparation
-                .template_const_loop_iteration_limit,
-            #[cfg(feature = "timers")]
-            timing_context: None, },
+            ModuleMaterialisationInput {
+                path_fork: &mut path_fork,
+                identity: &fixture.identity,
+                requester_context: &fixture.preparation,
+                requester_call_span: None,
+                boundary_string_table: &fixture.preparation.string_table,
+                external_package_registry: fixture.preparation.external_package_registry.as_ref(),
+                style_directives: &fixture.preparation.style_directives,
+                build_profile: fixture.preparation.build_profile,
+                template_const_loop_iteration_limit: fixture
+                    .preparation
+                    .template_const_loop_iteration_limit,
+                #[cfg(feature = "timers")]
+                timing_context: None,
+            },
         )
         .expect("the frozen generic body should materialise");
     let generated_resource = generated_body_resource_handle(&materialised);
@@ -1543,7 +1615,7 @@ fn frozen_resource_body_captures_resolved_subset_before_materialisation() {
         "freezing should retain the body's referenced path row before materialisation",
     );
     assert_eq!(
-        artefact.body.source_owner.file_id,
+        artefact.body.canonical_donor_file_id(),
         SourceId::COMPILATION_ROOT,
         "the frozen body should retain its canonical donor source owner",
     );
@@ -1563,8 +1635,7 @@ fn frozen_resource_body_captures_resolved_subset_before_materialisation() {
         panic!("the frozen body should retain a resource outcome");
     };
     assert_eq!(
-        owner_relative_path,
-        "assets/logo.svg",
+        owner_relative_path, "assets/logo.svg",
         "the frozen body must retain the resolved resource path without materialising",
     );
 }
@@ -1578,21 +1649,24 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
             .context
             .materialise_ast_at(
                 0,
-                ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
-                requester_context: &fixture.preparation,
-                requester_call_span: None,
-                boundary_string_table: &fixture.preparation.string_table,
-                external_package_registry: fixture
-                    .preparation
-                    .external_package_registry
-                    .as_ref(),
-                style_directives: &fixture.preparation.style_directives,
-                build_profile: fixture.preparation.build_profile,
-                template_const_loop_iteration_limit: fixture
-                    .preparation
-                    .template_const_loop_iteration_limit,
-                #[cfg(feature = "timers")]
-                timing_context: None, },
+                ModuleMaterialisationInput {
+                    path_fork: &mut path_fork,
+                    identity: &fixture.identity,
+                    requester_context: &fixture.preparation,
+                    requester_call_span: None,
+                    boundary_string_table: &fixture.preparation.string_table,
+                    external_package_registry: fixture
+                        .preparation
+                        .external_package_registry
+                        .as_ref(),
+                    style_directives: &fixture.preparation.style_directives,
+                    build_profile: fixture.preparation.build_profile,
+                    template_const_loop_iteration_limit: fixture
+                        .preparation
+                        .template_const_loop_iteration_limit,
+                    #[cfg(feature = "timers")]
+                    timing_context: None,
+                },
             )
             .expect("the frozen generic body should materialise")
     };
@@ -1743,21 +1817,24 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
             .context
             .materialise_ast_at(
                 0,
-                ModuleMaterialisationInput { path_fork: &mut path_fork, identity: &fixture.identity,
-                requester_context: &fixture.preparation,
-                requester_call_span: None,
-                boundary_string_table: &fixture.preparation.string_table,
-                external_package_registry: fixture
-                    .preparation
-                    .external_package_registry
-                    .as_ref(),
-                style_directives: &fixture.preparation.style_directives,
-                build_profile: fixture.preparation.build_profile,
-                template_const_loop_iteration_limit: fixture
-                    .preparation
-                    .template_const_loop_iteration_limit,
-                #[cfg(feature = "timers")]
-                timing_context: None, },
+                ModuleMaterialisationInput {
+                    path_fork: &mut path_fork,
+                    identity: &fixture.identity,
+                    requester_context: &fixture.preparation,
+                    requester_call_span: None,
+                    boundary_string_table: &fixture.preparation.string_table,
+                    external_package_registry: fixture
+                        .preparation
+                        .external_package_registry
+                        .as_ref(),
+                    style_directives: &fixture.preparation.style_directives,
+                    build_profile: fixture.preparation.build_profile,
+                    template_const_loop_iteration_limit: fixture
+                        .preparation
+                        .template_const_loop_iteration_limit,
+                    #[cfg(feature = "timers")]
+                    timing_context: None,
+                },
             )
             .expect("the frozen generic should materialise")
     };
@@ -1780,7 +1857,12 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
         let generated_parameter = generated_signature
             .parameters
             .iter()
-            .find(|parameter| matches!(parameter.value.kind, ExpressionKind::StructuralString { .. }))
+            .find(|parameter| {
+                matches!(
+                    parameter.value.kind,
+                    ExpressionKind::StructuralString { .. }
+                )
+            })
             .expect("the generated signature should retain its suffix resource parameter");
         structural_resource_handle(&generated_parameter.value)
     };
@@ -1843,8 +1925,12 @@ fn requester_template_identity_index_is_exact_and_rejects_duplicate_bodies() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let identity = generated_identity("indexed").declaration().clone();
-    let body_path = path_fork.try_intern_portable_path("src/indexed.moth", &mut string_table).expect("test path fits");
-    let imported_path = path_fork.try_intern_portable_path("src/imported.moth", &mut string_table).expect("test path fits");
+    let body_path = path_fork
+        .try_intern_portable_path("src/indexed.moth", &mut string_table)
+        .expect("test path fits");
+    let imported_path = path_fork
+        .try_intern_portable_path("src/imported.moth", &mut string_table)
+        .expect("test path fits");
     let mut templates = FxHashMap::default();
     templates.insert(
         body_path,
@@ -1859,7 +1945,9 @@ fn requester_template_identity_index_is_exact_and_rejects_duplicate_bodies() {
         .expect("bodyless imported templates must not conflict with retained bodies");
     assert_eq!(index.get(&identity), Some(&body_path));
 
-    let duplicate_path = path_fork.try_intern_portable_path("src/duplicate.moth", &mut string_table).expect("test path fits");
+    let duplicate_path = path_fork
+        .try_intern_portable_path("src/duplicate.moth", &mut string_table)
+        .expect("test path fits");
     templates.insert(
         duplicate_path,
         retained_template(duplicate_path, identity, true),
@@ -1964,14 +2052,13 @@ fn frozen_generic_rejects_duplicate_path_handle() {
 
 #[test]
 fn generic_body_rejects_foreign_source_range() {
-    let owner = Arc::new(FileTokens::new(
-        PathId::ROOT,
-        SourceId::COMPILATION_ROOT,
-        Vec::new(),
-    ));
+    let shell = FileTokens::new(PathId::ROOT, SourceId::COMPILATION_ROOT, Vec::new());
+    let owner = shell
+        .canonical_source_tokens_arc()
+        .expect("test fixture must use a canonical source owner");
     let foreign_range =
         TokenRange::from_raw(SourceId::from_index(7), 0, 0).expect("range ordering is valid");
-    let error = GenericFunctionBody::source(owner, foreign_range, None, PathId::ROOT)
+    let error = GenericFunctionBody::source(owner, foreign_range, None, PathId::ROOT, None)
         .expect_err("a generic body must reject a range owned by another source");
     assert!(
         error.msg.contains("foreign source identity"),
@@ -2034,12 +2121,9 @@ fn provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_request
     let provider_path_table = Arc::new(provider_builder.freeze());
     let source_string_table = Arc::new(provider_strings.freeze());
 
-    let mut context =
-        ModuleMaterialisationContext::from_identities_for_test(vec![generated_identity(
-            "published",
-        )
-        .declaration()
-        .clone()]);
+    let mut context = ModuleMaterialisationContext::from_identities_for_test(vec![
+        generated_identity("published").declaration().clone(),
+    ]);
     context.artefacts[0].source_file = provider_source_file;
     context.artefacts[0].function_path = provider_function_path;
     context.install_identity_tables(Arc::clone(&provider_path_table), source_string_table);
@@ -2078,7 +2162,10 @@ fn provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_request
     assert_eq!(
         provider_path_table.render_portable_frozen(
             provider_source_file,
-            context.source_string_table.as_ref().expect("source strings"),
+            context
+                .source_string_table
+                .as_ref()
+                .expect("source strings"),
             &mut scratch
         ),
         "provider/@mod.moth"
@@ -2107,19 +2194,20 @@ fn provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_request
             &requester_frozen_strings,
             &mut scratch
         ),
-        requester_table.render_portable_frozen(requester_shared, &requester_frozen_strings, &mut scratch),
+        requester_table.render_portable_frozen(
+            requester_shared,
+            &requester_frozen_strings,
+            &mut scratch
+        ),
         "the same numeric prefix must not collapse distinct domains"
     );
 }
 
 #[test]
 fn incomplete_or_missing_retained_identity_pair_rejects_rebase() {
-    let mut incomplete =
-        ModuleMaterialisationContext::from_identities_for_test(vec![generated_identity(
-            "incomplete",
-        )
-        .declaration()
-        .clone()]);
+    let mut incomplete = ModuleMaterialisationContext::from_identities_for_test(vec![
+        generated_identity("incomplete").declaration().clone(),
+    ]);
     incomplete.path_table = Some(Arc::new(PathInternerFork::empty().snapshot_table()));
     let mut requester_fork = PathInternerFork::empty();
     let mut requester_strings = StringTable::new();
@@ -2140,7 +2228,9 @@ fn incomplete_or_missing_retained_identity_pair_rejects_rebase() {
         .err()
         .expect("a rebase without an issuing identity pair must reject");
     assert!(
-        error.msg.contains("cannot rebase without an issuing identity table pair"),
+        error
+            .msg
+            .contains("cannot rebase without an issuing identity table pair"),
         "unexpected missing-pair error: {error:?}"
     );
 }

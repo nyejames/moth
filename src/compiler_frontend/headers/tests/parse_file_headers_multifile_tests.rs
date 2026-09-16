@@ -140,9 +140,11 @@ fn per_file_fork_merge_produces_correct_headers_and_warnings_for_multiple_files(
         .headers
         .iter()
         .filter_map(|header| match &header.kind {
-            HeaderKind::Constant { .. } => Some(
-                path_fork.render_portable(header.declaration_path, &string_table, &mut path_scratch),
-            ),
+            HeaderKind::Constant { .. } => Some(path_fork.render_portable(
+                header.declaration_path,
+                &string_table,
+                &mut path_scratch,
+            )),
             _ => None,
         })
         .collect();

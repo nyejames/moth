@@ -41,8 +41,8 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -136,12 +136,10 @@ pub(super) fn prepare_file_value_bundle(
             string_table,
         )
         .map_err(|error| match error {
-            SourceDatabaseError::Capacity(capacity) => {
-                CompilerMessages::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
-                    string_table.clone(),
-                )
-            }
+            SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
+                CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                string_table.clone(),
+            ),
             SourceDatabaseError::Infrastructure(error) => {
                 CompilerMessages::from_error_ref(error, string_table)
             }
@@ -297,14 +295,19 @@ pub(super) fn prepare_file_value_bundle(
             let mut failure = None;
 
             for reference in structural_references {
-                let resolved =
-                    match resolver.resolve(&path, path_syntax_table, reference, string_table, &path_fork) {
-                        Ok(resolved) => resolved,
-                        Err(error) => {
-                            failure = Some(error);
-                            break;
-                        }
-                    };
+                let resolved = match resolver.resolve(
+                    &path,
+                    path_syntax_table,
+                    reference,
+                    string_table,
+                    &path_fork,
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                };
                 if let Err(error) = collect_content_candidate(
                     &resolved,
                     &mut sources.candidates,
@@ -610,10 +613,12 @@ fn finalize_known_sources(
                 )),
                 // The fork re-interns the authored source paths, so its exhaustion is a typed
                 // source-capacity rejection, not infrastructure.
-                Err(SourceDatabaseError::Capacity(capacity)) => Some(CompilerMessages::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
-                    string_table.clone(),
-                )),
+                Err(SourceDatabaseError::Capacity(capacity)) => {
+                    Some(CompilerMessages::from_diagnostic(
+                        CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                        string_table.clone(),
+                    ))
+                }
                 Err(SourceDatabaseError::Infrastructure(error)) => {
                     Some(CompilerMessages::from_error_ref(error, string_table))
                 }

@@ -133,7 +133,9 @@ fn bool_reference_expression(
     name: &str,
 ) -> Expression {
     Expression::reference_with_type_id(
-        path_fork.try_intern_portable_path(name, string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path(name, string_table)
+            .expect("test path fits"),
         DataType::Bool,
         builtin_type_ids::BOOL,
         None,

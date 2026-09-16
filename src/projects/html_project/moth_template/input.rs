@@ -6,9 +6,7 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, SourceSpanCapacityResource,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
 };

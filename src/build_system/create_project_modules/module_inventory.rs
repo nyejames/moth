@@ -29,8 +29,10 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
+use crate::compiler_frontend::symbols::path_interner::{
+    PathInternerBuilder, PathInternerForkSource,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
-use crate::compiler_frontend::symbols::path_interner::{PathInternerBuilder, PathInternerForkSource};
 use crate::projects::settings::Config;
 use rustc_hash::FxHashMap;
 
@@ -175,8 +177,9 @@ fn resolve_directory_dependency_path(
             // path, so no clone is needed to carry the diagnostic.  Keep the issuing fork beside
             // it so its `PathId` domain remains valid after the source owner is finalized.
             let table = std::mem::take(string_table);
-            let mut failure =
-                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(diagnostic, table));
+            let mut failure = PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
+                diagnostic, table,
+            ));
             if let Err(error) = failure.attach_path_table_if_missing(Arc::new(
                 directory_dependency_resolution.path_fork().snapshot_table(),
             )) {
@@ -826,13 +829,11 @@ fn prepare_check_only_module(
                                 .to_owned(),
                         ));
                     }
-                    provider.local_source_id = Some(
-                        compiler_source_id_for_index(
-                            target_source_index,
-                            source_tree_index,
-                            preparation_context.source_files,
-                        )?,
-                    );
+                    provider.local_source_id = Some(compiler_source_id_for_index(
+                        target_source_index,
+                        source_tree_index,
+                        preparation_context.source_files,
+                    )?);
                     add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
                     if queued_module_sources.insert(target_source_index) {
                         pending_module_sources.push_back(target_source_index);

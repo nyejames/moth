@@ -84,10 +84,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
 
         let js_source_path = match context
             .path_fork
-            .try_intern_portable_path(
-                request.logical_source_path.as_str(),
-                context.string_table,
-            )
+            .try_intern_portable_path(request.logical_source_path.as_str(), context.string_table)
         {
             Ok(path) => path,
             Err(PathInternError::NonUtf8(non_utf8)) => {

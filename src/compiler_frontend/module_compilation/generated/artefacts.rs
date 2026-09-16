@@ -89,7 +89,6 @@ impl GeneratedFunctionDelta {
         self.records
     }
 
-
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         for record in &mut self.records {
             record.sidecar.module.remap_path_ids(remap);

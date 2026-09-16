@@ -7,6 +7,7 @@
 use super::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+#[cfg(test)]
 use rustc_hash::FxHashMap;
 
 /// Dense handle into one [`NumericLiteralStore`].
@@ -32,11 +33,16 @@ impl NumericLiteralId {
     pub const fn raw(self) -> u32 {
         self.0
     }
+    #[cfg(test)]
     pub const fn is_none(self) -> bool {
         self.0 == 0
     }
     pub const fn index(self) -> Option<usize> {
-        if self.0 == 0 { None } else { Some((self.0 - 1) as usize) }
+        if self.0 == 0 {
+            None
+        } else {
+            Some((self.0 - 1) as usize)
+        }
     }
 }
 
@@ -45,8 +51,14 @@ impl NumericLiteralId {
 pub enum NumericLiteralStoreError {
     Capacity(NumericLiteralCapacityError),
     Absent,
-    OutOfRange { raw: u32, len: usize },
-    ForeignSource { expected: SourceId, actual: SourceId },
+    OutOfRange {
+        raw: u32,
+        len: usize,
+    },
+    ForeignSource {
+        expected: SourceId,
+        actual: SourceId,
+    },
     Frozen,
 }
 
@@ -71,6 +83,7 @@ pub struct NumericLiteralStore {
 }
 
 impl NumericLiteralStore {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -105,6 +118,41 @@ impl NumericLiteralStore {
     pub fn is_frozen(&self) -> bool {
         self.frozen
     }
+    #[cfg(test)]
+    pub fn records(&self) -> &[NumericLiteralToken] {
+        &self.literals
+    }
+
+    #[cfg(test)]
+    pub fn iter(&self) -> impl Iterator<Item = (NumericLiteralId, &NumericLiteralToken)> + '_ {
+        self.literals.iter().enumerate().map(|(index, literal)| {
+            (
+                NumericLiteralId::try_from_index(index)
+                    .expect("stored numeric literal index must fit its handle"),
+                literal,
+            )
+        })
+    }
+
+    #[cfg(test)]
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (NumericLiteralId, &mut NumericLiteralToken)> + '_ {
+        assert!(
+            !self.frozen,
+            "numeric literal iteration cannot mutate a frozen store"
+        );
+        self.literals
+            .iter_mut()
+            .enumerate()
+            .map(|(index, literal)| {
+                (
+                    NumericLiteralId::try_from_index(index)
+                        .expect("stored numeric literal index must fit its handle"),
+                    literal,
+                )
+            })
+    }
 
     pub fn freeze(&mut self) {
         self.frozen = true;
@@ -125,6 +173,7 @@ impl NumericLiteralStore {
     }
 
     /// Compatibility constructor for fixtures that are not exercising the capacity lane.
+    #[cfg(test)]
     pub fn push(&mut self, literal: NumericLiteralToken) -> NumericLiteralId {
         self.try_push(literal)
             .expect("numeric literal insertion must be checked at its owner boundary")
@@ -149,7 +198,10 @@ impl NumericLiteralStore {
         self.try_push(literal)
     }
 
-    pub fn try_get(&self, id: NumericLiteralId) -> Result<&NumericLiteralToken, NumericLiteralStoreError> {
+    pub fn try_get(
+        &self,
+        id: NumericLiteralId,
+    ) -> Result<&NumericLiteralToken, NumericLiteralStoreError> {
         let Some(index) = id.index() else {
             return Err(NumericLiteralStoreError::Absent);
         };
@@ -175,27 +227,6 @@ impl NumericLiteralStore {
             });
         }
         self.try_get(id)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (NumericLiteralId, &NumericLiteralToken)> + use<'_> {
-        self.literals.iter().enumerate().filter_map(|(index, literal)| {
-            Some((NumericLiteralId::try_from_index(index)?, literal))
-        })
-    }
-
-    /// Mutable row iteration for construction-time payload fixes only.
-    ///
-    /// Panics on a frozen store: post-publication mutation must go through the owning
-    /// `FileTokens` boundary (which rejects it) or the materialisation clone-remap-freeze
-    /// path (which never mutates the shared source). No production caller uses this on a
-    /// frozen store; only construction code before `freeze()` may mutate rows in place.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (NumericLiteralId, &mut NumericLiteralToken)> + use<'_> {
-        if self.frozen {
-            panic!("numeric literal row mutation was requested after the source publication freeze");
-        }
-        self.literals.iter_mut().enumerate().filter_map(|(index, literal)| {
-            Some((NumericLiteralId::try_from_index(index)?, literal))
-        })
     }
 
     /// Infallible construction-time string remap. Panics on a frozen store.
@@ -228,22 +259,8 @@ impl NumericLiteralStore {
         Ok(())
     }
 
-    /// Clone a frozen artefact store into an unfrozen construction buffer.
-    ///
-    /// Generic materialisation clones its persistent frozen rows, remaps the clone once
-    /// into the generated-local table, then freezes it. The clone must start unfrozen so
-    /// the construction-time remap above accepts it; the caller must `freeze()` the
-    /// returned buffer after remapping. Never call this on an ordinary published source
-    /// store to keep mutating it.
-    pub(crate) fn clone_for_materialisation(&self) -> Self {
-        Self {
-            literals: self.literals.clone(),
-            owner_source: self.owner_source,
-            frozen: false,
-        }
-    }
-
     /// Copy only referenced records in first-reference order and return the old-to-new map.
+    #[cfg(test)]
     pub fn compact_subset<I>(
         &self,
         ids: I,
@@ -270,11 +287,6 @@ impl NumericLiteralStore {
         }
         Ok((subset, old_to_new))
     }
-
-    /// Expose immutable records for source-boundary adapters without exposing Vec capacity.
-    pub fn records(&self) -> &[NumericLiteralToken] {
-        &self.literals
-    }
 }
 
 #[cfg(test)]
@@ -293,7 +305,10 @@ mod tests {
         let mut strings = StringTable::new();
         let mut store = NumericLiteralStore::with_source(owner);
         let id = store.push(NumericLiteralToken::test_new("7", &mut strings));
-        assert!(matches!(store.try_get(NumericLiteralId::NONE), Err(NumericLiteralStoreError::Absent)));
+        assert!(matches!(
+            store.try_get(NumericLiteralId::NONE),
+            Err(NumericLiteralStoreError::Absent)
+        ));
         assert!(matches!(
             store.try_get(NumericLiteralId::try_from_raw(2).unwrap()),
             Err(NumericLiteralStoreError::OutOfRange { .. })
@@ -314,7 +329,13 @@ mod tests {
             .compact_subset([second, second, first])
             .expect("subset should be representable");
         let ids = subset.iter().map(|(id, _)| id).collect::<Vec<_>>();
-        assert_eq!(ids, [NumericLiteralId::try_from_raw(1).unwrap(), NumericLiteralId::try_from_raw(2).unwrap()]);
+        assert_eq!(
+            ids,
+            [
+                NumericLiteralId::try_from_raw(1).unwrap(),
+                NumericLiteralId::try_from_raw(2).unwrap()
+            ]
+        );
         assert_eq!(map[&second], ids[0]);
         assert_eq!(map[&first], ids[1]);
     }
@@ -357,10 +378,7 @@ mod tests {
         assert_eq!(store.iter_mut().count(), 1);
         let foreign = SourceId::from_index(9);
         assert!(matches!(
-            store.try_push_for_source(
-                foreign,
-                NumericLiteralToken::test_new("3", &mut local)
-            ),
+            store.try_push_for_source(foreign, NumericLiteralToken::test_new("3", &mut local)),
             Err(NumericLiteralStoreError::ForeignSource { .. })
         ));
         global.intern("preexisting");

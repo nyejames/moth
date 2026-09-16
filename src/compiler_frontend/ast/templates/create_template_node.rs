@@ -43,12 +43,12 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
 };
@@ -82,6 +82,16 @@ pub(crate) struct PreparedTemplateConstruction {
 
 type PreparedTemplateConstructionResult = Result<PreparedTemplateConstruction, TemplateError>;
 
+/// Mutable interner tables shared by nested template construction.
+///
+/// WHAT: groups the string and path tables that every nested-template call needs together.
+/// WHY: keeping them together keeps `new_nested_template` under the argument-count lint
+/// without changing construction behavior.
+pub(crate) struct TemplatePathTables<'a> {
+    pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
+}
+
 // -------------------------
 //  Template Construction
 // -------------------------
@@ -112,9 +122,11 @@ impl Template {
             context,
             type_interner,
             direct_child_wrappers,
-            string_table,
             NestedTemplateParseOptions::runtime_capable().with_default_style(default_style),
-            path_fork,
+            TemplatePathTables {
+                string_table,
+                path_fork,
+            },
         )?;
 
         Ok(construction.template)
@@ -142,9 +154,11 @@ impl Template {
             context,
             type_interner,
             direct_child_wrappers,
-            string_table,
             NestedTemplateParseOptions::const_required().with_default_style(default_style),
-            path_fork,
+            TemplatePathTables {
+                string_table,
+                path_fork,
+            },
         )
     }
 
@@ -204,10 +218,13 @@ impl Template {
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
-        string_table: &mut StringTable,
         parse_options: NestedTemplateParseOptions,
-        path_fork: &mut PathInternerFork,
+        tables: TemplatePathTables<'_>,
     ) -> PreparedTemplateConstructionResult {
+        let TemplatePathTables {
+            string_table,
+            path_fork,
+        } = tables;
         let NestedTemplateParseOptions {
             parsing_mode,
             control_flow_validation,
@@ -216,7 +233,6 @@ impl Template {
             default_style,
             allow_stored_insert_carrier,
         } = parse_options;
-
         // The parser-local build state accumulates head/body metadata while
         // parsing. The durable `Template` is constructed once after
         // authoritative TIR identity exists, not mutated throughout parsing.

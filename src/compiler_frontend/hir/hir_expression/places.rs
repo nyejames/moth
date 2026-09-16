@@ -568,15 +568,15 @@ impl<'a> HirBuilder<'a> {
             );
         };
 
-        let field_id = self
-            .fields_by_struct_and_name
-            .iter()
-            .find_map(|(&(owner_id, path), &field_id)| {
-                (owner_id == struct_id
-                    && self.path_fork.try_parent(path) == Some(struct_path)
-                    && self.path_fork.try_component(path) == Some(field_name))
-                .then_some(field_id)
-            });
+        let field_id =
+            self.fields_by_struct_and_name
+                .iter()
+                .find_map(|(&(owner_id, path), &field_id)| {
+                    (owner_id == struct_id
+                        && self.path_fork.try_parent(path) == Some(struct_path)
+                        && self.path_fork.try_component(path) == Some(field_name))
+                    .then_some(field_id)
+                });
 
         let Some(field_id) = field_id else {
             return_hir_transformation_error!(

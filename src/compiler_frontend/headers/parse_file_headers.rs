@@ -88,10 +88,14 @@ pub fn parse_file_headers_with_table(
         |expected_id| expected_id == file_id,
     );
 
-    let source_path = file_tokens.canonical_os_path.as_deref().map(Path::to_path_buf).unwrap_or_else(|| {
-        let mut scratch = Vec::new();
-        path_fork.render_native(file_tokens.src_path, string_table, &mut scratch)
-    });
+    let source_path = file_tokens
+        .canonical_os_path
+        .as_deref()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| {
+            let mut scratch = Vec::new();
+            path_fork.render_native(file_tokens.src_path, string_table, &mut scratch)
+        });
     // Directory Stage 0 supplies normal and support roots through `ModuleRootTable`. Keep the
     // canonical filename check as a fallback for synthetic or otherwise unindexed preparation so
     // a `+*.moth` support-package root remains export-capable in those contexts too.
@@ -231,6 +235,7 @@ pub(crate) fn prepare_file_from_tokens(
 
     match file_output {
         Ok(mut output) => {
+            drop(file_tokens);
             output
                 .remap_string_ids(&remap)
                 .map_err(FileFrontendPrepareFailure::Infrastructure)?;
@@ -279,10 +284,11 @@ pub fn prepare_header_syntax(
 ) -> Result<PreparedHeaderSyntax, HeaderPreparationFailure> {
     let source_build_config_contracts =
         collect_source_build_config_contracts(prepared_files, string_table, capture, path_fork)?;
-    let module_symbols =
-        build_module_symbols(prepared_files, string_table, capture, path_fork)?;
+    let module_symbols = build_module_symbols(prepared_files, string_table, capture, path_fork)?;
     let mut headers: Vec<Header> = Vec::new();
     let mut source_token_streams = FxHashMap::default();
+    let mut source_token_paths = FxHashMap::default();
+    let mut source_token_os_paths = FxHashMap::default();
     let mut top_level_const_fragments = Vec::new();
     let mut runtime_fragment_count = 0usize;
     let mut has_non_trivial_root_body = false;
@@ -290,14 +296,19 @@ pub fn prepare_header_syntax(
 
     for output in prepared_files {
         token_stats.add(&output.token_stats);
-        if let Some(stream) = output.source_token_stream.take()
-            && source_token_streams.insert(output.file_id, stream).is_some()
-        {
-            return Err(HeaderPreparationFailure::Infrastructure(
-                CompilerError::compiler_error(
-                    "multiple canonical source token streams were prepared for one SourceId",
-                ),
-            ));
+        if let Some(stream) = output.source_token_stream.take() {
+            if source_token_streams
+                .insert(output.file_id, stream)
+                .is_some()
+            {
+                return Err(HeaderPreparationFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "multiple canonical source token streams were prepared for one SourceId",
+                    ),
+                ));
+            }
+            source_token_paths.insert(output.file_id, output.source_file);
+            source_token_os_paths.insert(output.file_id, output.canonical_os_path.clone());
         }
         headers.extend(mem::take(&mut output.headers));
         top_level_const_fragments.extend(mem::take(&mut output.top_level_const_fragments));
@@ -317,6 +328,8 @@ pub fn prepare_header_syntax(
     Ok(PreparedHeaderSyntax {
         headers,
         source_token_streams,
+        source_token_paths,
+        source_token_os_paths,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count: runtime_fragment_count,
@@ -376,9 +389,7 @@ pub(super) fn find_config_qualifier_marker_in_declaration_defaults(
     };
 
     match &header.kind {
-        HeaderKind::Constant { declaration } => {
-            marker_in_range(declaration.initializer_range)
-        }
+        HeaderKind::Constant { declaration } => marker_in_range(declaration.initializer_range),
         HeaderKind::Function { signature, .. } => {
             for parameter in &signature.parameters {
                 if let Some(marker) = marker_in_range(parameter.default_range)? {
@@ -506,7 +517,6 @@ pub(super) fn find_config_qualifier_marker_in_header(
         .map(|marker| (marker, true)))
 }
 
-
 /// Collect source-owned `#Config` contract shells and reject all non-declaration placements.
 ///
 /// The declaration shell itself remains in `PreparedHeaderSyntax::headers` for the later
@@ -530,12 +540,7 @@ fn collect_source_build_config_contracts(
             continue;
         }
 
-        let source_tokens = output
-            .source_token_stream
-            .as_ref()
-            .map(|stream| stream.source_tokens())
-            .transpose()
-            .map_err(HeaderPreparationFailure::Infrastructure)?;
+        let source_tokens = output.source_token_stream.as_deref();
         if let Some(source_tokens) = source_tokens
             && source_tokens.source() != output.file_id
         {
@@ -678,6 +683,8 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
     let PreparedHeaderSyntax {
         mut headers,
         source_token_streams,
+        source_token_paths,
+        source_token_os_paths,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
@@ -755,6 +762,8 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
     Ok(BoundModuleHeaders {
         headers,
         source_token_streams,
+        source_token_paths,
+        source_token_os_paths,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,

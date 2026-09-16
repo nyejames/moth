@@ -11,6 +11,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource,
 };
@@ -21,18 +22,17 @@ use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_renderability::is_template_renderable_type;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::value_mode::ValueMode;
 
 pub(super) struct TemplateHeadExpressionContext<'a> {
     pub(super) context: &'a ScopeContext,

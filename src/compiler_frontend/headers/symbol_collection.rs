@@ -70,10 +70,9 @@ pub(super) fn build_module_symbols(
 
             // Header source paths are already the compiler's logical source identity. Keep that
             // identity in the module map instead of deriving a second filesystem path spelling.
-            module_symbols.canonical_source_by_symbol_path.insert(
-                header.declaration_path.to_owned(),
-                file_output.source_file,
-            );
+            module_symbols
+                .canonical_source_by_symbol_path
+                .insert(header.declaration_path.to_owned(), file_output.source_file);
             if let Some(name_span) = header.name_span {
                 module_symbols
                     .declaration_spans_by_symbol_path
@@ -86,7 +85,6 @@ pub(super) fn build_module_symbols(
                 string_table,
                 path_fork,
             );
-
         }
     }
 
@@ -323,10 +321,7 @@ fn register_header_symbol(
         HeaderKind::StartFunction => {
             // Register the compiler-owned implicit start function under its entry source file.
             let start_name = path_fork
-                .try_intern_child(
-                    source_file,
-                    string_table.intern(IMPLICIT_START_FUNC_NAME),
-                )
+                .try_intern_child(source_file, string_table.intern(IMPLICIT_START_FUNC_NAME))
                 .expect("path table exhausted while interning implicit start path");
             register_declared_symbol(module_symbols, &start_name, &source_file, false, path_fork);
         }
@@ -367,9 +362,7 @@ fn register_header_symbol(
                 is_dependency_bindable_for_symbol_collection(header),
                 path_fork,
             );
-            module_symbols
-                .trait_paths
-                .insert(header.declaration_path);
+            module_symbols.trait_paths.insert(header.declaration_path);
         }
 
         HeaderKind::TraitConformance { .. } => {

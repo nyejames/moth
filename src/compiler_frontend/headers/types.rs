@@ -35,14 +35,14 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, Path
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenRange, TokenSequenceId,
+    FileTokens, SourceTokens, TokenRange, TokenSequenceId,
 };
 use crate::compiler_frontend::traits::syntax::{
     TraitConformanceSyntax, TraitDeclarationSyntax, TraitIncompatibilitySyntax,
 };
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
-use std::collections::HashSet;
 use rustc_hash::FxHashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -59,11 +59,22 @@ use std::sync::Arc;
 /// header parsing. `declarations` inside it is empty until dependency sorting completes.
 pub struct PreparedHeaderSyntax {
     pub headers: Vec<Header>,
-    /// One canonical source stream per tokenized `SourceId`.
+    /// One canonical source owner per tokenized `SourceId`.
     ///
-    /// Each stream owns the sole canonical `SourceTokens` allocation and remains available only
-    /// so bounded parser adapters can materialize retained ranges or sequences.
-    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<FileTokens>>,
+    /// Each owner is the sole canonical `SourceTokens` allocation, Arc-cloned from the
+    /// transient lexer `FileTokens` at publication and never rebuilt from slices. The map
+    /// remains available only so bounded parser adapters can materialize retained ranges
+    /// or sequences.
+    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
+    /// Logical source path per retained canonical owner.
+    ///
+    /// `SourceTokens` carries no path identity, so the header stage retains the explicit
+    /// side map consumed by path queries instead of a `FileTokens::src_path` shell.
+    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
+    /// Canonical OS filesystem path per retained canonical owner, if available.
+    ///
+    /// `SourceTokens` must not store an OS path; IO/path-resolution identity travels here.
+    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
     /// Provider-independent source `#Config` declarations, normalized from top-level constant
     /// shells before any provider binding or AST expression resolution.
     ///
@@ -114,8 +125,12 @@ pub struct PreparedHeaderSyntax {
 /// before the provider graph has compiled.
 pub struct BoundModuleHeaders {
     pub headers: Vec<Header>,
-    /// The same one-owner source streams carried through provider binding for AST body adapters.
-    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<FileTokens>>,
+    /// The same one-owner canonical sources carried through provider binding for AST body adapters.
+    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
+    /// Logical source path per retained canonical owner (see `PreparedHeaderSyntax`).
+    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
+    /// Canonical OS filesystem path per retained canonical owner (see `PreparedHeaderSyntax`).
+    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
     /// Provider-independent source `#Config` declarations retained through binding for the
     /// module-local static-value projection in AST construction.
     pub source_build_config_contracts: Vec<SourceBuildConfigContract>,
@@ -410,12 +425,9 @@ impl LocalDeclarationOrderingHint {
         path_fork: &mut PathInternerFork,
     ) -> Result<Self, CompilerError> {
         let path = match self.origin {
-            LocalDeclarationOrderingHintOrigin::SourceOwned => rebind_required_path(
-                self.path,
-                provisional_source_file,
-                logical_path,
-                path_fork,
-            )?,
+            LocalDeclarationOrderingHintOrigin::SourceOwned => {
+                rebind_required_path(self.path, provisional_source_file, logical_path, path_fork)?
+            }
             LocalDeclarationOrderingHintOrigin::ProviderSpelling
             | LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling
             | LocalDeclarationOrderingHintOrigin::ContentSource => self.path,
@@ -447,9 +459,13 @@ fn rebind_required_path(
     let old_depth = path_fork.depth(old_prefix) as usize;
     let mut rebound = new_prefix;
     for component in scratch.iter().skip(old_depth) {
-        rebound = path_fork.try_intern_child(rebound, *component).ok_or_else(|| {
-            CompilerError::compiler_error("path table exhausted while rebinding source-owned path")
-        })?;
+        rebound = path_fork
+            .try_intern_child(rebound, *component)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "path table exhausted while rebinding source-owned path",
+                )
+            })?;
     }
     Ok(rebound)
 }
@@ -728,7 +744,8 @@ impl HeaderKind {
             }
             HeaderKind::Choice { variants, .. } => {
                 for variant in variants {
-                    variant.validate_required_source_prefixes(provisional_source_file, path_fork)?;
+                    variant
+                        .validate_required_source_prefixes(provisional_source_file, path_fork)?;
                 }
                 Ok(())
             }
@@ -910,12 +927,7 @@ fn rebind_signature_member_source_identity(
     logical_path: PathId,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
-    member.id = rebind_required_path(
-        member.id,
-        provisional_source_file,
-        logical_path,
-        path_fork,
-    )?;
+    member.id = rebind_required_path(member.id, provisional_source_file, logical_path, path_fork)?;
     rebind_source_span(&mut member.span, file_id);
     member.default_range = member
         .default_range
@@ -1403,11 +1415,10 @@ pub struct FileFrontendPrepareOutput {
     pub canonical_os_path: Option<std::path::PathBuf>,
     pub headers: Vec<Header>,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
-    /// The moved source stream retains the one canonical `SourceTokens` owner for this file.
+    /// The canonical `SourceTokens` owner for this file, Arc-cloned from the transient
+    /// lexer `FileTokens` at publication and never rebuilt from slices.
     /// It is shared at module scope only so bounded parser adapters can be built.
-    pub(crate) source_token_stream: Option<Arc<FileTokens>>,
-    /// Number of const templates parsed in this file.
-    ///
+    pub(crate) source_token_stream: Option<Arc<SourceTokens>>,
     /// WHY: const-template synthetic names must remain unique across the module while per-file
     /// parsing reports its contribution separately from module aggregation.
     // Phase 6 parallel preparation keeps this contribution explicit for validation and future
@@ -1466,7 +1477,6 @@ impl PreparedFilePathSyntax {
         })
     }
 
-
     /// The caller performs no fallible operations after this transition. Retained headers resolve
     /// through cloned immutable handles immediately afterward, so an attachment failure cannot
     /// leave a partially frozen output or make a mutable table observable through copy-on-write.
@@ -1519,7 +1529,6 @@ impl FileFrontendPrepareError {
         self.diagnostic.remap_path_ids(remap);
     }
 }
-
 
 /// Per-file preparation outcome that preserves the diagnostic and infrastructure lanes.
 ///
@@ -1600,8 +1609,8 @@ impl FileFrontendPrepareOutput {
             return Ok(());
         }
 
-        if let Some(stream) = self.source_token_stream.as_mut() {
-            Arc::get_mut(stream)
+        if let Some(source) = self.source_token_stream.as_mut() {
+            Arc::get_mut(source)
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
                         "prepared source token stream was shared before string remapping",
@@ -1649,15 +1658,8 @@ impl FileFrontendPrepareOutput {
         if remap.is_identity() {
             return Ok(());
         }
-        if let Some(stream) = self.source_token_stream.as_mut() {
-            Arc::get_mut(stream)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "prepared source token stream was shared before path remapping",
-                    )
-                })?
-                .remap_path_ids(remap);
-        }
+        // The canonical owner carries no path identity; only the explicit file owner and
+        // the mutable file-owned table remap here.
         self.source_file = remap.get(self.source_file);
         for clause in &mut self.file_dependency_clauses {
             clause.remap_path_ids(remap);
@@ -1671,13 +1673,10 @@ impl FileFrontendPrepareOutput {
         self.path_syntax.table_mut()?.remap_path_ids(remap);
         Ok(())
     }
-
-    /// Rebind the complete retained file output to its deterministic module source identity.
+    /// Rebind every retained source identity to its consuming file.
     ///
-    /// WHAT: updates the output identity, the retained dependency path location in every clause, the
-    ///       file-owned selection locations, retained header ranges and sequence handles, detached
-    ///       declaration syntax, fragment metadata and warning locations in one consuming-file
-    ///       operation.
+    /// WHAT: updates the canonical file identity, retained declaration syntax, fragment metadata
+    ///       and warning locations in one consuming-file operation.
     /// WHY: synthetic Stage 0 discovery prepares files before the complete closure is known, so
     ///      traversal-local `SourceId`s and absolute source scopes must be reconciled before the
     ///      output can enter module-wide aggregation. Retaining only dependency clauses would
@@ -1696,19 +1695,15 @@ impl FileFrontendPrepareOutput {
         self.validate_source_rebinding(provisional_source_file, &*path_fork)?;
         self.source_file = final_logical_path;
         self.file_id = final_file_id;
-        self.canonical_os_path = Some(canonical_os_path.clone());
-        if let Some(stream) = self.source_token_stream.as_mut() {
-            Arc::get_mut(stream)
+        self.canonical_os_path = Some(canonical_os_path);
+        if let Some(source) = self.source_token_stream.as_mut() {
+            Arc::get_mut(source)
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
                         "prepared source token stream was shared before source rebinding",
                     )
                 })?
-                .rebind_source_owner_identity(
-                    final_logical_path,
-                    final_file_id,
-                    Some(canonical_os_path.clone()),
-                );
+                .rebind_source_identity(final_file_id);
         }
 
         for clause in &mut self.file_dependency_clauses {
@@ -1765,78 +1760,36 @@ impl FileFrontendPrepareOutput {
             return Ok(());
         }
 
-        // The invariant pass above proves every stream remains deferred. From this point onward
-        // the transition has no fallible steps: freeze the sole owner, then attach that immutable
-        // allocation to every already-validated retained header. Ordinary numeric stores freeze
+        // The invariant pass above proves the file owner is uniquely held. From this point
+        // onward the transition has no fallible steps: freeze the sole owner, then attach
+        // that immutable allocation to the canonical owner. Ordinary numeric stores freeze
         // at the same owner boundary after all construction-time remaps; the frozen generic
         // materialisation path finishes its own remapped clone frozen instead.
         let path_syntax = self.path_syntax.freeze_preflighted();
-        if let Some(stream) = self.source_token_stream.as_mut() {
-            Arc::get_mut(stream)
-                .expect("prepared source token stream gained a shared view before freeze")
-                .attach_preflighted_shared_path_syntax(Arc::clone(&path_syntax));
-            Arc::get_mut(stream)
-                .expect("prepared source token stream gained a shared view before numeric freeze")
-                .freeze_numeric_literals();
+        if let Some(source) = self.source_token_stream.as_mut() {
+            let canonical = Arc::get_mut(source)
+                .expect("prepared source token stream gained a shared view before freeze");
+            canonical.attach_shared_path_syntax(Arc::clone(&path_syntax));
+            canonical.freeze_numeric_literals();
         }
         Ok(())
     }
-    /// Install the one moved source stream after parsing has finished.
+    /// Install the one canonical source owner after parsing has finished.
+    ///
+    /// The owner is Arc-cloned from the transient lexer `FileTokens` at publication, never
+    /// rebuilt from slices.
     pub(crate) fn install_source_token_stream(
         &mut self,
-        stream: FileTokens,
+        source: Arc<SourceTokens>,
     ) -> Result<(), CompilerError> {
-        if stream.file_id != self.file_id {
+        if source.source() != self.file_id {
             return Err(CompilerError::compiler_error(
                 "prepared source token stream identity does not match its file output",
             ));
         }
-        self.source_token_stream = Some(Arc::new(stream));
+        self.source_token_stream = Some(source);
         Ok(())
     }
-
-    /// Materialize the bounded parser adapter represented by one retained header.
-    ///
-    /// The returned vector belongs to the caller and is never retained by a header or prepared
-    /// source owner. Segmented start syntax is materialized through the canonical sequence cursor.
-    /// This compatibility materialization remains only for deferred 3F2 declaration/signature/type
-    /// and 3F3–3F4 AST/template parser boundaries; header-stage fact scans use a checked
-    /// canonical cursor directly.
-    pub(crate) fn body_tokens(&self, header: &Header) -> Result<Vec<Token>, CompilerError> {
-        if header.tokens.source() != self.file_id {
-            return Err(CompilerError::compiler_error(
-                "retained header syntax does not match its prepared file identity",
-            ));
-        }
-        if let Some(sequence) = header.token_sequence {
-            let source = self.source_token_stream.as_ref().ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "retained token sequence has no prepared source token stream",
-                )
-            })?;
-            if source.file_id != self.file_id {
-                return Err(CompilerError::compiler_error(
-                    "retained token sequence does not match its prepared source stream",
-                ));
-            }
-            return source.materialize_token_sequence(sequence);
-        }
-        if header.tokens.is_empty() {
-            return Ok(Vec::new());
-        }
-        let source = self.source_token_stream.as_ref().ok_or_else(|| {
-            CompilerError::compiler_error(
-                "non-empty retained token range has no prepared source stream",
-            )
-        })?;
-        if header.tokens.source() != source.file_id {
-            return Err(CompilerError::compiler_error(
-                "retained token range does not match its prepared source stream",
-            ));
-        }
-        source.materialize_token_range(header.tokens)
-    }
-
 
     /// Confirm an output crossed its whole-file validation and freeze boundary earlier.
     ///
@@ -1882,11 +1835,7 @@ impl FileFrontendPrepareOutput {
         add_frontend_counter(FrontendCounter::PreparedFileInvariantValidationCount, 1);
         let path_syntax = self.path_syntax.table();
         path_syntax.validate_file_owned_locations(self.file_id)?;
-        let source_tokens = self
-            .source_token_stream
-            .as_deref()
-            .map(|stream| stream.source_tokens())
-            .transpose()?;
+        let source_tokens = self.source_token_stream.as_deref();
 
         validate_dependency_clauses(
             &self.file_dependency_clauses,
@@ -1902,7 +1851,6 @@ impl FileFrontendPrepareOutput {
                 self.file_id,
                 self.source_file,
                 path_fork,
-                self.source_token_stream.as_deref(),
                 source_tokens,
             )?;
         }
@@ -2049,7 +1997,6 @@ fn validate_header(
     file_id: SourceId,
     source_file: PathId,
     path_fork: &PathInternerFork,
-    source_stream: Option<&FileTokens>,
     source_tokens: Option<&SourceTokens>,
 ) -> Result<(), CompilerError> {
     if header.tokens.source() != file_id {
@@ -2062,8 +2009,8 @@ fn validate_header(
             "retained header path does not use the prepared file's final source prefix",
         ));
     }
-    match source_stream {
-        Some(stream) => {
+    match source_tokens {
+        Some(source) => {
             if matches!(
                 header.synthetic_content_payload,
                 Some(SyntheticContentPayload::RenderedHtml(_))
@@ -2073,12 +2020,6 @@ fn validate_header(
                 ));
             }
 
-            if stream.file_id != file_id {
-                return Err(CompilerError::compiler_error(
-                    "prepared source token stream does not match its file identity",
-                ));
-            }
-            let source = stream.source_tokens()?;
             if source.source() != file_id {
                 return Err(CompilerError::compiler_error(
                     "canonical source token owner does not match its prepared file identity",
@@ -2127,17 +2068,15 @@ fn validate_header(
         }
     }
 
-    if let Some(SyntheticContentPayload::MothTemplate { .. }) =
-        header.synthetic_content_payload
-    {
+    if let Some(SyntheticContentPayload::MothTemplate { .. }) = header.synthetic_content_payload {
         let HeaderKind::Constant { declaration } = &header.kind else {
             return Err(CompilerError::compiler_error(
                 "MothTemplate synthetic payload is not attached to a constant",
             ));
         };
-        if declaration.initializer_range != Some(header.tokens) {
+        if declaration.initializer_range.is_some() {
             return Err(CompilerError::compiler_error(
-                "MothTemplate synthetic content retained a mismatched initializer range",
+                "MothTemplate synthetic content retained parser initializer syntax",
             ));
         }
     }
@@ -2169,13 +2108,7 @@ fn validate_header_kind(
             signature,
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
-            validate_function_signature(
-                signature,
-                file_id,
-                source_file,
-                path_fork,
-                source_tokens,
-            )?;
+            validate_function_signature(signature, file_id, source_file, path_fork, source_tokens)?;
         }
         HeaderKind::Constant { declaration } => {
             validate_declaration_syntax(declaration, file_id, source_tokens)?;
@@ -2186,13 +2119,7 @@ fn validate_header_kind(
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
             for field in fields {
-                validate_signature_member(
-                    field,
-                    file_id,
-                    source_file,
-                    path_fork,
-                    source_tokens,
-                )?;
+                validate_signature_member(field, file_id, source_file, path_fork, source_tokens)?;
             }
         }
         HeaderKind::Choice {
@@ -2201,13 +2128,7 @@ fn validate_header_kind(
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
             for variant in variants {
-                validate_choice_variant(
-                    variant,
-                    file_id,
-                    source_file,
-                    path_fork,
-                    source_tokens,
-                )?;
+                validate_choice_variant(variant, file_id, source_file, path_fork, source_tokens)?;
             }
         }
         HeaderKind::TypeAlias { target } => {
@@ -2410,16 +2331,13 @@ fn validate_source_range(
         )));
     }
     let source = source_tokens.ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "{role} range has no canonical source token owner"
-        ))
+        CompilerError::compiler_error(format!("{role} range has no canonical source token owner"))
     })?;
     source.range(range.start(), range.end()).map_err(|error| {
         CompilerError::compiler_error(format!("{role} range is invalid: {error:?}"))
     })?;
     Ok(())
 }
-
 
 fn validate_source_span(
     span: Option<SourceSpan>,

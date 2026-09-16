@@ -12,6 +12,7 @@ use rustc_hash::FxHashMap;
 
 use super::{const_inline_field_value, const_inline_field_value_from_receiver};
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, TemplateType};
@@ -27,7 +28,6 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -93,8 +93,8 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
 
     let inlined =
         const_inline_field_value_from_receiver(&receiver, field_name, &registry, None, &path_fork)
-        .expect("effective TIR classification should succeed")
-        .expect("receiver-authored const field should inline");
+            .expect("effective TIR classification should succeed")
+            .expect("receiver-authored const field should inline");
 
     assert!(matches!(inlined.kind, ExpressionKind::Template(_)));
     assert_eq!(inlined.value_mode, ValueMode::ImmutableOwned);

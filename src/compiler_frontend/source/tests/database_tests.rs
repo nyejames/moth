@@ -1,6 +1,6 @@
 use super::{
-    database::SourceCapacityError, FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase,
-    SourceDatabaseError, SourceId, SourceKind, SourceProvenance, SourceRegistrationIndex,
+    FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceDatabaseError, SourceId,
+    SourceKind, SourceProvenance, SourceRegistrationIndex, database::SourceCapacityError,
     line_index::LinePosition, record::ensure_source_snapshot_fits,
 };
 
@@ -564,9 +564,9 @@ fn conflicting_kind_for_canonical_source_is_rejected() {
     assert_eq!(first_id, repeated_id);
     let error = match error {
         SourceDatabaseError::Infrastructure(error) => error,
-        SourceDatabaseError::Capacity(capacity) => panic!(
-            "a kind conflict is an invariant failure, not source capacity: {capacity:?}"
-        ),
+        SourceDatabaseError::Capacity(capacity) => {
+            panic!("a kind conflict is an invariant failure, not source capacity: {capacity:?}")
+        }
     };
     assert!(
         error.msg.contains("/project/src/shared.moth")
@@ -672,7 +672,6 @@ fn forced_source_identity_exhaustion_at_registration_reports_identity_capacity()
         "the rejected registration must not leave a partial source record"
     );
 }
-
 
 #[test]
 fn source_snapshot_size_bound_rejects_u32_max_by_provenance() {

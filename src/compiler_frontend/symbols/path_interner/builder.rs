@@ -5,13 +5,13 @@
 //! WHY:  parent links share every common prefix without storing a component vector in each path
 //!       identity or requiring a globally locked interner.
 
+use super::NonUtf8PathComponent;
 use super::fork::{PathInternerFork, PathInternerForkSource};
 use super::frozen::PathTable;
 use super::id::PathId;
 use super::remap::PathIdRemap;
-use super::NonUtf8PathComponent;
 use crate::compiler_frontend::instrumentation::{
-    add_frontend_counter, increment_frontend_counter, record_path_max_depth, FrontendCounter,
+    FrontendCounter, add_frontend_counter, increment_frontend_counter, record_path_max_depth,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use rustc_hash::FxHashMap;
@@ -107,7 +107,6 @@ impl PathInternerBuilder {
         }
         Ok(logical_path)
     }
-
 
     #[cfg(test)]
     /// Intern a portable forward-slash path without changing its exact separator spelling.

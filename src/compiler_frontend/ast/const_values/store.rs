@@ -307,11 +307,7 @@ impl ConstValueStore {
                     path: declaration.id,
                     value,
                 });
-                if store
-                    .values_by_path
-                    .insert(declaration.id, value)
-                    .is_some()
-                {
+                if store.values_by_path.insert(declaration.id, value).is_some() {
                     return Err(CompilerError::compiler_error(
                         "ConstValueStore received duplicate module-constant declaration paths.",
                     )
@@ -360,11 +356,7 @@ impl ConstValueStore {
             type_environment,
             template_builder,
         )?;
-        if self
-            .values_by_path
-            .insert(declaration.id, value)
-            .is_some()
-        {
+        if self.values_by_path.insert(declaration.id, value).is_some() {
             return Err(CompilerError::compiler_error(
                 "ConstValueStore received duplicate body-local const-record paths.",
             )
@@ -678,9 +670,7 @@ impl ConstValueStore {
     }
 
     /// Every path binding in the store, including body-local const records.
-    pub(crate) fn path_value_bindings(
-        &self,
-    ) -> impl Iterator<Item = (&PathId, ConstValueId)> {
+    pub(crate) fn path_value_bindings(&self) -> impl Iterator<Item = (&PathId, ConstValueId)> {
         self.values_by_path.iter().map(|(path, id)| (path, *id))
     }
 

@@ -8,6 +8,7 @@
 //!      expression contract in statement and expression positions.
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
@@ -40,7 +41,6 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Input bundle for `parse_function_call` to avoid long argument lists.

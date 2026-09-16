@@ -1,8 +1,9 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::ast::templates::create_template_node::TemplatePathTables;
 use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult,
@@ -22,7 +23,6 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan};
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TemplateBodyMode, Token, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -161,7 +161,6 @@ fn new_constant_context_with_style_directives(
     ScopeContext::new_constant(scope, &parent)
 }
 
-
 fn fold_template_in_context(
     template: &Template,
     context: &ScopeContext,
@@ -243,7 +242,12 @@ fn runtime_template_context(
     path_fork: &mut PathInternerFork,
 ) -> ScopeContext {
     let style_directives = frontend_test_style_directives();
-    runtime_template_context_with_style_directives(scope, &style_directives, string_table, path_fork)
+    runtime_template_context_with_style_directives(
+        scope,
+        &style_directives,
+        string_table,
+        path_fork,
+    )
 }
 
 fn runtime_template_context_with_style_directives(
@@ -286,7 +290,12 @@ fn constant_template_context(
     path_fork: &PathInternerFork,
 ) -> ScopeContext {
     let style_directives = frontend_test_style_directives();
-    constant_template_context_with_style_directives(scope, declarations, &style_directives, path_fork)
+    constant_template_context_with_style_directives(
+        scope,
+        declarations,
+        &style_directives,
+        path_fork,
+    )
 }
 
 fn constant_template_context_with_style_directives(
@@ -299,7 +308,10 @@ fn constant_template_context_with_style_directives(
         ScopeContext::new_for_tests(
             ContextKind::Constant,
             scope.to_owned(),
-            Rc::new(TopLevelDeclarationTable::new(declarations.to_vec(), path_fork)),
+            Rc::new(TopLevelDeclarationTable::new(
+                declarations.to_vec(),
+                path_fork,
+            )),
             Arc::new(ExternalPackageRegistry::default()),
             vec![],
             0,
@@ -329,15 +341,19 @@ fn folded_template_output_with_style_directives(
         &mut path_fork,
     );
     let source_path = file_tokens.src_path;
-    let context = new_constant_context_with_style_directives(
-        source_path,
-        style_directives,
-        &path_fork,
-    );
+    let context =
+        new_constant_context_with_style_directives(source_path, style_directives, &path_fork);
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("template should parse");
     let folded = fold_template_in_context(&template, &context, &mut string_table);
 
     string_table.resolve(folded).to_owned()
@@ -355,8 +371,19 @@ fn template_parse_rendered_error_with_style_directives(
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
-    let mut file_tokens = match tokenize(source, scope, crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile, style_directives, &mut string_table, &mut path_fork, crate::compiler_frontend::source::SourceId::COMPILATION_ROOT, &mut span_builder) {
+    let scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
+    let mut file_tokens = match tokenize(
+        source,
+        scope,
+        crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
+        style_directives,
+        &mut string_table,
+        &mut path_fork,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    ) {
         Ok(tokens) => tokens,
         Err(TokenizeFailure::Diagnosed(diagnostic)) => {
             return render_test_diagnostic(&diagnostic, &string_table);
@@ -372,15 +399,19 @@ fn template_parse_rendered_error_with_style_directives(
         .expect("expected a template opener");
     file_tokens.freeze_path_syntax_for_test();
     let source_path = file_tokens.src_path;
-    let context = new_constant_context_with_style_directives(
-        source_path,
-        style_directives,
-        &path_fork,
-    );
+    let context =
+        new_constant_context_with_style_directives(source_path, style_directives, &path_fork);
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
-    let error = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect_err("template should fail to parse");
+    let error = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("template should fail to parse");
     let diagnostic = expect_template_diagnostic(error);
 
     render_test_diagnostic(&diagnostic, &string_table)
@@ -449,16 +480,19 @@ fn template_warnings_with_style_directives(
             &mut path_fork,
         )
     } else {
-        new_constant_context_with_style_directives(
-            source_path,
-            style_directives,
-            &path_fork,
-        )
+        new_constant_context_with_style_directives(source_path, style_directives, &path_fork)
     };
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
-    let _ = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("template should parse for warning checks");
+    let _ = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("template should parse for warning checks");
     context.take_emitted_warnings()
 }
 

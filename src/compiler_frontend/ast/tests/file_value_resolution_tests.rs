@@ -5,16 +5,17 @@
 //! folded string identity, rather than only its text, so a second content constant or a
 //! re-interned value cannot pass.
 
-use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::SourceFileKind;
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValuePayload,
 };
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{
@@ -29,10 +30,10 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax, HeaderParseOptions,
+    HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
-    prepare_plain_markdown_file, PlainMarkdownPrepareInput,
+    PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
 use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::paths::file_references::{
@@ -51,11 +52,10 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, FrozenIdentityHandle
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::{tokenize, TokenizeFailure};
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};

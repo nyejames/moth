@@ -5,8 +5,8 @@
 //! can reference constants, so constants are resolved before struct fields.
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::generic_bounds::{
@@ -157,7 +157,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     let (_, struct_type_id) =
                         self.type_environment.register_nominal_struct(struct_def);
                     Rc::make_mut(&mut self.nominal_type_ids_by_path)
-.insert(header.declaration_path, struct_type_id);
+                        .insert(header.declaration_path, struct_type_id);
 
                     self.replace_declaration(
                         declaration_id,
@@ -207,7 +207,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     let (_, choice_type_id) =
                         self.type_environment.register_nominal_choice(choice_def);
                     Rc::make_mut(&mut self.nominal_type_ids_by_path)
-.insert(header.declaration_path, choice_type_id);
+                        .insert(header.declaration_path, choice_type_id);
 
                     self.replace_declaration(
                         declaration_id,
@@ -660,14 +660,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             )?;
 
             if header.export_mode.is_public() {
-                let owner_name = self.path_fork.component(header.declaration_path).ok_or_else(|| {
-                    self.error_messages(
-                        CompilerError::compiler_error(
-                            "Public nominal generic header had no source-path name.",
-                        ),
-                        string_table,
-                    )
-                })?;
+                let owner_name = self
+                    .path_fork
+                    .component(header.declaration_path)
+                    .ok_or_else(|| {
+                        self.error_messages(
+                            CompilerError::compiler_error(
+                                "Public nominal generic header had no source-path name.",
+                            ),
+                            string_table,
+                        )
+                    })?;
                 self.validate_public_generic_bounds(
                     owner_name,
                     generic_parameters,
@@ -842,12 +845,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .type_environment
             .nominal_path(type_id)
             .and_then(|path| self.path_fork.component(*path));
-        validate_nominal_generic_bound_evidence(
-            type_id,
-            instance_name,
-            span,
-            &evidence_context,
-        )
+        validate_nominal_generic_bound_evidence(type_id, instance_name, span, &evidence_context)
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
     }
 
@@ -1100,6 +1098,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             template_ir_store: Rc::clone(&self.context.template_ir_store),
             build_profile: self.context.build_profile,
             source_token_streams: self.source_token_streams.clone(),
+            source_token_paths: self.source_token_paths.clone(),
+            source_token_os_paths: self.source_token_os_paths.clone(),
         });
 
         let mut aliases_left = aliases_waiting_for_constants.len();
@@ -1223,15 +1223,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 })?;
             // Live parser state stays on the canonical source owner. The transient
             // cursor spans the full canonical source so nested default ranges stay
-            // inside its bounds for this member-shell parse only. `from_file_tokens_range`
+            // inside its bounds for this member-shell parse only. `from_source_tokens`
             // retains the canonical owner for later bounded expression handoffs.
-            let full = file_owner.canonical_source_tokens()?.full_range().map_err(|error| {
+            let full = file_owner.full_range().map_err(|error| {
                 CompilerError::compiler_error(format!(
                     "member-bearing header source range could not be constructed: {error:?}"
                 ))
             })?;
+            let os_path = self
+                .source_token_os_paths
+                .get(&header.tokens.source())
+                .and_then(|path| path.clone());
+            let source_arc = self
+                .source_token_streams
+                .get(&header.tokens.source())
+                .expect("member-bearing header source owner vanished during cursor construction");
             let source_owner =
-                AstCursor::from_file_tokens_range(file_owner, full).map_err(|error| {
+                AstCursor::from_source_tokens(source_arc, os_path, full).map_err(|error| {
                     CompilerError::compiler_error(format!(
                         "member-bearing header source range is outside its source owner: {error:?}"
                     ))

@@ -13,8 +13,8 @@ use super::compiler_errors::{
     CompilerError, CompilerMessages, RenderPathContext, RenderTypeContext,
 };
 use super::module_diagnostics::ModuleDiagnostics;
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
@@ -196,7 +196,6 @@ impl PremergeFailure {
         }
     }
 
-
     /// Convert the premerge lane into the final boundary vessel exactly once.
     ///
     /// WHAT: moves a diagnosed batch into `CompilerMessages`, carries an infrastructure
@@ -306,7 +305,6 @@ impl PremergeDiagnosticBatch {
     /// Existing primary and label owners are authoritative: this bridge supplies ownership for
     /// legacy AST/HIR diagnostics without replacing mixed-domain provenance.
     pub(crate) fn set_frozen_identity_handle_if_missing(
-
         &mut self,
         frozen_identity_handle: FrozenIdentityHandle,
     ) {

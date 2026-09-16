@@ -18,18 +18,19 @@ fn classify_one(spelling: &str) -> PreparedFileReferenceClass {
         if spelling.is_empty() {
             PathId::ROOT
         } else {
-            path_fork.try_intern_portable_path(spelling, &mut strings).expect("test path fits")
+            path_fork
+                .try_intern_portable_path(spelling, &mut strings)
+                .expect("test path fits")
         },
         SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
-    let classified =
-        classify_prepared_file_references(
-            &table,
-            [],
-            SourceId::COMPILATION_ROOT,
-            &path_fork,
-            &strings,
-        );
+    let classified = classify_prepared_file_references(
+        &table,
+        [],
+        SourceId::COMPILATION_ROOT,
+        &path_fork,
+        &strings,
+    );
     classified.references()[0].class
 }
 
@@ -81,22 +82,25 @@ fn dependency_clause_rows_are_not_reclassified_as_file_values() {
     let mut table = PathSyntaxTable::new();
     let authored_span = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
     let clause = table.push(
-        path_fork.try_intern_portable_path("core/math", &mut strings).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("core/math", &mut strings)
+            .expect("test path fits"),
         authored_span,
     );
     let value = table.push(
-        path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("assets/logo.svg", &mut strings)
+            .expect("test path fits"),
         authored_span,
     );
 
-    let classified =
-        classify_prepared_file_references(
-            &table,
-            [clause],
-            SourceId::COMPILATION_ROOT,
-            &path_fork,
-            &strings,
-        );
+    let classified = classify_prepared_file_references(
+        &table,
+        [clause],
+        SourceId::COMPILATION_ROOT,
+        &path_fork,
+        &strings,
+    );
     let references = classified.references();
     assert_eq!(references.len(), 1);
     assert_eq!(references[0].path_syntax, value);
@@ -111,14 +115,13 @@ fn quoted_url_strings_are_not_path_rows() {
     let strings = StringTable::new();
     let path_fork = PathInternerFork::empty();
     let table = PathSyntaxTable::new();
-    let classified =
-        classify_prepared_file_references(
-            &table,
-            [],
-            SourceId::COMPILATION_ROOT,
-            &path_fork,
-            &strings,
-        );
+    let classified = classify_prepared_file_references(
+        &table,
+        [],
+        SourceId::COMPILATION_ROOT,
+        &path_fork,
+        &strings,
+    );
     assert!(classified.references().is_empty());
 }
 
@@ -128,7 +131,9 @@ fn resolved_references_are_lookupable_by_file_and_path_handle() {
     let mut path_fork = PathInternerFork::empty();
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
-        path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("assets/logo.svg", &mut strings)
+            .expect("test path fits"),
         SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();
@@ -156,7 +161,9 @@ fn resolved_reference_duplicate_composite_keys_are_rejected() {
     let mut path_fork = PathInternerFork::empty();
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
-        path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("assets/logo.svg", &mut strings)
+            .expect("test path fits"),
         SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();
@@ -181,7 +188,9 @@ fn resolved_reference_validation_rejects_class_outcome_mismatch() {
     let mut path_fork = PathInternerFork::empty();
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
-        path_fork.try_intern_portable_path("assets/logo.svg", &mut strings).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("assets/logo.svg", &mut strings)
+            .expect("test path fits"),
         SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();

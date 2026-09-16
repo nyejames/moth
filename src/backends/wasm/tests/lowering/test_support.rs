@@ -94,8 +94,9 @@ pub(crate) fn build_module(
 
     for block in &module.blocks {
         for local in &block.locals {
-            let local_path =
-                path_fork.try_intern_portable_path(&format!("local_{}", local.id.0), string_table).expect("test path fits");
+            let local_path = path_fork
+                .try_intern_portable_path(&format!("local_{}", local.id.0), string_table)
+                .expect("test path fits");
             module.side_table.bind_local_name(local.id, local_path);
         }
     }

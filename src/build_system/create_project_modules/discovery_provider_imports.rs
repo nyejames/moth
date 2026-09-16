@@ -1,6 +1,6 @@
 use super::*;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 // -------------------------
 //  Provider-backed import resolution
 // -------------------------
@@ -111,15 +111,11 @@ fn invoke_provider_and_record_resolution(
 
     // Use cached result when available.
     if let Some(cached) = external_imports.cache.get(&cache_key) {
-        let source_file_logical = source_file_logical_path(
-            consumer_canonical_path,
-            project_path_resolver,
-        )?;
-        external_imports.resolution_table.insert(
-            source_file_logical,
-            raw_prefix,
-            cached.clone(),
-        );
+        let source_file_logical =
+            source_file_logical_path(consumer_canonical_path, project_path_resolver)?;
+        external_imports
+            .resolution_table
+            .insert(source_file_logical, raw_prefix, cached.clone());
         return Ok(());
     }
 
@@ -154,10 +150,8 @@ fn invoke_provider_and_record_resolution(
     if let Some(resolved) = result {
         external_imports.cache.insert(cache_key, resolved.clone());
 
-        let source_file_logical = source_file_logical_path(
-            consumer_canonical_path,
-            project_path_resolver,
-        )?;
+        let source_file_logical =
+            source_file_logical_path(consumer_canonical_path, project_path_resolver)?;
         external_imports
             .resolution_table
             .insert(source_file_logical, raw_prefix, resolved);
@@ -165,7 +159,6 @@ fn invoke_provider_and_record_resolution(
 
     Ok(())
 }
-
 
 /// Resolves a provider import prefix to a canonical filesystem path without selecting a compiler
 /// source extension candidate.
@@ -179,12 +172,8 @@ fn resolve_provider_prefix_to_canonical_path(
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<PathBuf, SourceDiscoveryError> {
-    let (base_kind, filesystem_base) = if let Some(package_root) =
-        project_path_resolver.source_package_root_for_dependency(
-            prefix_path,
-            path_fork,
-            string_table,
-        )
+    let (base_kind, filesystem_base) = if let Some(package_root) = project_path_resolver
+        .source_package_root_for_dependency(prefix_path, path_fork, string_table)
     {
         (
             crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase::SourcePackageRoot,
@@ -270,10 +259,7 @@ fn check_provider_dependency_module_boundary(
 
     if consumer_container != target_container {
         return Err(SourceDiscoveryError::from(
-            CompilerDiagnostic::cross_module_import_not_exported(
-                dependency_path,
-                source_span,
-            ),
+            CompilerDiagnostic::cross_module_import_not_exported(dependency_path, source_span),
         ));
     }
 
@@ -327,9 +313,5 @@ pub(super) fn unsupported_external_extension_error(
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let extension_id = string_table.intern(extension);
-    CompilerDiagnostic::unsupported_external_extension(
-        import_path,
-        extension_id,
-        source_span,
-    )
+    CompilerDiagnostic::unsupported_external_extension(import_path, extension_id, source_span)
 }

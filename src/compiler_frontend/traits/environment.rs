@@ -344,8 +344,7 @@ impl TraitEnvironment {
         }
 
         let id = definition.id;
-        self.ids_by_path
-            .insert(definition.canonical_path, id);
+        self.ids_by_path.insert(definition.canonical_path, id);
         self.paths_by_id
             .entry(id)
             .or_default()

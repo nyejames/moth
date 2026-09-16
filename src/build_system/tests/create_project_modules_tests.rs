@@ -29,7 +29,6 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::{PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
     DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
@@ -60,20 +59,21 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
     SourceRegistrationIndex, SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::compiler_frontend::symbols::path_interner::PathId;
 #[path = "create_project_modules_benchmark_tests.rs"]
 mod create_project_modules_benchmark_tests;
 #[path = "create_project_modules_config_tests.rs"]
@@ -342,11 +342,11 @@ fn prepared_entry_file_path(
                 *role,
                 FileRole::ActiveModuleRoot | FileRole::ActiveApiOnlyModuleRoot
             ) {
-                Some(
-                    prepared
-                        .path_fork
-                        .render_native(*source_file, &prepared.string_table, &mut Vec::new()),
-                )
+                Some(prepared.path_fork.render_native(
+                    *source_file,
+                    &prepared.string_table,
+                    &mut Vec::new(),
+                ))
             } else {
                 None
             }
@@ -376,15 +376,11 @@ fn module_prepared_source_names(
         .module_file_paths
         .iter()
         .map(|source_file| {
-            module
-                .prepared
-                .semantic
-                .path_fork
-                .render_portable(
-                    *source_file,
-                    &module.prepared.semantic.string_table,
-                    &mut Vec::new(),
-                )
+            module.prepared.semantic.path_fork.render_portable(
+                *source_file,
+                &module.prepared.semantic.string_table,
+                &mut Vec::new(),
+            )
         })
         .collect::<Vec<_>>();
     logical_paths.sort();
@@ -907,18 +903,24 @@ fn synthetic_prepared_identity_snapshot(
                 })
             {
                 assert_eq!(header.tokens.source(), file_id);
-                let source_owner = prepared
-                    .semantic
-                    .prepared_header_syntax
+                let syntax = &prepared.semantic.prepared_header_syntax;
+                let source_owner = syntax
                     .source_token_streams
                     .get(&header.tokens.source())
                     .expect("header should have its source token owner");
+                assert_eq!(source_owner.source(), file_id);
                 assert_eq!(
-                    source_owner.canonical_os_path.as_deref(),
+                    syntax
+                        .source_token_os_paths
+                        .get(&header.tokens.source())
+                        .and_then(|path| path.as_deref()),
                     identity.canonical_os_path.as_deref()
                 );
                 assert_eq!(
-                    source_owner.path_syntax.owner_source(),
+                    source_owner
+                        .path_syntax_arc()
+                        .expect("header source should retain its path table")
+                        .owner_source(),
                     Some(file_id),
                     "header path rows must use the final source identity"
                 );
@@ -1599,12 +1601,14 @@ fn direct_selection_resolves_cross_module_child_facade() {
         &resolver,
         &crate::builder_surface::SourcePackageRegistry::default(),
         None,
-        |namespace_set, source_tree_index, _package_prefix, string_table, provider_paths, path_fork| {
-            let resolution = DirectoryDependencyResolution::project(
-                namespace_set,
-                source_tree_index,
-                path_fork,
-            );
+        |namespace_set,
+         source_tree_index,
+         _package_prefix,
+         string_table,
+         provider_paths,
+         path_fork| {
+            let resolution =
+                DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
             let provider = provider_root(&["child"], provider_paths);
             let resolved = resolution
                 .resolve_dependency(&provider, &declaring_source, string_table)
@@ -1663,12 +1667,14 @@ fn direct_selection_resolves_source_package_facade() {
         &resolver,
         &source_packages,
         None,
-        |namespace_set, source_tree_index, _package_prefix, string_table, provider_paths, path_fork| {
-            let resolution = DirectoryDependencyResolution::project(
-                namespace_set,
-                source_tree_index,
-                path_fork,
-            );
+        |namespace_set,
+         source_tree_index,
+         _package_prefix,
+         string_table,
+         provider_paths,
+         path_fork| {
+            let resolution =
+                DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
             let provider = provider_root(&["helper"], provider_paths);
             let resolved = resolution
                 .resolve_dependency(&provider, &declaring_source, string_table)

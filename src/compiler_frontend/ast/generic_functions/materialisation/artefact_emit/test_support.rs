@@ -5,7 +5,7 @@
 //! WHY: these fixtures need the context's private stable fields, so they live below the owning
 //!      artefact module instead of widening production visibility or adding test APIs there.
 
-use super::super::frozen_syntax::StableBodySyntax;
+use super::super::frozen_syntax::{StableBodyOwner, StableBodySyntax};
 use super::super::semantic_closure::StableSemanticClosure;
 use super::super::stable_types::{GenericTemplateArtefact, StableFunctionSignature};
 use super::super::visibility::StableFileVisibility;
@@ -21,14 +21,15 @@ impl ModuleMaterialisationContext {
     /// Build a test-only context with one artefact per identity and no real body payload.
     pub(crate) fn from_identities_for_test(identities: Vec<GeneratedDeclarationIdentity>) -> Self {
         let frozen_identity_handle = FrozenIdentityHandle::new();
-        let empty_source_owner = Arc::new(FileTokens::new(
+        let empty_shell = FileTokens::new(
             PathId::ROOT,
             crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
             Vec::new(),
-        ));
+        );
+        let empty_source_owner = empty_shell
+            .canonical_source_tokens_arc()
+            .expect("test fixture must use a canonical source owner");
         let empty_token_range = empty_source_owner
-            .source_tokens()
-            .expect("test fixture must use a canonical source owner")
             .full_range()
             .expect("empty canonical source should have a checked full range");
         let artefacts = identities
@@ -45,7 +46,10 @@ impl ModuleMaterialisationContext {
                     declaration_path: PathId::ROOT,
                     donor_file_id: crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
                     frozen_identity_handle: frozen_identity_handle.clone(),
-                    source_owner: Arc::clone(&empty_source_owner),
+                    source_owner: StableBodyOwner::Source {
+                        source_tokens: Arc::clone(&empty_source_owner),
+                        canonical_os_path: None,
+                    },
                     token_range: empty_token_range,
                     token_sequence: None,
                     source_path_table: None,

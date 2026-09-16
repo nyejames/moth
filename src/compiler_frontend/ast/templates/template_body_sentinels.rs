@@ -6,11 +6,11 @@
 //! nesting, while this support module keeps marker policy, boundary trimming,
 //! and marker diagnostics together.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -141,23 +141,19 @@ pub(super) fn classify_direct_else_marker(token_stream: &AstCursor) -> Option<Di
 fn classify_direct_else_marker_at_cursor(cursor: &AstCursor) -> Option<DirectElseMarker> {
     let mut index = cursor.position().checked_add(1)?;
 
-    while index < cursor.length()
-        && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
+    while index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
     {
         index += 1;
     }
 
-    if index >= cursor.length()
-        || !matches!(cursor.token_kind_at(index), Some(TokenKind::Else))
-    {
+    if index >= cursor.length() || !matches!(cursor.token_kind_at(index), Some(TokenKind::Else)) {
         return None;
     }
 
     let span = cursor.span_at(index);
     index += 1;
 
-    while index < cursor.length()
-        && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
+    while index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
     {
         index += 1;
     }
@@ -367,8 +363,7 @@ fn classify_direct_loop_control_marker_at_cursor(
 ) -> Option<DirectLoopControlMarker> {
     let mut index = cursor.position().checked_add(1)?;
 
-    while index < cursor.length()
-        && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
+    while index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
     {
         index += 1;
     }
@@ -380,8 +375,7 @@ fn classify_direct_loop_control_marker_at_cursor(
     };
     index += 1;
 
-    while index < cursor.length()
-        && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
+    while index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
     {
         index += 1;
     }

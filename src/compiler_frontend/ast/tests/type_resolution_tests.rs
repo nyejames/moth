@@ -245,7 +245,10 @@ fn literal_capacity_resolves_to_fixed_collection() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
@@ -282,7 +285,10 @@ fn constant_capacity_resolves_to_fixed_collection() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
@@ -298,7 +304,9 @@ fn constant_capacity_resolves_to_fixed_collection() {
         0,
     );
     let constant_declaration = Declaration {
-        id: path_fork.try_intern_components(&[capacity_name]).expect("test path fits"),
+        id: path_fork
+            .try_intern_components(&[capacity_name])
+            .expect("test path fits"),
         value: Expression::new(
             ExpressionKind::Int(42),
             None,
@@ -344,7 +352,10 @@ fn nested_fixed_collections_fold_both_capacities() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
@@ -465,7 +476,9 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
     let mut path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut type_environment = TypeEnvironment::new();
-    let wrapper_path = path_fork.try_intern_portable_path("wrapper", &mut string_table).expect("test path fits");
+    let wrapper_path = path_fork
+        .try_intern_portable_path("wrapper", &mut string_table)
+        .expect("test path fits");
     let wrapper_template = slot_field_default_template(&mut template_ir_store.borrow_mut());
     let wrapper_declaration = Declaration {
         id: wrapper_path,
@@ -473,10 +486,15 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
         binding_span: None,
         config_qualifier: None,
     };
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![wrapper_declaration], &path_fork));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        vec![wrapper_declaration],
+        &path_fork,
+    ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
-    let struct_path = path_fork.try_intern_portable_path("Card", &mut string_table).expect("test path fits");
+    let struct_path = path_fork
+        .try_intern_portable_path("Card", &mut string_table)
+        .expect("test path fits");
     let field_path = path_fork
         .try_intern_child(struct_path, string_table.intern("content"))
         .expect("test path fits");
@@ -517,7 +535,9 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
     let mut path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut type_environment = TypeEnvironment::new();
-    let constant_path = path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits");
+    let constant_path = path_fork
+        .try_intern_portable_path("value", &mut string_table)
+        .expect("test path fits");
     let project_member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
         "render",
@@ -565,7 +585,9 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
     ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
-    let struct_path = path_fork.try_intern_portable_path("Card", &mut string_table).expect("test path fits");
+    let struct_path = path_fork
+        .try_intern_portable_path("Card", &mut string_table)
+        .expect("test path fits");
     let field = Declaration {
         id: path_fork
             .try_intern_child(struct_path, string_table.intern("values"))
@@ -729,8 +751,7 @@ use_maps |scores StringScores, direct {Bool = {String = Int}}| -> {Char = String
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let builtins = *ast.type_environment.builtins();
 
-    let user_type_id =
-        nominal_type_id(&ast, &mut string_table, &mut path_fork, "User");
+    let user_type_id = nominal_type_id(&ast, &mut string_table, &mut path_fork, "User");
     let scores_name = string_table.intern("scores");
     let scores_type_id = ast
         .type_environment
@@ -779,8 +800,7 @@ use_maps |scores StringScores, direct {Bool = {String = Int}}| -> {Char = String
         .expect("map return should have a TypeId");
     assert_map_shape(&ast, return_type_id, builtins.char, scores_type_id);
 
-    let payload_type_id =
-        nominal_type_id(&ast, &mut string_table, &mut path_fork, "Payload");
+    let payload_type_id = nominal_type_id(&ast, &mut string_table, &mut path_fork, "Payload");
     let payload_definition = ast
         .type_environment
         .choice_definition_for(payload_type_id)
@@ -850,7 +870,10 @@ fn map_type_resolves_for_supported_key() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
@@ -890,7 +913,10 @@ fn map_type_rejects_unsupported_key() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
@@ -951,7 +977,10 @@ fn map_type_rejects_excessive_inline_nesting() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
@@ -997,7 +1026,10 @@ fn map_type_allows_two_level_nesting() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 

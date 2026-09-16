@@ -131,8 +131,7 @@ pub(crate) struct ResolvedPublicTypeRootTable {
 pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
     pub sorted_headers: &'a [Header],
     pub resolved_struct_fields_by_path: &'a FxHashMap<PathId, Vec<Declaration>>,
-    pub resolved_function_signatures_by_path:
-        &'a FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub resolved_function_signatures_by_path: &'a FxHashMap<PathId, ResolvedFunctionSignature>,
     pub nominal_type_ids_by_path: &'a FxHashMap<PathId, TypeId>,
     pub resolved_type_aliases_by_path: &'a FxHashMap<PathId, ResolvedTypeAlias>,
     pub declaration_table: &'a TopLevelDeclarationTable,

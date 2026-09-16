@@ -35,10 +35,10 @@
 // `module_ast` contains the environment, emission, finalization, and scope-context helpers that
 // implement the AST pipeline. The rest of the AST surface is split by concern
 // (expressions, statements, templates, field access, etc.).
-pub(crate) mod cursor;
 pub(crate) mod ast_nodes;
 pub(crate) mod const_eval;
 pub(crate) mod const_values;
+pub(crate) mod cursor;
 pub(crate) mod file_value_resolution;
 pub(crate) mod generic_bounds;
 pub(crate) mod generic_functions;
@@ -161,6 +161,7 @@ use crate::compiler_frontend::ast::templates::top_level_templates::AstConstTopLe
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::instrumentation::{log_ast_counters, reset_ast_counters};
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstantiationRequest, ModuleMaterialisationPreparationBuilder,
 };
@@ -180,7 +181,6 @@ use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
@@ -251,8 +251,7 @@ pub struct Ast {
     /// WHY: config validation and HIR metadata need one shared source of truth for
     ///      const-ness without re-walking the AST.
     pub const_facts: AstConstFacts,
-    pub(crate) imported_functions_by_local_path:
-        FxHashMap<PathId, AstImportedFunctionContract>,
+    pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
     /// Provenance introduced by static configuration branch selection, keyed by function path
     /// until HIR allocates the build-local function IDs.
     pub(crate) static_if_function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
@@ -307,7 +306,9 @@ pub struct AstBuildResult {
 pub(in crate::compiler_frontend) struct AstBuildInput {
     pub headers: Vec<Header>,
     pub source_token_streams:
-        FxHashMap<SourceId, Arc<crate::compiler_frontend::tokenizer::tokens::FileTokens>>,
+        FxHashMap<SourceId, Arc<crate::compiler_frontend::tokenizer::tokens::SourceTokens>>,
+    pub source_token_paths: FxHashMap<SourceId, PathId>,
+    pub source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
     pub module_symbols: ModuleSymbols,
     pub binding_environment: HeaderBindingEnvironment,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
@@ -342,13 +343,14 @@ impl Ast {
         let AstBuildInput {
             headers,
             source_token_streams,
+            source_token_paths,
+            source_token_os_paths,
             module_symbols,
             binding_environment,
             top_level_const_fragments,
             source_build_config_contract_names,
         } = input;
         reset_ast_counters();
-
 
         let header_count = headers.len();
         let ast_header_counts = AstHeaderCounterSnapshot::from_headers(&headers);
@@ -367,6 +369,8 @@ impl Ast {
                 module_symbols,
                 binding_environment,
                 source_token_streams: source_token_streams.clone(),
+                source_token_paths: source_token_paths.clone(),
+                source_token_os_paths: source_token_os_paths.clone(),
             },
             string_table,
         )?;
@@ -385,6 +389,8 @@ impl Ast {
                 header_count,
                 path_fork,
                 source_token_streams,
+                source_token_paths,
+                source_token_os_paths,
             )
             .emit(headers, string_table)?
         };

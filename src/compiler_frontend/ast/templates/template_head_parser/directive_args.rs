@@ -19,6 +19,7 @@
 //! - **Slot modules** own slot schema and composition; they do not parse tokens.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -27,11 +28,10 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -120,11 +120,7 @@ pub(crate) fn expect_directive_close_paren(token_stream: &AstCursor) -> Directiv
     let found = token_stream.current_token_kind().to_owned();
     Err(with_current_token_span(
         token_stream,
-        CompilerDiagnostic::expected_token(
-            TokenKind::CloseParenthesis,
-            Some(found),
-            None,
-        ),
+        CompilerDiagnostic::expected_token(TokenKind::CloseParenthesis, Some(found), None),
     )
     .into())
 }
@@ -184,10 +180,7 @@ fn parse_single_expression_in_directive_parens(
     if token_stream.current_token_kind() == &TokenKind::Comma {
         return Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::unexpected_token(
-                TokenKind::Comma,
-                None,
-            ),
+            CompilerDiagnostic::unexpected_token(TokenKind::Comma, None),
         )
         .into());
     }
@@ -294,11 +287,7 @@ pub(crate) fn parse_optional_slot_target_argument(
             let index = materialize_i32(token, string_table).map_err(|reason| {
                 with_current_token_span(
                     token_stream,
-                    CompilerDiagnostic::invalid_number_literal(
-                        token.source_text,
-                        reason,
-                        None,
-                    ),
+                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, None),
                 )
             })?;
 

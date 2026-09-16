@@ -1,9 +1,10 @@
 use crate::compiler_frontend::keywords::{
-    ClassifiedSourceWord, SourceWordClass, attached_bang_keyword_token_kind, classify_source_word,
-    is_identifier_continue, is_keyword, is_valid_identifier, keyword_token_kind,
+    ClassifiedSourceWord, SourceWordClass, attached_bang_keyword_token_kind,
+    attached_bang_keyword_token_tag, classify_source_word, is_identifier_continue, is_keyword,
+    is_valid_identifier, keyword_token_kind, keyword_token_tag,
 };
 use crate::compiler_frontend::symbols::identifier_policy::keyword_shadow_match;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 
 #[test]
 fn keyword_policy_maps_exact_tokenizer_spellings() {
@@ -230,4 +231,24 @@ fn attached_bang_keyword_authority_covers_return_and_cast() {
     );
     assert_eq!(attached_bang_keyword_token_kind("if"), None);
     assert_eq!(attached_bang_keyword_token_kind("return!"), None);
+    assert_eq!(
+        attached_bang_keyword_token_tag("return"),
+        Some(TokenTag::RETURN_BANG)
+    );
+    assert_eq!(
+        attached_bang_keyword_token_tag("cast"),
+        Some(TokenTag::CAST_BANG)
+    );
+    assert_eq!(attached_bang_keyword_token_tag("if"), None);
+}
+
+#[test]
+fn keyword_tag_projection_matches_kind_taxonomy() {
+    for source in [
+        "export", "if", "return", "cast", "is", "copy", "Int", "true", "none",
+    ] {
+        let kind = keyword_token_kind(source).expect("keyword spelling must classify");
+        assert_eq!(keyword_token_tag(source), Some(kind.token_tag()));
+    }
+    assert_eq!(keyword_token_tag("import"), None);
 }

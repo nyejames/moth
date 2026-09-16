@@ -18,8 +18,8 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax, BoundModuleHeaders,
-    HeaderParseOptions,
+    BoundModuleHeaders, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::module::HirModule;

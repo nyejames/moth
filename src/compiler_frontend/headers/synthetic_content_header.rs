@@ -18,7 +18,7 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenRange, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, Token, TokenKind, TokenRange};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use std::collections::HashSet;
 
@@ -50,7 +50,9 @@ pub(crate) fn content_constant_path(
     let content_name = string_table.intern(SYNTHETIC_CONTENT_NAME);
     path_fork
         .try_intern_child(content_source, content_name)
-        .ok_or_else(|| CompilerError::compiler_error("path table exhausted while interning content path"))
+        .ok_or_else(|| {
+            CompilerError::compiler_error("path table exhausted while interning content path")
+        })
 }
 
 /// Build a private `content #String` constant header from a compact adapter payload.
@@ -69,10 +71,10 @@ pub(crate) fn synthetic_content_header(
         ));
     }
     let header_path = content_constant_path(input.source_file, path_fork, string_table)?;
-    let initializer_range = match input.payload {
-        SyntheticContentPayload::MothTemplate { .. } => Some(input.initializer_range),
-        SyntheticContentPayload::RenderedHtml(_) => None,
-    };
+    // Synthetic bodies are represented by `Header::tokens`; AST constant resolution supplies
+    // the parser-only initializer override from that range and payload. Keeping the declaration
+    // shell range empty prevents a second retained initializer authority.
+    let initializer_range = None;
     let declaration = DeclarationSyntax {
         binding_mode: BindingMode::CompileTimeConstant,
         type_annotation: ParsedTypeRef::BuiltinString { span: None },
@@ -103,9 +105,10 @@ pub(crate) fn synthetic_content_header(
 /// than retained on the header or prepared source.
 pub(crate) fn materialize_synthetic_content_initializer(
     payload: SyntheticContentPayload,
-    source: Option<&FileTokens>,
+    source: Option<&SourceTokens>,
     body_range: TokenRange,
     declaration_path: PathId,
+    canonical_os_path: Option<std::path::PathBuf>,
 ) -> Result<Vec<Token>, CompilerError> {
     match payload {
         SyntheticContentPayload::RenderedHtml(rendered_html) => Ok(vec![
@@ -121,10 +124,12 @@ pub(crate) fn materialize_synthetic_content_initializer(
                     "MothTemplate synthetic content has no canonical source token owner",
                 )
             })?;
-            let mut body_stream =
-                FileTokens::new_bounded_substream(source, body_range, declaration_path)?;
-            let mut initializer_tokens = Vec::with_capacity(body_stream.tokens.len() + 5);
-            initializer_tokens.push(Token::new(TokenKind::TemplateHead, LocalSpan::source_start()));
+            let body_tokens = source.materialize_range(body_range)?;
+            let mut initializer_tokens = Vec::with_capacity(body_tokens.len() + 5);
+            initializer_tokens.push(Token::new(
+                TokenKind::TemplateHead,
+                LocalSpan::source_start(),
+            ));
             initializer_tokens.push(Token::new(
                 TokenKind::StyleDirective(markdown_directive),
                 LocalSpan::source_start(),
@@ -133,9 +138,15 @@ pub(crate) fn materialize_synthetic_content_initializer(
                 TokenKind::StartTemplateBody,
                 LocalSpan::source_start(),
             ));
-            initializer_tokens.append(&mut body_stream.tokens);
-            initializer_tokens.push(Token::new(TokenKind::TemplateClose, LocalSpan::source_start()));
+            initializer_tokens.extend(body_tokens);
+            initializer_tokens.push(Token::new(
+                TokenKind::TemplateClose,
+                LocalSpan::source_start(),
+            ));
             initializer_tokens.push(Token::new(TokenKind::Eof, LocalSpan::source_start()));
+            // The from-canonical adapter signature needs the explicit filesystem identity plus
+            // the declaration shell path; materialization keeps only the token vector.
+            let _ = (declaration_path, canonical_os_path);
             Ok(initializer_tokens)
         }
     }

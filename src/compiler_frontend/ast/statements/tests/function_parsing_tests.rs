@@ -84,18 +84,21 @@ fn function_default_path_token_reports_structured_diagnostic_not_panic() {
 
 #[test]
 fn parses_function_parameters_and_return_types() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("add |left Int, right Int| -> Int:\n    return left + right\n;\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("add |left Int, right Int| -> Int:\n    return left + right\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "add");
 
     assert_eq!(signature.parameters.len(), 2);
     assert_eq!(
-        path_fork.component(signature.parameters[0].id)
+        path_fork
+            .component(signature.parameters[0].id)
             .map(|id| string_table.resolve(id)),
         Some("left")
     );
     assert_eq!(
-        path_fork.component(signature.parameters[1].id)
+        path_fork
+            .component(signature.parameters[1].id)
             .map(|id| string_table.resolve(id)),
         Some("right")
     );
@@ -110,7 +113,8 @@ fn parses_function_parameters_and_return_types() {
 
 #[test]
 fn parses_final_error_return_slot_in_function_signature() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("compute |x Int| -> Int, Error!:\n    return x\n;\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("compute |x Int| -> Int, Error!:\n    return x\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
 
@@ -134,7 +138,8 @@ fn parses_final_error_return_slot_in_function_signature() {
 
 #[test]
 fn parses_optional_final_error_return_slot() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("compute |x Int| -> Int, String?!:\n    return x\n;\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("compute |x Int| -> Int, String?!:\n    return x\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
 
@@ -179,11 +184,16 @@ fn rejects_multiple_error_return_slots() {
 
 #[test]
 fn parses_generic_function_declaration_without_emitting_executable_function() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("identity type T |value T| -> T:\n    return value\n;\n\nio.line([: [\"ready\"]])\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "identity type T |value T| -> T:\n    return value\n;\n\nio.line([: [\"ready\"]])\n",
+    );
 
     let generic_function_emitted = ast.nodes.iter().any(|node| match &node.kind {
         NodeKind::Function(path, ..) => {
-            path_fork.component(*path).map(|id| string_table.resolve(id)) == Some("identity")
+            path_fork
+                .component(*path)
+                .map(|id| string_table.resolve(id))
+                == Some("identity")
         }
         _ => false,
     });
@@ -203,7 +213,10 @@ fn same_file_generic_calls_emit_requests_without_eager_function_bodies() {
 
     let generic_template_emitted = ast.nodes.iter().any(|node| match &node.kind {
         NodeKind::Function(path, ..) => {
-            path_fork.component(*path).map(|id| string_table.resolve(id)) == Some("identity")
+            path_fork
+                .component(*path)
+                .map(|id| string_table.resolve(id))
+                == Some("identity")
         }
         _ => false,
     });
@@ -422,7 +435,9 @@ fn generic_template_terminality_uses_static_module_constant_selection() {
 
 #[test]
 fn start_function_distinguishes_user_and_host_calls() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("identity |value Int| -> Int:\n    return value\n;\n\nresult = identity(1)\nio.line([: [result]])\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "identity |value Int| -> Int:\n    return value\n;\n\nresult = identity(1)\nio.line([: [result]])\n",
+    );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -497,7 +512,9 @@ fn rejects_struct_constructor_argument_type_with_field_wording() {
 
 #[test]
 fn resolves_named_struct_type_in_function_parameters() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int,\n|\n\nshow |value Point|:\n    io.line([: [value.x]])\n;\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Point = |\n    x Int,\n|\n\nshow |value Point|:\n    io.line([: [value.x]])\n;\n",
+    );
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "show");
     assert!(matches!(
@@ -511,7 +528,9 @@ fn resolves_named_struct_type_in_function_parameters() {
 
 #[test]
 fn resolves_named_struct_type_in_function_returns() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int,\n|\n\nclone |value Point| -> Point:\n    return value\n;\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Point = |\n    x Int,\n|\n\nclone |value Point| -> Point:\n    return value\n;\n",
+    );
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "clone");
     assert!(matches!(
@@ -648,7 +667,9 @@ fn rejects_const_record_method_calls() {
 
 #[test]
 fn parses_mutable_receiver_methods_with_explicit_receiver_tilde() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint ~= Point()\n~point.reset()\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Point = |\n    x Int = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint ~= Point()\n~point.reset()\n",
+    );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
     let NodeKind::ExpressionStatement(call_expr) = &body[1].kind else {
@@ -689,7 +710,9 @@ fn rejects_explicit_receiver_tilde_for_shared_receiver_methods() {
 
 #[test]
 fn parses_result_propagation_call_in_expression_position() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return value\n;\n\nforward |value String| -> String, Error!:\n    return can_error(value)!\n;\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "can_error |value String| -> String, Error!:\n    return value\n;\n\nforward |value String| -> String, Error!:\n    return can_error(value)!\n;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "forward");
     let NodeKind::Return(values) = &body[0].kind else {
@@ -732,7 +755,9 @@ fn return_int_context_reports_targeted_guidance_for_regular_division() {
 
 #[test]
 fn parses_result_fallback_call_in_expression_position() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return value\n;\n\nrecover |value String| -> String:\n    return can_error(value) catch:\n        then \"fallback\"\n    ;\n;\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "can_error |value String| -> String, Error!:\n    return value\n;\n\nrecover |value String| -> String:\n    return can_error(value) catch:\n        then \"fallback\"\n    ;\n;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::Return(values) = &body[0].kind else {
@@ -761,11 +786,13 @@ fn parses_result_fallback_call_in_expression_position() {
 
 #[test]
 fn parses_inline_choice_predicate_receiver_as_value_match() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Status :: Ready, Waiting;\n\
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Status :: Ready, Waiting;\n\
      score_for |status Status| -> Int:\n\
          score = if status is Ready then 1 else 0\n\
          return score\n\
-     ;\n");
+     ;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "score_for");
     let NodeKind::VariableDeclaration(score_decl) = &body[0].kind else {
@@ -795,10 +822,12 @@ fn parses_inline_choice_predicate_receiver_as_value_match() {
 
 #[test]
 fn parses_inline_option_present_capture_receiver_as_value_match() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("display |maybe_name String?| -> String:\n\
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "display |maybe_name String?| -> String:\n\
          name = if maybe_name is |name| then name else \"guest\"\n\
          return name\n\
-     ;\n");
+     ;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "display");
     let NodeKind::VariableDeclaration(name_decl) = &body[0].kind else {
@@ -847,14 +876,16 @@ fn newline_between_is_and_option_capture_is_not_committed_at_inline_receiver() {
 
 #[test]
 fn parses_block_option_present_capture_receiver_as_value_match() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("display |maybe_name String?| -> String:\n\
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "display |maybe_name String?| -> String:\n\
          name = if maybe_name is |name|:\n\
              then name\n\
          else\n\
              then \"guest\"\n\
          ;\n\
          return name\n\
-     ;\n");
+     ;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "display");
     let NodeKind::VariableDeclaration(name_decl) = &body[0].kind else {
@@ -911,7 +942,8 @@ fn newline_between_is_and_option_capture_is_not_committed_at_block_receiver() {
 
 #[test]
 fn parses_block_choice_predicate_receiver_as_value_match() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Status :: Ready, Waiting;\n\
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Status :: Ready, Waiting;\n\
      score_for |status Status| -> Int:\n\
          score = if status is Ready:\n\
              then 1\n\
@@ -919,7 +951,8 @@ fn parses_block_choice_predicate_receiver_as_value_match() {
              then 0\n\
          ;\n\
          return score\n\
-     ;\n");
+     ;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "score_for");
     let NodeKind::VariableDeclaration(score_decl) = &body[0].kind else {
@@ -953,10 +986,12 @@ fn parses_block_choice_predicate_receiver_as_value_match() {
 
 #[test]
 fn parses_inferred_multi_bind_inline_option_capture_as_value_match() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("display |maybe_name String?| -> String, Int:\n\
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "display |maybe_name String?| -> String, Int:\n\
          label, count = if maybe_name is |name| then name, 1 else \"guest\", 0\n\
          return label, count\n\
-     ;\n");
+     ;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "display");
     let NodeKind::MultiBind { value, .. } = &body[0].kind else {
@@ -984,7 +1019,8 @@ fn parses_inferred_multi_bind_inline_option_capture_as_value_match() {
 
 #[test]
 fn parses_inferred_multi_bind_block_choice_payload_as_value_match() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Response :: Complete, Failed | message String |;\n\
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Response :: Complete, Failed | message String |;\n\
      label_for |response Response| -> String, Int:\n\
          text, code = if response is Failed(message):\n\
              then message, 1\n\
@@ -992,7 +1028,8 @@ fn parses_inferred_multi_bind_block_choice_payload_as_value_match() {
              then \"complete\", 0\n\
          ;\n\
          return text, code\n\
-     ;\n");
+     ;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "label_for");
     let NodeKind::MultiBind { value, .. } = &body[0].kind else {
@@ -1020,10 +1057,12 @@ fn parses_inferred_multi_bind_block_choice_payload_as_value_match() {
 
 #[test]
 fn parses_option_equality_receiver_as_bool_value_if() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("compare |left String?, right String?| -> String:\n\
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "compare |left String?, right String?| -> String:\n\
          result = if left is right then \"yes\" else \"no\"\n\
          return result\n\
-     ;\n");
+     ;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "compare");
     let NodeKind::VariableDeclaration(result_decl) = &body[0].kind else {
@@ -1039,7 +1078,9 @@ fn parses_option_equality_receiver_as_bool_value_if() {
 
 #[test]
 fn parses_catch_handler_with_fallback_scope_in_declaration_rhs() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("can_error |value String| -> String, Error!:\n    return value\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.message]])\n        then \"fallback\"\n    ;\n    return output\n;\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "can_error |value String| -> String, Error!:\n    return value\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.message]])\n        then \"fallback\"\n    ;\n    return output\n;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
     let NodeKind::VariableDeclaration(output_decl) = &body[0].kind else {
@@ -1071,7 +1112,9 @@ fn parses_catch_handler_with_fallback_scope_in_declaration_rhs() {
 
 #[test]
 fn parses_standalone_result_propagation_statement() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("can_error || -> Error!:\n    return\n;\n\nrun || -> Error!:\n    can_error()!\n;\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "can_error || -> Error!:\n    return\n;\n\nrun || -> Error!:\n    can_error()!\n;\n",
+    );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "run");
     let NodeKind::ExpressionStatement(expression) = &body[0].kind else {
@@ -1121,7 +1164,8 @@ fn rejects_trailing_comma_in_error_return() {
 
 #[test]
 fn parses_valid_single_return_without_trailing_comma() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("compute |x Int| -> Int:\n    return 42\n;\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("compute |x Int| -> Int:\n    return 42\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.returns.len(), 1);
@@ -1135,7 +1179,8 @@ fn parses_valid_single_return_without_trailing_comma() {
 
 #[test]
 fn parses_valid_multiple_returns_without_trailing_comma() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("compute |x Int| -> Int, String:\n    return 42, \"result\"\n;\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("compute |x Int| -> Int, String:\n    return 42, \"result\"\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.returns.len(), 2);
@@ -1155,12 +1200,14 @@ fn parses_valid_multiple_returns_without_trailing_comma() {
 
 #[test]
 fn parses_valid_single_parameter_without_trailing_comma() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("compute |x Int| -> Int:\n    return x\n;\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("compute |x Int| -> Int:\n    return x\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.parameters.len(), 1);
     assert_eq!(
-        path_fork.component(signature.parameters[0].id)
+        path_fork
+            .component(signature.parameters[0].id)
             .map(|id| string_table.resolve(id)),
         Some("x")
     );
@@ -1168,17 +1215,20 @@ fn parses_valid_single_parameter_without_trailing_comma() {
 
 #[test]
 fn parses_valid_multiple_parameters_without_trailing_comma() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("compute |x Int, y Int| -> Int:\n    return x + y\n;\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("compute |x Int, y Int| -> Int:\n    return x + y\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.parameters.len(), 2);
     assert_eq!(
-        path_fork.component(signature.parameters[0].id)
+        path_fork
+            .component(signature.parameters[0].id)
             .map(|id| string_table.resolve(id)),
         Some("x")
     );
     assert_eq!(
-        path_fork.component(signature.parameters[1].id)
+        path_fork
+            .component(signature.parameters[1].id)
             .map(|id| string_table.resolve(id)),
         Some("y")
     );

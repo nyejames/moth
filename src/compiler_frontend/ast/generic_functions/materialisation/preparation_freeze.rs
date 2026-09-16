@@ -63,9 +63,7 @@ use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
-use crate::compiler_frontend::symbols::string_interning::{
-    StringId, StringIdRemap, StringTable,
-};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 
@@ -86,8 +84,7 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
     pub(crate) binding_environment: HeaderBindingEnvironment,
-    pub(crate) imported_functions_by_local_path:
-        FxHashMap<PathId, AstImportedFunctionContract>,
+    pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
     pub(crate) imported_struct_definitions:
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
     pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,
@@ -95,11 +92,9 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(super) default_const_templates_by_path: FxHashMap<PathId, PublicConstTemplate>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
     pub(crate) resolved_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
-    pub(crate) resolved_function_signatures_by_path:
-        FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub(crate) resolved_function_signatures_by_path: FxHashMap<PathId, ResolvedFunctionSignature>,
     pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
-    pub(super) generic_template_paths_by_identity:
-        FxHashMap<GeneratedDeclarationIdentity, PathId>,
+    pub(super) generic_template_paths_by_identity: FxHashMap<GeneratedDeclarationIdentity, PathId>,
     pub(crate) resolved_type_aliases_by_path: FxHashMap<PathId, ResolvedTypeAlias>,
     pub(crate) choice_variant_shells_by_path: FxHashMap<PathId, Vec<ChoiceVariant>>,
     pub(crate) declaration_semantics: DeclarationSemanticTable,
@@ -349,7 +344,13 @@ impl ModuleMaterialisationPreparation {
         let artefacts = templates
             .into_iter()
             .map(|template| {
-                self.freeze_template(template, public_interface, &semantic_closure, resources, path_fork)
+                self.freeze_template(
+                    template,
+                    public_interface,
+                    &semantic_closure,
+                    resources,
+                    path_fork,
+                )
             })
             .collect::<Result<Box<[_]>, CompilerError>>()?;
         Ok(Some(ModuleMaterialisationContext {
@@ -404,8 +405,12 @@ impl ModuleMaterialisationPreparation {
         )?;
         let selected_paths =
             self.selected_visible_paths(&template.source_file, &referenced_names)?;
-        let visibility = self
-            .stable_file_visibility(&template.source_file, &referenced_names, resources, path_fork)?;
+        let visibility = self.stable_file_visibility(
+            &template.source_file,
+            &referenced_names,
+            resources,
+            path_fork,
+        )?;
         let declarations = self.stable_declaration_bindings(&selected_paths, public_interface)?;
         let local_declarations = self.stable_local_declaration_bindings(&selected_paths);
         let callables = self.stable_callable_bindings(&selected_paths, resources, path_fork)?;
@@ -565,11 +570,8 @@ impl ModuleMaterialisationPreparation {
             .copied()
             .ok_or_else(|| {
                 let mut scratch = Vec::new();
-                let rendered = path_fork.render_portable(
-                    *logical_path,
-                    &self.string_table,
-                    &mut scratch,
-                );
+                let rendered =
+                    path_fork.render_portable(*logical_path, &self.string_table, &mut scratch);
                 CompilerError::compiler_error(format!(
                     "synthetic content constant for {} was not present before generic capture",
                     rendered
@@ -1252,11 +1254,8 @@ impl ModuleMaterialisationPreparation {
                 let mut scratch = Vec::new();
                 path_fork.render_portable(path, &self.string_table, &mut scratch)
             };
-            let identity = ModulePrivateNominalIdentity::new(
-                module_origin.clone(),
-                defining_path,
-                category,
-            );
+            let identity =
+                ModulePrivateNominalIdentity::new(module_origin.clone(), defining_path, category);
             self.type_environment.register_canonical_identity(
                 CanonicalTypeIdentity::ModulePrivateNominal(identity.clone()),
                 type_id,
@@ -1344,11 +1343,7 @@ impl ModuleMaterialisationPreparation {
         let receiver_path = match resolved.receiver.as_ref() {
             Some(ReceiverKey::Struct(receiver) | ReceiverKey::Choice(receiver)) => {
                 let mut scratch = Vec::new();
-                Some(paths.render_portable(
-                    *receiver,
-                    &self.string_table,
-                    &mut scratch,
-                ))
+                Some(paths.render_portable(*receiver, &self.string_table, &mut scratch))
             }
             Some(ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_)) => {
                 return Err(CompilerError::compiler_error(

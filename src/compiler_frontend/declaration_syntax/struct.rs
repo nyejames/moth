@@ -10,6 +10,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::DeclarationCursor;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
@@ -24,7 +25,6 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use super::DeclarationCursor;
 /// Two-lane result for struct shell parsing.
 ///
 /// WHAT: mirrors `RecordBodyParseResult` so the thin `parse_struct_shell` wrapper

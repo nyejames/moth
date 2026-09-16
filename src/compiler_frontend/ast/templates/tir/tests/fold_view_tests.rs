@@ -145,7 +145,9 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
     };
 
     // An active binding stack does not change a view that reads no bindings.
-    let path = path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("value", &mut string_table)
+        .expect("test path fits");
     let mut active_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,

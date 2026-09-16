@@ -61,11 +61,7 @@ impl PreparedFileReferenceTable {
         // interned strings.
     }
 
-    pub(crate) fn rebind_source_identity(
-        &mut self,
-        file_id: SourceId,
-        _logical_path: PathId,
-    ) {
+    pub(crate) fn rebind_source_identity(&mut self, file_id: SourceId, _logical_path: PathId) {
         for reference in &mut self.references {
             reference.source_file = file_id;
             reference.span = SourceSpan::new(file_id, reference.span.local());

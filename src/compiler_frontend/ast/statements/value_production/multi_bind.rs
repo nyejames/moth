@@ -9,6 +9,7 @@ use super::expression_build::{build_value_if_expression, build_value_match_expre
 use super::receiver::try_parse_value_block_at_receiver_with_target;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
@@ -28,7 +29,6 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 
 /// Value-producing multi-bind bodies recurse into the AST body parser, so they preserve the

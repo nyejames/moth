@@ -106,7 +106,8 @@ fn fallible_core_trait_appends_error_return_channel() {
     let mut trait_environment = TraitEnvironment::new();
 
     let int_type_id = type_environment.builtins().int;
-    let error_type_id = register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
+    let error_type_id =
+        register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
     let trait_id = trait_environment.register_core_trait(
         &mut type_environment,
         &mut string_table,
@@ -349,8 +350,10 @@ fn register_error_nominal_type(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> crate::compiler_frontend::datatypes::ids::TypeId {
-    let error_path =
-        crate::compiler_frontend::builtins::error_type::builtin_error_type_path(path_fork, string_table);
+    let error_path = crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+        path_fork,
+        string_table,
+    );
     let struct_def = crate::compiler_frontend::datatypes::definitions::StructTypeDefinition {
         id: crate::compiler_frontend::datatypes::ids::NominalTypeId(0),
         path: error_path,
@@ -374,9 +377,20 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         .get_by_canonical_path(&path)
         .expect("source identity")
         .id;
-    let scope = path_fork.try_intern_filesystem_path(&path, &mut strings).expect("source path");
+    let scope = path_fork
+        .try_intern_filesystem_path(&path, &mut strings)
+        .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let mut tokens = tokenize(
+        source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("signature tokens");
     let prepared = parse_file_headers_with_table(
         &mut tokens,
@@ -389,7 +403,9 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         &mut spans,
     )
     .expect("trait declaration should prepare");
-    let declaration = prepared.headers.iter()
+    let declaration = prepared
+        .headers
+        .iter()
         .find_map(|header| match &header.kind {
             HeaderKind::Trait { declaration } => Some(declaration),
             _ => None,

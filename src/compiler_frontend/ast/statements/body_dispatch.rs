@@ -6,6 +6,7 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::asserts::parse_assert_statement;
@@ -27,7 +28,6 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues, ProducedValuesParseInput, ValueReceiverKind,
     is_missing_produced_value_boundary, parse_produced_values_typed,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};

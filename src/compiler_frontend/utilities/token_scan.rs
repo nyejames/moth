@@ -87,7 +87,10 @@ pub(crate) fn collect_scanned_symbol_references(
             continue;
         };
 
-        let previous = index.checked_sub(1).and_then(|i| tokens.get(i)).map(|t| t.tag);
+        let previous = index
+            .checked_sub(1)
+            .and_then(|i| tokens.get(i))
+            .map(|t| t.tag);
         if previous == Some(TokenTag::DOT) || previous == Some(TokenTag::DOUBLE_COLON) {
             continue;
         }
@@ -187,11 +190,19 @@ impl ScannedToken {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TokenFactView<'a> {
     Slice(&'a [Token]),
-    Stream { tokens: &'a [Token], end: usize },
-    Canonical { tokens: &'a SourceTokens, start: usize, end: usize },
+    Stream {
+        tokens: &'a [Token],
+        end: usize,
+    },
+    Canonical {
+        tokens: &'a SourceTokens,
+        start: usize,
+        end: usize,
+    },
 }
 
 impl<'a> TokenFactView<'a> {
+    #[cfg(test)]
     pub(crate) fn from_slice(tokens: &'a [Token]) -> Self {
         Self::Slice(tokens)
     }
@@ -202,6 +213,7 @@ impl<'a> TokenFactView<'a> {
     /// indexed facts, so string/path remaps stay visible and no snapshot can go stale.
     /// WHY: header streams remap payloads before publication; copying one clause window
     ///      would freeze pre-remap identities the path table no longer recognises.
+    #[cfg(test)]
     pub(crate) fn from_stream(stream: &'a FileTokens) -> Self {
         Self::Stream {
             tokens: &stream.tokens,
@@ -256,7 +268,11 @@ impl<'a> TokenFactView<'a> {
                 tokens,
                 end: tokens.len().min(stream_end),
             }),
-            Self::Canonical { tokens, start: base, end: base_end } => {
+            Self::Canonical {
+                tokens,
+                start: base,
+                end: base_end,
+            } => {
                 let bounded_start = base.checked_add(start)?;
                 let bounded_end = base.checked_add(end)?;
                 (bounded_end <= base_end).then_some(Self::Canonical {
@@ -276,13 +292,13 @@ impl<'a> TokenFactView<'a> {
         }
     }
 
-
     pub(crate) fn get(self, index: usize) -> Option<ScannedToken> {
         match self {
             Self::Slice(tokens) => tokens.get(index).map(ScannedToken::from_token),
-            Self::Stream { tokens, end } => {
-                (index < end).then(|| tokens.get(index)).flatten().map(ScannedToken::from_token)
-            }
+            Self::Stream { tokens, end } => (index < end)
+                .then(|| tokens.get(index))
+                .flatten()
+                .map(ScannedToken::from_token),
             Self::Canonical { tokens, start, end } => {
                 let absolute = start.checked_add(index)?;
                 if absolute >= end {
@@ -305,7 +321,7 @@ impl<'a> TokenFactView<'a> {
         }
     }
 }
-
+#[cfg(test)]
 pub(crate) fn collect_symbol_references(
     tokens: &[Token],
     source_id: SourceId,
@@ -381,6 +397,7 @@ enum RecordPipeAction {
     Close,
     Ignore,
 }
+#[cfg(test)]
 fn classify_pipe_list(
     tokens: &[Token],
     pipe_index: usize,
@@ -401,6 +418,7 @@ fn classify_pipe_list(
 /// literal stay pipe regions, including malformed first members. Catch bindings
 /// (`|err|`) and option captures (`|name|`) stay outside so `|` keeps continuing
 /// the surrounding expression.
+#[cfg(test)]
 fn pipe_opens_member_list(tokens: &[Token], pipe_index: usize, allow_value_first: bool) -> bool {
     pipe_opens_member_list_with(
         |cursor| {
@@ -636,6 +654,7 @@ impl TemplateBalance {
 /// states remain typed infrastructure failures for the declaration-shell boundary.
 pub(crate) type TokenScanResult<T> = Result<T, TokenScanFailure>;
 
+#[cfg(test)]
 pub(crate) fn collect_declaration_initializer_tokens(
     token_stream: &mut FileTokens,
     string_table: &mut StringTable,
@@ -697,7 +716,9 @@ pub(crate) fn collect_declaration_initializer_tokens(
             )
         {
             if inline_value_if_missing_else_depth > 0
-                || collected.last().is_some_and(|token| token.kind == TokenKind::Else)
+                || collected
+                    .last()
+                    .is_some_and(|token| token.kind == TokenKind::Else)
             {
                 collected.push(token_stream.current_token());
             }
@@ -709,7 +730,9 @@ pub(crate) fn collect_declaration_initializer_tokens(
             && !continues_multiline_expression
         {
             if inline_value_if_missing_else_depth > 0
-                || collected.last().is_some_and(|token| token.kind == TokenKind::Else)
+                || collected
+                    .last()
+                    .is_some_and(|token| token.kind == TokenKind::Else)
             {
                 collected.push(token_stream.current_token());
             }
@@ -912,12 +935,10 @@ pub(crate) fn collect_declaration_initializer_range(
                     .last()
                     .is_some_and(|token: &ScannedToken| token.tag.continues_expression())
             };
-            let next_continues = next_non_newline_tag
-                .is_some_and(TokenTag::continues_expression);
+            let next_continues = next_non_newline_tag.is_some_and(TokenTag::continues_expression);
             let continues_to_authored_else = inline_value_if_missing_else_depth > 0
                 && next_non_newline_tag == Some(TokenTag::ELSE);
-            let continues_to_catch_header =
-                catch_header_pending || inline_catch_value_pending;
+            let continues_to_catch_header = catch_header_pending || inline_catch_value_pending;
             previous_continues
                 || next_continues
                 || continues_to_authored_else
@@ -927,12 +948,12 @@ pub(crate) fn collect_declaration_initializer_range(
         };
 
         let boundary_end = if at_top_level
-            && matches!(
-                current_tag,
-                TokenTag::COMMA | TokenTag::END | TokenTag::EOF
-            ) {
+            && matches!(current_tag, TokenTag::COMMA | TokenTag::END | TokenTag::EOF)
+        {
             let include_boundary = inline_value_if_missing_else_depth > 0
-                || collected.last().is_some_and(|token| token.tag == TokenTag::ELSE);
+                || collected
+                    .last()
+                    .is_some_and(|token| token.tag == TokenTag::ELSE);
             Some(if include_boundary {
                 TokenIndex::try_from_index(current_ref.index().index().saturating_add(1))
                     .ok_or_else(|| {
@@ -948,7 +969,9 @@ pub(crate) fn collect_declaration_initializer_range(
             && !continues_multiline_expression
         {
             let include_boundary = inline_value_if_missing_else_depth > 0
-                || collected.last().is_some_and(|token| token.tag == TokenTag::ELSE);
+                || collected
+                    .last()
+                    .is_some_and(|token| token.tag == TokenTag::ELSE);
             Some(if include_boundary {
                 TokenIndex::try_from_index(current_ref.index().index().saturating_add(1))
                     .ok_or_else(|| {
@@ -969,15 +992,13 @@ pub(crate) fn collect_declaration_initializer_range(
                     "declaration initializer range was invalid: {error:?}",
                 )))
             })?;
-            let facts = TokenFactView::from_source_range(source_tokens, range).map_err(|error| {
-                TokenScanFailure::Infrastructure(CompilerError::compiler_error(format!(
-                    "declaration initializer reference view was invalid: {error:?}",
-                )))
-            })?;
-            return Ok((
-                range,
-                collect_scanned_symbol_references(facts, source_id),
-            ));
+            let facts =
+                TokenFactView::from_source_range(source_tokens, range).map_err(|error| {
+                    TokenScanFailure::Infrastructure(CompilerError::compiler_error(format!(
+                        "declaration initializer reference view was invalid: {error:?}",
+                    )))
+                })?;
+            return Ok((range, collect_scanned_symbol_references(facts, source_id)));
         }
 
         if current_tag == TokenTag::EOF && (!at_top_level || inside_record_region) {
@@ -1100,7 +1121,10 @@ pub(crate) fn collect_declaration_initializer_range(
             _ => {}
         }
 
-        if !matches!(current_tag, TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::NEWLINE) {
+        if !matches!(
+            current_tag,
+            TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::NEWLINE
+        ) {
             last_closed_record_pipe = false;
         }
         depth.step_tag(current_tag);
@@ -1165,9 +1189,15 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
     let mut depth = NestingDepth::default();
     let mut record_pipe_depth = 0usize;
     let mut offset = 0usize;
+    let remaining_tokens = token_stream
+        .length()
+        .saturating_sub(token_stream.position());
     let mut seen_non_newline = false;
 
-    while let Some(token_kind) = token_stream.token_kind_at_offset(offset) {
+    while offset < remaining_tokens {
+        let Some(token_kind) = token_stream.token_kind_at_offset(offset) else {
+            break;
+        };
         if token_kind == TokenKind::TypeParameterBracket {
             match classify_pipe_list_at_cursor(
                 token_stream,
@@ -1210,6 +1240,7 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
     false
 }
 
+#[cfg(test)]
 pub(crate) fn find_expression_end_index(
     tokens: &[Token],
     start_index: usize,
@@ -1237,6 +1268,7 @@ pub(crate) fn find_expression_end_index(
     index
 }
 
+#[cfg(test)]
 pub(crate) fn consume_balanced_template_region<E>(
     token_stream: &mut FileTokens,
     mut on_token: impl FnMut(Token, &TokenKind),
@@ -1270,15 +1302,16 @@ pub(crate) fn consume_balanced_template_region_from_source<E>(
     on_eof_error: impl Fn(SourceSpan) -> E,
     on_infrastructure_error: impl Fn(CompilerError) -> E,
 ) -> Result<usize, E> {
-    let opening = TokenIndex::try_from_index(opening_index)
-        .ok_or_else(|| on_infrastructure_error(CompilerError::compiler_error(
+    let opening = TokenIndex::try_from_index(opening_index).ok_or_else(|| {
+        on_infrastructure_error(CompilerError::compiler_error(
             "template opening exceeded the source token index space",
-        )))?;
-    let expected_current = opening_index
-        .checked_add(1)
-        .ok_or_else(|| on_infrastructure_error(CompilerError::compiler_error(
+        ))
+    })?;
+    let expected_current = opening_index.checked_add(1).ok_or_else(|| {
+        on_infrastructure_error(CompilerError::compiler_error(
             "template body index exceeded the source token index space",
-        )))?;
+        ))
+    })?;
     if token_stream.index != expected_current {
         return Err(on_infrastructure_error(CompilerError::compiler_error(
             "template compatibility cursor was not positioned after its opening token",

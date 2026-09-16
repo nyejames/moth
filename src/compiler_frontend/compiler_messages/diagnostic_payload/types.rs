@@ -810,7 +810,6 @@ impl InvalidGenericParameterReason {
     }
 }
 
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTemplateDirectiveReason {
     UnknownDirective,

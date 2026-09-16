@@ -88,7 +88,9 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let point_path = path_fork.try_intern_portable_path("Point", &mut string_table).expect("test path fits");
+    let point_path = path_fork
+        .try_intern_portable_path("Point", &mut string_table)
+        .expect("test path fits");
     let (_, point_type) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: point_path,
@@ -97,7 +99,9 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
         const_record: false,
     });
 
-    let status_path = path_fork.try_intern_portable_path("Status", &mut string_table).expect("test path fits");
+    let status_path = path_fork
+        .try_intern_portable_path("Status", &mut string_table)
+        .expect("test path fits");
     let ready = string_table.get_or_intern("Ready".to_owned());
     let failed = string_table.get_or_intern("Failed".to_owned());
     let (_, status_type) = type_environment.register_nominal_choice(ChoiceTypeDefinition {

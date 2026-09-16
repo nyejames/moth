@@ -137,16 +137,13 @@ fn authored_default_expression_survives_newline_and_multiline_continuation() {
     );
     let multiline_signature = first_function_signature(&multiline);
     assert!(
-        multiline_signature
-            .parameters
-            .iter()
-            .any(|parameter| {
-                default_tokens(&multiline, parameter.default_range)
-                    .iter()
-                    .filter(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-                    .count()
-                    == 2
-            }),
+        multiline_signature.parameters.iter().any(|parameter| {
+            default_tokens(&multiline, parameter.default_range)
+                .iter()
+                .filter(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+                .count()
+                == 2
+        }),
         "an operator-continued multiline default should fold both string literals"
     );
 }

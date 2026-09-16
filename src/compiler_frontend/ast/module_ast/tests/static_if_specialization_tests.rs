@@ -13,8 +13,12 @@ use crate::compiler_frontend::value_mode::ValueMode;
 fn terminating_value_body_lift_uses_explicit_branch_scope() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let branch_scope = path_fork.try_intern_portable_path("branch", &mut string_table).expect("test path fits");
-    let nested_scope = path_fork.try_intern_portable_path("nested", &mut string_table).expect("test path fits");
+    let branch_scope = path_fork
+        .try_intern_portable_path("branch", &mut string_table)
+        .expect("test path fits");
+    let nested_scope = path_fork
+        .try_intern_portable_path("nested", &mut string_table)
+        .expect("test path fits");
     let span: Option<SourceSpan> = None;
     let nested_terminal = AstNode {
         kind: NodeKind::LexicalScope {
@@ -62,10 +66,18 @@ fn inactive_static_branch_drops_nested_provenance() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let span: Option<SourceSpan> = None;
-    let function_path = path_fork.try_intern_portable_path("selected", &mut string_table).expect("test path fits");
-    let then_scope = path_fork.try_intern_portable_path("then", &mut string_table).expect("test path fits");
-    let else_scope = path_fork.try_intern_portable_path("else", &mut string_table).expect("test path fits");
-    let nested_scope = path_fork.try_intern_portable_path("nested", &mut string_table).expect("test path fits");
+    let function_path = path_fork
+        .try_intern_portable_path("selected", &mut string_table)
+        .expect("test path fits");
+    let then_scope = path_fork
+        .try_intern_portable_path("then", &mut string_table)
+        .expect("test path fits");
+    let else_scope = path_fork
+        .try_intern_portable_path("else", &mut string_table)
+        .expect("test path fits");
+    let nested_scope = path_fork
+        .try_intern_portable_path("nested", &mut string_table)
+        .expect("test path fits");
     let nested_condition = Expression::bool(true, span, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
             SyntheticInterfaceMemberIdentity::new(

@@ -21,20 +21,28 @@ fn html_directive_sets_formatter_via_handler_behavior() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source_with_style_directives("[$html:\n<div class=\"card\">x</div>\n]",
-    &style_directives,
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
-    let context = new_constant_context_with_style_directives(
-        source_path,
+    let mut file_tokens = template_tokens_from_source_with_style_directives(
+        "[$html:\n<div class=\"card\">x</div>\n]",
         &style_directives,
-        &path_fork,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
     );
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
+    let context =
+        new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("html template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("html template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
     assert_eq!(effective_style.id, "html");
@@ -47,21 +55,28 @@ fn css_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source_with_style_directives("[$css:\n.button { color: red; }\n]",
-    &style_directives,
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
-    let context = new_constant_context_with_style_directives(
-        source_path,
+    let mut file_tokens = template_tokens_from_source_with_style_directives(
+        "[$css:\n.button { color: red; }\n]",
         &style_directives,
-        &path_fork,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
     );
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
+    let context =
+        new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("css template should parse");
-
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("css template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
     assert_eq!(effective_style.id, "css");
@@ -72,14 +87,26 @@ fn markdown_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens =
-        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[$md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let context = new_constant_context(source_path, &path_fork);
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("markdown template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("markdown template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
     assert_eq!(effective_style.id, "markdown");
@@ -91,14 +118,26 @@ fn code_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens =
-        template_tokens_from_source("[$code:\nloop x\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[$code:\nloop x\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let context = new_constant_context(source_path, &path_fork);
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("code template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("code template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
     assert_eq!(effective_style.id, "code");
@@ -111,20 +150,28 @@ fn escape_html_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source_with_style_directives("[$escape_html:\n<b>Hello</b>\n]",
-    &style_directives,
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
-    let context = new_constant_context_with_style_directives(
-        source_path,
+    let mut file_tokens = template_tokens_from_source_with_style_directives(
+        "[$escape_html:\n<b>Hello</b>\n]",
         &style_directives,
-        &path_fork,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
     );
+    let source_path = file_tokens.src_path;
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
+    let context =
+        new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("escape_html template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("escape_html template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
     assert_eq!(effective_style.id, "escape_html");
@@ -199,15 +246,26 @@ fn runtime_templates_format_static_body_strings_only() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source("[value, $md:\n# Hello\n]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[value, $md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens).expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
+        .expect("test token stream must expose an AST cursor");
     let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("template should parse");
 
     assert!(matches!(
         effective_tir_kind(&template, &context),

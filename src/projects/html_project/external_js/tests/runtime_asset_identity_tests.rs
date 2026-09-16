@@ -19,8 +19,8 @@ use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::js_import_provider::{
     JsExternalImportProvider, js_provider_package_path,
 };

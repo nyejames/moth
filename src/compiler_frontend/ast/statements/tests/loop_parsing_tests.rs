@@ -83,10 +83,9 @@ fn parses_range_loop_with_pipe_binding() {
     };
 
     assert_eq!(
-        bindings
-            .item
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.item.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("i")
     );
     assert!(bindings.index.is_none());
@@ -112,17 +111,15 @@ fn parses_range_loop_with_value_and_index_bindings() {
     };
 
     assert_eq!(
-        bindings
-            .item
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.item.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("value")
     );
     assert_eq!(
-        bindings
-            .index
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.index.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("index")
     );
 }
@@ -167,10 +164,9 @@ fn parses_collection_loop_with_pipe_item_binding() {
     };
 
     assert_eq!(
-        bindings
-            .item
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.item.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("item")
     );
     assert!(bindings.index.is_none());
@@ -192,17 +188,15 @@ fn parses_collection_loop_with_item_and_index_pipe_bindings() {
     };
 
     assert_eq!(
-        bindings
-            .item
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.item.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("item")
     );
     assert_eq!(
-        bindings
-            .index
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.index.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("index")
     );
 }
@@ -319,7 +313,8 @@ fn parses_collection_loop_without_bindings() {
 
 #[test]
 fn parses_range_loop_without_bindings() {
-    let (ast, path_fork, string_table) = parse_loop_fixture("loop 0 to 10:\n    io.line([: [1]])\n;");
+    let (ast, path_fork, string_table) =
+        parse_loop_fixture("loop 0 to 10:\n    io.line([: [1]])\n;");
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { bindings, .. } = &body[0].kind else {
@@ -455,7 +450,8 @@ fn parses_inclusive_range_loop_with_tight_ampersand() {
 
 #[test]
 fn parses_omitted_start_exclusive_range_loop() {
-    let (ast, path_fork, string_table) = parse_loop_fixture("sum ~= 0\nloop to 5 |i|:\n    sum = sum + i\n;");
+    let (ast, path_fork, string_table) =
+        parse_loop_fixture("sum ~= 0\nloop to 5 |i|:\n    sum = sum + i\n;");
 
     let body = loop_function_body(&ast, &path_fork, &string_table);
 

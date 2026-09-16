@@ -10,6 +10,7 @@ use super::expression_rpn::ExpressionRpnItem;
 use super::function_calls::{FunctionCallParseInput, parse_function_call_expression};
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionTemplate,
     parse_generic_function_call_expression, validate_generic_function_template_call_expression,
@@ -24,7 +25,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Input bundle for source callable member parsing.

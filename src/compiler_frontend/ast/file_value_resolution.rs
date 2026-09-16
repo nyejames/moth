@@ -8,6 +8,7 @@
 //! In either lane, resource and site-root rows remain structural strings.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
@@ -25,10 +26,9 @@ use crate::compiler_frontend::headers::synthetic_content_header::content_constan
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Resolve one `TokenKind::Path` through the value-position Stage 0 view.

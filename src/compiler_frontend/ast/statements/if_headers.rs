@@ -233,8 +233,7 @@ pub(crate) fn classify_if_header(token_stream: &AstCursor) -> IfHeaderClassifica
     ordinary_bool_header(IfHeaderDelimiter::None, None)
 }
 fn classify_from_is(token_stream: &AstCursor, is_index: usize) -> IfHeaderClassification {
-    let token_after_is =
-        next_meaningful_token_index(token_stream, is_index.saturating_add(1));
+    let token_after_is = next_meaningful_token_index(token_stream, is_index.saturating_add(1));
     let Some(after_is) = token_after_is else {
         return IfHeaderClassification {
             shape: IfHeaderShape::OrdinaryBool,
@@ -335,10 +334,7 @@ fn ordinary_bool_header(
     }
 }
 
-fn next_meaningful_token_index(
-    token_stream: &AstCursor,
-    start_index: usize,
-) -> Option<usize> {
+fn next_meaningful_token_index(token_stream: &AstCursor, start_index: usize) -> Option<usize> {
     let mut index = start_index;
 
     while index < token_stream.length() {

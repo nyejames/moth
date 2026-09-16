@@ -123,13 +123,11 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
     alias.target_type_id = TypeId(u32::MAX);
     let alias_declaration_span = alias.declaration_span;
 
-    let freeze_result = prepared
-        .preparation
-        .freeze(
-            &prepared.public_interface,
-            &ModuleResourceTable::new(),
-            &prepared.path_fork,
-        );
+    let freeze_result = prepared.preparation.freeze(
+        &prepared.public_interface,
+        &ModuleResourceTable::new(),
+        &prepared.path_fork,
+    );
     let Err(error) = freeze_result else {
         panic!("an unprojectable alias target must not freeze");
     };
@@ -146,8 +144,7 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
     // The alias declaration retains authored provenance rather than falling back to file start:
     // the transported span must be exactly the alias's declaration span.
     assert_eq!(
-        error.source_span,
-        alias_declaration_span,
+        error.source_span, alias_declaration_span,
         "the alias declaration span must survive transport unchanged",
     );
 }

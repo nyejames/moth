@@ -9,6 +9,7 @@
 //! Body-context choice expression parsing (`Choice::Variant` values) lives in
 //! `ast/expressions/parse_expression_identifiers.rs` and is intentionally separate.
 
+use super::DeclarationCursor;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -16,8 +17,7 @@ use crate::compiler_frontend::compiler_messages::DeferredFeatureReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::InvalidChoiceVariantReason;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword_error,
-    reserved_trait_keyword_or_dispatch_mismatch,
+    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body;
@@ -32,7 +32,6 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
-use super::DeclarationCursor;
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug)]

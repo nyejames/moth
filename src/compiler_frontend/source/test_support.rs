@@ -50,7 +50,6 @@ impl TestSourceContext {
         &self.path
     }
 
-
     pub(crate) fn span_builder(&self) -> &ExtendedSpanBuilder {
         &self.span_builder
     }

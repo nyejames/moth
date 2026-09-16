@@ -500,7 +500,6 @@ fn inline_else_follows_before_statement_end(token_stream: &AstCursor) -> bool {
     }
 }
 
-
 fn inline_else_follows_before_statement_end_in_cursor(
     token_stream: &AstCursor,
     stop_tokens: &[TokenKind],

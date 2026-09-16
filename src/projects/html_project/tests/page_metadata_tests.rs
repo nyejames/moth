@@ -31,10 +31,7 @@ use crate::projects::html_project::resource_output_plan::{
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use std::path::{Path, PathBuf};
 
-fn test_module(
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> HirModule {
+fn test_module(string_table: &mut StringTable, path_fork: &mut PathInternerFork) -> HirModule {
     let mut module = HirModule::new();
     let source_path = path_fork
         .try_intern_filesystem_path(PathBuf::from("docs/@page.moth").as_path(), string_table)

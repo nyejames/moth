@@ -4,6 +4,7 @@
 //! WHY: functions, structs, and choices share exactly one generic-parameter syntax and
 //! should not grow parallel validation paths as generics expand.
 
+use super::DeclarationCursor;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticToken, InvalidDeclarationReason, InvalidGenericParameterReason,
@@ -17,7 +18,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
-use super::DeclarationCursor;
 use rustc_hash::FxHashSet;
 
 /// Typed failure result for generic-parameter parsing.
@@ -69,10 +69,11 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
             TokenKind::Symbol(_) => {
                 let span = current_source_span(token_stream);
                 let Some(found) = token_stream.canonical_cursor().current() else {
-                    return Err(
-                        with_token_span(span, CompilerDiagnostic::unexpected_end_of_file(None, span))
-                            .into(),
-                    );
+                    return Err(with_token_span(
+                        span,
+                        CompilerDiagnostic::unexpected_end_of_file(None, span),
+                    )
+                    .into());
                 };
                 return Err(with_token_span(
                     span,
@@ -85,13 +86,11 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 if expecting_parameter {
                     let span = current_source_span(token_stream);
                     let Some(found) = token_stream.canonical_cursor().current() else {
-                        return Err(
-                            with_token_span(
-                                span,
-                                CompilerDiagnostic::unexpected_end_of_file(None, span),
-                            )
-                            .into(),
-                        );
+                        return Err(with_token_span(
+                            span,
+                            CompilerDiagnostic::unexpected_end_of_file(None, span),
+                        )
+                        .into());
                     };
                     return Err(with_token_span(
                         span,
@@ -128,13 +127,11 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 if expecting_parameter {
                     let span = current_source_span(token_stream);
                     let Some(found) = token_stream.canonical_cursor().current() else {
-                        return Err(
-                            with_token_span(
-                                span,
-                                CompilerDiagnostic::unexpected_end_of_file(None, span),
-                            )
-                            .into(),
-                        );
+                        return Err(with_token_span(
+                            span,
+                            CompilerDiagnostic::unexpected_end_of_file(None, span),
+                        )
+                        .into());
                     };
                     return Err(with_token_span(
                         span,
@@ -231,9 +228,11 @@ fn parse_trait_bounds_for_current_parameter(
     let Some(parameter) = parameters.last_mut() else {
         let span = current_source_span(token_stream);
         let Some(found) = token_stream.canonical_cursor().current() else {
-            return Err(
-                with_token_span(span, CompilerDiagnostic::unexpected_end_of_file(None, span)).into(),
-            );
+            return Err(with_token_span(
+                span,
+                CompilerDiagnostic::unexpected_end_of_file(None, span),
+            )
+            .into());
         };
         return Err(with_token_span(
             span,

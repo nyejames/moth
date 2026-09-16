@@ -5,13 +5,14 @@
 //! WHY: header parsing owns declaration-shell discovery, but AST owns type resolution and
 //! expression parsing. Keeping this module AST-free preserves that stage boundary.
 
+use super::DeclarationCursor;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken,
-    InvalidFunctionSignatureReason, InvalidSignatureMemberReason,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidFunctionSignatureReason,
+    InvalidSignatureMemberReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -29,7 +30,6 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
-use super::DeclarationCursor;
 use rustc_hash::FxHashMap;
 
 /// Two-lane result for signature member/parameter parsing.
@@ -301,14 +301,12 @@ pub fn parse_signature_members_syntax(
                     )
                     .into());
                 };
-                return Err(
-                    CompilerDiagnostic::unexpected_token_from_ref(
-                        found,
-                        current_source_span(token_stream),
-                    )
-                    .into(),
-                );
-            },
+                return Err(CompilerDiagnostic::unexpected_token_from_ref(
+                    found,
+                    current_source_span(token_stream),
+                )
+                .into());
+            }
 
             TokenKind::Symbol(member_name) => {
                 ensure_member_slot(expecting_member, token_stream)?;
@@ -341,13 +339,14 @@ pub fn parse_signature_members_syntax(
                 ensure_member_slot(expecting_member, token_stream)?;
 
                 let this_id = string_table.intern("this");
-                let this_path = path_fork
-                    .try_intern_child(owner_path, this_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "path table exhausted while interning a signature member path",
-                        )
-                    })?;
+                let this_path =
+                    path_fork
+                        .try_intern_child(owner_path, this_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "path table exhausted while interning a signature member path",
+                            )
+                        })?;
                 let member = parse_signature_member_syntax(
                     token_stream,
                     this_path,
@@ -384,13 +383,14 @@ pub fn parse_signature_members_syntax(
                 }
 
                 let this_id = string_table.intern("This");
-                let this_path = path_fork
-                    .try_intern_child(owner_path, this_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "path table exhausted while interning a signature member path",
-                        )
-                    })?;
+                let this_path =
+                    path_fork
+                        .try_intern_child(owner_path, this_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "path table exhausted while interning a signature member path",
+                            )
+                        })?;
                 let member = parse_trait_this_member_syntax(
                     token_stream,
                     this_path,
@@ -425,13 +425,14 @@ pub fn parse_signature_members_syntax(
                 }
 
                 let this_id = string_table.intern("This");
-                let this_path = path_fork
-                    .try_intern_child(owner_path, this_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "path table exhausted while interning a signature member path",
-                        )
-                    })?;
+                let this_path =
+                    path_fork
+                        .try_intern_child(owner_path, this_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "path table exhausted while interning a signature member path",
+                            )
+                        })?;
                 let member = parse_trait_this_member_syntax(
                     token_stream,
                     this_path,
@@ -489,18 +490,18 @@ pub fn parse_signature_members_syntax(
 
             _ => {
                 let common_mistake = match token_stream.current_token_kind() {
-                    TokenKind::OpenParenthesis => Some(CommonSyntaxMistakeReason::SignatureParenthesisDelimiter),
+                    TokenKind::OpenParenthesis => {
+                        Some(CommonSyntaxMistakeReason::SignatureParenthesisDelimiter)
+                    }
                     TokenKind::As => Some(CommonSyntaxMistakeReason::SignatureAsKeyword),
                     _ => None,
                 };
                 if let Some(reason) = common_mistake {
-                    return Err(
-                        CompilerDiagnostic::common_syntax_mistake(
-                            reason,
-                            current_source_span(token_stream),
-                        )
-                        .into(),
-                    );
+                    return Err(CompilerDiagnostic::common_syntax_mistake(
+                        reason,
+                        current_source_span(token_stream),
+                    )
+                    .into());
                 }
 
                 let span = current_source_span(token_stream);
@@ -676,13 +677,11 @@ fn parse_signature_member_syntax(
                 )
                 .into());
             };
-            return Err(
-                CompilerDiagnostic::unexpected_token_from_ref(
-                    found,
-                    current_source_span(token_stream),
-                )
-                .into(),
-            );
+            return Err(CompilerDiagnostic::unexpected_token_from_ref(
+                found,
+                current_source_span(token_stream),
+            )
+            .into());
         }
 
         _ => {
@@ -797,16 +796,13 @@ fn collect_member_default_range(
     }
 
     let end = token_stream.canonical_cursor().position();
-    let range = TokenRange::try_new_for(
-        token_stream.canonical_cursor().source_tokens(),
-        start,
-        end,
-    )
-    .map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "signature member default range exceeded its canonical source owner: {error:?}",
-        )))
-    })?;
+    let range =
+        TokenRange::try_new_for(token_stream.canonical_cursor().source_tokens(), start, end)
+            .map_err(|error| {
+                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                    "signature member default range exceeded its canonical source owner: {error:?}",
+                )))
+            })?;
     if range.is_empty() {
         let span = current_source_span(token_stream);
         let Some(found) = token_stream.canonical_cursor().current() else {

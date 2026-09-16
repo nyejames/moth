@@ -75,10 +75,10 @@ use crate::compiler_frontend::public_interface::{
     PublicFunctionCategory, PublicGenericParameterSurface, PublicParameterTypeSlot,
     PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::{
@@ -308,9 +308,11 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
 
     // Header-built dependency visibility is consumed directly; AST does not rebuild dependency bindings.
     pub(crate) binding_environment: HeaderBindingEnvironment,
-    /// One shared owner map used to build bounded parser adapters during environment resolution.
+    /// One shared canonical owner plus explicit side maps used for bounded parser adapters.
     pub(crate) source_token_streams:
-        FxHashMap<SourceId, Arc<crate::compiler_frontend::tokenizer::tokens::FileTokens>>,
+        FxHashMap<SourceId, Arc<crate::compiler_frontend::tokenizer::tokens::SourceTokens>>,
+    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
+    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
 
     // Mutable environment-building state.
     pub(crate) warnings: Vec<CompilerDiagnostic>,
@@ -341,11 +343,9 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
 
     pub(crate) struct_source_by_path: FxHashMap<PathId, PathId>,
     pub(crate) choice_source_by_path: FxHashMap<PathId, PathId>,
-    pub(crate) resolved_function_signatures_by_path:
-        FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub(crate) resolved_function_signatures_by_path: FxHashMap<PathId, ResolvedFunctionSignature>,
     pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
-    pub(crate) generic_parameter_lists_by_path:
-        FxHashMap<PathId, RegisteredGenericParameterList>,
+    pub(crate) generic_parameter_lists_by_path: FxHashMap<PathId, RegisteredGenericParameterList>,
 
     // Frontend semantic type identity built during environment construction.
     // WHY: parsed types are resolved into canonical TypeIds as declarations are processed.
@@ -384,6 +384,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             module_symbols: ModuleSymbols::empty(),
             binding_environment: HeaderBindingEnvironment::default(),
             source_token_streams: FxHashMap::default(),
+            source_token_paths: FxHashMap::default(),
+            source_token_os_paths: FxHashMap::default(),
             warnings: Vec::new(),
             declaration_table: Rc::new(TopLevelDeclarationTable::empty()),
             resolved_module_constants: Rc::new(ResolvedConstantSet::default()),
@@ -420,8 +422,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             mut module_symbols,
             binding_environment,
             source_token_streams,
+            source_token_paths,
+            source_token_os_paths,
         } = input;
         self.source_token_streams = source_token_streams;
+        self.source_token_paths = source_token_paths;
+        self.source_token_os_paths = source_token_os_paths;
 
         // Move header-owned data into the builder state.
         let ordered_semantic_declarations =
@@ -811,16 +817,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .source_path_for_header(header)
             .expect("header body range has no prepared source-path identity")
     }
-    pub(crate) fn header_path_syntax(
-        &self,
-        header: &Header,
-    ) -> &crate::compiler_frontend::tokenizer::tokens::FilePathSyntax {
-        &self
-            .source_token_streams
-            .get(&header.tokens.source())
-            .expect("header body range has no prepared source token owner")
-            .path_syntax
-    }
 
     /// Resolve the declaration-site generic parameter scope for one declaration.
     ///
@@ -963,7 +959,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn register_builtin_structs_in_type_environment(
         &mut self,
         string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+    ) -> Result<(), CompilerMessages> {
         let builtin_paths = [builtin_error_type_path(self.path_fork, string_table)];
 
         for path in &builtin_paths {

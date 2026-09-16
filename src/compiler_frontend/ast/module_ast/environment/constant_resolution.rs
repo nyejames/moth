@@ -29,7 +29,9 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 use crate::compiler_frontend::ast::module_ast::scope_context::{
     ContextKind, FileValueResolutionServices, ScopeContext,
 };
-use crate::compiler_frontend::ast::statements::declarations::resolve_declaration_syntax;
+use crate::compiler_frontend::ast::statements::declarations::{
+    DeclarationLoweringTables, resolve_declaration_syntax,
+};
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
@@ -44,20 +46,20 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::headers::synthetic_content_header::materialize_synthetic_content_initializer;
-use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens};
-use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
+use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, SourceTokens};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
+use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -89,8 +91,12 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub template_ir_store: Rc<RefCell<TemplateIrStore>>,
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
     pub file_value_resolution: Option<Rc<FileValueResolutionServices>>,
-    /// Canonical source owners used to supply path syntax to the bounded legacy resolver.
-    pub source_token_streams: FxHashMap<crate::compiler_frontend::source::SourceId, Arc<FileTokens>>,
+    /// Canonical source owners plus explicit side maps used for bounded adapters.
+    pub source_token_streams:
+        FxHashMap<crate::compiler_frontend::source::SourceId, Arc<SourceTokens>>,
+    pub source_token_paths: FxHashMap<crate::compiler_frontend::source::SourceId, PathId>,
+    pub source_token_os_paths:
+        FxHashMap<crate::compiler_frontend::source::SourceId, Option<std::path::PathBuf>>,
     pub build_profile: FrontendBuildProfile,
     pub template_const_loop_iteration_limit: usize,
 }
@@ -200,9 +206,19 @@ impl ConstantResolutionSession {
             .source_token_streams
             .get(&header.tokens.source())
             .map(|owner| owner.as_ref());
+        let file_os_path = self
+            .module_view
+            .source_token_os_paths
+            .get(&header.tokens.source())
+            .and_then(|path| path.clone());
+        let file_source_path = self
+            .module_view
+            .source_token_paths
+            .get(&header.tokens.source())
+            .copied()
+            .unwrap_or(source_file_scope);
         let payload = header.synthetic_content_payload;
-        if matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_)))
-            && file_owner.is_some()
+        if matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) && file_owner.is_some()
         {
             return Err(CompilerError::compiler_error(
                 "RenderedHtml synthetic content retained a canonical source token owner",
@@ -221,9 +237,17 @@ impl ConstantResolutionSession {
         } else {
             None
         };
-        let path_syntax = file_owner
-            .map(|owner| &owner.path_syntax)
-            .or_else(|| fallback_path_syntax.as_ref())
+        let owned_path_syntax = if let Some(owner) = file_owner {
+            Some(owner.path_syntax_arc()?)
+        } else {
+            None
+        };
+        let borrowed_path_syntax = owned_path_syntax
+            .as_ref()
+            .map(|table| FilePathSyntax::Shared(Arc::clone(table)));
+        let path_syntax = borrowed_path_syntax
+            .as_ref()
+            .or(fallback_path_syntax.as_ref())
             .expect("constant header path syntax fallback must be present");
 
         let initializer_override = if let Some(payload) = payload {
@@ -231,12 +255,13 @@ impl ConstantResolutionSession {
                 payload,
                 file_owner,
                 header.tokens,
-                header.declaration_path,
+                file_source_path,
+                file_os_path,
             )
             .map_err(ExpressionParseError::from)?;
             Some(
                 FileTokens::new_from_slice(
-                    header.declaration_path,
+                    file_source_path,
                     header.tokens.source(),
                     None,
                     initializer_tokens,
@@ -248,22 +273,31 @@ impl ConstantResolutionSession {
             None
         };
 
-        // Live parser state stays on the canonical source owner. The transient
-        // cursor spans the full canonical source so nested initializer ranges
-        // stay inside its bounds; synthetic content has no canonical owner
-        // and therefore passes no live cursor alongside its explicit `FileTokens`.
-        // `from_file_tokens_range` retains the owner for bounded handoffs.
+        // Retain the canonical source owner for bounded initializer handoffs. This path never
+        // reads parser facts from the cursor, so avoid materialising its initial token window for
+        // every constant header; synthetic content has no canonical owner and passes no cursor
+        // alongside its explicit `FileTokens`.
         let body_cursor = file_owner
-            .map(|owner| -> Result<AstCursor, ExpressionParseError> {
-                let canonical = owner
-                    .canonical_source_tokens()
-                    .map_err(ExpressionParseError::from)?;
-                let full = canonical.full_range().map_err(|error| {
+            .map(|owner| -> Result<AstCursor<'_>, ExpressionParseError> {
+                let full = owner.full_range().map_err(|error| {
                     ExpressionParseError::from(CompilerError::compiler_error(format!(
                         "constant header source range could not be constructed: {error:?}"
                     )))
                 })?;
-                AstCursor::from_file_tokens_range(owner, full).map_err(|error| {
+                let os_path = self
+                    .module_view
+                    .source_token_os_paths
+                    .get(&header.tokens.source())
+                    .and_then(|path| path.clone());
+                AstCursor::from_source_tokens_for_handoff(
+                    self.module_view
+                        .source_token_streams
+                        .get(&header.tokens.source())
+                        .expect("constant header source owner vanished during cursor construction"),
+                    os_path,
+                    full,
+                )
+                .map_err(|error| {
                     ExpressionParseError::from(CompilerError::compiler_error(format!(
                         "constant header source range is outside its source owner: {error:?}"
                     )))
@@ -278,8 +312,10 @@ impl ConstantResolutionSession {
             initializer_override,
             &mut scope_context,
             &mut type_interner,
-            string_table,
-            path_fork,
+            DeclarationLoweringTables {
+                string_table,
+                path_fork,
+            },
         );
         let mut declaration = declaration_result?;
         // Top-level constant binding anchor is the header name token, not the

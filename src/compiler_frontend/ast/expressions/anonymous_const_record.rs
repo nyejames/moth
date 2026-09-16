@@ -24,50 +24,12 @@ use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_sha
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
-
-/// True when `|` at `pipe_index` opens a value record rather than a struct shell.
-///
-/// A compile-time receiving context (`#=`) treats every `|...|` initializer as a const
-/// record, including empty and malformed lists. Ordinary `=` keeps empty `| |` and
-/// `| name Type |` as struct shells, and only `| name =` / `| name ,` as records.
-pub(crate) fn pipe_opens_value_record(
-    tokens: &[Token],
-    pipe_index: usize,
-    compile_time: bool,
-) -> bool {
-    if compile_time {
-        return true;
-    }
-
-    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
-    let skip_newlines = |mut cursor: usize| {
-        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
-            cursor += 1;
-        }
-        cursor
-    };
-
-    let mut cursor = skip_newlines(pipe_index + 1);
-    if matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket)) {
-        return false;
-    }
-
-    if !matches!(kind_at(cursor), Some(TokenKind::Symbol(_))) {
-        return false;
-    }
-
-    cursor = skip_newlines(cursor + 1);
-    matches!(
-        kind_at(cursor),
-        Some(TokenKind::Assign) | Some(TokenKind::Comma)
-    )
-}
 
 /// Cursor-view form of the shared struct-shell/record dispatch for expression-window scans.
 ///
@@ -254,16 +216,21 @@ fn parse_record_field(
     token_stream.advance(); // past the field name
 
     let mut qualifier = {
-        let mut declaration_cursor = token_stream.declaration_cursor()?;
-        if !starts_build_config_qualifier_at_cursor(&declaration_cursor, string_table) {
-            None
-        } else {
-            let qualifier =
-                parse_build_config_qualifier(&mut declaration_cursor, string_table, None)?;
-            let next_index = declaration_cursor.position();
-            drop(declaration_cursor);
+        let parsed_qualifier = {
+            let mut declaration_cursor = token_stream.declaration_cursor()?;
+            if !starts_build_config_qualifier_at_cursor(&declaration_cursor, string_table) {
+                None
+            } else {
+                let qualifier =
+                    parse_build_config_qualifier(&mut declaration_cursor, string_table, None)?;
+                Some((qualifier, declaration_cursor.position()))
+            }
+        };
+        if let Some((qualifier, next_index)) = parsed_qualifier {
             token_stream.set_position(next_index)?;
             Some(qualifier)
+        } else {
+            None
         }
     };
     let has_initializer = token_stream.current_token_kind() == &TokenKind::Assign;

@@ -50,7 +50,9 @@ use std::rc::Rc;
 fn stream_from_tokens(tokens: Vec<Token>, string_table: &mut StringTable) -> FileTokens {
     let mut path_fork = PathInternerFork::empty();
     FileTokens::new(
-        path_fork.try_intern_portable_path("type_syntax_tests", string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("type_syntax_tests", string_table)
+            .expect("test path fits"),
         SourceId::COMPILATION_ROOT,
         tokens,
     )
@@ -113,7 +115,10 @@ fn resolve_type_annotation_error(
     string_table: &mut StringTable,
     expected_failure: &str,
 ) -> CompilerDiagnostic {
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
@@ -145,7 +150,10 @@ fn declaration_context_allows_inferred_annotations() {
 fn resolved_type_annotation_carries_canonical_type_id() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
@@ -167,7 +175,10 @@ fn resolved_type_annotation_carries_canonical_type_id() {
 fn resolved_inferred_annotation_has_no_type_id() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
@@ -598,10 +609,15 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let maybe_name = string_table.intern("MaybeString");
-    let maybe_path = path_fork.try_intern_portable_path("MaybeString", &mut string_table).expect("test path fits");
+    let maybe_path = path_fork
+        .try_intern_portable_path("MaybeString", &mut string_table)
+        .expect("test path fits");
 
     let unresolved = DataType::Option(Box::new(DataType::NamedType(maybe_name)));
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut visible_type_aliases = FxHashMap::default();
     visible_type_aliases.insert(
@@ -667,7 +683,9 @@ fn resolves_named_types_recursively_in_composite_types() {
     let unresolved =
         DataType::collection(DataType::Option(Box::new(DataType::NamedType(point_name))));
 
-    let point_path = path_fork.try_intern_portable_path("Point", &mut string_table).expect("test path fits");
+    let point_path = path_fork
+        .try_intern_portable_path("Point", &mut string_table)
+        .expect("test path fits");
     let declarations = vec![Declaration {
         id: point_path,
         value: Expression::no_value(None, DataType::Int, ValueMode::ImmutableOwned),
@@ -700,7 +718,9 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
         arguments: vec![DataType::StringSlice],
     };
 
-    let box_path = path_fork.try_intern_portable_path("Box", &mut string_table).expect("test path fits");
+    let box_path = path_fork
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
     let mut type_environment = TypeEnvironment::new();
     let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
@@ -759,7 +779,9 @@ fn generic_instance_resolution_rejects_wrong_arity() {
         arguments: vec![DataType::StringSlice, DataType::Int],
     };
 
-    let box_path = path_fork.try_intern_portable_path("Box", &mut string_table).expect("test path fits");
+    let box_path = path_fork
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
     let mut type_environment = TypeEnvironment::new();
     let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
@@ -824,7 +846,9 @@ fn bare_generic_type_name_requires_type_arguments() {
     let t_name = string_table.intern("T");
     let unresolved = DataType::NamedType(box_name);
 
-    let box_path = path_fork.try_intern_portable_path("Box", &mut string_table).expect("test path fits");
+    let box_path = path_fork
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
     let mut type_environment = TypeEnvironment::new();
     let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
@@ -885,7 +909,10 @@ fn unknown_named_type_reports_consistent_error() {
     let missing = string_table.intern("Missing");
 
     let unresolved = DataType::NamedType(missing);
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) );
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        vec![],
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
@@ -934,7 +961,9 @@ fn optional_generic_instance_conversion_rejects_unresolved_arguments() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let box_path = path_fork.try_intern_portable_path("Box", &mut string_table).expect("test path fits");
+    let box_path = path_fork
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
     type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path.to_owned(),

@@ -3,6 +3,7 @@
 //! WHAT: parses `| field Type [= default], ... |` bodies used by structs and choice payloads.
 //! WHY: record bodies are a neutral declaration syntax concept, not struct-specific logic.
 
+use super::DeclarationCursor;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax, parse_signature_members_syntax,
@@ -11,7 +12,6 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use super::DeclarationCursor;
 
 /// Two-lane result for record-body parsing.
 ///

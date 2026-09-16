@@ -28,7 +28,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
 };
@@ -48,6 +47,7 @@ use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseBuilder, SourceId,
     SourceKind, SourceRegistrationIndex,
@@ -189,12 +189,10 @@ pub(crate) fn compile_moth_template_source(
                     string_table,
                 )
                 .map_err(|error| match error {
-                    SourceDatabaseError::Capacity(capacity) => {
-                        CompilerMessages::from_diagnostic(
-                            CompilerDiagnostic::source_table_capacity(capacity.resource()),
-                            string_table.clone(),
-                        )
-                    }
+                    SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
+                        CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                        string_table.clone(),
+                    ),
                     SourceDatabaseError::Infrastructure(error) => {
                         CompilerMessages::from_error_ref(error, string_table)
                     }
@@ -486,9 +484,7 @@ fn order_template_headers(
         HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
             PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
         ),
-        HeaderPreparationFailure::Infrastructure(error) => {
-            PremergeFailure::Infrastructure(error)
-        }
+        HeaderPreparationFailure::Infrastructure(error) => PremergeFailure::Infrastructure(error),
     })?;
     let bound_headers = bind_module_headers(
         prepared_syntax,
@@ -698,6 +694,8 @@ fn fold_template_ast(
         AstBuildInput {
             headers: sorted.headers,
             source_token_streams: sorted.source_token_streams,
+            source_token_paths: sorted.source_token_paths,
+            source_token_os_paths: sorted.source_token_os_paths,
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,

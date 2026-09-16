@@ -12,9 +12,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterLis
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    starts_build_config_qualifier_at_source,
-};
+use crate::compiler_frontend::declaration_syntax::build_config_contract::starts_build_config_qualifier_at_source;
 use crate::compiler_frontend::declaration_syntax::choice::parse_choice_shell as parse_choice_header_payload;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, parse_declaration_syntax,
@@ -112,7 +110,6 @@ fn source_tag_at_cursor(token_stream: &FileTokens) -> HeaderDispatchResult<Token
     )?
     .tag())
 }
-
 
 fn source_next_tag(token_stream: &FileTokens) -> HeaderDispatchResult<Option<TokenTag>> {
     let next_index = token_stream.index.checked_add(1).ok_or_else(|| {
@@ -394,9 +391,8 @@ pub(super) fn create_header(
                 context.path_fork,
                 span_builder,
             )?;
-            let next_index =
-                token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-            drop(declaration_cursor);
+            let next_index = token_stream
+                .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
             token_stream.index = next_index;
 
             // Local declaration-ordering hints: parameter + return type references only.
@@ -422,10 +418,7 @@ pub(super) fn create_header(
                 )?;
             }
 
-            body_range = capture_function_body_range(
-                token_stream,
-                context.string_table,
-            )?;
+            body_range = capture_function_body_range(token_stream, context.string_table)?;
 
             kind = HeaderKind::Function {
                 generic_parameters,
@@ -471,7 +464,6 @@ pub(super) fn create_header(
                 )?;
                 let next_index = token_stream
                     .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-                drop(declaration_cursor);
                 token_stream.index = next_index;
 
                 // Collect strict type edges from field types only (no default-expression edges).
@@ -557,9 +549,8 @@ pub(super) fn create_header(
                 context.warnings,
                 span_builder,
             )?;
-            let next_index =
-                token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-            drop(declaration_cursor);
+            let next_index = token_stream
+                .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
             token_stream.index = next_index;
 
             // Collect strict type edges from payload field types.
@@ -620,9 +611,8 @@ pub(super) fn create_header(
                 TypeAnnotationContext::TypeAliasTarget,
                 context.string_table,
             )?;
-            let next_index =
-                token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-            drop(declaration_cursor);
+            let next_index = token_stream
+                .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
             token_stream.index = next_index;
 
             let mut selection_error = None;
@@ -692,9 +682,8 @@ fn parse_optional_generic_parameters(
     // until the header parser has finished walking this file. File-level preparation validates
     // dependency-name collisions after all clauses and declaration shells are retained.
     let forbidden_names = FxHashSet::default();
-    let mut declaration_cursor = DeclarationCursor::new(
-        token_stream.canonical_cursor_from_current()?,
-    )?;
+    let mut declaration_cursor =
+        DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
     let result = parse_generic_parameter_list_after_type_keyword(
         &mut declaration_cursor,
         &forbidden_names,
@@ -702,7 +691,6 @@ fn parse_optional_generic_parameters(
     )?;
     let next_index =
         token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-    drop(declaration_cursor);
     token_stream.index = next_index;
     Ok(result)
 }
@@ -788,14 +776,18 @@ fn capture_function_body_range(
         )))
     })?;
     if canonical.source() != token_stream.file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "function body capture source token owner does not match its file identity",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "function body capture source token owner does not match its file identity",
+            ),
+        ));
     }
     if token_stream.length != canonical.len() || token_stream.tokens.len() != canonical.len() {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "function body capture token adapter length does not match its source owner",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "function body capture token adapter length does not match its source owner",
+            ),
+        ));
     }
 
     let body_start = TokenIndex::try_from_index(body_start).ok_or_else(|| {
@@ -889,9 +881,11 @@ fn capture_function_body_range(
     })?;
     let next_index = cursor.position().index();
     if next_index > token_stream.tokens.len() {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "function body capture handoff exceeded its compatibility token adapter",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "function body capture handoff exceeded its compatibility token adapter",
+            ),
+        ));
     }
 
     // Canonical scanning is complete. Synchronise the compatibility index once so deferred
@@ -925,7 +919,6 @@ fn create_constant_header_payload(
     )?;
     let next_index =
         token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-    drop(declaration_cursor);
     token_stream.index = next_index;
     // A comma terminates anonymous-record fields, but it cannot terminate a top-level source
     // contract. Keep the shared declaration parser permissive for record fields and reject this

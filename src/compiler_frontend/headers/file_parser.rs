@@ -68,9 +68,11 @@ fn source_token_at_index<'a>(
         )))
     })?;
     if canonical.source() != token_stream.file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            format!("{owner} source token owner does not match its file identity"),
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(format!(
+                "{owner} source token owner does not match its file identity"
+            )),
+        ));
     }
     let position = TokenIndex::try_from_index(index).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
@@ -94,7 +96,6 @@ fn record_start_body_token_from_source(
         .record_start_body_token_ref(token)
         .map_err(HeaderParseFailure::Infrastructure)
 }
-
 
 // Top-level declarations are same-module-visible by default; cross-module public visibility
 // comes only from the root `export:` block. Non-declaration statements are collected into the
@@ -154,9 +155,11 @@ fn parse_headers_in_file_inner(
                 )))
             })?;
             if canonical.source() != file_id {
-                return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "header walk source token owner does not match its file identity",
-                )));
+                return Err(HeaderParseFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "header walk source token owner does not match its file identity",
+                    ),
+                ));
             }
             let current_position = TokenIndex::try_from_index(current_index).ok_or_else(|| {
                 HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
@@ -173,11 +176,12 @@ fn parse_headers_in_file_inner(
                     "header token follower index overflowed its source range",
                 ))
             })?;
-            let follower_position = TokenIndex::try_from_index(follower_index).ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "header token follower index exceeded its checked domain",
-                ))
-            })?;
+            let follower_position =
+                TokenIndex::try_from_index(follower_index).ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                        "header token follower index exceeded its checked domain",
+                    ))
+                })?;
             let follower = canonical.token(follower_position).ok();
             let at_boundary = statement_boundary_at_source(canonical, current_index);
             (
@@ -277,7 +281,6 @@ fn parse_headers_in_file_inner(
     Ok(())
 }
 
-
 fn reject_non_block_export(
     token_stream: &mut FileTokens,
     context: &mut HeaderParseContext<'_>,
@@ -293,11 +296,13 @@ fn reject_non_block_export(
     // Without the block delimiter, the token is not an export target. Keep this diagnostic in
     // header parsing instead of interpreting the following tokens through another syntax path.
     let found = source_token_at_index(token_stream, token_stream.index, "export-block")?;
-    Err(diagnostic_failure(CompilerDiagnostic::expected_token_from_ref(
-        TokenTag::COLON,
-        Some(found),
-        Some(export_span),
-    )))
+    Err(diagnostic_failure(
+        CompilerDiagnostic::expected_token_from_ref(
+            TokenTag::COLON,
+            Some(found),
+            Some(export_span),
+        ),
+    ))
 }
 
 fn handle_export_block(
@@ -353,9 +358,11 @@ fn handle_export_block(
                 )))
             })?;
             if canonical.source() != token_stream.file_id {
-                return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export-block source token owner does not match its file identity",
-                )));
+                return Err(HeaderParseFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "export-block source token owner does not match its file identity",
+                    ),
+                ));
             }
             let current_position = TokenIndex::try_from_index(current_index).ok_or_else(|| {
                 HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
@@ -372,11 +379,12 @@ fn handle_export_block(
                     "export-block follower index overflowed its source range",
                 ))
             })?;
-            let follower_position = TokenIndex::try_from_index(follower_index).ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export-block follower index exceeded its checked domain",
-                ))
-            })?;
+            let follower_position =
+                TokenIndex::try_from_index(follower_index).ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                        "export-block follower index exceeded its checked domain",
+                    ))
+                })?;
             let follower = canonical.token(follower_position).ok();
             (
                 current.source_span(),
@@ -385,8 +393,7 @@ fn handle_export_block(
             )
         };
         let current_token = match &item {
-            HeaderFileItem::Symbol(_)
-            | HeaderFileItem::BuiltinTypeConformanceTarget(_) => {
+            HeaderFileItem::Symbol(_) | HeaderFileItem::BuiltinTypeConformanceTarget(_) => {
                 Some(token_stream.tokens[current_index].clone())
             }
             _ => None,
@@ -401,14 +408,15 @@ fn handle_export_block(
             current_tag,
             current_span,
         )?;
-        state.export_block_item_count = state
-            .export_block_item_count
-            .checked_add(1)
-            .ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export-block item count overflowed its source state",
-                ))
-            })?;
+        state.export_block_item_count =
+            state
+                .export_block_item_count
+                .checked_add(1)
+                .ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                        "export-block item count overflowed its source state",
+                    ))
+                })?;
     }
 
     let current = source_token_at_index(token_stream, token_stream.index, "export-block")?;
@@ -447,9 +455,11 @@ fn parse_export_block_item(
     match item {
         HeaderFileItem::Symbol(name_id) => {
             let Some(current_token) = current_token else {
-                return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export symbol item lost its compatibility token handoff",
-                )));
+                return Err(HeaderParseFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "export symbol item lost its compatibility token handoff",
+                    ),
+                ));
             };
             handle_symbol_item(
                 token_stream,
@@ -463,9 +473,11 @@ fn parse_export_block_item(
 
         HeaderFileItem::BuiltinTypeConformanceTarget(type_name) => {
             let Some(current_token) = current_token else {
-                return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export builtin item lost its compatibility token handoff",
-                )));
+                return Err(HeaderParseFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "export builtin item lost its compatibility token handoff",
+                    ),
+                ));
             };
             let name_id = context.string_table.intern(type_name);
             handle_symbol_item(
@@ -534,11 +546,7 @@ struct LegacyDependencyStart {
     path_index: TokenIndex,
 }
 
-fn checked_legacy_index(
-    index: usize,
-    offset: usize,
-    owner: &str,
-) -> FileParserResult<usize> {
+fn checked_legacy_index(index: usize, offset: usize, owner: &str) -> FileParserResult<usize> {
     index.checked_add(offset).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "{owner} token index overflowed its source range"
@@ -616,9 +624,11 @@ fn handle_symbol_item(
         )))
     })?;
     if canonical.source() != token_stream.file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "legacy dependency scan source token owner does not match its file identity",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "legacy dependency scan source token owner does not match its file identity",
+            ),
+        ));
     }
     let facts = TokenFactView::from_source(canonical);
     if let Some(start) =
@@ -643,10 +653,12 @@ fn handle_symbol_item(
         token_stream,
         state,
         context,
-        current_token,
-        name_id,
-        current_span,
-        current_index,
+        SymbolItemRequest {
+            current_token,
+            name_id,
+            current_span,
+            current_index,
+        },
         export_mode,
     )
 }
@@ -854,21 +866,30 @@ fn legacy_dependency_replacement(
 }
 
 fn clause_terminator(token: Option<ScannedToken>) -> bool {
-    token.is_none_or(|token| {
-        matches!(token.tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF)
-    })
+    token.is_none_or(|token| matches!(token.tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF))
+}
+
+/// One already-read top-level symbol with the source facts its header dispatch needs.
+struct SymbolItemRequest {
+    current_token: Token,
+    name_id: StringId,
+    current_span: SourceSpan,
+    current_index: usize,
 }
 
 fn handle_symbol_item_with_export_mode(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    current_token: Token,
-    name_id: StringId,
-    current_span: SourceSpan,
-    current_index: usize,
+    symbol: SymbolItemRequest,
     export_mode: HeaderExportMode,
 ) -> FileParserResult<()> {
+    let SymbolItemRequest {
+        current_token,
+        name_id,
+        current_span,
+        current_index,
+    } = symbol;
     let follower_index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "symbol lookahead index exceeded its checked domain",
@@ -881,9 +902,11 @@ fn handle_symbol_item_with_export_mode(
             )))
         })?;
         if canonical.source() != token_stream.file_id {
-            return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "symbol lookahead source token owner does not match its file identity",
-            )));
+            return Err(HeaderParseFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "symbol lookahead source token owner does not match its file identity",
+                ),
+            ));
         }
         let follower = canonical.token(follower_index).map_err(|_| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
@@ -894,10 +917,7 @@ fn handle_symbol_item_with_export_mode(
             follower.tag(),
             starts_duplicate_top_level_header_declaration_at_source(canonical, follower_index),
             starts_trait_declaration_after_must_at_source(canonical, follower_index),
-            starts_specialized_generic_conformance_declaration_at_source(
-                canonical,
-                follower_index,
-            ),
+            starts_specialized_generic_conformance_declaration_at_source(canonical, follower_index),
         )
     };
 
@@ -1040,11 +1060,7 @@ fn handle_runtime_template_item(
             "runtime template opening preceded the source token index",
         ))
     })?;
-    let range = capture_runtime_template_range(
-        opening_index,
-        token_stream,
-        context.string_table,
-    )?;
+    let range = capture_runtime_template_range(opening_index, token_stream, context.string_table)?;
     let canonical = token_stream.source_tokens().map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "runtime template range is missing its source token owner: {error:?}"
@@ -1054,10 +1070,8 @@ fn handle_runtime_template_item(
         .record_start_body_source_range_from_source_tokens(range, canonical)
         .map_err(HeaderParseFailure::Infrastructure)?;
     if context.file_role == FileRole::ActiveModuleRoot {
-        state.runtime_fragment_count = state
-            .runtime_fragment_count
-            .checked_add(1)
-            .ok_or_else(|| {
+        state.runtime_fragment_count =
+            state.runtime_fragment_count.checked_add(1).ok_or_else(|| {
                 HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
                     "runtime fragment count overflowed its source state",
                 ))
@@ -1092,7 +1106,6 @@ fn find_config_marker_in_start_ranges(
     }
     Ok(None)
 }
-
 
 fn finish_file_output(
     token_stream: &mut FileTokens,
@@ -1160,16 +1173,19 @@ fn finish_file_output(
             .into_non_entry_output(token_stream, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
-    let source_token_stream = token_stream.take_for_prepared_source();
+    let prepared_tokens = token_stream.take_for_prepared_source();
+    let canonical_owner = prepared_tokens
+        .canonical_source_tokens_arc()
+        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     attach_structural_file_facts(
         &mut output,
-        &source_token_stream,
+        &canonical_owner,
         context.string_table,
         context.path_fork,
     )
     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     output
-        .install_source_token_stream(source_token_stream)
+        .install_source_token_stream(canonical_owner)
         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     Ok(output)
 }
@@ -1185,15 +1201,14 @@ fn finish_file_output(
 ///       succeeds, so an invalid default cannot affect Stage 0 source discovery.
 fn attach_structural_file_facts(
     output: &mut FileFrontendPrepareOutput,
-    source_tokens: &FileTokens,
+    canonical: &SourceTokens,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
     let is_config_file = path_fork
         .component(output.source_file)
         .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
-    let canonical = source_tokens.source_tokens()?;
-    if canonical.source() != source_tokens.file_id {
+    if canonical.source() != output.file_id {
         return Err(CompilerError::compiler_error(
             "source token owner does not match its file stream identity",
         ));
@@ -1236,7 +1251,7 @@ fn attach_structural_file_facts(
     }
 
     for header in &output.headers {
-        if header.tokens.source() != source_tokens.file_id {
+        if header.tokens.source() != output.file_id {
             return Err(CompilerError::compiler_error(
                 "retained header range does not match its source token owner",
             ));
@@ -1265,17 +1280,13 @@ fn attach_structural_file_facts(
                 ))
             })?)
         };
-        let body_has_config_marker =
-            body_cursor.is_some_and(|cursor| source_cursor_contains_config_marker(cursor, string_table));
+        let body_has_config_marker = body_cursor
+            .is_some_and(|cursor| source_cursor_contains_config_marker(cursor, string_table));
         let declaration_has_config_marker = if declaration_owned_marker {
             false
         } else {
-            find_config_qualifier_marker_in_declaration_defaults(
-                header,
-                canonical,
-                string_table,
-            )?
-            .is_some()
+            find_config_qualifier_marker_in_declaration_defaults(header, canonical, string_table)?
+                .is_some()
         };
         if is_config_file
             || (!declaration_owned_marker
@@ -1360,7 +1371,7 @@ fn attach_structural_file_facts(
 
     collect_content_source_ordering_hints(
         &mut output.headers,
-        source_tokens,
+        canonical,
         &output.structural_file_references,
         output.path_syntax.table(),
         string_table,
@@ -1385,10 +1396,8 @@ fn source_cursor_contains_config_marker(
             break;
         };
         if !crosses_segment
-            && previous.tag()
-                == crate::compiler_frontend::tokenizer::tokens::TokenTag::HASH
-            && current.tag()
-                == crate::compiler_frontend::tokenizer::tokens::TokenTag::SYMBOL
+            && previous.tag() == crate::compiler_frontend::tokenizer::tokens::TokenTag::HASH
+            && current.tag() == crate::compiler_frontend::tokenizer::tokens::TokenTag::SYMBOL
             && current
                 .string_id()
                 .is_some_and(|name| string_table.resolve(name) == "Config")
@@ -1466,8 +1475,7 @@ fn dependency_generic_parameter_forbidden_names(
             .selections(dependency_selections)
             .expect("validated file dependency selection range");
         if selections.is_empty() {
-            if let Some(local_name) =
-                clause.effective_namespace_local_name(string_table, path_fork)
+            if let Some(local_name) = clause.effective_namespace_local_name(string_table, path_fork)
             {
                 forbidden_names.insert(local_name);
             }

@@ -18,8 +18,8 @@ use crate::compiler_frontend::headers::parse_file_headers::PreparedHeaderSyntax;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::path::Path;
 use std::sync::Arc;

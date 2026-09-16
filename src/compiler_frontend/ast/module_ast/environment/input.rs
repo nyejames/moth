@@ -6,7 +6,8 @@
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
@@ -18,5 +19,7 @@ use std::sync::Arc;
 pub(crate) struct AstEnvironmentInput {
     pub(crate) module_symbols: ModuleSymbols,
     pub(crate) binding_environment: HeaderBindingEnvironment,
-    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<FileTokens>>,
+    pub(crate) source_token_streams: FxHashMap<SourceId, Arc<SourceTokens>>,
+    pub(crate) source_token_paths: FxHashMap<SourceId, PathId>,
+    pub(crate) source_token_os_paths: FxHashMap<SourceId, Option<std::path::PathBuf>>,
 }

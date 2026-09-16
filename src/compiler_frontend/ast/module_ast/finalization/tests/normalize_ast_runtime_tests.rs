@@ -35,7 +35,9 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
         );
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::reference_with_type_id(
-                path_fork.try_intern_portable_path("show_branch", &mut string_table).expect("test path fits"),
+                path_fork
+                    .try_intern_portable_path("show_branch", &mut string_table)
+                    .expect("test path fits"),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
                 location,
@@ -122,7 +124,9 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
             builder.push_sequence_node(vec![open, aggregate_output, close], location);
         let header = TemplateLoopHeader::Conditional {
             condition: Box::new(Expression::reference_with_type_id(
-                path_fork.try_intern_portable_path("keep_looping", &mut string_table).expect("test path fits"),
+                path_fork
+                    .try_intern_portable_path("keep_looping", &mut string_table)
+                    .expect("test path fits"),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
                 location,
@@ -261,7 +265,9 @@ fn registered_runtime_template(
 ) -> Template {
     let mut path_fork = PathInternerFork::empty();
     let byte_len = string_table.resolve(text).len();
-    let reference_path = path_fork.try_intern_portable_path(reference_name, string_table).expect("test path fits");
+    let reference_path = path_fork
+        .try_intern_portable_path(reference_name, string_table)
+        .expect("test path fits");
     let reference_expression = Expression::reference_with_type_id(
         reference_path,
         DataType::StringSlice,
@@ -540,7 +546,9 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let overlay_text = string_table.intern("normalized overlay text");
-    let runtime_path = path_fork.try_intern_portable_path("runtime_name", &mut string_table).expect("test path fits");
+    let runtime_path = path_fork
+        .try_intern_portable_path("runtime_name", &mut string_table)
+        .expect("test path fits");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty_context = TemplateViewContext::default();
@@ -824,7 +832,9 @@ fn nested_const_template_folds_through_final_view() {
 fn reactive_metadata_derived_from_nested_final_view() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let reactive_path = path_fork.try_intern_portable_path("reactive_source", &mut string_table).expect("test path fits");
+    let reactive_path = path_fork
+        .try_intern_portable_path("reactive_source", &mut string_table)
+        .expect("test path fits");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
@@ -912,10 +922,18 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let function_path = path_fork.try_intern_portable_path("render_count", &mut string_table).expect("test path fits");
-    let parameter_path = path_fork.try_intern_portable_path("source", &mut string_table).expect("test path fits");
-    let active_source_path = path_fork.try_intern_portable_path("count", &mut string_table).expect("test path fits");
-    let inactive_source_path = path_fork.try_intern_portable_path("inactive", &mut string_table).expect("test path fits");
+    let function_path = path_fork
+        .try_intern_portable_path("render_count", &mut string_table)
+        .expect("test path fits");
+    let parameter_path = path_fork
+        .try_intern_portable_path("source", &mut string_table)
+        .expect("test path fits");
+    let active_source_path = path_fork
+        .try_intern_portable_path("count", &mut string_table)
+        .expect("test path fits");
+    let inactive_source_path = path_fork
+        .try_intern_portable_path("inactive", &mut string_table)
+        .expect("test path fits");
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let template_expression =

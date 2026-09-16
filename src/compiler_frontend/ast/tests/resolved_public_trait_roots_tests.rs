@@ -37,7 +37,8 @@ fn trait_header(
     let declaration_path = path_fork
         .try_intern_portable_path(name, string_table)
         .expect("test path fits");
-    let token_index = TokenIndex::try_from_raw(0).expect("zero token index should be representable");
+    let token_index =
+        TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind: HeaderKind::Trait {
             declaration: TraitDeclarationSyntax {
@@ -71,7 +72,8 @@ fn function_header(
     let declaration_path = path_fork
         .try_intern_portable_path(name, string_table)
         .expect("test path fits");
-    let token_index = TokenIndex::try_from_raw(0).expect("zero token index should be representable");
+    let token_index =
+        TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind: HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -90,7 +92,6 @@ fn function_header(
     }
 }
 
-
 fn this_type(env: &mut TypeEnvironment, string_table: &mut StringTable) -> TypeId {
     env.register_synthetic_generic_parameter(string_table.intern("This"))
 }
@@ -106,7 +107,9 @@ fn register_source_trait(
     let definition = ResolvedTraitDefinition {
         id: trait_id,
         name: string_table.intern(trait_name),
-        canonical_path: path_fork.try_intern_portable_path(trait_name, string_table).expect("test path fits"),
+        canonical_path: path_fork
+            .try_intern_portable_path(trait_name, string_table)
+            .expect("test path fits"),
         source_file: PathId::ROOT,
         this_type,
         requirements: Vec::new(),
@@ -167,11 +170,15 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
 
     assert_eq!(trait_roots.len(), 2);
     assert_eq!(
-        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        path_fork
+            .component(trait_roots[0].canonical_path)
+            .map(|id| string_table.resolve(id)),
         Some("Alpha")
     );
     assert_eq!(
-        path_fork.component(trait_roots[1].canonical_path).map(|id| string_table.resolve(id)),
+        path_fork
+            .component(trait_roots[1].canonical_path)
+            .map(|id| string_table.resolve(id)),
         Some("Beta")
     );
     assert_eq!(trait_roots[0].this_type, this_id);
@@ -228,7 +235,9 @@ fn excludes_private_traits() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        path_fork
+            .component(trait_roots[0].canonical_path)
+            .map(|id| string_table.resolve(id)),
         Some("Public")
     );
 }
@@ -283,7 +292,9 @@ fn excludes_imported_and_non_active_root_traits() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        path_fork
+            .component(trait_roots[0].canonical_path)
+            .map(|id| string_table.resolve(id)),
         Some("Local")
     );
 }
@@ -371,7 +382,9 @@ fn excludes_non_trait_declarations() {
 
     assert_eq!(trait_roots.len(), 1);
     assert_eq!(
-        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        path_fork
+            .component(trait_roots[0].canonical_path)
+            .map(|id| string_table.resolve(id)),
         Some("Shape")
     );
 }
@@ -440,8 +453,12 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     let mut trait_environment = TraitEnvironment::new();
 
     let this_id = this_type(&mut type_environment, &mut string_table);
-    let (alpha_id, beta_id) =
-        register_two_public_traits(&mut trait_environment, &mut string_table, &mut path_fork, this_id);
+    let (alpha_id, beta_id) = register_two_public_traits(
+        &mut trait_environment,
+        &mut string_table,
+        &mut path_fork,
+        this_id,
+    );
 
     let headers = vec![
         trait_header(
@@ -474,13 +491,17 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     // of which side authored the public relation. The order is the deterministic authored
     // source order recorded by the trait environment.
     assert_eq!(
-        path_fork.component(trait_roots[0].canonical_path).map(|id| string_table.resolve(id)),
+        path_fork
+            .component(trait_roots[0].canonical_path)
+            .map(|id| string_table.resolve(id)),
         Some("Alpha")
     );
     assert_eq!(trait_roots[0].incompatible_trait_ids, vec![beta_id]);
 
     assert_eq!(
-        path_fork.component(trait_roots[1].canonical_path).map(|id| string_table.resolve(id)),
+        path_fork
+            .component(trait_roots[1].canonical_path)
+            .map(|id| string_table.resolve(id)),
         Some("Beta")
     );
     assert_eq!(trait_roots[1].incompatible_trait_ids, vec![alpha_id]);

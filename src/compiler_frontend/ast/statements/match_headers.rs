@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 };
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_match_guard_condition;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     ChoicePayloadCapture, MatchPattern, ParsedChoicePattern, parse_choice_variant_pattern,
     parse_non_choice_pattern, parse_option_pattern,
@@ -29,7 +30,6 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;

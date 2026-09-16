@@ -38,8 +38,7 @@ pub(crate) fn token_is_line_initial(token_stream: &AstCursor, index: usize) -> b
     if matches!(kind, TokenKind::Newline | TokenKind::End | TokenKind::Eof) {
         return false;
     }
-    index == 0
-        || token_stream.token_kind_at(index.saturating_sub(1)) == Some(TokenKind::Newline)
+    index == 0 || token_stream.token_kind_at(index.saturating_sub(1)) == Some(TokenKind::Newline)
 }
 
 /// Returns true when the token at `start_index` has a top-level `=>` in a match
@@ -120,9 +119,7 @@ pub(crate) fn token_index_starts_match_arm_header(
         return None;
     }
 
-    let Some(start_kind) = token_stream.token_kind_at(start_index) else {
-        return None;
-    };
+    let start_kind = token_stream.token_kind_at(start_index)?;
 
     // `else` is handled separately by the match parser.
     if matches!(

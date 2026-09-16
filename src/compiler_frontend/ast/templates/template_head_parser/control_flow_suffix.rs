@@ -5,6 +5,7 @@
 //! WHY: the head parser must recognize control flow before body parsing, but
 //! branch/body splitting belongs to the body parser in the next phase.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
 use crate::compiler_frontend::ast::statements::loop_headers::{
     ParsedLoopHeader, parse_loop_header_tokens,
@@ -21,7 +22,6 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -57,8 +57,13 @@ pub(crate) fn parse_if_suffix(
         .into());
     }
 
-    let parsed_header =
-        parse_if_header(token_stream, context, type_interner, string_table, path_fork)?;
+    let parsed_header = parse_if_header(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )?;
 
     ensure_suffix_ends_at_body_start(token_stream)?;
     token_stream.advance(); // consume `:`
@@ -103,8 +108,7 @@ pub(crate) fn parse_if_suffix(
             inline_source_consts_for_const_required_if_condition(condition, context, string_table);
     }
 
-    let else_context =
-        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+    let else_context = context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
 
     Ok(TemplateBodyParseMode::If(Box::new(
         TemplateIfBodyParseInput {
@@ -158,7 +162,9 @@ pub(crate) fn parse_loop_suffix(
         .into());
     }
 
-    let path_syntax = token_stream.path_syntax_for_substream().map_err(TemplateError::from)?;
+    let path_syntax = token_stream
+        .path_syntax_for_substream()
+        .map_err(TemplateError::from)?;
     let mut warnings = Vec::new();
     let (parsed_header, body_context) = parse_loop_header_tokens(
         &suffix_tokens,
@@ -234,7 +240,6 @@ fn next_meaningful_token_is_body_boundary_at_cursor(cursor: &AstCursor) -> bool 
     true
 }
 
-
 fn ensure_suffix_ends_at_body_start(token_stream: &AstCursor) -> ControlFlowSuffixResult<()> {
     match token_stream.current_token_kind() {
         TokenKind::StartTemplateBody => Ok(()),
@@ -289,8 +294,7 @@ fn find_template_body_start_at_cursor(
             return Ok(index);
         }
 
-        if nesting_depth.is_top_level()
-            && matches!(kind, TokenKind::TemplateClose | TokenKind::Eof)
+        if nesting_depth.is_top_level() && matches!(kind, TokenKind::TemplateClose | TokenKind::Eof)
         {
             let Some(span) = cursor.span_at(index) else {
                 return Err(None);

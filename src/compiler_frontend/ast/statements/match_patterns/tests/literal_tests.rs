@@ -69,7 +69,9 @@ fn parse_whole_number_pattern(
 ) -> LiteralPatternTestResult<Expression> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let text = string_table.intern(normalized_text);
     // For signed tokens the source_text includes the sign prefix.
     let source = match sign {
@@ -112,7 +114,9 @@ fn parse_whole_number_pattern(
 fn parse_negative_number_pattern(normalized_text: &str) -> LiteralPatternTestResult<Expression> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let text = string_table.intern(normalized_text);
     // In this path the Negative token is separate, so the literal is unsigned.
     let source_text = string_table.intern(normalized_text);

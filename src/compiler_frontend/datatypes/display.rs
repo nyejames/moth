@@ -28,7 +28,6 @@ pub fn display_type(
     path_table: &PathTable,
 ) -> String {
     display_type_with_resolver(type_id, env, table, path_table)
-
 }
 /// Renders a `TypeId` through any string resolver (mutable or frozen table).
 pub(crate) fn display_type_with_resolver(
@@ -61,7 +60,6 @@ pub(crate) fn format_fallible_signature_parts(
 //  Internal Rendering Helpers
 // -----------------------------------------------------------
 
-
 fn path_name(
     path: PathId,
     path_table: &PathTable,
@@ -92,12 +90,7 @@ fn display_definition(
             super::ids::BuiltinTypeKey::None => "None".to_owned(),
         },
         TypeDefinition::Struct(struct_def) => {
-            let name = path_name(
-                struct_def.path,
-                path_table,
-                table,
-                "<anonymous struct>",
-            );
+            let name = path_name(struct_def.path, path_table, table, "<anonymous struct>");
             if struct_def.const_record {
                 format!("const record {name}")
             } else {
@@ -125,7 +118,7 @@ fn display_definition(
         }
         TypeDefinition::Constructed(constructed) => {
             display_constructed(constructed, env, table, path_table)
-        },
+        }
         TypeDefinition::Function(function) => {
             let param_types: Vec<String> = function
                 .parameters
@@ -180,7 +173,10 @@ fn display_constructed(
                         "{{{cap} {}}}",
                         display_type_with_resolver(*element, env, table, path_table)
                     ),
-                    None => format!("{{{}}}", display_type_with_resolver(*element, env, table, path_table)),
+                    None => format!(
+                        "{{{}}}",
+                        display_type_with_resolver(*element, env, table, path_table)
+                    ),
                 }
             } else {
                 "Collection".to_owned()
@@ -199,7 +195,10 @@ fn display_constructed(
         }
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option) => {
             if let Some(inner) = constructed.arguments.first() {
-                format!("{}?", display_type_with_resolver(*inner, env, table, path_table))
+                format!(
+                    "{}?",
+                    display_type_with_resolver(*inner, env, table, path_table)
+                )
             } else {
                 "Option".to_owned()
             }

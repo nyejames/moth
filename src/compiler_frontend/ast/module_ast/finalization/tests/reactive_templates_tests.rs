@@ -373,8 +373,7 @@ fn rebases_reactive_parameter_subscription_to_call_argument_source() {
     let parameter_path = symbol("source", &mut path_fork, &mut string_table);
     let count_path = symbol("count", &mut path_fork, &mut string_table);
 
-    let mut parameter =
-        no_value_declaration(parameter_path, DataType::Int, builtin_type_ids::INT);
+    let mut parameter = no_value_declaration(parameter_path, DataType::Int, builtin_type_ids::INT);
     parameter.value.reactive_source = Some(reactive_source(
         parameter_path,
         ReactiveSourceKind::Parameter,
@@ -392,12 +391,8 @@ fn rebases_reactive_parameter_subscription_to_call_argument_source() {
         None,
     )];
 
-    let mut argument =
-        reference_expression(count_path, DataType::Int, builtin_type_ids::INT)
-            .with_reactive_source(reactive_source(
-                count_path,
-                ReactiveSourceKind::Declaration,
-            ));
+    let mut argument = reference_expression(count_path, DataType::Int, builtin_type_ids::INT)
+        .with_reactive_source(reactive_source(count_path, ReactiveSourceKind::Declaration));
     argument.reactive_template = None;
 
     let mut ast = vec![
@@ -499,8 +494,7 @@ fn references_use_metadata_computed_for_prior_declarations() {
     let count_path = symbol("count", &mut path_fork, &mut string_table);
     let view_path = symbol("view", &mut path_fork, &mut string_table);
 
-    let mut parameter =
-        no_value_declaration(parameter_path, DataType::Int, builtin_type_ids::INT);
+    let mut parameter = no_value_declaration(parameter_path, DataType::Int, builtin_type_ids::INT);
     parameter.value.reactive_source = Some(reactive_source(
         parameter_path,
         ReactiveSourceKind::Parameter,
@@ -519,10 +513,7 @@ fn references_use_metadata_computed_for_prior_declarations() {
     )];
 
     let argument = reference_expression(count_path, DataType::Int, builtin_type_ids::INT)
-        .with_reactive_source(reactive_source(
-            count_path,
-            ReactiveSourceKind::Declaration,
-        ));
+        .with_reactive_source(reactive_source(count_path, ReactiveSourceKind::Declaration));
     let declaration = Declaration {
         id: view_path,
         value: call_expression(
@@ -773,11 +764,8 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
     let (body_root, body_site_id) =
         single_expression_body_root(&mut store, body_expression, location);
 
-    let selector_expression = reference_expression(
-        show_path,
-        DataType::StringSlice,
-        builtin_type_ids::STRING,
-    );
+    let selector_expression =
+        reference_expression(show_path, DataType::StringSlice, builtin_type_ids::STRING);
     let selector_site_id = store.next_expression_site_id();
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(selector_expression),

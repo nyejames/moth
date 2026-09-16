@@ -32,10 +32,10 @@ use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId,
 };
-use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -219,16 +219,20 @@ pub(crate) fn parse_single_file_ast_build_result(
             .expect("header binding failed without a diagnostic")
     })?;
 
-    let sorted =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), string_table, &mut path_fork)
-            .map_err(|failure| {
-                failure
-                    .into_messages(string_table)
-                    .into_diagnostics()
-                    .into_iter()
-                    .next()
-                    .expect("dependency sorting failed without a diagnostic")
-            })?;
+    let sorted = resolve_module_dependencies(
+        headers,
+        &ContentSourceTargets::empty(),
+        string_table,
+        &mut path_fork,
+    )
+    .map_err(|failure| {
+        failure
+            .into_messages(string_table)
+            .into_diagnostics()
+            .into_iter()
+            .next()
+            .expect("dependency sorting failed without a diagnostic")
+    })?;
 
     let entry_path = path_fork
         .try_intern_portable_path("@page.moth", string_table)
@@ -237,6 +241,8 @@ pub(crate) fn parse_single_file_ast_build_result(
         AstBuildInput {
             headers: sorted.headers,
             source_token_streams: sorted.source_token_streams,
+            source_token_paths: sorted.source_token_paths,
+            source_token_os_paths: sorted.source_token_os_paths,
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,

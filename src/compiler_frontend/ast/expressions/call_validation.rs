@@ -27,8 +27,8 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::external_packages::{
     ExternalAccessKind, ExternalFunctionDef, ExternalParameter,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::type_coercion::compatibility::{
     TypeCompatibilityCache, TypeCompatibilityMode,
 };
@@ -390,8 +390,14 @@ fn resolve_call_arguments_with_type_policy(
             return Err(CompilerError::compiler_error(message).into());
         };
 
-        let passing_mode =
-            classify_call_passing_mode(&diagnostics, &argument, expectation, slot, string_table, path_fork)?;
+        let passing_mode = classify_call_passing_mode(
+            &diagnostics,
+            &argument,
+            expectation,
+            slot,
+            string_table,
+            path_fork,
+        )?;
 
         if expectation.requires_reactive_source && !argument.value.is_reactive_source() {
             return Err(CompilerDiagnostic::invalid_call_shape(

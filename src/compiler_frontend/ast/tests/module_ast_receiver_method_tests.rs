@@ -30,7 +30,9 @@ fn interned_path(
     path_fork: &mut PathInternerFork,
 ) -> PathId {
     let components: Vec<_> = parts.iter().map(|part| string_table.intern(part)).collect();
-    path_fork.try_intern_components(&components).expect("test path fits")
+    path_fork
+        .try_intern_components(&components)
+        .expect("test path fits")
 }
 
 fn empty_receiver_entry(

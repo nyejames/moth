@@ -19,15 +19,16 @@ use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyCla
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, HeaderBuildContext, HeaderKind, LocalDeclarationOrderingHint,
+    SyntheticContentPayload,
 };
-use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenCursor, TokenRange};
+use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenCursor, TokenRange};
+use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 
@@ -156,7 +157,9 @@ pub(super) fn dependency_path_for_local_name(
     for dependency in file_dependency_clauses {
         let selections = dependency.selections(dependency_selections)?;
         if selections.is_empty() {
-        if dependency.effective_namespace_local_name(string_table, path_fork) == Some(local_name) {
+            if dependency.effective_namespace_local_name(string_table, path_fork)
+                == Some(local_name)
+            {
                 return Ok(Some(dependency.dependency.path));
             }
             continue;
@@ -194,7 +197,7 @@ pub(super) fn dependency_path_for_local_name(
 /// path handles and their prepared classification without parsing any expression.
 pub(super) fn collect_content_source_ordering_hints(
     headers: &mut [Header],
-    source_tokens: &FileTokens,
+    source_tokens: &SourceTokens,
     file_references: &PreparedFileReferenceTable,
     path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
@@ -208,20 +211,39 @@ pub(super) fn collect_content_source_ordering_hints(
             kind,
             tokens: token_range,
             local_ordering_hints,
+            synthetic_content_payload,
             ..
         } = header;
 
         match kind {
             HeaderKind::Constant { declaration } => {
-                if declaration.config_qualifier.is_none()
-                    && let Some(range) = declaration.initializer_range
-                {
-                    scan_token_range_for_content_sources(
-                        range,
-                        source_tokens,
-                        &content_targets,
-                        local_ordering_hints,
-                    )?;
+                if declaration.config_qualifier.is_none() {
+                    if let Some(range) = declaration.initializer_range {
+                        scan_token_range_for_content_sources(
+                            range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    }
+
+                    // Moth-template synthetic content keeps its body in `Header::tokens` while
+                    // leaving the declaration initializer range empty. Preserve that single body
+                    // range as the ordering-hint source.
+                    if declaration.initializer_range.is_none()
+                        && matches!(
+                            *synthetic_content_payload,
+                            Some(SyntheticContentPayload::MothTemplate { .. })
+                        )
+                        && !token_range.is_empty()
+                    {
+                        scan_token_range_for_content_sources(
+                            *token_range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    }
                 }
             }
 
@@ -321,24 +343,16 @@ fn content_source_targets(
 
 fn scan_token_range_for_content_sources(
     range: TokenRange,
-    source_tokens: &FileTokens,
+    source_tokens: &SourceTokens,
     content_targets: &FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>,
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
 ) -> Result<(), CompilerError> {
-    if range.source() != source_tokens.file_id {
+    if range.source() != source_tokens.source() {
         return Err(CompilerError::compiler_error(
             "content ordering range belongs to a different source token owner",
         ));
     }
-    let canonical = source_tokens.source_tokens().map_err(|_| {
-        CompilerError::compiler_error("content ordering range exceeds its source token owner")
-    })?;
-    if canonical.source() != source_tokens.file_id {
-        return Err(CompilerError::compiler_error(
-            "content ordering source token owner does not match its file identity",
-        ));
-    }
-    let cursor = canonical.cursor(range).map_err(|_| {
+    let cursor = source_tokens.cursor(range).map_err(|_| {
         CompilerError::compiler_error("content ordering range exceeds its source token owner")
     })?;
     scan_source_range_for_content_sources(cursor, content_targets, hints);
@@ -365,7 +379,6 @@ fn scan_source_range_for_content_sources(
         }
     }
 }
-
 
 #[cfg(test)]
 #[path = "tests/ordering_hints_tests.rs"]

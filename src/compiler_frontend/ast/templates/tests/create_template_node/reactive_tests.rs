@@ -15,8 +15,15 @@ fn reactive_head_unknown_source_retains_exact_multibyte_span() {
         .expect("test token stream must expose an AST cursor");
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-            .expect_err("an unknown reactive source should fail"),
+        Template::new(
+            &mut token_stream,
+            source_path,
+            &context,
+            vec![],
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("an unknown reactive source should fail"),
     );
     assert!(matches!(
         diagnostic.payload,

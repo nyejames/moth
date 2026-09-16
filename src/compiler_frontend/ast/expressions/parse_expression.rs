@@ -20,8 +20,8 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidRet
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
@@ -302,11 +302,8 @@ fn create_expression_until_with_policy(
     let start_index = input.token_stream.position();
     let mut scan = start_index;
     let mut depth = ExpressionBoundaryDepth::default();
-    loop {
-        let Some(kind) = input.token_stream.token_kind_at(scan) else {
-            break;
-        };
-        if depth.is_top_level() && stop_tokens.iter().any(|stop| kind == *stop) {
+    while let Some(kind) = input.token_stream.token_kind_at(scan) {
+        if depth.is_top_level() && stop_tokens.contains(&kind) {
             break;
         }
         depth.step(&kind);
@@ -356,7 +353,7 @@ fn create_expression_until_with_policy(
         return Err(CompilerDiagnostic::unexpected_token(end_kind, end_span).into());
     }
 
-    if !stop_tokens.iter().any(|stop| end_kind == *stop) {
+    if !stop_tokens.contains(&end_kind) {
         return Err(CompilerDiagnostic::unexpected_token(end_kind, end_span).into());
     }
 

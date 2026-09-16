@@ -236,9 +236,20 @@ fn hash_from_tokenized_source_rejected() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::default();
     let source = "result = 1 # 2";
-    let file_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let file_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let file_tokens = tokenize(
+        source,
+        file_path,
+        TokenizerEntryMode::SourceFile,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .unwrap();
 
     // Find the tokens after "result = "
@@ -253,7 +264,9 @@ fn hash_from_tokenized_source_rejected() {
 
     // Slice from after Assign to end
     let expr_tokens: Vec<Token> = file_tokens.tokens[index..].to_vec();
-    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let mut expr_file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, expr_tokens);
     let mut stream = AstCursor::from_file_tokens(&mut expr_file_tokens)
         .expect("test token stream must expose an AST cursor");
@@ -261,7 +274,10 @@ fn hash_from_tokenized_source_rejected() {
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -308,7 +324,9 @@ fn full_frontend_stray_hash_error() {
 fn constant_identifier_uses_module_store_tir() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let constant_name = string_table.intern("wrapper");
 
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -338,7 +356,10 @@ fn constant_identifier_uses_module_store_tir() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,

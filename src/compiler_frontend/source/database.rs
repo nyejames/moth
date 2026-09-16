@@ -381,11 +381,12 @@ impl SourceDatabase {
         })?;
         let mut components = Vec::with_capacity(depth as usize);
         table.resolve_components(logical_path, &mut components);
-        path_fork.try_intern_components(&components).ok_or(
-            SourceDatabaseError::Capacity(SourceCapacityError::LogicalPathTableFull),
-        )
+        path_fork
+            .try_intern_components(&components)
+            .ok_or(SourceDatabaseError::Capacity(
+                SourceCapacityError::LogicalPathTableFull,
+            ))
     }
-
 
     /// Look up the exact source snapshot retained for a physical source identity.
     ///
@@ -682,8 +683,7 @@ impl SourceDatabase {
         kind: SourceKind,
     ) -> Result<SourceId, SourceDatabaseError> {
         #[cfg(test)]
-        if crate::compiler_frontend::symbols::path_interner::test_exhaustion::forced_exhaustion()
-        {
+        if crate::compiler_frontend::symbols::path_interner::test_exhaustion::forced_exhaustion() {
             // Test-only: reject the new source identity so tests reach the exhaustion boundary
             // without registering the full compact source domain.
             return Err(SourceDatabaseError::Capacity(
@@ -733,9 +733,7 @@ impl SourceDatabase {
         &self,
         logical_path: PathId,
     ) -> Option<&SourceSlot> {
-        let mut matches = self
-            .iter()
-            .filter(|slot| slot.logical_path == logical_path);
+        let mut matches = self.iter().filter(|slot| slot.logical_path == logical_path);
         let slot = matches.next()?;
         if matches.next().is_some() {
             return None;
@@ -824,7 +822,6 @@ impl FrozenSourceDatabase {
         self.loaded.get(loaded_index.index())
     }
 }
-
 
 fn compilation_root_slot() -> SourceSlot {
     SourceSlot {
@@ -1143,7 +1140,9 @@ pub(crate) enum SourceCapacityError {
 }
 
 impl SourceCapacityError {
-    pub(crate) fn resource(self) -> crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource {
+    pub(crate) fn resource(
+        self,
+    ) -> crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource {
         match self {
             Self::LogicalPathTableFull => {
                 crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::LogicalPath
@@ -1175,7 +1174,6 @@ impl From<CompilerError> for SourceDatabaseError {
     }
 }
 
-
 fn non_utf8_logical_path_error(logical_path: &Path) -> CompilerError {
     CompilerError::file_error(
         logical_path,
@@ -1199,11 +1197,11 @@ fn map_path_intern_error(error: PathInternError) -> SourceDatabaseError {
         PathInternError::TableFull => {
             SourceDatabaseError::Capacity(SourceCapacityError::LogicalPathTableFull)
         }
-        PathInternError::BaseMismatch { .. } => SourceDatabaseError::Infrastructure(
-            CompilerError::compiler_error(
+        PathInternError::BaseMismatch { .. } => {
+            SourceDatabaseError::Infrastructure(CompilerError::compiler_error(
                 "logical path merge base is not a structural prefix of the destination table",
-            ),
-        ),
+            ))
+        }
     }
 }
 

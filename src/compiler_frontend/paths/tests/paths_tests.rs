@@ -20,8 +20,19 @@ fn tokenize_source(
 ) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
-    let tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, span_builder)
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
+    let tokens = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        span_builder,
+    )
     .expect("source should tokenize");
     (tokens, string_table, path_fork)
 }
@@ -36,8 +47,19 @@ fn tokenize_source_with_id(
 ) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
-    let tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, file_id, span_builder)
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
+    let tokens = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        file_id,
+        span_builder,
+    )
     .expect("source should tokenize");
     (tokens, string_table)
 }
@@ -45,8 +67,7 @@ fn tokenize_source_with_id(
 #[test]
 fn path_token_terminates_at_unquoted_whitespace() {
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (tokens, string_table, path_fork) =
-        tokenize_source("@core/math sin\n", &mut span_builder);
+    let (tokens, string_table, path_fork) = tokenize_source("@core/math sin\n", &mut span_builder);
     let path_id = tokens
         .tokens
         .iter()
@@ -127,7 +148,10 @@ fn path_table_freeze_rejects_checked_push_and_rejects_foreign_source() {
     assert!(table.is_frozen());
     assert!(
         matches!(
-            table.try_push_local(root, crate::compiler_frontend::source::LocalSpan::source_start()),
+            table.try_push_local(
+                root,
+                crate::compiler_frontend::source::LocalSpan::source_start()
+            ),
             Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Frozen)
         ),
         "a frozen source-owned table must reject another authored row on its frozen lane"
@@ -203,9 +227,20 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
     for source in ["@ docs\n", "@docs/ my\n"] {
         let mut strings = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_path = path_fork.try_intern_portable_path("test.moth", &mut strings).expect("test path fits");
+        let source_path = path_fork
+            .try_intern_portable_path("test.moth", &mut strings)
+            .expect("test path fits");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let error = match tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder) {
+        let error = match tokenize(
+            source,
+            source_path,
+            TokenizerEntryMode::SourceFile,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut strings,
+            &mut path_fork,
+            SourceId::COMPILATION_ROOT,
+            &mut span_builder,
+        ) {
             Ok(_) => panic!(
                 "whitespace cannot separate a path introducer or separator from its component"
             ),
@@ -225,9 +260,20 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
 fn path_errors_remain_structured() {
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut strings).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut strings)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let error = match tokenize("@/child", source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder) {
+    let error = match tokenize(
+        "@/child",
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    ) {
         Ok(_) => panic!("public root suffix should fail"),
         Err(TokenizeFailure::Diagnosed(diagnostic)) => diagnostic,
         Err(TokenizeFailure::Infrastructure(error)) => {
@@ -249,7 +295,9 @@ fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
     let source = format!("-- 🦋\n{path_text}\n");
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("long-path.moth", &mut strings).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("long-path.moth", &mut strings)
+        .expect("test path fits");
     let canonical_path = path_fork.render_native(scope, &strings, &mut Vec::new());
     let sources = SourceDatabase::build([&canonical_path], &canonical_path, None, &mut strings)
         .expect("source should register");
@@ -258,7 +306,16 @@ fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
         .expect("registered source")
         .id;
     let mut spans = ExtendedSpanBuilder::new();
-    let tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("quoted multibyte path should tokenize");
     let token = tokens
         .tokens

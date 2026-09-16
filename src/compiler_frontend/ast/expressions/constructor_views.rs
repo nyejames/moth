@@ -13,7 +13,6 @@ use crate::compiler_frontend::datatypes::definitions::FieldDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-
 /// Lightweight view of one constructor parameter for call validation.
 ///
 /// WHAT: carries everything `resolve_call_arguments` needs to build

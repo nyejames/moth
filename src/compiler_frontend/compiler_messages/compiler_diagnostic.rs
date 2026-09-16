@@ -184,10 +184,7 @@ impl CompilerDiagnostic {
     }
 
     /// Infallible `UnexpectedToken` over validated source token views.
-    pub(crate) fn unexpected_token_from_ref(
-        found: TokenRef<'_>,
-        span: Option<SourceSpan>,
-    ) -> Self {
+    pub(crate) fn unexpected_token_from_ref(found: TokenRef<'_>, span: Option<SourceSpan>) -> Self {
         Self::unexpected_token_from_tag(DiagnosticToken::from_token_ref(found), span)
     }
 
@@ -200,11 +197,8 @@ impl CompilerDiagnostic {
         error: TokenViewError,
         context: &'static str,
     ) -> CompilerError {
-        CompilerError::compiler_error(format!(
-            "{context} token payload was malformed: {error:?}"
-        ))
+        CompilerError::compiler_error(format!("{context} token payload was malformed: {error:?}"))
     }
-
 
     pub(crate) fn unexpected_trailing_comma(span: Option<SourceSpan>) -> Self {
         Self::new(
@@ -366,10 +360,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_namespace_default_name(
-        path: PathId,
-        span: Option<SourceSpan>,
-    ) -> Self {
+    pub(crate) fn invalid_namespace_default_name(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::InvalidNamespaceDefaultName),
             span,

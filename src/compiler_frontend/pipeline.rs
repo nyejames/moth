@@ -15,8 +15,9 @@
 //! or project code cannot assemble a semantic sequence of its own.
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    check_borrows as run_borrow_checker, BorrowCheckError, BorrowCheckReport,
+    BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::{
@@ -30,19 +31,19 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    parse_file_headers_with_table, BoundModuleHeaders, FileFrontendPrepareError,
-    FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
+    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
+    SourcePreparationDelta, parse_file_headers_with_table,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
-    prepare_plain_markdown_file, PlainMarkdownPrepareInput,
+    PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::instrumentation::{add_frontend_counter, FrontendCounter};
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::module_dependencies::{
-    resolve_module_dependencies, ContentSourceTargets, SortedHeaders,
+    ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
 };
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
@@ -57,7 +58,6 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
-use crate::compiler_frontend::FrontendBuildProfile;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -457,6 +457,8 @@ impl<'a> CompilerFrontend<'a> {
                 ),
                 headers: sorted.headers,
                 source_token_streams: sorted.source_token_streams,
+                source_token_paths: sorted.source_token_paths,
+                source_token_os_paths: sorted.source_token_os_paths,
                 module_symbols: sorted.module_symbols,
                 binding_environment: sorted.binding_environment,
                 top_level_const_fragments: sorted.top_level_const_fragments,

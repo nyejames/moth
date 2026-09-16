@@ -10,15 +10,26 @@ fn markdown_formatter_output_text_uses_authored_tir_spans() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens =
-        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[$md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path.to_owned(), &path_fork);
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("markdown template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("markdown template should parse");
     let spans = collect_formatted_body_text_spans_from_tir(&template, &context);
 
     assert!(
@@ -117,15 +128,26 @@ fn markdown_formatter_produces_formatted_tir_output() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens =
-        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[$md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path.to_owned(), &path_fork);
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("markdown template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("markdown template should parse");
 
     let formatted_body = collect_formatted_body_text_from_tir(&template, &context, &string_table);
 

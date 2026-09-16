@@ -299,8 +299,13 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/test.moth");
     let source = "make |items ~{capacity MyType}| -> Int:\n    return 1\n;\n";
-    let (output, mut span_builder) =
-        prepare_single_file_with_fork(source, &file_path, &file_path, &mut string_table, &mut path_fork);
+    let (output, mut span_builder) = prepare_single_file_with_fork(
+        source,
+        &file_path,
+        &file_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let headers = prepare_and_bind_headers_result(
         vec![output],

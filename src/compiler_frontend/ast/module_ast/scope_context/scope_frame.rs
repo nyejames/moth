@@ -366,8 +366,7 @@ impl ScopeFrame {
         declarations: Vec<Declaration>,
         path_fork: &PathInternerFork,
     ) {
-        self.local_declarations_by_name =
-            build_local_declarations_index(&declarations, path_fork);
+        self.local_declarations_by_name = build_local_declarations_index(&declarations, path_fork);
         self.local_declarations = declarations
             .into_iter()
             .map(|declaration| LocalDeclaration {

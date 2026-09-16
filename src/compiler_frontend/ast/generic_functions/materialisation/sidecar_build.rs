@@ -61,6 +61,9 @@ use rustc_hash::FxHashSet;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+
+type MaterialisedSidecarOutcome = (AstBuildResult, PathId);
+
 impl ModuleMaterialisationPreparation {
     pub(crate) fn build_environment(
         &self,
@@ -152,9 +155,7 @@ impl ModuleMaterialisationPreparation {
         })
     }
 
-    pub(crate) fn generic_function_templates(
-        &self,
-    ) -> &FxHashMap<PathId, GenericFunctionTemplate> {
+    pub(crate) fn generic_function_templates(&self) -> &FxHashMap<PathId, GenericFunctionTemplate> {
         &self.generic_function_templates_by_path
     }
 
@@ -426,7 +427,7 @@ pub(super) fn emit_materialised_sidecar<PrimarySource>(
     primary_source: &PrimarySource,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<(AstBuildResult, PathId), CompilerMessages>
+) -> Result<MaterialisedSidecarOutcome, CompilerMessages>
 where
     PrimarySource: MaterialisationNominalSource,
 {
@@ -438,13 +439,14 @@ where
         requester_call_span,
     } = request;
     let type_arguments = identity.type_arguments();
+    let nominal_source = (primary_source, requester_context);
     let mut materialised_type_arguments = Vec::with_capacity(type_arguments.len());
     for canonical_identity in type_arguments {
         let type_id = intern_generated_canonical_type(
             canonical_identity,
             &mut environment.type_environment,
             phase_context.external_package_registry.as_ref(),
-            requester_context,
+            &nominal_source,
             string_table,
             path_fork,
         )
@@ -482,11 +484,11 @@ where
             1,
             path_fork,
             FxHashMap::default(),
+            FxHashMap::default(),
+            FxHashMap::default(),
         )
-            .with_generic_call_site_identity_handle(
-                requester_context.frozen_identity_handle.clone(),
-            )
-            .emit_generated_request(request, string_table)?
+        .with_generic_call_site_identity_handle(requester_context.frozen_identity_handle.clone())
+        .emit_generated_request(request, string_table)?
     };
 
     let mut build_result = {
@@ -495,7 +497,11 @@ where
             crate::timing::TimingMetric::FrontendGeneratedAstFinalise,
             phase_context.timing_context
         );
-        AstFinalizer::new(phase_context, environment, path_fork).finalize(emitted, &[], string_table)?
+        AstFinalizer::new(phase_context, environment, path_fork).finalize(
+            emitted,
+            &[],
+            string_table,
+        )?
     };
     // The declaring source owns authored field provenance. Imported or synthetic requester
     // blueprints omit those spans, so donor-first merging keeps source ranges stable.

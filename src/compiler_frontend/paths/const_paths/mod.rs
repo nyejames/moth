@@ -84,9 +84,13 @@ pub fn parse_file_path(
         .into());
     }
 
-    let root = path_fork.try_intern_components(&parsed_prefix.components).ok_or_else(|| {
-        CompilerError::compiler_error("path table exhausted while interning an authored path row")
-    })?;
+    let root = path_fork
+        .try_intern_components(&parsed_prefix.components)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path table exhausted while interning an authored path row",
+            )
+        })?;
     mint_path_token(stream, root, path_fork)
 }
 

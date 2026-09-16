@@ -49,8 +49,6 @@ pub(crate) struct HirTestChoiceDefinition {
     pub(crate) variants: Vec<ChoiceVariant>,
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Return-slot helpers
 // ---------------------------------------------------------------------------
@@ -519,10 +517,7 @@ pub(crate) fn choice_type_id(
 /// WHY:  named for what it does rather than `build_ast_with_registered_types`, because HIR lowering resolves frontend
 ///       `TypeId`s during declaration registration and a fixture that skipped that step would
 ///       fail for reasons that have nothing to do with the test's subject.
-pub(crate) fn build_ast_with_registered_types(
-    nodes: Vec<AstNode>,
-    entry_path: PathId,
-) -> Ast {
+pub(crate) fn build_ast_with_registered_types(nodes: Vec<AstNode>, entry_path: PathId) -> Ast {
     build_ast_with_choices(nodes, entry_path, vec![])
 }
 

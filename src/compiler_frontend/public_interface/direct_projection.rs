@@ -441,8 +441,11 @@ fn project_declaration_records<'a>(
     type_context: &DeclarationTypeProjectionContext<'_>,
     state: &mut DeclarationRecordProjectionState<'a, '_>,
 ) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
-    let mut root_index =
-        RootIndex::new(&root_table.roots, type_context.string_table, type_context.path_fork)?;
+    let mut root_index = RootIndex::new(
+        &root_table.roots,
+        type_context.string_table,
+        type_context.path_fork,
+    )?;
 
     let mut declarations = Vec::new();
     let mut seen_origins: FxHashSet<OriginDeclarationId> = FxHashSet::default();
@@ -741,9 +744,11 @@ fn fold_constant_value(
 ) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), CompilerError> {
     let Some(value_id) = context.const_values.value_for_path(&defining_path) else {
         let mut scratch = Vec::new();
-        let defining_path = context
-            .path_fork
-            .render_portable(defining_path, context.folded_value_projection_context.string_table, &mut scratch);
+        let defining_path = context.path_fork.render_portable(
+            defining_path,
+            context.folded_value_projection_context.string_table,
+            &mut scratch,
+        );
         let mut available_paths = context
             .const_values
             .module_constant_paths()

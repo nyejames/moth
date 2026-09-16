@@ -22,12 +22,12 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 
-use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use super::validation::{
     validate_catch_fallible_handler_binding, validate_catch_fallible_handler_conflict,
@@ -72,8 +72,14 @@ pub(crate) fn parse_catch_fallible_handler_typed(
         None => &mut local_handler_warnings,
     };
 
-    let error_binding =
-        parse_catch_error_binding(token_stream, context, &site, warnings, string_table, path_fork)?;
+    let error_binding = parse_catch_error_binding(
+        token_stream,
+        context,
+        &site,
+        warnings,
+        string_table,
+        path_fork,
+    )?;
 
     parse_catch_fallible_handler_body(
         token_stream,
@@ -318,8 +324,14 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,
     };
-    let error_binding =
-        parse_catch_error_binding(token_stream, context, &site, warnings, string_table, path_fork)?;
+    let error_binding = parse_catch_error_binding(
+        token_stream,
+        context,
+        &site,
+        warnings,
+        string_table,
+        path_fork,
+    )?;
 
     parse_inline_catch_handler_body(
         token_stream,

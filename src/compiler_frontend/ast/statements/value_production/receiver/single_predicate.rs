@@ -7,8 +7,8 @@
 //! eligibility and option `none`/literal diagnostics.
 
 use crate::compiler_frontend::ast::ContextKind;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::if_headers::{
@@ -156,9 +156,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupport
     let scrutinee_type_id = context.get_reference(scrutinee_name)?.value.type_id;
     type_environment.option_inner_type(scrutinee_type_id)?;
 
-    let Some(pattern_kind) = token_stream.token_kind_at(pattern_index) else {
-        return None;
-    };
+    let pattern_kind = token_stream.token_kind_at(pattern_index)?;
 
     if matches!(pattern_kind, TokenKind::NoneLiteral) {
         return Some(InvalidControlFlowStatementReason::ValueIfOptionNonePredicate);

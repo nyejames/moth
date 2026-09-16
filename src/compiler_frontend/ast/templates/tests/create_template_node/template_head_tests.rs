@@ -18,9 +18,15 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
 
-    let diagnostic =
-        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect_err("unknown name in template head should fail");
+    let diagnostic = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("unknown name in template head should fail");
     let diagnostic = expect_template_diagnostic(diagnostic);
 
     let unknown_name = string_table.intern("unknown_name");
@@ -63,22 +69,29 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(&source,
-    &style_directives,
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let source_path = file_tokens.src_path;
-    let context = new_constant_context_with_style_directives(
-        source_path,
+    let mut file_tokens = template_tokens_from_source_with_style_directives(
+        &source,
         &style_directives,
-        &path_fork,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
     );
+    let source_path = file_tokens.src_path;
+    let context =
+        new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-            .expect_err("incompatible formatter directives should fail"),
+        Template::new(
+            &mut token_stream,
+            source_path,
+            &context,
+            vec![],
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("incompatible formatter directives should fail"),
     );
     assert!(matches!(
         diagnostic.payload,
@@ -112,8 +125,12 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
-        template_tokens_from_source("[stale_template]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[stale_template]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let scope = file_tokens.src_path;
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
@@ -186,8 +203,12 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens =
-        template_tokens_from_source("[@core/math]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[@core/math]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let opener_index = file_tokens.index;
     // Build the explicit unbounded compatibility adapter from the valid token vector first.
     // `new_from_slice` validates path handles against the shared table, so the `NONE`
@@ -261,8 +282,12 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
-        template_tokens_from_source("[@docs/intro.mtf]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[@docs/intro.mtf]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let path_syntax = file_tokens
         .tokens
         .iter()
@@ -286,12 +311,9 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         .expect("content source identity should be present");
     let source_file = source_slot.id;
     let content_logical_path = source_slot.logical_path;
-    let content_path = content_constant_path(
-        content_logical_path,
-        &mut path_fork,
-        &mut string_table,
-    )
-    .expect("content constant path should intern");
+    let content_path =
+        content_constant_path(content_logical_path, &mut path_fork, &mut string_table)
+            .expect("content constant path should intern");
     let content_string = string_table.intern("resolved head content");
     let content_declaration = Declaration {
         id: content_path,
@@ -318,7 +340,10 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     let context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         source_path,
-        Rc::new(TopLevelDeclarationTable::new(vec![content_declaration], &path_fork)),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![content_declaration],
+            &path_fork,
+        )),
         Arc::new(ExternalPackageRegistry::default()),
         vec![],
         0,
@@ -346,8 +371,8 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         &mut string_table,
         &mut path_fork,
     )
-            .expect("content path in a template head should resolve from Stage 0")
-            .template;
+    .expect("content path in a template head should resolve from Stage 0")
+    .template;
     let folded = fold_template_in_context(&template, &context, &mut string_table);
 
     assert_eq!(
@@ -422,8 +447,15 @@ fn template_head_extensionless_path_retains_exact_span() {
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-            .expect_err("an extensionless template-head path should fail"),
+        Template::new(
+            &mut token_stream,
+            source_path,
+            &context,
+            vec![],
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("an extensionless template-head path should fail"),
     );
     assert!(matches!(
         diagnostic.payload,
@@ -455,7 +487,9 @@ fn template_head_extensionless_path_retains_exact_span() {
 fn single_item_template_head_with_close_is_foldable() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
     let context = new_constant_context(scope.to_owned(), &path_fork);
 
     let mut file_tokens = FileTokens::new(
@@ -472,8 +506,15 @@ fn single_item_template_head_with_close_is_foldable() {
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("single-item head template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("single-item head template should parse");
 
     assert!(matches!(
         effective_tir_kind(&template, &context),
@@ -488,15 +529,26 @@ fn parsed_template_tir_reference_carries_empty_view_context() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
-        template_tokens_from_source("[: body]", &mut string_table, &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[: body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
 
-    let template = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("template source should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("template source should parse");
     let reference = &template.tir_reference;
 
     assert_eq!(reference.context, TemplateViewContext::default());
@@ -507,16 +559,26 @@ fn template_control_flow_suffix_requires_comma_after_head_items() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source("[value if true: Visible]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
+    let mut file_tokens = template_tokens_from_source(
+        "[value if true: Visible]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let source_path = file_tokens.src_path;
     let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
     let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
         .expect("test token stream must expose an AST cursor");
 
-    let diagnostic = Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-        .expect_err("missing comma before template control-flow suffix should fail");
+    let diagnostic = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("missing comma before template control-flow suffix should fail");
     let diagnostic = expect_template_diagnostic(diagnostic);
 
     assert!(matches!(
@@ -577,8 +639,15 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
         .expect("test token stream must expose an AST cursor");
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, source_path, &context, vec![], &mut string_table, &mut path_fork)
-            .expect_err("a separator after an if suffix should fail"),
+        Template::new(
+            &mut token_stream,
+            source_path,
+            &context,
+            vec![],
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("a separator after an if suffix should fail"),
     );
     assert!(matches!(
         diagnostic.payload,

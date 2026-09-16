@@ -176,13 +176,23 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
     let source_code = source_files
         .retained_text(file_id)
         .expect("the snapshot should remain owned");
-    let authored_scope = path_fork.try_intern_filesystem_path(authored_path, &mut string_table)
+    let authored_scope = path_fork
+        .try_intern_filesystem_path(authored_path, &mut string_table)
         .expect("the authored path should be UTF-8");
     // A reference lexer pass captures the literal's local span; the span rows land in a
     // throwaway reference builder, so the service's independent builder must re-encode the
     // same bytes for the retained-span assertion below.
     let mut reference_builder = ExtendedSpanBuilder::new();
-    let reference_tokens = tokenize(source_code, authored_scope, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, file_id, &mut reference_builder)
+    let reference_tokens = tokenize(
+        source_code,
+        authored_scope,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        file_id,
+        &mut reference_builder,
+    )
     .expect("the config should tokenize before its later dialect rejection");
     let literal_span = reference_tokens
         .tokens

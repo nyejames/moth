@@ -13,6 +13,7 @@ use super::head_expressions::{
     TemplateHeadExpressionContext, push_template_head_reactive_subscription,
 };
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
@@ -20,7 +21,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -100,10 +100,7 @@ pub(super) fn parse_reactive_subscription(
 
         return Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(
-                reason,
-                None,
-            ),
+            CompilerDiagnostic::invalid_template_structure(reason, None),
         )
         .into());
     }
@@ -186,4 +183,3 @@ fn with_token_span(
 fn current_token_local_span(token_stream: &AstCursor) -> LocalSpan {
     token_stream.current_span().local()
 }
-

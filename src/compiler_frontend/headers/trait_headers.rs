@@ -142,7 +142,6 @@ fn parse_trait_requirement(
     )?;
     let next_index =
         token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-    drop(declaration_cursor);
     token_stream.index = next_index;
 
     // Every non-empty requirement must start with `This` or `~This`.
@@ -389,7 +388,9 @@ pub(super) fn conformance_header_path(
     let name = string_table.intern(&format!("__trait_conformance_{:?}", span.local()));
     path_fork
         .try_intern_child(target_path, name)
-        .ok_or_else(|| CompilerError::compiler_error("path table exhausted while interning conformance path"))
+        .ok_or_else(|| {
+            CompilerError::compiler_error("path table exhausted while interning conformance path")
+        })
 }
 
 pub(super) fn incompatibility_header_path(
@@ -401,7 +402,11 @@ pub(super) fn incompatibility_header_path(
     let name = string_table.intern(&format!("__trait_incompatibility_{:?}", span.local()));
     path_fork
         .try_intern_child(subject_path, name)
-        .ok_or_else(|| CompilerError::compiler_error("path table exhausted while interning incompatibility path"))
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path table exhausted while interning incompatibility path",
+            )
+        })
 }
 
 pub(super) fn ensure_trait_name_is_all_caps(

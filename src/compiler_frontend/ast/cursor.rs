@@ -10,24 +10,11 @@ use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenKind, TokenRange,
-    TokenRangeError, TokenRef, TokenTag,
+    FilePathSyntax, FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenKind,
+    TokenRange, TokenRangeError, TokenRef, TokenTag,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
-
-/// A saved parser position and visibility boundary.
-#[derive(Debug)]
-pub(crate) enum AstCursorCheckpoint<'a> {
-    Canonical {
-        cursor: TokenCursor<'a>,
-        limit: Option<usize>,
-    },
-    Compatibility {
-        index: usize,
-        limit: Option<usize>,
-    },
-}
 
 #[derive(Debug)]
 enum AstCursorBacking<'a> {
@@ -45,8 +32,8 @@ pub(crate) struct AstCursor<'a> {
     backing: AstCursorBacking<'a>,
     /// Canonical source ownership retained for bounded parser handoffs.
     ///
-    /// `AstCursor::new` is intentionally source-store-only and therefore leaves this absent.
-    /// Cursors built from `FileTokens` clone the existing owner `Arc` instead of rebuilding it.
+    /// Owner-less canonical cursors leave this absent. Cursors built from `FileTokens` clone
+    /// the existing owner `Arc` instead of rebuilding it.
     canonical_owner: Option<Arc<SourceTokens>>,
     /// Filesystem identity used only when a `FileTokens`-backed cursor creates an adapter.
     canonical_os_path: Option<PathBuf>,
@@ -57,10 +44,6 @@ pub(crate) struct AstCursor<'a> {
 }
 
 impl<'a> AstCursor<'a> {
-    pub(crate) fn new(cursor: TokenCursor<'a>) -> Self {
-        Self::new_with_owner(cursor, None, None)
-    }
-
     fn new_with_owner(
         cursor: TokenCursor<'a>,
         canonical_owner: Option<Arc<SourceTokens>>,
@@ -108,28 +91,47 @@ impl<'a> AstCursor<'a> {
         cursor.refresh_facts();
         Ok(cursor)
     }
-    /// Construct an owner-retaining canonical cursor over a checked source range.
+    /// Construct an owner-retaining canonical cursor directly from one canonical source owner.
     ///
-    /// The cursor borrows the canonical owner through `token_stream` while retaining an `Arc`
-    /// clone and filesystem identity for any bounded parser handoff performed from this cursor.
-    /// This is the owner-aware counterpart to [`AstCursor::new`], which accepts only a borrowed
-    /// `TokenCursor` and therefore cannot recover provenance on its own.
-    pub(crate) fn from_file_tokens_range(
-        token_stream: &'a FileTokens,
+    /// Ordinary header/environment lookups share `Arc<SourceTokens>` plus explicit side-map
+    /// filesystem identity. The cursor borrows the owner while retaining an `Arc` clone for
+    /// later bounded parser handoffs.
+    pub(crate) fn from_source_tokens(
+        source_tokens: &'a Arc<SourceTokens>,
+        canonical_os_path: Option<PathBuf>,
         range: TokenRange,
     ) -> Result<Self, CompilerError> {
-        let source_tokens = token_stream.canonical_source_tokens()?;
+        let mut cursor =
+            Self::from_source_tokens_for_handoff(source_tokens, canonical_os_path, range)?;
+        cursor.refresh_facts();
+        Ok(cursor)
+    }
+
+    /// Construct an owner-retaining canonical cursor for a bounded parser handoff.
+    ///
+    /// The handoff only needs the checked range and retained owner; it never reads parser facts
+    /// from this cursor. Avoiding the initial current/next/previous materialisation matters for
+    /// declaration headers, where the same owner is handed to one short-lived initializer
+    /// adapter per constant.
+    pub(crate) fn from_source_tokens_for_handoff(
+        source_tokens: &'a Arc<SourceTokens>,
+        canonical_os_path: Option<PathBuf>,
+        range: TokenRange,
+    ) -> Result<Self, CompilerError> {
         let canonical = source_tokens.cursor(range).map_err(|error| {
             CompilerError::compiler_error(format!(
                 "canonical source range cursor construction failed: {error:?}"
             ))
         })?;
-        let canonical_owner = token_stream.canonical_source_tokens_arc()?;
-        Ok(Self::new_with_owner(
-            canonical,
-            Some(canonical_owner),
-            token_stream.canonical_os_path.clone(),
-        ))
+        Ok(Self {
+            backing: AstCursorBacking::Canonical(canonical),
+            canonical_owner: Some(Arc::clone(source_tokens)),
+            canonical_os_path,
+            limit: None,
+            current_kind: TokenKind::Eof,
+            next_kind: None,
+            previous_kind: None,
+        })
     }
 
     /// Force the compatibility lane over a remapped generic-body adapter.
@@ -184,7 +186,7 @@ impl<'a> AstCursor<'a> {
             }
             AstCursorBacking::Compatibility(stream) => {
                 FileTokens::new_bounded_expression_substream(
-                    &**stream,
+                    stream,
                     range,
                     declaration_path,
                     eof_span,
@@ -201,32 +203,6 @@ impl<'a> AstCursor<'a> {
         self.visible_at(cursor.parser_position(), token)
     }
 
-    pub(crate) fn peek_next(&self) -> Option<TokenRef<'a>> {
-        let AstCursorBacking::Canonical(cursor) = &self.backing else {
-            return None;
-        };
-        let logical_position = cursor.parser_position().checked_add(1)?;
-        let token = if cursor.is_segmented() {
-            cursor.parser_peek_next()
-        } else {
-            cursor.peek_next()
-        }?;
-        self.visible_at(logical_position, token)
-    }
-
-    pub(crate) fn peek_at(&self, offset: usize) -> Option<TokenRef<'a>> {
-        let AstCursorBacking::Canonical(cursor) = &self.backing else {
-            return None;
-        };
-        let logical_position = cursor.parser_position().checked_add(offset)?;
-        let token = if cursor.is_segmented() {
-            cursor.parser_peek_at(offset)
-        } else {
-            cursor.peek_at(offset)
-        }?;
-        self.visible_at(logical_position, token)
-    }
-
     pub(crate) fn previous(&self) -> Option<TokenRef<'a>> {
         let AstCursorBacking::Canonical(cursor) = &self.backing else {
             return None;
@@ -237,19 +213,30 @@ impl<'a> AstCursor<'a> {
     }
 
     pub(crate) fn advance(&mut self) {
-        let at_end = self.is_at_end();
-        if at_end {
-            return;
-        }
+        let limit = self.limit;
         match &mut self.backing {
             AstCursorBacking::Canonical(cursor) => {
+                if limit.is_some_and(|limit| cursor.parser_position() >= limit)
+                    || cursor.is_at_end()
+                {
+                    return;
+                }
                 cursor.advance();
+                self.refresh_facts();
             }
             AstCursorBacking::Compatibility(stream) => {
-                stream.advance();
+                if limit.is_some_and(|limit| stream.index >= limit)
+                    || stream.index >= stream.length
+                    || matches!(
+                        stream.tokens.get(stream.index).map(|token| &token.kind),
+                        Some(TokenKind::Eof)
+                    )
+                {
+                    return;
+                }
+                stream.index += 1;
             }
         }
-        self.refresh_facts();
     }
 
     pub(crate) fn skip_newlines(&mut self) {
@@ -320,8 +307,7 @@ impl<'a> AstCursor<'a> {
     /// Read a token relative to the current parser position.
     ///
     /// The offset is logical-parser relative for both contiguous and segmented canonical cursors;
-    /// advancing a copied cursor allows the segmented path to cross source gaps without changing
-    /// the live parser position.
+    /// the cursor resolves that dense position without changing the live parser position.
     pub(crate) fn token_kind_at_offset(&self, offset: usize) -> Option<TokenKind> {
         if self
             .limit
@@ -331,11 +317,9 @@ impl<'a> AstCursor<'a> {
         }
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => {
-                let mut cursor = *cursor;
-                for _ in 0..offset {
-                    cursor.advance()?;
-                }
-                cursor.current_token_owned().ok().flatten().map(|token| token.kind)
+                let position = cursor.parser_position();
+                let token = cursor.parser_token_at(position.checked_add(offset)?)?;
+                token.to_token_kind().ok()
             }
             AstCursorBacking::Compatibility(stream) => stream
                 .tokens
@@ -344,29 +328,18 @@ impl<'a> AstCursor<'a> {
         }
     }
 
-
     pub(crate) fn span_at(&self, index: usize) -> Option<SourceSpan> {
         self.token_at(index)
             .map(|token| SourceSpan::new(self.source_id(), token.span))
     }
 
-    pub(crate) fn declaration_cursor(
-        &self,
-    ) -> Result<DeclarationCursor<'_>, CompilerError> {
+    pub(crate) fn declaration_cursor(&self) -> Result<DeclarationCursor<'_>, CompilerError> {
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => DeclarationCursor::new(*cursor),
-            AstCursorBacking::Compatibility(stream) => {
-                DeclarationCursor::from_file_tokens(stream)
-            }
+            AstCursorBacking::Compatibility(stream) => DeclarationCursor::from_file_tokens(stream),
         }
     }
 
-    pub(crate) fn position_index(&self) -> Option<TokenIndex> {
-        match &self.backing {
-            AstCursorBacking::Canonical(cursor) => Some(cursor.position()),
-            AstCursorBacking::Compatibility(_) => None,
-        }
-    }
     pub(crate) fn set_position(&mut self, position: usize) -> Result<(), CompilerError> {
         if self.limit.is_some_and(|limit| position > limit) {
             return Err(CompilerError::compiler_error(
@@ -408,43 +381,6 @@ impl<'a> AstCursor<'a> {
         Ok(())
     }
 
-    pub(crate) fn checkpoint(&self) -> AstCursorCheckpoint<'a> {
-        match &self.backing {
-            AstCursorBacking::Canonical(cursor) => AstCursorCheckpoint::Canonical {
-                cursor: *cursor,
-                limit: self.limit,
-            },
-            AstCursorBacking::Compatibility(stream) => AstCursorCheckpoint::Compatibility {
-                index: stream.index,
-                limit: self.limit,
-            },
-        }
-    }
-
-    pub(crate) fn restore(&mut self, checkpoint: AstCursorCheckpoint<'a>) {
-        match (&mut self.backing, checkpoint) {
-            (
-                AstCursorBacking::Canonical(cursor),
-                AstCursorCheckpoint::Canonical {
-                    cursor: saved_cursor,
-                    limit,
-                },
-            ) => {
-                *cursor = saved_cursor;
-                self.limit = limit;
-            }
-            (
-                AstCursorBacking::Compatibility(stream),
-                AstCursorCheckpoint::Compatibility { index, limit },
-            ) => {
-                stream.index = index;
-                self.limit = limit;
-            }
-            _ => panic!("AST cursor checkpoint belongs to a different cursor backing"),
-        }
-        self.refresh_facts();
-    }
-
     pub(crate) fn set_limit(&mut self, end: usize) -> Result<Option<usize>, CompilerError> {
         let current = self.position();
         if end < current {
@@ -468,11 +404,9 @@ impl<'a> AstCursor<'a> {
     }
 
     pub(crate) fn restore_limit(&mut self, limit: Option<usize>) {
-
         self.limit = limit;
         self.refresh_facts();
     }
-
     pub(crate) fn is_at_end(&self) -> bool {
         self.limit.is_some_and(|limit| self.position() >= limit)
             || match &self.backing {
@@ -481,10 +415,7 @@ impl<'a> AstCursor<'a> {
             }
     }
 
-    pub(crate) fn nested(
-        &self,
-        range: TokenRange,
-    ) -> Result<TokenCursor<'a>, TokenRangeError> {
+    pub(crate) fn nested(&self, range: TokenRange) -> Result<TokenCursor<'a>, TokenRangeError> {
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => cursor.nested(range),
             AstCursorBacking::Compatibility(_) => Err(TokenRangeError::OutOfBounds {
@@ -506,7 +437,6 @@ impl<'a> AstCursor<'a> {
             self.canonical_os_path.clone(),
         ))
     }
-
 
     pub(crate) fn current_span(&self) -> SourceSpan {
         match &self.backing {
@@ -552,23 +482,12 @@ impl<'a> AstCursor<'a> {
         }
     }
 
-    pub(crate) fn canonical_cursor(&self) -> Option<TokenCursor<'a>> {
-        match &self.backing {
-            AstCursorBacking::Canonical(cursor) => Some(*cursor),
-            AstCursorBacking::Compatibility(_) => None,
-        }
-    }
-
     pub(crate) fn current_tag(&self) -> TokenTag {
-        self.current_kind.token_tag()
+        self.current_token_kind().token_tag()
     }
 
     pub(crate) fn peek_next_tag(&self) -> Option<TokenTag> {
-        self.next_kind.as_ref().map(TokenKind::token_tag)
-    }
-
-    pub(crate) fn previous_tag(&self) -> Option<TokenTag> {
-        self.previous_kind.as_ref().map(TokenKind::token_tag)
+        self.peek_next_token().map(TokenKind::token_tag)
     }
 
     pub(crate) fn current_token(&self) -> Token {
@@ -581,28 +500,46 @@ impl<'a> AstCursor<'a> {
         }
     }
 
-    pub(crate) fn current_kind(&self) -> TokenKind {
-        self.current_kind.clone()
-    }
-
-    pub(crate) fn peek_next_kind(&self) -> Option<TokenKind> {
-        self.next_kind.clone()
-    }
-
-    pub(crate) fn previous_kind(&self) -> Option<TokenKind> {
-        self.previous_kind.clone()
-    }
-
     pub(crate) fn current_token_kind(&self) -> &TokenKind {
-        &self.current_kind
+        match &self.backing {
+            AstCursorBacking::Canonical(_) => &self.current_kind,
+            AstCursorBacking::Compatibility(stream) => {
+                if self.limit.is_some_and(|limit| stream.index >= limit) {
+                    return &self.current_kind;
+                }
+                stream
+                    .tokens
+                    .get(stream.index)
+                    .map(|token| &token.kind)
+                    .unwrap_or(&self.current_kind)
+            }
+        }
     }
 
     pub(crate) fn peek_next_token(&self) -> Option<&TokenKind> {
-        self.next_kind.as_ref()
+        match &self.backing {
+            AstCursorBacking::Canonical(_) => self.next_kind.as_ref(),
+            AstCursorBacking::Compatibility(stream) => {
+                let index = stream.index.checked_add(1)?;
+                let end = self.limit.unwrap_or(stream.length);
+                (index < end)
+                    .then(|| stream.tokens.get(index))
+                    .flatten()
+                    .map(|token| &token.kind)
+            }
+        }
     }
 
     pub(crate) fn previous_token(&self) -> Option<&TokenKind> {
-        self.previous_kind.as_ref()
+        match &self.backing {
+            AstCursorBacking::Canonical(_) => self.previous_kind.as_ref(),
+            AstCursorBacking::Compatibility(stream) => stream
+                .index
+                .checked_sub(1)
+                .filter(|index| self.limit.is_none_or(|limit| *index < limit))
+                .and_then(|index| stream.tokens.get(index))
+                .map(|token| &token.kind),
+        }
     }
 
     pub(crate) fn current_postfix_operator_span(&self) -> SourceSpan {
@@ -615,10 +552,7 @@ impl<'a> AstCursor<'a> {
             .then_some(token)
     }
 
-    fn previous_from_cursor(
-        cursor: TokenCursor<'a>,
-        limit: Option<usize>,
-    ) -> Option<TokenRef<'a>> {
+    fn previous_from_cursor(cursor: TokenCursor<'a>, limit: Option<usize>) -> Option<TokenRef<'a>> {
         let current = cursor.current();
         let range = cursor.range();
         let position = current
@@ -636,67 +570,43 @@ impl<'a> AstCursor<'a> {
     }
 
     fn refresh_facts(&mut self) {
-        let current = match &self.backing {
-            AstCursorBacking::Canonical(cursor) => {
-                let position = cursor.parser_position();
-                cursor
-                    .current()
-                    .and_then(|token| self.visible_at(position, token))
-                    .and_then(|token| token.to_token_kind().ok())
-            }
-            AstCursorBacking::Compatibility(stream) => {
-                let within_limit = self.limit.is_none_or(|limit| stream.index < limit);
-                within_limit
-                    .then(|| stream.tokens.get(stream.index))
-                    .flatten()
-                    .map(|token| token.kind.clone())
-            }
+        let AstCursorBacking::Canonical(cursor) = &self.backing else {
+            // Compatibility cursors expose the already-materialised parser vector directly from
+            // their accessors. Re-cloning three TokenKinds on every advance would erase the
+            // compatibility lane's purpose.
+            return;
         };
-        let next = match &self.backing {
-            AstCursorBacking::Canonical(cursor) => {
-                let next_position = cursor.parser_position().checked_add(1);
-                let token = if cursor.is_segmented() {
-                    cursor.parser_peek_next()
-                } else {
-                    cursor.peek_next()
-                };
-                next_position
-                    .and_then(|position| token.and_then(|token| self.visible_at(position, token)))
-                    .and_then(|token| token.to_token_kind().ok())
-            }
-            AstCursorBacking::Compatibility(stream) => {
-                let index = stream.index.checked_add(1);
-                let within_limit = self.limit.unwrap_or(stream.length);
-                index
-                    .filter(|index| *index < within_limit && *index < stream.length)
-                    .and_then(|index| stream.tokens.get(index))
-                    .map(|token| token.kind.clone())
-            }
+
+        let position = cursor.parser_position();
+        let current = cursor
+            .current()
+            .and_then(|token| self.visible_at(position, token))
+            .and_then(|token| token.to_token_kind().ok());
+
+        let next_position = position.checked_add(1);
+        let next_token = if cursor.is_segmented() {
+            cursor.parser_peek_next()
+        } else {
+            cursor.peek_next()
         };
-        let previous = match &self.backing {
-            AstCursorBacking::Canonical(cursor) => {
-                if cursor.is_segmented() {
-                    cursor
-                        .parser_position()
-                        .checked_sub(1)
-                        .and_then(|position| {
-                            cursor
-                                .parser_previous()
-                                .and_then(|token| self.visible_at(position, token))
-                        })
-                        .and_then(|token| token.to_token_kind().ok())
-                } else {
-                    Self::previous_from_cursor(*cursor, self.limit)
-                        .and_then(|token| token.to_token_kind().ok())
-                }
-            }
-            AstCursorBacking::Compatibility(stream) => stream
-                .index
+        let next = next_position
+            .and_then(|position| next_token.and_then(|token| self.visible_at(position, token)))
+            .and_then(|token| token.to_token_kind().ok());
+
+        let previous = if cursor.is_segmented() {
+            position
                 .checked_sub(1)
-                .filter(|index| self.limit.is_none_or(|limit| *index < limit))
-                .and_then(|index| stream.tokens.get(index))
-                .map(|token| token.kind.clone()),
+                .and_then(|position| {
+                    cursor
+                        .parser_previous()
+                        .and_then(|token| self.visible_at(position, token))
+                })
+                .and_then(|token| token.to_token_kind().ok())
+        } else {
+            Self::previous_from_cursor(*cursor, self.limit)
+                .and_then(|token| token.to_token_kind().ok())
         };
+
         self.current_kind = current.unwrap_or(TokenKind::Eof);
         self.next_kind = next;
         self.previous_kind = previous;
@@ -706,4 +616,3 @@ impl<'a> AstCursor<'a> {
         Token::new(TokenKind::Eof, LocalSpan::source_start())
     }
 }
-

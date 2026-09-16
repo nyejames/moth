@@ -1,4 +1,3 @@
-use crate::builder_surface::SourceFileKind;
 use super::{
     BorrowAccessKind, BorrowDiagnosticKind, CompileTimeEvaluationErrorReason, CompilerDiagnostic,
     ConfigDiagnosticKind, DeferredFeatureDiagnosticKind, DeferredFeatureReason,
@@ -19,13 +18,14 @@ use super::{
     TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
     UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
+use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, ErrorType, RenderFrozenContext, RenderTypeContext,
 };
-use crate::compiler_frontend::compiler_messages::{ModuleDiagnostics, PremergeDiagnosticBatch};
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
 };
+use crate::compiler_frontend::compiler_messages::{ModuleDiagnostics, PremergeDiagnosticBatch};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
@@ -220,7 +220,9 @@ fn category_and_default_severity_derive_from_kind() {
 fn explicit_severity_can_override_descriptor_default() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let diagnostic = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         DiagnosticSeverity::Warning,
@@ -238,7 +240,9 @@ fn explicit_severity_can_override_descriptor_default() {
 fn diagnostic_identity_uses_descriptor_code_actual_severity_and_typed_reason() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let diagnostic = CompilerDiagnostic::with_severity(
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCollectionType),
         DiagnosticSeverity::Warning,
@@ -262,7 +266,9 @@ fn diagnostic_identity_uses_descriptor_code_actual_severity_and_typed_reason() {
 fn unsupported_backend_feature_exposes_stable_reason_key() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern("Wasm"),
         UnsupportedBackendFeatureReason::HashmapOperation,
@@ -280,7 +286,9 @@ fn unsupported_backend_feature_exposes_stable_reason_key() {
 fn non_utf8_output_folder_reason_has_stable_identity_and_rendering() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("config.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("config.moth", &mut string_table)
+        .expect("test path fits");
     let reason = InvalidConfigReason::InvalidOutputFolder {
         folder: None,
         reason: InvalidOutputFolderReason::NonUtf8,
@@ -377,7 +385,9 @@ fn stable_reason_key_format_rejects_unqualified_or_noncanonical_keys() {
 fn reasonless_payloads_have_no_reason_key() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let diagnostic = CompilerDiagnostic::new(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         span(source_path),
@@ -394,7 +404,9 @@ fn reasonless_payloads_have_no_reason_key() {
 fn reason_key_dispatch_covers_distinct_typed_reason_families() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let span = span(source_path);
     let diagnostics = [
         CompilerDiagnostic::invalid_type_annotation(
@@ -427,7 +439,9 @@ fn reason_key_dispatch_covers_distinct_typed_reason_families() {
 fn diagnostic_bag_tracks_errors_warnings_and_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let first = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
@@ -459,7 +473,9 @@ fn diagnostic_bag_tracks_errors_warnings_and_order() {
 fn compiler_messages_counts_and_order_come_from_structured_diagnostics() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let error = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
@@ -492,7 +508,9 @@ fn compiler_messages_counts_and_order_come_from_structured_diagnostics() {
 fn compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let error = unknown_name_diagnostic(
         string_table.intern("missing"),
         NameNamespace::Value,
@@ -524,7 +542,9 @@ fn compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors() {
 fn compiler_messages_with_infrastructure_error_preserve_warning_production_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         DiagnosticSeverity::Warning,
@@ -587,8 +607,7 @@ fn attach_rejects_rendered_path_beyond_the_candidate_table() {
     // table: rendering would dereference a node the table cannot address. Pairing must fail
     // visibly instead of silently attaching a context that cannot spell the payload's path.
     let batch_table = StringTable::new();
-    let orphan_path =
-        PathId::try_from_index(9).expect("index 9 fits the compact path domain");
+    let orphan_path = PathId::try_from_index(9).expect("index 9 fits the compact path domain");
     let diagnostic = CompilerDiagnostic::missing_import_target(orphan_path, None);
     let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
 
@@ -801,7 +820,6 @@ fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation
         "public-surface path/name remapping rendered incorrectly: {rendered}"
     );
 }
-
 
 #[test]
 fn attach_retains_table_for_nominal_type_render_context_without_path_payloads() {
@@ -1323,7 +1341,9 @@ fn colliding_owner_messages(
     let mut path_fork = PathInternerFork::empty();
     let name_id = string_table.intern(name);
     assert_eq!(name_id, StringId::from_index(0));
-    let type_path = path_fork.try_intern_portable_path(type_name, &mut string_table).expect("test path fits");
+    let type_path = path_fork
+        .try_intern_portable_path(type_name, &mut string_table)
+        .expect("test path fits");
 
     let registration = SourceRegistrationIndex::from_rows(std::iter::once((
         primary,
@@ -1537,7 +1557,9 @@ fn freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion() {
 fn remap_string_ids_updates_payloads_labels_and_tokens() {
     let mut local_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let import_path = path_fork.try_intern_portable_path("lib.moth", &mut local_table).expect("test path fits");
+    let import_path = path_fork
+        .try_intern_portable_path("lib.moth", &mut local_table)
+        .expect("test path fits");
     let name = local_table.intern("Button");
     let alias = local_table.intern("AliasButton");
     let label_text = local_table.intern("temporary label");
@@ -1632,7 +1654,9 @@ fn remap_string_ids_updates_payloads_labels_and_tokens() {
 fn remap_string_ids_updates_legacy_dependency_replacement() {
     let mut local_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut local_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut local_table)
+        .expect("test path fits");
     let replacement = local_table.intern("@vendor/drawing.js as drawing");
 
     let diagnostic =
@@ -1664,7 +1688,9 @@ fn remap_string_ids_updates_legacy_dependency_replacement() {
 fn remap_string_ids_updates_compile_time_evaluation_operation() {
     let mut local_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut local_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut local_table)
+        .expect("test path fits");
     let operation = local_table.intern("string equality comparison");
 
     let diagnostic = CompilerDiagnostic::compile_time_evaluation_error(
@@ -1779,7 +1805,9 @@ fn duplicate_declaration_without_previous_location_omits_secondary_label() {
 fn type_mismatch_constructor_carries_type_ids_without_rendering() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
         builtin_type_ids::INT,
@@ -1808,7 +1836,9 @@ fn type_mismatch_constructor_carries_type_ids_without_rendering() {
 fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let type_environment = TypeEnvironment::new();
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
@@ -1833,7 +1863,9 @@ fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
 fn type_mismatch_terse_renderer_renders_type_names_with_context() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let type_environment = TypeEnvironment::new();
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
@@ -1858,7 +1890,9 @@ fn type_mismatch_terse_renderer_renders_type_names_with_context() {
 fn invalid_string_escape_renderer_preserves_the_authored_escape_spelling() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     for (escaped, expected) in [
@@ -1880,7 +1914,9 @@ fn invalid_string_escape_renderer_preserves_the_authored_escape_spelling() {
 fn invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_backslashes() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     for (reason, expected) in [
@@ -1893,8 +1929,7 @@ fn invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_b
             "The string ends with a backslash. Add a supported escaped character or remove the backslash.",
         ),
     ] {
-        let diagnostic =
-            CompilerDiagnostic::invalid_string_escape(reason, span(source_path));
+        let diagnostic = CompilerDiagnostic::invalid_string_escape(reason, span(source_path));
         let message =
             terminal::format_payload_guidance(&diagnostic.payload, render_context).join("\n");
 
@@ -1906,7 +1941,9 @@ fn invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_b
 fn rule_renderers_use_user_facing_messages_not_reason_debug_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let value_name = string_table.intern("value");
 
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
@@ -1998,16 +2035,15 @@ fn immutable_binding_diagnostic_carries_secondary_declaration_label() {
 fn syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let choice_name = string_table.intern("Status");
     let variant_name = string_table.intern("Ready");
 
     let diagnostics = [
         (
-            CompilerDiagnostic::invalid_path(
-                PathKind::WhitespaceMustBeQuoted,
-                span(source_path),
-            ),
+            CompilerDiagnostic::invalid_path(PathKind::WhitespaceMustBeQuoted, span(source_path)),
             "Path components with whitespace must be quoted",
             "WhitespaceMustBeQuoted",
         ),
@@ -2061,7 +2097,9 @@ fn syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names()
 fn choice_variant_unknown_variant_suggests_close_candidate() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let choice_name = string_table.intern("Status");
     let misspelled = string_table.intern("Reay");
     let ready = string_table.intern("Ready");
@@ -2101,7 +2139,9 @@ fn choice_variant_unknown_variant_suggests_close_candidate() {
 fn choice_variant_unknown_variant_no_suggestion_for_unrelated_name() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let choice_name = string_table.intern("Status");
     let unrelated = string_table.intern("Xyzzy");
     let ready = string_table.intern("Ready");
@@ -2141,7 +2181,9 @@ fn choice_variant_unknown_variant_no_suggestion_for_unrelated_name() {
 fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let literal = string_table.intern("1.");
     let style_directive = string_table.intern("unknown");
     let supported_directives = string_table.intern("'$html', '$css'");
@@ -2408,7 +2450,9 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
 fn invalid_expression_renderers_keep_structured_reason_prose() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
 
     let diagnostics = [
         (
@@ -2489,7 +2533,9 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
 fn phase_1_2_renderers_keep_source_language_terminology() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let config_key = string_table.intern("homepage");
     let diagnostics = vec![
         CompilerDiagnostic::invalid_standalone_statement(
@@ -2585,26 +2631,24 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
 fn source_dependency_renderers_use_current_language_terminology() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
-    let dependency_path = path_fork.try_intern_portable_path("missing.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
+    let dependency_path = path_fork
+        .try_intern_portable_path("missing.moth", &mut string_table)
+        .expect("test path fits");
     let namespace_name = string_table.intern("docs");
     let alias_name = string_table.intern("readFile");
     let symbol_name = string_table.intern("read_file");
     let member_name = string_table.intern("member");
     let mut diagnostics = vec![
-        CompilerDiagnostic::missing_import_target(
-            dependency_path,
-            span(source_path),
-        ),
+        CompilerDiagnostic::missing_import_target(dependency_path, span(source_path)),
         CompilerDiagnostic::invalid_import_path(
             dependency_path,
             InvalidImportPathReason::ParentDirectorySegment,
             span(source_path),
         ),
-        CompilerDiagnostic::dependency_namespace_used_as_value(
-            namespace_name,
-            span(source_path),
-        ),
+        CompilerDiagnostic::dependency_namespace_used_as_value(namespace_name, span(source_path)),
         CompilerDiagnostic::nested_dependency_traversal(namespace_name, span(source_path)),
         CompilerDiagnostic::dependency_alias_case_mismatch(
             alias_name,
@@ -2703,18 +2747,19 @@ fn source_dependency_renderers_use_current_language_terminology() {
 fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
-    let import_path = path_fork.try_intern_portable_path("missing.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
+    let import_path = path_fork
+        .try_intern_portable_path("missing.moth", &mut string_table)
+        .expect("test path fits");
     let value_name = string_table.intern("value");
     let config_key = string_table.intern("homepage");
     let feature_name = string_table.intern("traits");
     let type_environment = TypeEnvironment::new();
 
     let diagnostics = vec![
-        CompilerDiagnostic::invalid_path(
-            PathKind::WhitespaceMustBeQuoted,
-            span(source_path),
-        ),
+        CompilerDiagnostic::invalid_path(PathKind::WhitespaceMustBeQuoted, span(source_path)),
         CompilerDiagnostic::type_mismatch(
             type_environment.builtins().int,
             type_environment.builtins().string,
@@ -2789,7 +2834,9 @@ fn assert_rendered_diagnostic_hides_internal_names(rendered: &str) {
 fn incompatible_choice_comparison_renderer_hides_reason_debug_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let diagnostic = CompilerDiagnostic::incompatible_choice_comparison(
         IncompatibleChoiceComparisonReason::ChoiceWithNonChoice,
         builtin_type_ids::BOOL,
@@ -2822,7 +2869,9 @@ fn render_invalid_call_shape(
     callee_name: &str,
 ) -> String {
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", string_table)
+        .expect("test path fits");
     let callee = string_table.intern(callee_name);
     let diagnostic =
         CompilerDiagnostic::invalid_call_shape(reason, Some(callee), span(source_path));
@@ -3070,7 +3119,9 @@ fn mutable_access_not_allowed_tells_author_to_remove_authored_marker() {
 fn invalid_call_shape_remap_updates_binding_name_and_parameter_name() {
     let mut local_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut local_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut local_table)
+        .expect("test path fits");
     let parameter = local_table.intern("values");
     let binding = local_table.intern("values");
     let callee = local_table.intern("consume");
@@ -3117,7 +3168,9 @@ fn render_invalid_receiver_call(
     receiver_binding_name: Option<&str>,
 ) -> String {
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", string_table)
+        .expect("test path fits");
     let method = string_table.intern(method_name);
     let binding = receiver_binding_name.map(|name| string_table.intern(name));
     let diagnostic = CompilerDiagnostic::invalid_receiver_call(
@@ -3403,7 +3456,9 @@ fn const_record_runtime_call_renders_current_source_term() {
 fn invalid_receiver_call_remap_updates_receiver_binding_name() {
     let mut local_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut local_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut local_table)
+        .expect("test path fits");
     let method = local_table.intern("move");
     let binding = local_table.intern("p");
 
@@ -3439,7 +3494,9 @@ fn invalid_receiver_call_remap_updates_receiver_binding_name() {
 fn type_mismatch_renderer_fallback_uses_stable_type_id_text() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
         builtin_type_ids::INT,

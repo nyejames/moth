@@ -16,8 +16,8 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError};
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
+use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::sync::Arc;
@@ -89,8 +89,7 @@ impl SourceDiscoveryError {
         match self {
             SourceDiscoveryError::Diagnostic(diagnostic) => {
                 let table = std::mem::take(string_table);
-                let mut batch =
-                    PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
+                let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
                 if let Err(error) = batch.attach_path_table_if_missing(path_table) {
                     return PremergeFailure::Infrastructure(error);
                 }
@@ -128,11 +127,9 @@ impl From<CompilerError> for SourceDiscoveryError {
 impl From<SourceDatabaseError> for SourceDiscoveryError {
     fn from(error: SourceDatabaseError) -> Self {
         match error {
-            SourceDatabaseError::Capacity(capacity) => {
-                SourceDiscoveryError::Diagnostic(CompilerDiagnostic::source_table_capacity(
-                    capacity.resource(),
-                ))
-            }
+            SourceDatabaseError::Capacity(capacity) => SourceDiscoveryError::Diagnostic(
+                CompilerDiagnostic::source_table_capacity(capacity.resource()),
+            ),
             SourceDatabaseError::Infrastructure(error) => {
                 SourceDiscoveryError::Infrastructure(error)
             }

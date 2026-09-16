@@ -5,10 +5,9 @@
 //! enum or any source-owned side-store handles that would make a diagnostic
 //! depend on the source token buffer's lifetime.
 
-use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{
-    TokenDescriptorPayload, TokenKind, TokenRef, TokenTag, TokenViewError,
+    TokenDescriptorPayload, TokenKind, TokenRef, TokenTag, TokenViewError, numeric_kind_flags,
 };
 
 const TAG_MASK: u32 = u16::MAX as u32;
@@ -219,13 +218,5 @@ impl From<TokenKind> for DiagnosticToken {
 impl From<&TokenKind> for DiagnosticToken {
     fn from(token_kind: &TokenKind) -> Self {
         Self::from(token_kind.clone())
-    }
-}
-
-const fn numeric_kind_flags(kind: NumericLiteralKind) -> u16 {
-    match kind {
-        NumericLiteralKind::WholeNumber => 0,
-        NumericLiteralKind::DecimalPoint => 1,
-        NumericLiteralKind::Exponent => 2,
     }
 }

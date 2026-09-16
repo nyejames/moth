@@ -23,9 +23,9 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Full value matches recurse into statement match bodies, so their result retains internal
 /// frozen-token-table failures for the expression parser boundary.

@@ -56,11 +56,21 @@ use std::rc::Rc;
 fn imported_constant_uses_the_next_table_id_and_publishes_it() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
-    let trait_path = path_fork.try_intern_portable_path("Trait", &mut string_table).expect("test path fits");
-    let start_path = path_fork.try_intern_portable_path("start", &mut string_table).expect("test path fits");
-    let builtin_path = path_fork.try_intern_portable_path("Builtin", &mut string_table).expect("test path fits");
-    let imported_path = path_fork.try_intern_portable_path("imported", &mut string_table).expect("test path fits");
+    let alias_path = path_fork
+        .try_intern_portable_path("Alias", &mut string_table)
+        .expect("test path fits");
+    let trait_path = path_fork
+        .try_intern_portable_path("Trait", &mut string_table)
+        .expect("test path fits");
+    let start_path = path_fork
+        .try_intern_portable_path("start", &mut string_table)
+        .expect("test path fits");
+    let builtin_path = path_fork
+        .try_intern_portable_path("Builtin", &mut string_table)
+        .expect("test path fits");
+    let imported_path = path_fork
+        .try_intern_portable_path("imported", &mut string_table)
+        .expect("test path fits");
 
     let mut declaration_table = Rc::new(
         TopLevelDeclarationTable::from_stage3_order(
@@ -207,7 +217,9 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
     let producer_resource_id =
         producer_resources.intern_origin(producer_resource_origin.clone(), None);
     let prefix = producer_string_table.intern("assets/");
-    let constant_path = path_fork.try_intern_portable_path("logo", &mut producer_string_table).expect("test path fits");
+    let constant_path = path_fork
+        .try_intern_portable_path("logo", &mut producer_string_table)
+        .expect("test path fits");
     let producer_pieces = vec![
         ConstStringPiece::Text(prefix),
         ConstStringPiece::Resource(producer_resource_id),
@@ -252,16 +264,19 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
     };
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &FxHashMap::default(),
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &producer_type_environment,
-    external_registry: &registry,
-    string_table: &producer_string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &const_values,
-    module_resources: Some(&producer_resources), })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &FxHashMap::default(),
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &producer_type_environment,
+        external_registry: &registry,
+        string_table: &producer_string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &const_values,
+        module_resources: Some(&producer_resources),
+    })
     .build()
     .expect("producer public projection should build")
     .draft;
@@ -329,7 +344,9 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     let producer_marker = producer_type_environment.anonymous_const_record_type();
 
     let nested_count = Declaration {
-        id: path_fork.try_intern_portable_path("count", &mut producer_string_table).expect("test path fits"),
+        id: path_fork
+            .try_intern_portable_path("count", &mut producer_string_table)
+            .expect("test path fits"),
         value: Expression::int(7, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
@@ -343,25 +360,33 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
 
     let producer_fields = vec![
         Declaration {
-            id: path_fork.try_intern_portable_path("year", &mut producer_string_table).expect("test path fits"),
+            id: path_fork
+                .try_intern_portable_path("year", &mut producer_string_table)
+                .expect("test path fits"),
             value: Expression::int(2026, None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
         Declaration {
-            id: path_fork.try_intern_portable_path("enabled", &mut producer_string_table).expect("test path fits"),
+            id: path_fork
+                .try_intern_portable_path("enabled", &mut producer_string_table)
+                .expect("test path fits"),
             value: Expression::bool(true, None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
         Declaration {
-            id: path_fork.try_intern_portable_path("nested", &mut producer_string_table).expect("test path fits"),
+            id: path_fork
+                .try_intern_portable_path("nested", &mut producer_string_table)
+                .expect("test path fits"),
             value: nested_record,
             binding_span: None,
             config_qualifier: None,
         },
     ];
-    let constant_path = path_fork.try_intern_portable_path("meta", &mut producer_string_table).expect("test path fits");
+    let constant_path = path_fork
+        .try_intern_portable_path("meta", &mut producer_string_table)
+        .expect("test path fits");
     let module_constant = Declaration {
         id: constant_path,
         value: Expression::anonymous_const_record(
@@ -411,16 +436,19 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
     };
     let registry = ExternalPackageRegistry::new();
-    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput { path_fork: &path_fork, export_seed,
-    public_interface_projection_input: projection_input,
-    public_source_nominal_type_origins: &FxHashMap::default(),
-    public_source_trait_origins: &FxHashMap::default(),
-    type_environment: &producer_type_environment,
-    external_registry: &registry,
-    string_table: &producer_string_table,
-    generic_function_templates: &FxHashMap::default(),
-    const_values: &const_values,
-    module_resources: None, })
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &FxHashMap::default(),
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &producer_type_environment,
+        external_registry: &registry,
+        string_table: &producer_string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &const_values,
+        module_resources: None,
+    })
     .build()
     .expect("producer public projection should build")
     .draft;
@@ -530,9 +558,15 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
     let mut consumer_string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut consumer_type_environment = TypeEnvironment::new();
-    let title_path = path_fork.try_intern_portable_path("title", &mut consumer_string_table).expect("test path fits");
-    let year_path = path_fork.try_intern_portable_path("year", &mut consumer_string_table).expect("test path fits");
-    let struct_path = path_fork.try_intern_portable_path("Defaults", &mut consumer_string_table).expect("test path fits");
+    let title_path = path_fork
+        .try_intern_portable_path("title", &mut consumer_string_table)
+        .expect("test path fits");
+    let year_path = path_fork
+        .try_intern_portable_path("year", &mut consumer_string_table)
+        .expect("test path fits");
+    let struct_path = path_fork
+        .try_intern_portable_path("Defaults", &mut consumer_string_table)
+        .expect("test path fits");
     let (_, struct_type_id) =
         consumer_type_environment.register_nominal_struct(StructTypeDefinition {
             id: NominalTypeId(0),

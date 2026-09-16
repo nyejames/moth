@@ -122,10 +122,13 @@ fn invalid_artifact() -> CompiledModuleArtifact {
     let identity = duplicate_materialisation_identity();
     CompiledModuleArtifact {
         module: Module {
-            executable: ModuleExecutable { hir: HirModule::new(),
-            resource_table: ModuleResourceTable::new(),
-            type_environment: TypeEnvironment::new(),
-            borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+            executable: ModuleExecutable {
+                hir: HirModule::new(),
+                resource_table: ModuleResourceTable::new(),
+                type_environment: TypeEnvironment::new(),
+                borrow_analysis: BorrowCheckReport::default(),
+                path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
+            },
             link_facts: ModuleLinkFacts {
                 external_package_registry: Arc::new(ExternalPackageRegistry::new()),
                 external_import_candidates: Vec::new(),
@@ -193,10 +196,13 @@ fn generated_sidecar(
     summary: PublicCallSummary,
 ) -> GeneratedFunctionSidecar {
     let mut module = Module {
-        executable: ModuleExecutable { hir: HirModule::new(),
-        resource_table: ModuleResourceTable::new(),
-        type_environment: TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        executable: ModuleExecutable {
+            hir: HirModule::new(),
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
+        },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: Vec::new(),
@@ -616,7 +622,8 @@ fn effective_project_fields_classify_fixed_direct_and_metadata_kinds() {
 
 /// Build one minimal semantic result whose path fork carries one module-local path node, so
 /// publication must allocate into the build table to merge it.
-fn semantic_result_with_local_path() -> crate::compiler_frontend::module_compilation::ModuleSemanticResult {
+fn semantic_result_with_local_path()
+-> crate::compiler_frontend::module_compilation::ModuleSemanticResult {
     let origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("combined-publication-tests"),
         "main".to_owned(),
@@ -688,7 +695,11 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
     };
     let (diagnostic_bag, _moved_string_table, ..) = batch.into_parts();
     let diagnostics = diagnostic_bag.diagnostics();
-    assert_eq!(diagnostics.len(), 1, "exhaustion must diagnose exactly once");
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "exhaustion must diagnose exactly once"
+    );
     assert_eq!(
         diagnostics[0].payload,
         crate::compiler_frontend::compiler_messages::DiagnosticPayload::SourceSpanCapacity {
@@ -732,14 +743,16 @@ fn check_only_success_result_with_warnings() -> (
     let warning_path = module_path_fork
         .try_intern_portable_path("sidecar/lib-target.moth", &mut module_string_table)
         .expect("the direct warning path should intern");
-    artifact.module.metadata.warnings.push(
-        CompilerDiagnostic::with_severity(
+    artifact
+        .module
+        .metadata
+        .warnings
+        .push(CompilerDiagnostic::with_severity(
             DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
             DiagnosticSeverity::Warning,
             None,
             DiagnosticPayload::MissingImportTarget { path: warning_path },
-        ),
-    );
+        ));
     let sidecar_path = module_path_fork
         .try_intern_portable_path("sidecar/generated-target.moth", &mut module_string_table)
         .expect("the sidecar warning path should intern");
@@ -751,10 +764,13 @@ fn check_only_success_result_with_warnings() -> (
         metadata: base_metadata,
     } = artifact.module;
     let mut sidecar_module = Module {
-        executable: ModuleExecutable { hir: HirModule::new(),
-        resource_table: ModuleResourceTable::new(),
-        type_environment: TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        executable: ModuleExecutable {
+            hir: HirModule::new(),
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
+        },
         link_facts: base_link_facts,
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::from("@sidecar.moth"),
@@ -765,14 +781,15 @@ fn check_only_success_result_with_warnings() -> (
             materialisation_context: None,
         },
     };
-    sidecar_module.metadata.warnings.push(
-        CompilerDiagnostic::with_severity(
+    sidecar_module
+        .metadata
+        .warnings
+        .push(CompilerDiagnostic::with_severity(
             DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
             DiagnosticSeverity::Warning,
             None,
             DiagnosticPayload::MissingImportTarget { path: sidecar_path },
-        ),
-    );
+        ));
 
     let identity = generated_identity("check_only_sidecar");
     let summary = generated_summary();
@@ -788,11 +805,13 @@ fn check_only_success_result_with_warnings() -> (
                 },
                 metadata: base_metadata,
             },
-            generated_delta: GeneratedFunctionDelta::from_records(vec![CompletedGeneratedFunction {
-                identity: identity.clone(),
-                summary,
-                sidecar,
-            }]),
+            generated_delta: GeneratedFunctionDelta::from_records(vec![
+                CompletedGeneratedFunction {
+                    identity: identity.clone(),
+                    summary,
+                    sidecar,
+                },
+            ]),
             resource_source_associations: Vec::new(),
             string_table: module_string_table,
             path_fork: module_path_fork,
@@ -804,16 +823,16 @@ fn check_only_success_result_with_warnings() -> (
 
 #[test]
 fn check_only_success_batches_render_local_paths_through_production_construction() {
+    use crate::build_system::create_project_modules::compilation::canonical::check_only_success_batch;
     use crate::build_system::create_project_modules::compiled_boundary::{
-        CompletedSourcePackageRegistry, CompiledGraphBoundary, ProjectFrontendCompilation,
+        CompiledGraphBoundary, CompletedSourcePackageRegistry, ProjectFrontendCompilation,
         TransientPremergeBatch,
     };
-    use crate::compiler_frontend::compiler_messages::display_messages;
-    use crate::build_system::create_project_modules::compilation::canonical::check_only_success_batch;
     use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
     use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
     use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
     use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+    use crate::compiler_frontend::compiler_messages::display_messages;
 
     let (compiled, _spelling) = check_only_success_result_with_warnings();
     // Route through the real canonical check-only success construction: it collects the
@@ -849,7 +868,11 @@ fn check_only_success_batches_render_local_paths_through_production_construction
         .into_render_messages_with_frozen_identity(&mut string_table, None, None)
         .expect("transient check-only warnings should render");
     let rendered = display_messages::format_terse_compiler_messages(&messages);
-    assert_eq!(rendered.len(), 2, "both warnings should render: {rendered:?}");
+    assert_eq!(
+        rendered.len(),
+        2,
+        "both warnings should render: {rendered:?}"
+    );
     for spelling in ["sidecar/lib-target.moth", "sidecar/generated-target.moth"] {
         assert!(
             rendered.iter().any(|line| line.contains(spelling)),
@@ -899,15 +922,21 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
         .expect("the module-local warning path should intern");
     compiled.string_table = module_string_table;
     compiled.path_fork = module_path_fork;
-    compiled.module.metadata.warnings.push(
-        CompilerDiagnostic::with_severity(
+    compiled
+        .module
+        .metadata
+        .warnings
+        .push(CompilerDiagnostic::with_severity(
             DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
             DiagnosticSeverity::Warning,
             None,
             DiagnosticPayload::MissingImportTarget { path: local_path },
-        ),
+        ));
+    assert_ne!(
+        local_path,
+        PathId::ROOT,
+        "the fixture must carry a local-only path id"
     );
-    assert_ne!(local_path, PathId::ROOT, "the fixture must carry a local-only path id");
 
     // The sibling fork inherits the same build prefix (both path and string tables), exactly
     // like a concurrent production worker. A fresh string table would mis-issue the sibling's
@@ -978,9 +1007,10 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
         remapped_path, local_path,
         "publication must remap the module-local warning path identity"
     );
-    let rendered = published
-        .executable
-        .path_table
-        .render_portable(remapped_path, &string_table, &mut Vec::new());
+    let rendered = published.executable.path_table.render_portable(
+        remapped_path,
+        &string_table,
+        &mut Vec::new(),
+    );
     assert_eq!(rendered, "lib.moth");
 }

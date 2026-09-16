@@ -21,9 +21,9 @@ use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_module_root_file;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
@@ -751,11 +751,8 @@ fn invalid_path_outcome(
     reason: InvalidCompileTimePathReason,
     reference: &PreparedFileReference,
 ) -> SingleFileReferenceOutcome {
-    let mut diagnostic = CompilerDiagnostic::invalid_compile_time_path(
-        authored_path,
-        reason,
-        Some(reference.span),
-    );
+    let mut diagnostic =
+        CompilerDiagnostic::invalid_compile_time_path(authored_path, reason, Some(reference.span));
     set_primary_span_from_reference(&mut diagnostic, reference);
     SingleFileReferenceOutcome::Diagnostic(diagnostic)
 }
@@ -817,7 +814,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
             settled: FxHashMap::default(),
         }
     }
-    
+
     pub(crate) fn resolve(
         &mut self,
         source_path: &Path,

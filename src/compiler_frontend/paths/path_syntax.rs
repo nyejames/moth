@@ -15,6 +15,7 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_co
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
+#[cfg(test)]
 use rustc_hash::FxHashMap;
 
 /// Dense file-local handle into a [`PathSyntaxTable`].
@@ -72,18 +73,21 @@ impl PathSyntaxId {
 /// New source-owned producers should use [`PathSyntaxTable::try_push_for_source`] so the owner
 /// boundary remains explicit. Accepting a global span here keeps existing test and retained-body
 /// fixtures source-compatible while the stored row is always local.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathSyntaxLocation {
     Local(LocalSpan),
     Global(SourceSpan),
 }
 
+#[cfg(test)]
 impl From<LocalSpan> for PathSyntaxLocation {
     fn from(span: LocalSpan) -> Self {
         Self::Local(span)
     }
 }
 
+#[cfg(test)]
 impl From<SourceSpan> for PathSyntaxLocation {
     fn from(span: SourceSpan) -> Self {
         Self::Global(span)
@@ -102,7 +106,10 @@ pub enum PathSyntaxCapacityError {
 pub enum PathSyntaxError {
     Capacity(PathSyntaxCapacityError),
     Frozen,
-    ForeignSource { expected: SourceId, actual: SourceId },
+    ForeignSource {
+        expected: SourceId,
+        actual: SourceId,
+    },
 }
 
 impl From<PathSyntaxCapacityError> for PathSyntaxError {
@@ -148,6 +155,7 @@ impl PathSyntaxTable {
     }
 
     /// The source identity owned by this table, when rows have been attached to one.
+    #[cfg(test)]
     pub fn owner_source(&self) -> Option<SourceId> {
         self.owner_source
     }
@@ -157,15 +165,17 @@ impl PathSyntaxTable {
         self.frozen = true;
     }
 
+    #[cfg(test)]
     pub fn is_frozen(&self) -> bool {
         self.frozen
     }
 
     /// Walk every authored path row with its dense handle in stable row order.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (PathSyntaxId, &PathSyntax)> {
-        self.paths.iter().enumerate().filter_map(|(index, path)| {
-            Some((PathSyntaxId::from_index(index)?, path))
-        })
+        self.paths
+            .iter()
+            .enumerate()
+            .filter_map(|(index, path)| Some((PathSyntaxId::from_index(index)?, path)))
     }
 
     /// Read one path row through a fallible boundary.
@@ -211,17 +221,17 @@ impl PathSyntaxTable {
         }
         Ok(row)
     }
-
     /// Append one row through the compatibility location adapter.
     ///
     /// Source producers use the checked methods below. This method remains for existing
     /// test/retained-body construction and is intentionally not used by authored lexing.
+    #[cfg(test)]
     pub fn push(&mut self, root: PathId, location: impl Into<PathSyntaxLocation>) -> PathSyntaxId {
         self.try_push(root, location)
             .expect("path syntax row construction must be checked at its owning boundary")
     }
-
     /// Checked append of one row. A global input establishes the table owner on first use.
+    #[cfg(test)]
     pub fn try_push(
         &mut self,
         root: PathId,
@@ -229,7 +239,7 @@ impl PathSyntaxTable {
     ) -> Result<PathSyntaxId, PathSyntaxError> {
         let location = location.into();
         match location {
-            PathSyntaxLocation::Local(span) => self.try_push_local(root, span).map_err(Into::into),
+            PathSyntaxLocation::Local(span) => self.try_push_local(root, span),
             PathSyntaxLocation::Global(span) => {
                 self.try_push_for_source(root, span.source(), span.local())
             }
@@ -270,7 +280,7 @@ impl PathSyntaxTable {
         if self.owner_source.is_none() {
             self.owner_source = Some(source);
         }
-        self.try_push_local(root, span).map_err(Into::into)
+        self.try_push_local(root, span)
     }
 
     /// Remap every complete-path identity in this table once.
@@ -345,11 +355,12 @@ impl PathSyntaxTable {
         self.validate_token_handles(tokens)?;
         for token in tokens {
             if let TokenKind::Path(path_id) = token.kind {
-                let row = self.try_path_for_token(
-                    path_id,
-                    SourceSpan::new(expected_source, token.span),
-                )?;
-                if self.owner_source.is_some_and(|owner| owner != expected_source) {
+                let row =
+                    self.try_path_for_token(path_id, SourceSpan::new(expected_source, token.span))?;
+                if self
+                    .owner_source
+                    .is_some_and(|owner| owner != expected_source)
+                {
                     return Err(CompilerError::compiler_error(format!(
                         "{role} path row does not use the prepared file's source identity"
                     )));
@@ -368,6 +379,7 @@ impl PathSyntaxTable {
     ///
     /// Rows are copied in first-token-reference order; repeated handles reuse one compact row and
     /// the returned map is therefore deterministic regardless of hash-map iteration order.
+    #[cfg(test)]
     pub(crate) fn capture_persistent_generic_subset(
         &self,
         tokens: &mut [Token],
@@ -416,6 +428,7 @@ impl PathSyntaxTable {
         Ok((subset, old_to_new))
     }
 
+    #[cfg(test)]
     fn copy_persistent_path_from(
         &mut self,
         source: &PathSyntaxTable,

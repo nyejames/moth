@@ -31,7 +31,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
@@ -43,6 +42,7 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -83,14 +83,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )?;
             if header.export_mode.is_public() {
-                let function_name = self.path_fork.component(header.declaration_path).ok_or_else(|| {
-                    self.error_messages(
-                        CompilerError::compiler_error(
-                            "Public generic function header had no source-path name.",
-                        ),
-                        string_table,
-                    )
-                })?;
+                let function_name = self
+                    .path_fork
+                    .component(header.declaration_path)
+                    .ok_or_else(|| {
+                        self.error_messages(
+                            CompilerError::compiler_error(
+                                "Public generic function header had no source-path name.",
+                            ),
+                            string_table,
+                        )
+                    })?;
                 self.validate_public_generic_bounds(
                     function_name,
                     generic_parameters,
@@ -147,29 +150,35 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     })?;
                 // Live parser state stays on the canonical source owner. The transient
                 // cursor spans the full canonical source so nested default ranges stay
-                // inside its bounds for this signature parse only. `from_file_tokens_range`
+                // inside its bounds for this signature parse only. `from_source_tokens`
                 // retains the canonical owner for later bounded expression handoffs.
-                let full = file_owner
-                    .canonical_source_tokens()
-                    .map_err(|error| self.error_messages(error, string_table))?
-                    .full_range()
-                    .map_err(|error| {
-                        self.error_messages(
-                            CompilerError::compiler_error(format!(
-                                "function header source range could not be constructed: {error:?}"
-                            )),
-                            string_table,
-                        )
-                    })?;
-                let source_owner =
-                    AstCursor::from_file_tokens_range(file_owner, full).map_err(|error| {
-                        self.error_messages(
-                            CompilerError::compiler_error(format!(
-                                "function header source range is outside its source owner: {error:?}"
-                            )),
-                            string_table,
-                        )
-                    })?;
+                let full = file_owner.full_range().map_err(|error| {
+                    self.error_messages(
+                        CompilerError::compiler_error(format!(
+                            "function header source range could not be constructed: {error:?}"
+                        )),
+                        string_table,
+                    )
+                })?;
+                let os_path = self
+                    .source_token_os_paths
+                    .get(&header.tokens.source())
+                    .and_then(|path| path.clone());
+                let source_owner = AstCursor::from_source_tokens(
+                    self.source_token_streams
+                        .get(&header.tokens.source())
+                        .expect("function header source owner vanished during cursor construction"),
+                    os_path,
+                    full,
+                )
+                .map_err(|error| {
+                    self.error_messages(
+                        CompilerError::compiler_error(format!(
+                            "function header source range is outside its source owner: {error:?}"
+                        )),
+                        string_table,
+                    )
+                })?;
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
@@ -281,22 +290,28 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         string_table,
                     ));
                 };
-                let source_owner = self
-                    .source_token_streams
+                let canonical_owner = Arc::clone(
+                    self.source_token_streams
+                        .get(&header.tokens.source())
+                        .ok_or_else(|| {
+                            self.error_messages(
+                                CompilerError::compiler_error(
+                                    "generic function header has no prepared source token owner",
+                                ),
+                                string_table,
+                            )
+                        })?,
+                );
+                let canonical_os_path = self
+                    .source_token_os_paths
                     .get(&header.tokens.source())
-                    .ok_or_else(|| {
-                        self.error_messages(
-                            CompilerError::compiler_error(
-                                "generic function header has no prepared source token owner",
-                            ),
-                            string_table,
-                        )
-                    })?;
+                    .and_then(|path| path.clone());
                 let body = GenericFunctionBody::source(
-                    Arc::clone(source_owner),
+                    canonical_owner,
                     header.tokens,
                     header.token_sequence,
                     header.declaration_path,
+                    canonical_os_path,
                 )
                 .map_err(|error| self.error_messages(error, string_table))?;
                 let template = build_generic_function_template(
@@ -379,7 +394,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let entry = ReceiverMethodEntry {
                 function_path: *function_path,
                 receiver: receiver.clone(),
-                source_file: self.path_fork.parent(*function_path).unwrap_or(PathId::ROOT),
+                source_file: self
+                    .path_fork
+                    .parent(*function_path)
+                    .unwrap_or(PathId::ROOT),
                 receiver_mutable: resolved
                     .signature
                     .parameters
