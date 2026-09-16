@@ -94,7 +94,6 @@ impl<'a> DeclarationCursor<'a> {
         )
     }
 
-
     pub(crate) fn with_compatibility_bounds(
         cursor: TokenCursor<'a>,
         compatibility_tokens: &'a [Token],
@@ -103,17 +102,22 @@ impl<'a> DeclarationCursor<'a> {
     ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
         if compatibility_index > compatibility_end || compatibility_end > compatibility_tokens.len()
         {
-            return Err(crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                "declaration compatibility cursor bounds are outside its token lane",
-            ));
+            return Err(
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "declaration compatibility cursor bounds are outside its token lane",
+                ),
+            );
         }
         let mut declaration_cursor = Self::new(cursor)?;
         let local_position = cursor.compatibility_position_from_start()?;
-        let compatibility_base = compatibility_index.checked_sub(local_position).ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                "declaration compatibility cursor position precedes its canonical range",
-            )
-        })?;
+        let compatibility_base =
+            compatibility_index
+                .checked_sub(local_position)
+                .ok_or_else(|| {
+                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                        "declaration compatibility cursor position precedes its canonical range",
+                    )
+                })?;
         declaration_cursor.compatibility_tokens = Some(compatibility_tokens);
         declaration_cursor.compatibility_base = compatibility_base;
         declaration_cursor.compatibility_end = compatibility_end;
@@ -132,9 +136,69 @@ impl<'a> DeclarationCursor<'a> {
     pub(crate) fn compatibility_tokens(&self) -> Option<&'a [Token]> {
         self.compatibility_tokens
     }
-
     pub(crate) fn compatibility_index(&self) -> Option<usize> {
         self.compatibility_tokens.map(|_| self.index)
+    }
+    pub(crate) fn token_at(&self, index: usize) -> Option<Token> {
+        let lower_bound = self.compatibility_tokens.map_or_else(
+            || self.cursor.range().start().index(),
+            |_| self.compatibility_base,
+        );
+        if index < lower_bound || index >= self.length {
+            return None;
+        }
+        if let Some(tokens) = self.compatibility_tokens {
+            return tokens.get(index).cloned();
+        }
+
+        let index = crate::compiler_frontend::tokenizer::tokens::TokenIndex::try_from_index(index)?;
+        self.cursor
+            .source_tokens()
+            .token(index)
+            .ok()
+            .and_then(|token| {
+                token
+                    .to_token_kind()
+                    .ok()
+                    .map(|kind| Token::new(kind, token.span()))
+            })
+    }
+
+    pub(crate) fn token_kind_at(&self, index: usize) -> Option<TokenKind> {
+        self.token_at(index).map(|token| token.kind)
+    }
+
+    pub(crate) fn span_at(&self, index: usize) -> Option<SourceSpan> {
+        self.token_at(index)
+            .map(|token| SourceSpan::new(self.source, token.span))
+    }
+
+    pub(crate) fn source_id(&self) -> crate::compiler_frontend::source::SourceId {
+        self.source
+    }
+
+    pub(crate) fn position(&self) -> usize {
+        self.index
+    }
+
+    pub(crate) fn is_at_end(&self) -> bool {
+        self.index >= self.length || self.current_token.is_none()
+    }
+
+    pub(crate) fn previous_token_kind(&self) -> Option<TokenKind> {
+        self.index
+            .checked_sub(1)
+            .and_then(|index| self.token_kind_at(index))
+    }
+
+    pub(crate) fn previous_token(&self) -> Option<Token> {
+        self.index
+            .checked_sub(1)
+            .and_then(|index| self.token_at(index))
+    }
+
+    pub(crate) fn current_postfix_operator_span(&self) -> Option<SourceSpan> {
+        self.current_span()
     }
 
     pub(crate) fn refresh(&mut self) {
@@ -168,7 +232,6 @@ impl<'a> DeclarationCursor<'a> {
             .map(|token| token.kind.clone())
             .unwrap_or(TokenKind::Eof);
     }
-
 
     pub(crate) fn current_token_kind(&self) -> &TokenKind {
         &self.current_kind

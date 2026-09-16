@@ -6,6 +6,7 @@
 //! WHY: header splitting and AST statement parsing both need token-boundary facts,
 //! but neither stage should duplicate delimiter-depth scans or depend on the other.
 
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{NestingDepth, TokenFactView};
 
@@ -32,7 +33,22 @@ pub(crate) fn find_top_level_fat_arrow_on_line(
     token_stream: &FileTokens,
     start_index: usize,
 ) -> Option<usize> {
-    find_top_level_fat_arrow_on_line_in_tokens(&token_stream.tokens, start_index)
+    let Some(cursor) = DeclarationCursor::from_file_tokens(token_stream).ok() else {
+        return find_top_level_fat_arrow_on_line_in_tokens(&token_stream.tokens, start_index);
+    };
+    let mut nesting_depth = NestingDepth::default();
+    for index in start_index..cursor.length {
+        let Some(kind) = cursor.token_kind_at(index) else {
+            break;
+        };
+        match kind {
+            TokenKind::Newline | TokenKind::End | TokenKind::Eof => break,
+            TokenKind::FatArrow if nesting_depth.is_top_level() => return Some(index),
+            _ => nesting_depth.step(&kind),
+        }
+    }
+
+    None
 }
 
 pub(crate) fn find_top_level_fat_arrow_on_line_in_tokens(
@@ -63,7 +79,10 @@ fn find_top_level_fat_arrow_on_line_in_view(
     let mut nesting_depth = NestingDepth::default();
     for index in start_index..tokens.len() {
         let token = tokens.get(index)?;
-        if token.tag == TokenTag::NEWLINE || token.tag == TokenTag::END || token.tag == TokenTag::EOF {
+        if token.tag == TokenTag::NEWLINE
+            || token.tag == TokenTag::END
+            || token.tag == TokenTag::EOF
+        {
             break;
         }
         if nesting_depth.is_top_level() && token.tag == TokenTag::FAT_ARROW {
@@ -84,12 +103,17 @@ pub(crate) fn find_top_level_match_arm_fat_arrow(
     token_stream: &FileTokens,
     start_index: usize,
 ) -> Option<usize> {
+    let Some(cursor) = DeclarationCursor::from_file_tokens(token_stream).ok() else {
+        return match_arm_fat_arrow_in_tokens(&token_stream.tokens, start_index);
+    };
     let mut nesting_depth = NestingDepth::default();
     let mut guard_started = false;
     let mut guard_expression_started = false;
 
-    for index in start_index..token_stream.length {
-        let kind = &token_stream.tokens[index].kind;
+    for index in start_index..cursor.length {
+        let Some(kind) = cursor.token_kind_at(index) else {
+            break;
+        };
 
         match kind {
             TokenKind::End | TokenKind::Eof => break,
@@ -114,6 +138,44 @@ pub(crate) fn find_top_level_match_arm_fat_arrow(
                 if guard_started && nesting_depth.is_top_level() {
                     guard_expression_started = true;
                 }
+                nesting_depth.step(&kind);
+            }
+        }
+    }
+
+    None
+}
+
+fn match_arm_fat_arrow_in_tokens(tokens: &[Token], start_index: usize) -> Option<usize> {
+    let mut nesting_depth = NestingDepth::default();
+    let mut guard_started = false;
+    let mut guard_expression_started = false;
+
+    for (offset, token) in tokens.iter().enumerate().skip(start_index) {
+        let kind = &token.kind;
+        match kind {
+            TokenKind::End | TokenKind::Eof => break,
+            TokenKind::Newline => {
+                if nesting_depth.is_top_level() && guard_started && !guard_expression_started {
+                    continue;
+                }
+
+                break;
+            }
+            TokenKind::FatArrow if nesting_depth.is_top_level() => {
+                if !guard_started || guard_expression_started {
+                    return Some(offset);
+                }
+
+                break;
+            }
+            TokenKind::If if nesting_depth.is_top_level() && !guard_started => {
+                guard_started = true;
+            }
+            _ => {
+                if guard_started && nesting_depth.is_top_level() {
+                    guard_expression_started = true;
+                }
                 nesting_depth.step(kind);
             }
         }
@@ -126,7 +188,24 @@ pub(crate) fn find_top_level_colon_on_line(
     token_stream: &FileTokens,
     start_index: usize,
 ) -> Option<usize> {
-    find_top_level_token_on_line(&token_stream.tokens, start_index, |kind| {
-        matches!(kind, TokenKind::Colon)
-    })
+    let Some(cursor) = DeclarationCursor::from_file_tokens(token_stream).ok() else {
+        return find_top_level_token_on_line(&token_stream.tokens, start_index, |kind| {
+            matches!(kind, TokenKind::Colon)
+        });
+    };
+    let mut nesting_depth = NestingDepth::default();
+    for index in start_index..cursor.length {
+        let Some(kind) = cursor.token_kind_at(index) else {
+            break;
+        };
+        match kind {
+            TokenKind::Newline | TokenKind::End | TokenKind::Eof => break,
+            _ if nesting_depth.is_top_level() && matches!(kind, TokenKind::Colon) => {
+                return Some(index);
+            }
+            _ => nesting_depth.step(&kind),
+        }
+    }
+
+    None
 }

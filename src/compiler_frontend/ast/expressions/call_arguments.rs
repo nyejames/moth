@@ -29,6 +29,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -244,15 +245,24 @@ fn parse_call_arguments_inner(
         reject_simple_generic_argument_type_ascription(token_stream, syntax_context)?;
 
         // Detect named-target syntax (`name = expr`) or reject unsupported variants.
+        // Pure lookahead only: probe deeper tokens through a short canonical view and
+        // drop it before any `FileTokens` advance or expression re-entry.
+        let lookahead_base = token_stream.index;
+        let lookahead_third_is_assign =
+            lookahead_kind_at(token_stream, lookahead_base.saturating_add(2)).as_ref()
+                == Some(&TokenKind::Assign);
+        let lookahead_third_is_close_paren =
+            lookahead_kind_at(token_stream, lookahead_base.saturating_add(2))
+                == Some(TokenKind::CloseParenthesis);
+        let lookahead_fourth_is_assign =
+            lookahead_kind_at(token_stream, lookahead_base.saturating_add(3))
+                == Some(TokenKind::Assign);
         let named_target = match token_stream.current_token_kind() {
             // `~name = expr` is not supported.
             TokenKind::Mutable
-                if matches!(token_stream.peek_next_token(), Some(TokenKind::Symbol(_)))
-                    && token_stream
-                        .tokens
-                        .get(token_stream.index + 2)
-                        .map(|token| &token.kind)
-                        == Some(&TokenKind::Assign) =>
+                if next_token_kind(token_stream)
+                    .is_some_and(|kind| matches!(kind, TokenKind::Symbol(_)))
+                    && lookahead_third_is_assign =>
             {
                 return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::Mutable,
@@ -263,12 +273,9 @@ fn parse_call_arguments_inner(
 
             // Standard named argument: `name = expr`.
             TokenKind::Symbol(name)
-                if token_stream.peek_next_token() == Some(&TokenKind::Assign) =>
+                if next_token_kind(token_stream).as_ref() == Some(&TokenKind::Assign) =>
             {
-                let target_span = Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                ));
+                let target_span = current_span(token_stream);
                 let target_name = *name;
                 token_stream.advance();
                 token_stream.advance();
@@ -278,17 +285,10 @@ fn parse_call_arguments_inner(
 
             // Parenthesized names like `(name) = expr` are not supported.
             TokenKind::OpenParenthesis
-                if matches!(token_stream.peek_next_token(), Some(TokenKind::Symbol(_)))
-                    && token_stream
-                        .tokens
-                        .get(token_stream.index + 2)
-                        .map(|token| &token.kind)
-                        == Some(&TokenKind::CloseParenthesis)
-                    && token_stream
-                        .tokens
-                        .get(token_stream.index + 3)
-                        .map(|token| &token.kind)
-                        == Some(&TokenKind::Assign) =>
+                if next_token_kind(token_stream)
+                    .is_some_and(|kind| matches!(kind, TokenKind::Symbol(_)))
+                    && lookahead_third_is_close_paren
+                    && lookahead_fourth_is_assign =>
             {
                 return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::OpenParenthesis,
@@ -413,19 +413,14 @@ fn argument_is_bare_none(token_stream: &FileTokens) -> bool {
         return false;
     }
 
-    let mut next_index = token_stream.index + 1;
-    while token_stream
-        .tokens
-        .get(next_index)
-        .is_some_and(|token| matches!(&token.kind, TokenKind::Newline))
+    let mut next_index = token_stream.index.saturating_add(1);
+    while lookahead_kind_at(token_stream, next_index).is_some_and(|kind| kind == TokenKind::Newline)
     {
-        next_index += 1;
+        next_index = next_index.saturating_add(1);
     }
 
-    token_stream
-        .tokens
-        .get(next_index)
-        .is_some_and(|token| matches!(&token.kind, TokenKind::Comma | TokenKind::CloseParenthesis))
+    lookahead_kind_at(token_stream, next_index)
+        .is_some_and(|kind| matches!(kind, TokenKind::Comma | TokenKind::CloseParenthesis))
 }
 
 /// Maintains one parser-time declaration-order routing state for a call argument list.
@@ -608,7 +603,29 @@ fn known_parameter_names(expectations: &[ParameterExpectation]) -> Vec<StringId>
         .filter_map(|expectation| expectation.name)
         .collect()
 }
+/// Read-only lookahead through a short canonical view.
+///
+/// WHAT: probes one adapter-relative token kind without advancing the stream.
+/// WHY: call-argument named-target and bare-`none` scans are pure lookahead; a
+/// short `DeclarationCursor` keeps that fact read-only and drops before any
+/// `FileTokens` advance or expression re-entry. Unbounded compatibility-only
+/// streams have no canonical provenance, so fall back to the explicit vector
+/// lane there rather than inventing a bridge.
+fn lookahead_kind_at(token_stream: &FileTokens, index: usize) -> Option<TokenKind> {
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        if let Some(kind) = cursor.token_kind_at(index) {
+            return Some(kind);
+        }
+    }
+    token_stream
+        .tokens
+        .get(index)
+        .map(|token| token.kind.clone())
+}
 
+fn next_token_kind(token_stream: &FileTokens) -> Option<TokenKind> {
+    lookahead_kind_at(token_stream, token_stream.index.saturating_add(1))
+}
 fn reject_simple_generic_argument_type_ascription(
     token_stream: &FileTokens,
     syntax_context: CallArgumentSyntaxContext,
@@ -621,14 +638,23 @@ fn reject_simple_generic_argument_type_ascription(
         return Ok(());
     }
 
-    let Some(type_token) = token_stream.tokens.get(token_stream.index + 1) else {
+    let cursor_span = if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        cursor.span_at(cursor.position().saturating_add(1))
+    } else {
+        None
+    };
+    let fallback_span = token_stream
+        .tokens
+        .get(token_stream.index.saturating_add(1))
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span));
+    let Some(type_span) = cursor_span.or(fallback_span) else {
         return Ok(());
     };
 
     Err(CompilerDiagnostic::invalid_generic_instantiation(
         function_name,
         InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
-        Some(SourceSpan::new(token_stream.file_id, type_token.span)),
+        Some(type_span),
     )
     .into())
 }
@@ -637,25 +663,26 @@ fn reject_simple_generic_argument_type_ascription(
 /// This deliberately stays small: broader type-looking symbol recovery would be speculative in
 /// the shared call parser and could change ordinary call errors.
 fn starts_simple_value_with_attached_type(token_stream: &FileTokens) -> bool {
-    let Some(value_token) = token_stream.tokens.get(token_stream.index) else {
+    let base = token_stream.index;
+    let Some(value_kind) = lookahead_kind_at(token_stream, base) else {
         return false;
     };
-    let Some(type_token) = token_stream.tokens.get(token_stream.index + 1) else {
+    let Some(type_kind) = lookahead_kind_at(token_stream, base.saturating_add(1)) else {
         return false;
     };
-    let Some(boundary_token) = token_stream.tokens.get(token_stream.index + 2) else {
+    let Some(boundary_kind) = lookahead_kind_at(token_stream, base.saturating_add(2)) else {
         return false;
     };
 
     matches!(
-        value_token.kind,
+        value_kind,
         TokenKind::NumericLiteral(_)
             | TokenKind::StringSliceLiteral(_)
             | TokenKind::BoolLiteral(_)
             | TokenKind::CharLiteral(_)
             | TokenKind::NoneLiteral
     ) && matches!(
-        type_token.kind,
+        type_kind,
         TokenKind::DatatypeInt
             | TokenKind::DatatypeFloat
             | TokenKind::DatatypeBool
@@ -663,7 +690,7 @@ fn starts_simple_value_with_attached_type(token_stream: &FileTokens) -> bool {
             | TokenKind::DatatypeChar
             | TokenKind::DatatypeNone
     ) && matches!(
-        boundary_token.kind,
+        boundary_kind,
         TokenKind::Comma | TokenKind::CloseParenthesis | TokenKind::Newline
     )
 }
@@ -672,8 +699,13 @@ fn starts_simple_value_with_attached_type(token_stream: &FileTokens) -> bool {
 #[path = "tests/function_call_tests.rs"]
 mod function_call_tests;
 fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+    DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_span())
+        .or_else(|| {
+            Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ))
+        })
 }

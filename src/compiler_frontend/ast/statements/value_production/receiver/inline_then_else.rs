@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -35,8 +36,11 @@ use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_ex
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id,
 };
-use crate::compiler_frontend::utilities::token_scan::find_expression_end_index;
+use crate::compiler_frontend::utilities::token_scan::{
+    ExpressionBoundaryDepth, find_expression_end_index,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
+
 /// Input for the shared inline then/else parser.
 pub(super) struct InlineThenElseInput<'a, 'b> {
     pub(super) token_stream: &'a mut FileTokens,
@@ -84,9 +88,19 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn same_logi
         (right_index, left_index)
     };
 
-    token_stream.tokens[start..=end]
-        .iter()
-        .all(|token| token.kind != TokenKind::Newline)
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        return (start..=end).all(|index| {
+            cursor
+                .token_kind_at(index)
+                .is_some_and(|kind| kind != TokenKind::Newline)
+        });
+    }
+    (start..=end).all(|index| {
+        token_stream
+            .tokens
+            .get(index)
+            .is_some_and(|token| token.kind != TokenKind::Newline)
+    })
 }
 /// converting a retained-token lifecycle fault into a source diagnostic mid-parse.
 type InlineThenElseResult<T> = Result<T, ExpressionParseError>;
@@ -258,8 +272,12 @@ pub(super) fn parse_inline_then_else(
     let mut then_expr_type = expected_type_id
         .map(ExpectedType::Known)
         .unwrap_or(ExpectedType::Infer);
-    let mut then_cast_target_context =
-        cast_target_context_for_inline_branch(expected_type_id, type_interner, string_table, path_fork);
+    let mut then_cast_target_context = cast_target_context_for_inline_branch(
+        expected_type_id,
+        type_interner,
+        string_table,
+        path_fork,
+    );
 
     // An authored `else` keeps the existing bounded branch parse. Without one,
     // stop at the first receiving boundary so the missing-keyword diagnostic
@@ -304,8 +322,12 @@ pub(super) fn parse_inline_then_else(
     let mut else_expr_type = expected_type_id
         .map(ExpectedType::Known)
         .unwrap_or(ExpectedType::Infer);
-    let mut else_cast_target_context =
-        cast_target_context_for_inline_branch(expected_type_id, type_interner, string_table, path_fork);
+    let mut else_cast_target_context = cast_target_context_for_inline_branch(
+        expected_type_id,
+        type_interner,
+        string_table,
+        path_fork,
+    );
     let else_expression_start_index = token_stream.index;
     let input = ExpressionParseInput::ordinary(
         ExpressionParseResources {
@@ -411,11 +433,85 @@ fn inline_else_follows_before_statement_end(token_stream: &FileTokens) -> bool {
         TokenKind::CloseParenthesis,
         TokenKind::CloseCurly,
     ];
+    let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) else {
+        return inline_else_follows_before_statement_end_in_tokens(token_stream, &stop_tokens);
+    };
+    let mut scan_start = cursor.position();
+
+    loop {
+        let mut depth = ExpressionBoundaryDepth::default();
+        let mut boundary_index = scan_start;
+        while boundary_index < cursor.length {
+            let Some(kind) = cursor.token_kind_at(boundary_index) else {
+                break;
+            };
+            if depth.is_top_level() && stop_tokens.contains(&kind) {
+                break;
+            }
+            depth.step(&kind);
+            if matches!(kind, TokenKind::Eof) {
+                break;
+            }
+            boundary_index += 1;
+        }
+        let Some(boundary) = cursor.token_kind_at(boundary_index) else {
+            return false;
+        };
+
+        match boundary {
+            TokenKind::Else => return true,
+            TokenKind::Newline => {
+                let previous_continues = boundary_index
+                    .checked_sub(1)
+                    .filter(|previous_index| *previous_index >= scan_start)
+                    .is_some_and(|previous_index| {
+                        cursor
+                            .token_kind_at(previous_index)
+                            .is_some_and(|kind| kind.continues_expression())
+                    });
+                let mut next_non_newline_index = boundary_index.checked_add(1);
+                let mut next_kind = None;
+                while let Some(index) = next_non_newline_index {
+                    match cursor.token_kind_at(index) {
+                        Some(TokenKind::Newline) => {
+                            next_non_newline_index = index.checked_add(1);
+                        }
+                        Some(kind) => {
+                            next_kind = Some(kind);
+                            break;
+                        }
+                        None => {
+                            next_non_newline_index = None;
+                        }
+                    }
+                }
+                let (Some(_), Some(next_kind)) = (next_non_newline_index, next_kind) else {
+                    return false;
+                };
+
+                if next_kind == TokenKind::Else {
+                    return true;
+                }
+                if !previous_continues && !next_kind.continues_expression() {
+                    return false;
+                }
+
+                scan_start = next_non_newline_index.expect("matched index above");
+            }
+            _ => return false,
+        }
+    }
+}
+
+fn inline_else_follows_before_statement_end_in_tokens(
+    token_stream: &FileTokens,
+    stop_tokens: &[TokenKind],
+) -> bool {
     let mut scan_start = token_stream.index;
 
     loop {
         let boundary_index =
-            find_expression_end_index(&token_stream.tokens, scan_start, &stop_tokens);
+            find_expression_end_index(&token_stream.tokens, scan_start, stop_tokens);
         let Some(boundary) = token_stream.tokens.get(boundary_index) else {
             return false;
         };
@@ -435,7 +531,7 @@ fn inline_else_follows_before_statement_end(token_stream: &FileTokens) -> bool {
                     .tokens
                     .iter()
                     .enumerate()
-                    .skip(boundary_index + 1)
+                    .skip(boundary_index.saturating_add(1))
                     .find(|(_, token)| token.kind != TokenKind::Newline)
                     .map(|(index, _)| index);
                 let Some(next_non_newline_index) = next_non_newline_index else {

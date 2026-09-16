@@ -29,8 +29,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidDeclarationReason,
     InvalidStandaloneStatementReason, InvalidThisUsageReason, ReservedNameOwner,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -71,6 +71,23 @@ fn push_accessed_symbol_statement(
     ))
 }
 
+/// Read the next token kind through a short-lived canonical view.
+///
+/// WHAT: pure read-only lookahead that preserves adapter-relative indexes; dropped
+/// before any `FileTokens` mutation or re-entrant parse.
+/// WHY: narrowed `new_from_slice` streams have no canonical provenance, so they keep
+/// `peek_next_token` as the documented `FileTokens` grammar boundary (fallback below).
+fn peek_next_kind(token_stream: &FileTokens) -> Option<TokenKind> {
+    DeclarationCursor::from_file_tokens(token_stream)
+        .map(|cursor| {
+            cursor
+                .position()
+                .checked_add(1)
+                .and_then(|next| cursor.token_kind_at(next))
+        })
+        .unwrap_or_else(|_| token_stream.peek_next_token().cloned())
+}
+
 // --------------------------
 //  `this` statement parsing
 // --------------------------
@@ -107,7 +124,7 @@ pub(crate) fn parse_this_statement(
         .into());
     };
 
-    match token_stream.peek_next_token() {
+    match peek_next_kind(token_stream).as_ref() {
         // Direct reassignment of `this` is never allowed.
         Some(next_token) if next_token.is_assignment_operator() => {
             Err(CompilerDiagnostic::invalid_this_usage(
@@ -241,9 +258,13 @@ pub(crate) fn parse_symbol_statement(
         .into());
     }
 
-    if let Some(multi_bind_node) =
-        parse_multi_bind_statement(token_stream, context, type_interner, string_table, path_fork)?
-    {
+    if let Some(multi_bind_node) = parse_multi_bind_statement(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )? {
         ast.push(multi_bind_node);
         return Ok(());
     }
@@ -251,7 +272,7 @@ pub(crate) fn parse_symbol_statement(
     // If the symbol already names a visible local, treat it as a use
     // (assignment, field access, or expression) rather than a new declaration.
     if let Some(existing_reference) = context.get_reference(&symbol_id) {
-        match token_stream.peek_next_token() {
+        match peek_next_kind(token_stream).as_ref() {
             // Direct reassignment of an existing local variable.
             Some(next_token) if next_token.is_assignment_operator() => {
                 token_stream.advance();
@@ -334,10 +355,7 @@ pub(crate) fn parse_symbol_statement(
                     existing_reference.value.span,
                     Some(token_stream.current_span()),
                 );
-                diagnostic.primary_span = Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.tokens[token_stream.index].span,
-                ));
+                diagnostic.primary_span = Some(token_stream.current_span());
                 return Err(diagnostic.into());
             }
 
@@ -367,7 +385,7 @@ pub(crate) fn parse_symbol_statement(
     if let Some((external_function_id, external_function_def)) =
         context.lookup_visible_external_function(symbol_id)
     {
-        if token_stream.peek_next_token() == Some(&TokenKind::TypeParameterBracket) {
+        if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::TypeParameterBracket) {
             // Explicit external imports retain the authored dependency span; prelude-injected
             // symbols intentionally have no source span to attach.
             let previous_span = context
@@ -413,7 +431,7 @@ pub(crate) fn parse_symbol_statement(
 
     // An open parenthesis after an unknown symbol means a call attempt.
     // Provide targeted diagnostics for receiver methods and external types.
-    if token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis) {
+    if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::OpenParenthesis) {
         if let Some(receiver_method_entry) =
             context.lookup_visible_receiver_method_by_name(symbol_id)
         {
@@ -446,7 +464,7 @@ pub(crate) fn parse_symbol_statement(
     // namespace symbol, but they are valid side-effect statements when the field access resolves
     // to a call. Route them through expression-statement validation before declaration parsing
     // interprets the leading symbol as a malformed declaration.
-    if token_stream.peek_next_token() == Some(&TokenKind::Dot) {
+    if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::Dot) {
         let expression = parse_symbol_expression_statement_candidate(
             token_stream,
             context,

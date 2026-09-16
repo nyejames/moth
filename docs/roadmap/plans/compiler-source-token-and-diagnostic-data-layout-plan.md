@@ -12,10 +12,11 @@
 > plus validation-lane stabilization). The bounded pre-Phase-3 validation restoration is complete:
 > warning-denied native Clippy and the integration suite are green, and the only remaining red gate
 > is the explicitly accepted inherited generic-instantiation scaling exception recorded below.
-> Phase 3 token-store work remains queued and has not started; Slice 3A is the next action only after
-> this capsule is accepted. Package work stays paused until accepted Phase 3. After Phase 3 this plan
-> pauses: Wiring V1, then native result slots and Core const evaluation run first, and Phase 4 resumes
-> only after a rebase and explicit reactivation. The roadmap retains those separate checkpoints.
+> Phase 3 fixed-token/source-owned migration is active: Slices 3A–3E and 3F1–3F3 are accepted,
+> with 3F4 template-parser migration next. Package work stays paused until accepted Phase 3. After
+> Phase 3 this plan pauses: Wiring V1, then native result slots and Core const evaluation run first,
+> and Phase 4 resumes only after a rebase and explicit reactivation. The roadmap retains those
+> separate checkpoints.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -72,13 +73,10 @@ from a compressed summary alone.
 ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
-- Phase: the accepted Phase 2 continuation checkpoint is `c17672bb5` on
-  `diagnostic-data-layout-changes`; it carries the diagnostic correction `e7d9a7ab5` (path/string
-  attachment and remap ownership) and the merged-revision validation-lane stabilization.
-  Phase 2 complete-path interning is accepted, including final review corrections in `aed38042f`
-  (generated path/string pairing and report-owner path retention). The bounded pre-Phase-3
-  validation restoration is complete; Phase 3 Slice 3A token array layout selection remains queued
-  and has not started.
+- Phase: Phase 2 complete-path interning remains accepted at continuation checkpoint `c17672bb5` on
+  `diagnostic-data-layout-changes`, with diagnostic correction `e7d9a7ab5` and merged-revision
+  validation-lane stabilization. Phase 3 fixed-token/source-owned migration is active; Slices 3A–3E
+  and 3F1–3F3 are accepted, and 3F4 template-parser migration is next.
 - Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
   diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
 - Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
@@ -122,9 +120,9 @@ CURRENT_WORKSPACE_STATE:
   benchmark preflight cases. It remains red only because the inherited generic-instantiation
   series fits `n^1.81` in the dedicated baseline rerun (`n^1.80` in the later full-gate rerun)
   against its unchanged `n^1.70` budget; the recorded current-main comparison was `n^1.77`.
-- Phase 3 fixed-token work is queued but not started. Slice 3A may begin only with this named
-  scaling exception consciously retained as its baseline; no Phase 3 code or benchmark work has
-  started in this restoration pass.
+- Phase 3 fixed-token/source-owned migration is active. Slices 3A–3E and 3F1–3F3 are accepted;
+  3F4 template-parser migration is the next implementation slice. The named generic-instantiation
+  scaling exception remains the baseline and is not raised or loosened.
 - After Phase 3, this plan pauses. Wiring V1 runs, then native result slots and Core const
   evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
   reactivated (see the Phase 4 reactivation gate in the Phase 4 section).
@@ -1031,7 +1029,19 @@ boundaries. Low-memory validation (`CARGO_BUILD_JOBS=1`, `CARGO_PROFILE_DEV_DEBU
 `cargo check -p moth --lib` plus focused declaration, type, header, tokenizer-cursor, source-config,
 and generic-body suites; a broader `frozen_body_tests` filter still reports two failures and was
 not used as 3F2 acceptance evidence.
-- [ ] **3F3 — AST core:** expression, statement, call, field, match, loop and assignment parsers
+- [x] **3F3 — AST core:** expression, statement, call, field, match, loop and assignment parsers
+Slice 3F3 decision (2026-09-16): AST expression and statement consumers now use short-lived
+`DeclarationCursor` views for token-local spans, lookahead and boundary scans whenever canonical
+provenance exists, with explicit compatibility-vector fallbacks for unbounded parser adapters.
+Template-capable recursive boundaries remain on `FileTokens`; no reverse cursor adapters, durable
+cursor references or second canonical token stores were introduced. Assignment, call, choice,
+field, collection, match, loop and fallible-handling paths preserve adapter-relative indexes,
+active-range bounds, source identities and compatibility-only diagnostics. Low-memory validation
+(`CARGO_BUILD_JOBS=1`, `CARGO_PROFILE_DEV_DEBUG=0`) passed `cargo check -p moth --lib`,
+expression AST (`116`), statement AST (`317`, excluding the accepted
+`rejects_multiline_inline_catch_fallback_value` baseline failure), declaration syntax (`74`),
+token cursor (`14`) and tokenizer (`126`) suites. The independent AST-core audit passed with no
+required corrections.
 - [ ] **3F4 — template parser:** template heads, TIR emission, slots, control flow and formatter-facing token reads
 - [ ] **3F5 — support surfaces:** token-based diagnostics, tests, debug/show-token output, `TokenStats` and benchmark classification; extend the owning test source helper with token-store construction rather than adding parser-specific fixture builders
 - [ ] in every batch, use short-lived token views only; no durable Rust reference or self-referential structure may be introduced

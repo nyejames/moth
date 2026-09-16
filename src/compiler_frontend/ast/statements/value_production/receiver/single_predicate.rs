@@ -20,9 +20,10 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Shared facts after a committed single-predicate header.
 ///
@@ -148,13 +149,24 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupport
     let scrutinee_type_id = context.get_reference(scrutinee_name)?.value.type_id;
     type_environment.option_inner_type(scrutinee_type_id)?;
 
-    let pattern_token = &token_stream.tokens[pattern_index].kind;
+    let Some(pattern_kind) = DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.token_kind_at(pattern_index))
+        .or_else(|| {
+            token_stream
+                .tokens
+                .get(pattern_index)
+                .map(|token| token.kind.clone())
+        })
+    else {
+        return None;
+    };
 
-    if matches!(pattern_token, TokenKind::NoneLiteral) {
+    if matches!(pattern_kind, TokenKind::NoneLiteral) {
         return Some(InvalidControlFlowStatementReason::ValueIfOptionNonePredicate);
     }
 
-    if token_is_literal_pattern(pattern_token)
+    if token_is_literal_pattern(&pattern_kind)
         && classification.inline_then_is_on_same_line_as(token_stream, pattern_index)
     {
         return Some(InvalidControlFlowStatementReason::ValueIfOptionLiteralPredicate);

@@ -34,9 +34,10 @@ use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_com
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use super::catch_handler::{
     CatchFallibleHandler, CatchFallibleHandlerSite, parse_catch_fallible_handler_typed,
@@ -427,9 +428,9 @@ fn parse_catch_handling_suffix(
             type_interner,
             site,
             warnings,
-        string_table,
-        path_fork,
-    ),
+            string_table,
+            path_fork,
+        ),
 
         _ => Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
@@ -538,22 +539,48 @@ fn parse_catch_handler(
 }
 
 fn next_catch_binding_is_inline(token_stream: &FileTokens) -> bool {
-    let mut index = token_stream.index + 1;
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        let mut index = cursor.position().checked_add(1);
 
+        while let Some(probe) = index {
+            let Some(kind) = cursor.token_kind_at(probe) else {
+                return false;
+            };
+            match kind {
+                TokenKind::TypeParameterBracket => {
+                    let mut lookahead = probe.checked_add(1);
+                    while let Some(next) = lookahead {
+                        match cursor.token_kind_at(next) {
+                            Some(TokenKind::Newline) => lookahead = next.checked_add(1),
+                            Some(kind) => return kind == TokenKind::Then,
+                            None => return false,
+                        }
+                    }
+                    return false;
+                }
+
+                TokenKind::Newline | TokenKind::End | TokenKind::Eof => return false,
+
+                _ => index = probe.checked_add(1),
+            }
+        }
+
+        return false;
+    }
+
+    let mut index = token_stream.index.saturating_add(1);
     while index < token_stream.length {
         match &token_stream.tokens[index].kind {
             TokenKind::TypeParameterBracket => {
                 return token_stream
                     .tokens
                     .iter()
-                    .skip(index + 1)
+                    .skip(index.saturating_add(1))
                     .find(|token| token.kind != TokenKind::Newline)
                     .is_some_and(|token| token.kind == TokenKind::Then);
             }
-
             TokenKind::Newline | TokenKind::End | TokenKind::Eof => return false,
-
-            _ => index += 1,
+            _ => index = index.saturating_add(1),
         }
     }
 

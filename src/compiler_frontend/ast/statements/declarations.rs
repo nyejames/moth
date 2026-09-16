@@ -46,12 +46,12 @@ use crate::compiler_frontend::ast::expressions::anonymous_const_record::pipe_ope
 use crate::compiler_frontend::build_config::BuildInputName;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
+use crate::compiler_frontend::declaration_syntax::r#struct::{
+    parse_struct_shell, validate_struct_default_values,
+};
 use crate::compiler_frontend::declaration_syntax::{
     DeclarationCursor,
     declaration_shell::{DeclarationSyntax, parse_declaration_syntax},
-};
-use crate::compiler_frontend::declaration_syntax::r#struct::{
-    parse_struct_shell, validate_struct_default_values,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
@@ -74,6 +74,41 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 /// frozen file table. If that retained-table invariant fails, the error must reach module
 /// emission as `CompilerError`, not become an authored declaration diagnostic.
 type DeclarationResult<T> = Result<T, ExpressionParseError>;
+
+/// True when `|` at `pipe_index` opens a value record, read through a cursor view.
+///
+/// WHAT: mirrors `pipe_opens_value_record` without touching the parser compatibility
+/// vector; used for the statement-owned struct/record dispatch below.
+/// WHY: initializer substreams are canonical bounded adapters, so this short-lived
+/// read-only view preserves adapter-relative indexes and source spans exactly.
+fn pipe_opens_value_record_at_cursor(
+    cursor: &DeclarationCursor,
+    pipe_index: usize,
+    compile_time: bool,
+) -> bool {
+    if compile_time {
+        return true;
+    }
+    let kind_at = |probe: usize| cursor.token_kind_at(probe);
+    let skip_newlines = |mut probe: usize| {
+        while matches!(kind_at(probe), Some(TokenKind::Newline)) {
+            probe += 1;
+        }
+        probe
+    };
+    let mut probe = skip_newlines(pipe_index + 1);
+    if matches!(kind_at(probe), Some(TokenKind::TypeParameterBracket)) {
+        return false;
+    }
+    if !matches!(kind_at(probe), Some(TokenKind::Symbol(_))) {
+        return false;
+    }
+    probe = skip_newlines(probe + 1);
+    matches!(
+        kind_at(probe),
+        Some(TokenKind::Assign) | Some(TokenKind::Comma)
+    )
+}
 
 /// Returns `Some(capacity)` when the parsed type is a capacity-only shorthand `{N}`.
 ///
@@ -668,12 +703,25 @@ pub fn resolve_declaration_syntax(
         //
         // Compile-time `| name = expr |` and empty `#= | |` are const records. Ordinary
         // empty `| |` and `| name Type |` stay with the struct shell grammar.
+        // Short-lived canonical view for this token-local record fact; dropped before
+        // any FileTokens use. Narrowed `new_from_slice` streams keep the legacy
+        // vector helper as the documented grammar boundary (fallback below).
         TokenKind::TypeParameterBracket
-            if !pipe_opens_value_record(
-                &initializer_stream.tokens,
-                initializer_stream.index,
-                declaration_syntax.binding_mode.is_compile_time(),
-            ) =>
+            if !DeclarationCursor::from_file_tokens(&initializer_stream)
+                .map(|cursor| {
+                    pipe_opens_value_record_at_cursor(
+                        &cursor,
+                        cursor.position(),
+                        declaration_syntax.binding_mode.is_compile_time(),
+                    )
+                })
+                .unwrap_or_else(|_| {
+                    pipe_opens_value_record(
+                        &initializer_stream.tokens,
+                        initializer_stream.index,
+                        declaration_syntax.binding_mode.is_compile_time(),
+                    )
+                }) =>
         {
             // Struct field defaults must be compile-time foldable, so they are parsed
             // in a dedicated constant context.
@@ -692,9 +740,8 @@ pub fn resolve_declaration_syntax(
                     path_fork,
                     &mut span_builder,
                 )?;
-                let next_index = initializer_stream.compatibility_index_for_cursor(
-                    declaration_cursor.canonical_cursor(),
-                )?;
+                let next_index = initializer_stream
+                    .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
                 drop(declaration_cursor);
                 initializer_stream.index = next_index;
                 field_syntax
@@ -935,9 +982,8 @@ fn declaration_initializer_stream(
             "declaration initializer range has no canonical source token owner",
         )
     })?;
-    let range = initializer_range.ok_or_else(|| {
-        CompilerError::compiler_error("declaration initializer range is missing")
-    })?;
+    let range = initializer_range
+        .ok_or_else(|| CompilerError::compiler_error("declaration initializer range is missing"))?;
     let eof_span = declaration_span
         .map(SourceSpan::local)
         .unwrap_or_else(LocalSpan::source_start);

@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -413,12 +414,29 @@ fn parse_expression_until_curly_entry_delimiter(
     )
 }
 
+/// Read the next token kind through a short-lived canonical view.
+///
+/// WHAT: pure read-only lookahead for the `==` common-mistake checks; dropped before
+/// any `FileTokens` mutation or expression re-entry.
+/// WHY: narrowed `new_from_slice` initializer streams have no canonical provenance,
+/// so they keep `peek_next_token` as the documented `FileTokens` grammar boundary.
+fn peek_next_kind(token_stream: &FileTokens) -> Option<TokenKind> {
+    DeclarationCursor::from_file_tokens(token_stream)
+        .map(|cursor| {
+            cursor
+                .position()
+                .checked_add(1)
+                .and_then(|next| cursor.token_kind_at(next))
+        })
+        .unwrap_or_else(|_| token_stream.peek_next_token().cloned())
+}
+
 fn mixed_collection_entry_error(token_stream: &FileTokens) -> Option<CompilerDiagnostic> {
     if token_stream.current_token_kind() != &TokenKind::Assign {
         return None;
     }
 
-    if token_stream.peek_next_token() == Some(&TokenKind::Assign) {
+    if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::Assign) {
         return check_expression_common_mistake(token_stream, false);
     }
 
@@ -437,7 +455,7 @@ fn consume_map_entry_separator(token_stream: &mut FileTokens) -> CollectionParse
         .into());
     }
 
-    if token_stream.peek_next_token() == Some(&TokenKind::Assign)
+    if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::Assign)
         && let Some(error) = check_expression_common_mistake(token_stream, false)
     {
         return Err(error.into());

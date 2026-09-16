@@ -49,13 +49,16 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
-use crate::compiler_frontend::utilities::token_scan::find_expression_end_index;
+use crate::compiler_frontend::utilities::token_scan::{
+    ExpressionBoundaryDepth, find_expression_end_index,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 pub(super) enum ExpressionTokenStep {
@@ -245,8 +248,11 @@ fn push_expression_after_suffixes(
     if !context.kind.is_constant_context()
         && expression_after_option_propagation.is_const_record_value()
     {
-        let record_name =
-            const_record_expression_name(&expression_after_option_propagation, string_table, path_fork);
+        let record_name = const_record_expression_name(
+            &expression_after_option_propagation,
+            string_table,
+            path_fork,
+        );
         return Err(CompilerDiagnostic::const_record_used_as_value(
             record_name,
             expression_after_option_propagation.span,
@@ -376,10 +382,18 @@ fn parse_unary_operator(
             ) {
                 *next_number_negative = true;
             } else {
-                let span = Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                ));
+                // Short-lived canonical view for this token-local unary span; dropped
+                // before any FileTokens use. `current_span` stays the documented
+                // FileTokens grammar boundary (fallback below).
+                let span = DeclarationCursor::from_file_tokens(token_stream)
+                    .ok()
+                    .and_then(|cursor| cursor.current_postfix_operator_span())
+                    .or_else(|| {
+                        Some(SourceSpan::new(
+                            token_stream.file_id,
+                            token_stream.current_token().span,
+                        ))
+                    });
                 expression.push(ExpressionRpnItem::Operator {
                     operator: Operator::Negate,
                     span,
@@ -388,10 +402,15 @@ fn parse_unary_operator(
             true
         }
         TokenKind::Not => {
-            let span = Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ));
+            let span = DeclarationCursor::from_file_tokens(token_stream)
+                .ok()
+                .and_then(|cursor| cursor.current_postfix_operator_span())
+                .or_else(|| {
+                    Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    ))
+                });
             expression.push(ExpressionRpnItem::Operator {
                 operator: Operator::Not,
                 span,
@@ -418,10 +437,15 @@ fn advance_with_operator(
     token_stream: &FileTokens,
     operator: Operator,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    let span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let span = DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_postfix_operator_span())
+        .or_else(|| {
+            Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ))
+        });
     push_operator_item(expression, context, span, operator);
     Ok(ExpressionTokenStep::Advance)
 }
@@ -471,10 +495,18 @@ pub(super) fn dispatch_expression_token(
         TokenKind::CloseParenthesis => dispatch_close_parenthesis(token_stream, state),
 
         TokenKind::OpenParenthesis => {
-            let group_span = Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ));
+            // Short-lived canonical view for this token-local group span; dropped before
+            // the grammar advance/re-entrant parse. `current_token` stays the documented
+            // FileTokens grammar boundary (fallback below).
+            let group_span = DeclarationCursor::from_file_tokens(&*token_stream)
+                .ok()
+                .and_then(|cursor| cursor.current_postfix_operator_span())
+                .or_else(|| {
+                    Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    ))
+                });
             token_stream.advance();
             // A grouped expression is no longer the immediate receiving boundary.
             // This keeps `(cast value)` from acting as an operator operand while
@@ -619,10 +651,18 @@ pub(super) fn dispatch_expression_token(
         }
 
         TokenKind::Path(path_syntax) => {
-            let path_span = Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ));
+            // Short-lived canonical view for this token-local path span; dropped before the
+            // template/file-value handoff and grammar advance. `current_token` stays the
+            // documented FileTokens grammar boundary (fallback below).
+            let path_span = DeclarationCursor::from_file_tokens(&*token_stream)
+                .ok()
+                .and_then(|cursor| cursor.current_postfix_operator_span())
+                .or_else(|| {
+                    Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    ))
+                });
             let operand = resolve_file_value(
                 path_syntax,
                 token_stream,
@@ -755,16 +795,14 @@ pub(super) fn dispatch_expression_token(
             .into())
         }
 
-        TokenKind::Cast | TokenKind::CastBang => {
-            parse_cast_expression(
-                token_stream,
-                context,
-                type_interner,
-                state,
-                string_table,
-                path_fork,
-            )
-        }
+        TokenKind::Cast | TokenKind::CastBang => parse_cast_expression(
+            token_stream,
+            context,
+            type_interner,
+            state,
+            string_table,
+            path_fork,
+        ),
 
         TokenKind::Negative | TokenKind::Not => {
             let _ = parse_unary_operator(
@@ -804,16 +842,14 @@ pub(super) fn dispatch_expression_token(
         // -------------------------------
         //  Comparison operators
         // -------------------------------
-        TokenKind::Is => {
-            dispatch_is_token(
-                token_stream,
-                context,
-                type_interner,
-                state,
-                string_table,
-                path_fork,
-            )
-        }
+        TokenKind::Is => dispatch_is_token(
+            token_stream,
+            context,
+            type_interner,
+            state,
+            string_table,
+            path_fork,
+        ),
 
         TokenKind::LessThan => {
             advance_with_operator(state.expression, context, token_stream, Operator::LessThan)
@@ -878,26 +914,26 @@ pub(super) fn dispatch_expression_token(
             }
 
             if context.kind.is_constant_context() {
-            let record = parse_anonymous_const_record_expression(
-                token_stream,
-                context,
-                type_interner,
-                string_table,
-                path_fork,
-            )?;
+                let record = parse_anonymous_const_record_expression(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                    path_fork,
+                )?;
 
-            push_expression_operand(
-                token_stream,
-                context,
-                type_interner,
-                string_table,
-                state.expression,
-                state.allow_boundary_catch,
-                record,
-                path_fork,
-            )?;
+                push_expression_operand(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                    state.expression,
+                    state.allow_boundary_catch,
+                    record,
+                    path_fork,
+                )?;
 
-            Ok(ExpressionTokenStep::Continue)
+                Ok(ExpressionTokenStep::Continue)
             } else {
                 Err(CompilerDiagnostic::deferred_feature_reason(
                     DeferredFeatureReason::RuntimeAnonymousRecord,
@@ -1000,13 +1036,21 @@ fn dispatch_newline(
     context: &ScopeContext,
     state: &mut ExpressionDispatchState<'_>,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    // When at the very start of the stream, treat the virtual previous token as a newline
-    // so expression continuation logic does not fire.
-    let previous_token = if token_stream.index == 0 {
-        &TokenKind::Newline
-    } else {
-        token_stream.previous_token()
-    };
+    // Short-lived canonical view for this token-local previous fact; dropped before
+    // any FileTokens mutation or rewind. Index save/restore below stays the
+    // documented FileTokens grammar boundary (no safe cursor reposition API).
+    let previous_token = DeclarationCursor::from_file_tokens(&*token_stream)
+        .ok()
+        .and_then(|cursor| cursor.previous_token_kind())
+        .or_else(|| {
+            if token_stream.index == 0 {
+                Some(TokenKind::Newline)
+            } else {
+                Some(token_stream.previous_token().clone())
+            }
+        })
+        .unwrap_or(TokenKind::Newline);
+    let previous_token = &previous_token;
     if state.consume_closing_parenthesis
         || (previous_token.continues_expression()
             && !matches!(
@@ -1286,13 +1330,37 @@ fn parse_cast_operand_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    let catch_index = find_expression_end_index(
-        &token_stream.tokens,
-        token_stream.index,
-        &[TokenKind::Catch],
-    );
-    let catch_is_cast_suffix = catch_index < token_stream.length
-        && token_stream.tokens[catch_index].kind == TokenKind::Catch;
+    // Short-lived canonical view for the pure `catch` lookahead; dropped before any
+    // FileTokens mutation or re-entrant parse. Bounded adapters keep the legacy
+    // vector scan (documented grammar boundary in the fallback below).
+    let catch_is_cast_suffix = match DeclarationCursor::from_file_tokens(&*token_stream) {
+        Ok(cursor) => {
+            let mut scan = cursor.position();
+            let mut depth = ExpressionBoundaryDepth::default();
+            loop {
+                let Some(kind) = cursor.token_kind_at(scan) else {
+                    break false;
+                };
+                if depth.is_top_level() && kind == TokenKind::Catch {
+                    break true;
+                }
+                depth.step(&kind);
+                if matches!(kind, TokenKind::Eof) {
+                    break false;
+                }
+                scan += 1;
+            }
+        }
+        Err(_) => {
+            let catch_index = find_expression_end_index(
+                &token_stream.tokens,
+                token_stream.index,
+                &[TokenKind::Catch],
+            );
+            catch_index < token_stream.length
+                && token_stream.tokens[catch_index].kind == TokenKind::Catch
+        }
+    };
 
     let mut cast_target_context = CastTargetContext::None;
 

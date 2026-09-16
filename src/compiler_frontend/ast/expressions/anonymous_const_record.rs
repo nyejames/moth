@@ -85,6 +85,48 @@ fn looks_like_nested_record_literal(tokens: &[Token], pipe_index: usize) -> bool
     pipe_opens_value_record(tokens, pipe_index, false)
 }
 
+/// Cursor-view form of [`looks_like_nested_record_literal`] for expression-window scans.
+///
+/// WHAT: reads the same newline-tolerant `|`, `name`, `=`, `,` facts through a short-lived
+/// canonical [`DeclarationCursor`] view instead of the parser compatibility vector.
+/// WHY: expression field-value checks need only token-local facts; keeping the slice helper
+/// preserves the shared struct-shell grammar boundary owned with `declarations.rs`.
+fn looks_like_nested_record_literal_at_cursor(
+    cursor: &DeclarationCursor,
+    pipe_index: usize,
+) -> bool {
+    let skip_newlines = |mut probe: usize| {
+        while matches!(cursor.token_kind_at(probe), Some(TokenKind::Newline)) {
+            probe += 1;
+        }
+        probe
+    };
+
+    let probe = skip_newlines(pipe_index + 1);
+    if matches!(
+        cursor.token_kind_at(probe),
+        Some(TokenKind::TypeParameterBracket)
+    ) {
+        return true;
+    }
+
+    let mut probe = skip_newlines(pipe_index + 1);
+    if matches!(
+        cursor.token_kind_at(probe),
+        Some(TokenKind::TypeParameterBracket)
+    ) {
+        return false;
+    }
+    if !matches!(cursor.token_kind_at(probe), Some(TokenKind::Symbol(_))) {
+        return false;
+    }
+    probe = skip_newlines(probe + 1);
+    matches!(
+        cursor.token_kind_at(probe),
+        Some(TokenKind::Assign) | Some(TokenKind::Comma)
+    )
+}
+
 /// Parse one anonymous const record from `| name = value, ... |` syntax.
 ///
 /// ENTRY INVARIANT: the stream is positioned on the opening `|` and the receiving context is
@@ -229,11 +271,7 @@ fn parse_record_field(
 
     let mut qualifier = if starts_build_config_qualifier(token_stream, string_table) {
         let mut declaration_cursor = DeclarationCursor::from_file_tokens(token_stream)?;
-        let qualifier = parse_build_config_qualifier(
-            &mut declaration_cursor,
-            string_table,
-            None,
-        )?;
+        let qualifier = parse_build_config_qualifier(&mut declaration_cursor, string_table, None)?;
         let next_index =
             token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
         drop(declaration_cursor);
@@ -269,7 +307,18 @@ fn parse_record_field(
         }
 
         if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
-            if looks_like_nested_record_literal(&token_stream.tokens, token_stream.index) {
+            // Short-lived canonical view for this token-local nested-record fact; dropped
+            // before any FileTokens mutation. Bounded adapters keep the legacy vector
+            // helper as the documented grammar boundary (fallback below).
+            let nested = match DeclarationCursor::from_file_tokens(&*token_stream) {
+                Ok(cursor) => {
+                    looks_like_nested_record_literal_at_cursor(&cursor, cursor.position())
+                }
+                Err(_) => {
+                    looks_like_nested_record_literal(&token_stream.tokens, token_stream.index)
+                }
+            };
+            if nested {
                 return Err(CompilerDiagnostic::invalid_expression(
                     InvalidExpressionReason::NestedAnonymousConstRecord,
                     current_span(token_stream),
@@ -298,7 +347,13 @@ fn parse_record_field(
                 ValueMode::ImmutableOwned,
             )
         } else {
-            parse_record_field_value(token_stream, context, type_interner, string_table, path_fork)?
+            parse_record_field_value(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                path_fork,
+            )?
         }
     } else {
         // A qualified required field may omit its initializer so explicit inputs or builder
@@ -373,8 +428,16 @@ fn unexpected_record_end(
 }
 
 fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+    // Short-lived canonical view for this token-local record span; dropped before any
+    // FileTokens mutation. `current_token` stays the documented FileTokens grammar
+    // boundary (fallback below).
+    DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_postfix_operator_span())
+        .or_else(|| {
+            Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ))
+        })
 }

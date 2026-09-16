@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -50,10 +51,18 @@ pub(super) fn parse_mutable_receiver_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let marker_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    // Short-lived canonical view for this token-local marker span; dropped before the
+    // grammar advance and field-access handoff. `current_token` stays the documented
+    // FileTokens grammar boundary (fallback below).
+    let marker_span = DeclarationCursor::from_file_tokens(&*token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_postfix_operator_span())
+        .or_else(|| {
+            Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ))
+        });
     token_stream.advance();
 
     let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
@@ -142,7 +151,13 @@ pub(super) fn parse_copy_place_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCopyPlace, ExpressionParseError> {
-    parse_copy_place_payload(token_stream, context, type_interner, string_table, path_fork)
+    parse_copy_place_payload(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )
 }
 
 fn parse_copy_place_payload(
@@ -394,8 +409,16 @@ pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expre
 }
 
 fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+    // Short-lived canonical view for this token-local span; dropped before any
+    // FileTokens use. `current_token` stays the documented FileTokens grammar
+    // boundary (fallback below).
+    DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_postfix_operator_span())
+        .or_else(|| {
+            Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ))
+        })
 }

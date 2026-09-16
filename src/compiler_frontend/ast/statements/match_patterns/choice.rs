@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::d
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -340,11 +341,7 @@ fn parse_variant_name(
             if token_stream.current_token_kind() == &TokenKind::DoubleColon {
                 let expected_choice_name = path_fork.component(*choice_nominal_path);
                 if expected_choice_name.is_some_and(|expected| first_name != expected)
-                    && !qualifier_resolves_to_choice(
-                        match_context,
-                        first_name,
-                        choice_nominal_path,
-                    )
+                    && !qualifier_resolves_to_choice(match_context, first_name, choice_nominal_path)
                 {
                     return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::QualifierDoesNotMatchScrutinee,
@@ -439,10 +436,15 @@ fn resolve_variant_to_tag(
     Ok(variant_index)
 }
 fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+    DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.current_span())
+        .or_else(|| {
+            Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ))
+        })
 }
 fn choice_display_name(
     choice_nominal_path: &PathId,

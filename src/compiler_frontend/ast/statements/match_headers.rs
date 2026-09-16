@@ -29,14 +29,15 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Parsed pattern header shared by full match arms and single-predicate value `if`.
 ///
@@ -434,9 +435,19 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
 /// syntax should continue into the pattern parser so it receives the more specific
 /// unsupported-pattern diagnostic instead of being mistaken for a capture.
 fn option_pattern_constructor_like(token_stream: &FileTokens) -> bool {
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        return cursor
+            .position()
+            .checked_add(1)
+            .and_then(|next| cursor.token_kind_at(next))
+            .is_some_and(|kind| {
+                matches!(kind, TokenKind::OpenParenthesis | TokenKind::DoubleColon)
+            });
+    }
+
     token_stream
         .tokens
-        .get(token_stream.index + 1)
+        .get(token_stream.index.saturating_add(1))
         .is_some_and(|token| {
             matches!(
                 token.kind,
@@ -444,7 +455,6 @@ fn option_pattern_constructor_like(token_stream: &FileTokens) -> bool {
             )
         })
 }
-
 /// Build a choice arm scope and final pattern with fully resolved capture binding paths.
 ///
 /// WHAT: clones the parent match context and adds `Declaration` entries for each parsed capture.

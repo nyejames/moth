@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::statements::loop_headers::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -38,10 +39,20 @@ pub fn create_loop(
 ) -> LoopResult<AstNode> {
     ast_log!("Creating a Loop");
 
-    let header_token = token_stream
-        .tokens
-        .get(token_stream.index.saturating_sub(1));
-    let span = header_token.map(|token| SourceSpan::new(token_stream.file_id, token.span));
+    let span = DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| {
+            cursor
+                .previous_token()
+                .map(|token| SourceSpan::new(cursor.source_id(), token.span))
+        })
+        .or_else(|| {
+            token_stream
+                .index
+                .checked_sub(1)
+                .and_then(|index| token_stream.tokens.get(index))
+                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        });
     let scope = context.scope;
     let colon_index = find_loop_header_colon_index(token_stream)?;
 
@@ -95,6 +106,45 @@ pub fn create_loop(
 }
 
 fn find_loop_header_colon_index(token_stream: &FileTokens) -> LoopResult<usize> {
+    let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) else {
+        return find_loop_header_colon_index_in_tokens(token_stream);
+    };
+    let mut nesting_depth = NestingDepth::default();
+    let mut search_index = cursor.position();
+
+    while search_index < cursor.length {
+        let Some(kind) = cursor.token_kind_at(search_index) else {
+            break;
+        };
+        let Some(token_span) = cursor.span_at(search_index) else {
+            break;
+        };
+        let is_top_level = nesting_depth.is_top_level();
+
+        if is_top_level && matches!(kind, TokenKind::Colon) {
+            return Ok(search_index);
+        }
+
+        if is_top_level && matches!(kind, TokenKind::End | TokenKind::Eof) {
+            return Err(CompilerDiagnostic::invalid_loop_header(
+                InvalidLoopHeaderReason::MissingColon,
+                Some(token_span),
+            )
+            .into());
+        }
+
+        nesting_depth.step(&kind);
+        search_index += 1;
+    }
+
+    Err(CompilerDiagnostic::invalid_loop_header(
+        InvalidLoopHeaderReason::MissingColon,
+        Some(token_stream.current_span()),
+    )
+    .into())
+}
+
+fn find_loop_header_colon_index_in_tokens(token_stream: &FileTokens) -> LoopResult<usize> {
     let mut nesting_depth = NestingDepth::default();
     let mut search_index = token_stream.index;
 
@@ -115,7 +165,7 @@ fn find_loop_header_colon_index(token_stream: &FileTokens) -> LoopResult<usize> 
         }
 
         nesting_depth.step(&token.kind);
-        search_index += 1;
+        search_index = search_index.saturating_add(1);
     }
 
     Err(CompilerDiagnostic::invalid_loop_header(

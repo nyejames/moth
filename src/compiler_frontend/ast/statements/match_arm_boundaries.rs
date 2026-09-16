@@ -14,6 +14,7 @@
 //! - Delimiter depth is tracked so `=>` inside nested parentheses, collections, or
 //!   templates is not mistaken for an arm separator.
 
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::tokenizer::line_scanning::{
     find_top_level_colon_on_line, find_top_level_fat_arrow_on_line,
     find_top_level_match_arm_fat_arrow,
@@ -34,15 +35,32 @@ pub(crate) fn token_is_line_initial(token_stream: &FileTokens, index: usize) -> 
         return false;
     }
 
-    let token = &token_stream.tokens[index];
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        let Some(kind) = cursor.token_kind_at(index) else {
+            return false;
+        };
+        if matches!(kind, TokenKind::Newline | TokenKind::End | TokenKind::Eof) {
+            return false;
+        }
+
+        return index == 0
+            || cursor.token_kind_at(index.saturating_sub(1)) == Some(TokenKind::Newline);
+    }
+
+    let Some(token) = token_stream.tokens.get(index) else {
+        return false;
+    };
     if matches!(
         token.kind,
         TokenKind::Newline | TokenKind::End | TokenKind::Eof
     ) {
         return false;
     }
-
-    index == 0 || token_stream.tokens[index - 1].kind == TokenKind::Newline
+    index == 0
+        || token_stream
+            .tokens
+            .get(index.saturating_sub(1))
+            .is_some_and(|previous| previous.kind == TokenKind::Newline)
 }
 
 /// Returns true when the token at `start_index` has a top-level `=>` in a match
@@ -81,8 +99,18 @@ pub(crate) fn token_index_starts_match_arm_header(
         return None;
     }
 
-    let start_token = &token_stream.tokens[start_index];
-    let start_kind = &start_token.kind;
+    let Some(start_kind) = DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| cursor.token_kind_at(start_index))
+        .or_else(|| {
+            token_stream
+                .tokens
+                .get(start_index)
+                .map(|token| token.kind.clone())
+        })
+    else {
+        return None;
+    };
 
     // `else` is handled separately by the match parser.
     if matches!(

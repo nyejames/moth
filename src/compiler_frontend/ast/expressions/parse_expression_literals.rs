@@ -21,10 +21,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -236,6 +237,19 @@ pub(super) fn parse_literal_expression(
 /// WHY: the type of `none` can be inferred from the other operand during later
 /// type-checking, so rejecting it here would be overly strict.
 fn none_literal_has_option_equality_context(token_stream: &FileTokens) -> bool {
+    // Short-lived canonical view for these two token-local equality facts; dropped
+    // before any FileTokens use. Bounded adapters keep the legacy vector facts as
+    // the documented grammar boundary (fallback below).
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        let position = cursor.position();
+        let follows_equality_operator = matches!(
+            cursor.previous_token_kind(),
+            Some(TokenKind::Is) | Some(TokenKind::Not)
+        );
+        let leads_equality_operator =
+            matches!(cursor.token_kind_at(position + 1), Some(TokenKind::Is));
+        return follows_equality_operator || leads_equality_operator;
+    }
     let follows_equality_operator = token_stream.index > 0
         && matches!(
             token_stream.previous_token(),

@@ -23,6 +23,7 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchPatternReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -96,19 +97,27 @@ impl IfHeaderClassification {
         let Some(delimiter_index) = self.delimiter_index else {
             return false;
         };
-        if token_index >= token_stream.tokens.len() || delimiter_index >= token_stream.tokens.len()
-        {
-            return false;
-        }
-
         let (start, end) = if token_index <= delimiter_index {
             (token_index, delimiter_index)
         } else {
             (delimiter_index, token_index)
         };
-        token_stream.tokens[start..=end]
-            .iter()
-            .all(|token| token.kind != TokenKind::Newline)
+        if end >= token_stream.length {
+            return false;
+        }
+        if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+            return (start..=end).all(|index| {
+                cursor
+                    .token_kind_at(index)
+                    .is_some_and(|kind| kind != TokenKind::Newline)
+            });
+        }
+        (start..=end).all(|index| {
+            token_stream
+                .tokens
+                .get(index)
+                .is_some_and(|token| token.kind != TokenKind::Newline)
+        })
     }
 
     /// Returns true when `|` is the raw next token after `is`.
@@ -120,10 +129,15 @@ impl IfHeaderClassification {
         let Some(is_index) = self.is_index else {
             return false;
         };
-
+        if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+            return is_index
+                .checked_add(1)
+                .and_then(|next| cursor.token_kind_at(next))
+                == Some(TokenKind::TypeParameterBracket);
+        }
         token_stream
             .tokens
-            .get(is_index + 1)
+            .get(is_index.saturating_add(1))
             .is_some_and(|token| token.kind == TokenKind::TypeParameterBracket)
     }
 }
@@ -199,8 +213,46 @@ pub(crate) fn parse_if_header(
     Ok(ParsedIfHeader::BoolCondition { condition })
 }
 
-/// Classify the token stream after `if` with one nesting-aware scan.
 pub(crate) fn classify_if_header(token_stream: &FileTokens) -> IfHeaderClassification {
+    let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) else {
+        return classify_if_header_in_tokens(token_stream);
+    };
+    let mut nesting_depth = NestingDepth::default();
+    let mut index = cursor.position();
+
+    while index < cursor.length {
+        let Some(token_kind) = cursor.token_kind_at(index) else {
+            break;
+        };
+
+        if nesting_depth.is_top_level() {
+            match token_kind {
+                TokenKind::Is => return classify_from_is(&cursor, index),
+                TokenKind::Colon => {
+                    return ordinary_bool_header(IfHeaderDelimiter::Colon, Some(index));
+                }
+                TokenKind::Then => {
+                    return ordinary_bool_header(IfHeaderDelimiter::InlineThen, Some(index));
+                }
+                TokenKind::StartTemplateBody => {
+                    return ordinary_bool_header(IfHeaderDelimiter::TemplateBody, Some(index));
+                }
+                TokenKind::TemplateClose => {
+                    return ordinary_bool_header(IfHeaderDelimiter::TemplateClose, Some(index));
+                }
+                TokenKind::Eof => break,
+                _ => {}
+            }
+        }
+
+        nesting_depth.step(&token_kind);
+        index += 1;
+    }
+
+    ordinary_bool_header(IfHeaderDelimiter::None, None)
+}
+
+fn classify_if_header_in_tokens(token_stream: &FileTokens) -> IfHeaderClassification {
     let mut nesting_depth = NestingDepth::default();
     let mut index = token_stream.index;
 
@@ -209,7 +261,7 @@ pub(crate) fn classify_if_header(token_stream: &FileTokens) -> IfHeaderClassific
 
         if nesting_depth.is_top_level() {
             match token_kind {
-                TokenKind::Is => return classify_from_is(token_stream, index),
+                TokenKind::Is => return classify_from_is_in_tokens(token_stream, index),
                 TokenKind::Colon => {
                     return ordinary_bool_header(IfHeaderDelimiter::Colon, Some(index));
                 }
@@ -234,8 +286,12 @@ pub(crate) fn classify_if_header(token_stream: &FileTokens) -> IfHeaderClassific
     ordinary_bool_header(IfHeaderDelimiter::None, None)
 }
 
-fn classify_from_is(token_stream: &FileTokens, is_index: usize) -> IfHeaderClassification {
-    let token_after_is = next_meaningful_token_index(token_stream, is_index + 1);
+fn classify_from_is_in_tokens(
+    token_stream: &FileTokens,
+    is_index: usize,
+) -> IfHeaderClassification {
+    let token_after_is =
+        next_meaningful_token_index_in_tokens(token_stream, is_index.saturating_add(1));
     let Some(after_is) = token_after_is else {
         return IfHeaderClassification {
             shape: IfHeaderShape::OrdinaryBool,
@@ -256,10 +312,10 @@ fn classify_from_is(token_stream: &FileTokens, is_index: usize) -> IfHeaderClass
         };
     }
 
-    classify_single_predicate_after_pattern(token_stream, is_index, after_is)
+    classify_single_predicate_after_pattern_in_tokens(token_stream, is_index, after_is)
 }
 
-fn classify_single_predicate_after_pattern(
+fn classify_single_predicate_after_pattern_in_tokens(
     token_stream: &FileTokens,
     is_index: usize,
     pattern_start: usize,
@@ -303,6 +359,79 @@ fn classify_single_predicate_after_pattern(
     }
 }
 
+fn classify_from_is(cursor: &DeclarationCursor<'_>, is_index: usize) -> IfHeaderClassification {
+    let token_after_is = next_meaningful_token_index(cursor, is_index + 1);
+    let Some(after_is) = token_after_is else {
+        return IfHeaderClassification {
+            shape: IfHeaderShape::OrdinaryBool,
+            is_index: Some(is_index),
+            token_after_is: None,
+            body_delimiter: IfHeaderDelimiter::None,
+            delimiter_index: None,
+        };
+    };
+
+    if let Some(kind) = cursor.token_kind_at(after_is)
+        && let Some(delimiter) = full_match_delimiter(&kind)
+    {
+        return IfHeaderClassification {
+            shape: IfHeaderShape::FullMatch,
+            is_index: Some(is_index),
+            token_after_is: Some(after_is),
+            body_delimiter: delimiter,
+            delimiter_index: Some(after_is),
+        };
+    }
+
+    classify_single_predicate_after_pattern(cursor, is_index, after_is)
+}
+
+fn classify_single_predicate_after_pattern(
+    cursor: &DeclarationCursor<'_>,
+    is_index: usize,
+    pattern_start: usize,
+) -> IfHeaderClassification {
+    let mut nesting_depth = NestingDepth::default();
+    let mut index = pattern_start;
+
+    while index < cursor.length {
+        let Some(token_kind) = cursor.token_kind_at(index) else {
+            break;
+        };
+
+        if nesting_depth.is_top_level()
+            && let Some(delimiter) = predicate_body_delimiter(&token_kind)
+        {
+            let shape = match delimiter {
+                IfHeaderDelimiter::InlineThen => IfHeaderShape::PotentialInlineSinglePredicate,
+                IfHeaderDelimiter::Colon
+                | IfHeaderDelimiter::TemplateBody
+                | IfHeaderDelimiter::TemplateClose => IfHeaderShape::PotentialBlockSinglePredicate,
+                IfHeaderDelimiter::None => IfHeaderShape::OrdinaryBool,
+            };
+
+            return IfHeaderClassification {
+                shape,
+                is_index: Some(is_index),
+                token_after_is: Some(pattern_start),
+                body_delimiter: delimiter,
+                delimiter_index: Some(index),
+            };
+        }
+
+        nesting_depth.step(&token_kind);
+        index += 1;
+    }
+
+    IfHeaderClassification {
+        shape: IfHeaderShape::OrdinaryBool,
+        is_index: Some(is_index),
+        token_after_is: Some(pattern_start),
+        body_delimiter: IfHeaderDelimiter::None,
+        delimiter_index: None,
+    }
+}
+
 fn full_match_delimiter(token_kind: &TokenKind) -> Option<IfHeaderDelimiter> {
     match token_kind {
         TokenKind::Colon => Some(IfHeaderDelimiter::Colon),
@@ -332,7 +461,27 @@ fn ordinary_bool_header(
     }
 }
 
-fn next_meaningful_token_index(token_stream: &FileTokens, start_index: usize) -> Option<usize> {
+fn next_meaningful_token_index(
+    cursor: &DeclarationCursor<'_>,
+    start_index: usize,
+) -> Option<usize> {
+    let mut index = start_index;
+
+    while index < cursor.length {
+        match cursor.token_kind_at(index)? {
+            TokenKind::Newline => index += 1,
+            TokenKind::Eof => return None,
+            _ => return Some(index),
+        }
+    }
+
+    None
+}
+
+fn next_meaningful_token_index_in_tokens(
+    token_stream: &FileTokens,
+    start_index: usize,
+) -> Option<usize> {
     let mut index = start_index;
 
     while index < token_stream.length {

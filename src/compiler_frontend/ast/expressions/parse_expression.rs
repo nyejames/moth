@@ -17,6 +17,7 @@ use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReturnShapeReason};
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -26,7 +27,9 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
-use crate::compiler_frontend::utilities::token_scan::find_expression_end_index;
+use crate::compiler_frontend::utilities::token_scan::{
+    ExpressionBoundaryDepth, find_expression_end_index,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 // WHAT: parses a comma-separated expression list against already-known expected result types.
@@ -299,8 +302,51 @@ fn create_expression_until_with_policy(
     // ------------------------
     //  Locate expression window
     // ------------------------
+    // Short-lived canonical view for pure lookahead; dropped before any FileTokens
+    // mutation. Narrowed/bounded adapters have no canonical provenance for
+    // `from_file_tokens`, so they keep the legacy vector scan as an explicitly
+    // documented grammar boundary (see fallback below).
     let start_index = input.token_stream.index;
-    let end_index = find_expression_end_index(&input.token_stream.tokens, start_index, stop_tokens);
+    let (end_index, end_kind, end_span) =
+        match DeclarationCursor::from_file_tokens(&*input.token_stream) {
+            Ok(cursor) => {
+                let mut scan = start_index;
+                let mut depth = ExpressionBoundaryDepth::default();
+                loop {
+                    let Some(kind) = cursor.token_kind_at(scan) else {
+                        break;
+                    };
+                    if depth.is_top_level() && stop_tokens.iter().any(|stop| kind == *stop) {
+                        break;
+                    }
+                    depth.step(&kind);
+                    if matches!(kind, TokenKind::Eof) {
+                        break;
+                    }
+                    scan += 1;
+                }
+                let end_index = scan;
+                let end_kind = cursor.token_kind_at(end_index);
+                let end_span = cursor.span_at(end_index);
+                (end_index, end_kind, end_span)
+            }
+            Err(_) => {
+                let end_index =
+                    find_expression_end_index(&input.token_stream.tokens, start_index, stop_tokens);
+                let (end_kind, end_span) = input
+                    .token_stream
+                    .tokens
+                    .get(end_index)
+                    .map(|token| {
+                        (
+                            Some(token.kind.clone()),
+                            Some(SourceSpan::new(input.token_stream.file_id, token.span)),
+                        )
+                    })
+                    .unwrap_or((None, None));
+                (end_index, end_kind, end_span)
+            }
+        };
 
     // ------------------------
     //  Validate window bounds
@@ -320,29 +366,27 @@ fn create_expression_until_with_policy(
         .into());
     }
 
-    if end_index == start_index {
-        return Err(CompilerDiagnostic::unexpected_token(
-            input.token_stream.tokens[end_index].kind.to_owned(),
-            Some(SourceSpan::new(
-                input.token_stream.file_id,
-                input.token_stream.tokens[end_index].span,
-            )),
+    let Some(end_kind) = end_kind else {
+        let formatted_stop_tokens: Vec<String> = stop_tokens
+            .iter()
+            .map(|token| format!("{token:?}"))
+            .collect();
+        let expected_tokens = formatted_stop_tokens.join(", ");
+
+        let expected_delimiter = input.string_table.intern(&expected_tokens);
+        return Err(CompilerDiagnostic::unexpected_end_of_file(
+            Some(expected_delimiter),
+            Some(input.token_stream.current_span()),
         )
         .into());
+    };
+
+    if end_index == start_index {
+        return Err(CompilerDiagnostic::unexpected_token(end_kind, end_span).into());
     }
 
-    if !stop_tokens
-        .iter()
-        .any(|stop| input.token_stream.tokens[end_index].kind == *stop)
-    {
-        return Err(CompilerDiagnostic::unexpected_token(
-            input.token_stream.tokens[end_index].kind.to_owned(),
-            Some(SourceSpan::new(
-                input.token_stream.file_id,
-                input.token_stream.tokens[end_index].span,
-            )),
-        )
-        .into());
+    if !stop_tokens.iter().any(|stop| end_kind == *stop) {
+        return Err(CompilerDiagnostic::unexpected_token(end_kind, end_span).into());
     }
 
     // ------------------------

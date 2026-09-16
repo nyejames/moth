@@ -28,7 +28,6 @@ use crate::compiler_frontend::ast::statements::match_headers::{
     ParsedMatchArmHeader, parse_match_arm_header,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
@@ -39,7 +38,9 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 
@@ -80,36 +81,80 @@ pub(crate) struct ParsedMatchBlock {
     pub exhaustiveness: MatchExhaustiveness,
     pub scope: PathId,
 }
+/// Returns the cursor's parser-relative position for a compatibility lane view.
+///
+/// Falls back to the legacy vector index when the stream has no canonical provenance
+/// (unbounded expression adapters); the boundary is reported to the migration owner.
+fn cursor_position_or_zero(token_stream: &FileTokens) -> usize {
+    DeclarationCursor::from_file_tokens(token_stream)
+        .map(|cursor| cursor.position())
+        .unwrap_or_else(|_| token_stream.index)
+}
 
 /// Peek at the next non-newline token without advancing the stream.
-fn peek_next_non_newline_token(token_stream: &FileTokens) -> Option<&Token> {
-    token_stream
-        .tokens
-        .iter()
-        .skip(token_stream.index + 1)
-        .find(|token| token.kind != TokenKind::Newline)
+fn peek_next_non_newline_token(token_stream: &FileTokens) -> Option<Token> {
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        let mut index = cursor.position().checked_add(1)?;
+        loop {
+            let kind = cursor.token_kind_at(index)?;
+            if kind != TokenKind::Newline {
+                return cursor.token_at(index);
+            }
+            index = index.checked_add(1)?;
+        }
+    }
+
+    let mut index = token_stream.index.saturating_add(1);
+    while let Some(token) = token_stream.tokens.get(index) {
+        if token.kind != TokenKind::Newline {
+            return Some(token.clone());
+        }
+        index = index.saturating_add(1);
+    }
+    None
 }
 
 /// Peek at the index of the next non-newline token without advancing the stream.
 fn peek_next_non_newline_token_index(token_stream: &FileTokens) -> Option<usize> {
-    token_stream
-        .tokens
-        .iter()
-        .enumerate()
-        .skip(token_stream.index + 1)
-        .find(|(_, token)| token.kind != TokenKind::Newline)
-        .map(|(i, _)| i)
+    if let Ok(cursor) = DeclarationCursor::from_file_tokens(token_stream) {
+        let mut index = cursor.position().checked_add(1)?;
+        loop {
+            let kind = cursor.token_kind_at(index)?;
+            if kind != TokenKind::Newline {
+                return Some(index);
+            }
+            index = index.checked_add(1)?;
+        }
+    }
+
+    let mut index = token_stream.index.saturating_add(1);
+    while let Some(token) = token_stream.tokens.get(index) {
+        if token.kind != TokenKind::Newline {
+            return Some(index);
+        }
+        index = index.saturating_add(1);
+    }
+    None
 }
 
 fn reject_same_line_else_if(token_stream: &FileTokens) -> BranchingResult<()> {
     let else_span = Some(token_stream.current_span());
-    let Some(next_token) = token_stream.tokens.get(token_stream.index + 1) else {
+    let next_kind = DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| {
+            cursor
+                .position()
+                .checked_add(1)
+                .and_then(|next| cursor.token_kind_at(next))
+        })
+        .or_else(|| token_stream.peek_next_token().cloned());
+    let Some(next_kind) = next_kind else {
         return Ok(());
     };
 
     // Statement `else if` is deliberately not a branch-chain syntax. A nested
     // `if` remains available as the first statement inside a separate `else` body.
-    if matches!(next_token.kind, TokenKind::If) {
+    if matches!(next_kind, TokenKind::If) {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ElseIfUnsupported,
@@ -135,14 +180,28 @@ pub fn create_branch(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<Vec<AstNode>> {
-    let header_token = token_stream
-        .tokens
-        .get(token_stream.index.saturating_sub(1));
-    let header_span = header_token
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+    let header_span = DeclarationCursor::from_file_tokens(token_stream)
+        .ok()
+        .and_then(|cursor| {
+            cursor
+                .previous_token()
+                .map(|token| SourceSpan::new(cursor.source_id(), token.span))
+        })
+        .or_else(|| {
+            token_stream
+                .index
+                .checked_sub(1)
+                .and_then(|index| token_stream.tokens.get(index))
+                .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        })
         .or_else(|| Some(token_stream.current_span()));
-    let parsed_header =
-        parse_if_header(token_stream, context, type_interner, string_table, path_fork)?;
+    let parsed_header = parse_if_header(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )?;
 
     let condition = match parsed_header {
         ParsedIfHeader::OptionPresentCapture {
@@ -196,11 +255,7 @@ pub fn create_branch(
     // selection, so retain the exact parser boundaries without rescanning calls later.
     let then_request_start = context.generic_request_checkpoint();
 
-    let then_context = context.new_child_control_flow(
-        ContextKind::Branch,
-        string_table,
-        path_fork,
-    );
+    let then_context = context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
     let then_scope = then_context.scope;
     let then_block = function_body_to_ast(
         token_stream,
@@ -423,13 +478,13 @@ pub(crate) fn parse_match_block(
 
         match token_stream.current_token_kind() {
             TokenKind::End => {
-                let next_token = peek_next_non_newline_token(token_stream);
+                let next_kind = peek_next_non_newline_token(token_stream).map(|token| token.kind);
                 let next_index = peek_next_non_newline_token_index(token_stream);
                 let semicolon_separates_same_level_arms = !seen_else
                     && matches!(
-                        (next_token, next_index),
-                        (Some(next), Some(idx))
-                            if next.kind == TokenKind::Else
+                        (next_kind, next_index),
+                        (Some(kind), Some(idx))
+                            if kind == TokenKind::Else
                                 || token_index_has_top_level_fat_arrow(token_stream, idx)
                     );
 
@@ -487,7 +542,6 @@ pub(crate) fn parse_match_block(
                 if let Some(candidate) = current_token_starts_match_arm_header(token_stream) {
                     debug_assert_eq!(candidate.start_index, token_stream.index);
                     debug_assert!(candidate.arrow_index > candidate.start_index);
-
                     let parsed = parse_match_arm(
                         &scrutinee,
                         token_stream,
@@ -519,7 +573,7 @@ pub(crate) fn parse_match_block(
                     continue;
                 }
 
-                if token_is_line_initial(token_stream, token_stream.index)
+                if token_is_line_initial(token_stream, cursor_position_or_zero(token_stream))
                     && current_line_contains_top_level_colon(token_stream)
                 {
                     return Err(branching_error(CompilerDiagnostic::invalid_match_arm(

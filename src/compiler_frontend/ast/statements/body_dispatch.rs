@@ -35,9 +35,10 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
     ReservedNameOwner,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -72,10 +73,24 @@ fn deferred_block_error(
     reason: DeferredFeatureReason,
 ) -> CompilerDiagnostic {
     let span = Some(token_stream.current_span());
-    if matches!(
-        token_stream.peek_next_token(),
-        Some(token) if token.is_assignment_operator()
-    ) {
+    // Short-lived canonical view for this token-local assignment fact; dropped before
+    // any FileTokens use. Narrowed streams keep `peek_next_token` as the documented
+    // FileTokens grammar boundary (fallback below).
+    let next_is_assignment = DeclarationCursor::from_file_tokens(token_stream)
+        .map(|cursor| {
+            cursor
+                .position()
+                .checked_add(1)
+                .and_then(|next| cursor.token_kind_at(next))
+                .is_some_and(|kind| kind.is_assignment_operator())
+        })
+        .unwrap_or_else(|_| {
+            matches!(
+                token_stream.peek_next_token(),
+                Some(token) if token.is_assignment_operator()
+            )
+        });
+    if next_is_assignment {
         let keyword_id = string_table.intern(keyword);
         return reserved_keyword_as_name_error(keyword_id, span);
     }

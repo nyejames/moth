@@ -21,6 +21,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidGenericInstantiationReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -89,11 +90,22 @@ pub(super) fn parse_source_callable_member(
             // Reject the known foreign spellings before they can be interpreted as
             // generic function values, comparisons, or templates.
             Some(TokenKind::Of | TokenKind::LessThan | TokenKind::TemplateHead) => {
-                let explicit_syntax_span = token_stream
+                // Pure lookahead: read the offending follower span through a short
+                // canonical view; fall back to the explicit lane only when the
+                // unbounded compatibility stream has no canonical provenance.
+                let cursor_span = DeclarationCursor::from_file_tokens(token_stream)
+                    .ok()
+                    .and_then(|cursor| {
+                        cursor
+                            .position()
+                            .checked_add(1)
+                            .and_then(|next| cursor.span_at(next))
+                    });
+                let fallback_span = token_stream
                     .tokens
-                    .get(token_stream.index + 1)
-                    .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-                    .or(call_span);
+                    .get(token_stream.index.saturating_add(1))
+                    .map(|token| SourceSpan::new(token_stream.file_id, token.span));
+                let explicit_syntax_span = cursor_span.or(fallback_span).or(call_span);
 
                 return Err(with_generic_primary_span(
                     explicit_generic_call_type_arguments_error(visible_name, explicit_syntax_span),

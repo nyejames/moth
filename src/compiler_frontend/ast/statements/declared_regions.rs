@@ -8,12 +8,25 @@
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidStatementPositionReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 pub(crate) fn classify_deferred_declared_region_header(
     token_stream: &FileTokens,
 ) -> Option<CompilerDiagnostic> {
-    if token_stream.peek_next_token() != Some(&TokenKind::Colon) {
+    // Short-lived canonical view for this token-local colon fact; dropped before any
+    // FileTokens use. Narrowed streams keep `peek_next_token` as the documented
+    // FileTokens grammar boundary (fallback below).
+    let next_is_colon = DeclarationCursor::from_file_tokens(token_stream)
+        .map(|cursor| {
+            cursor
+                .position()
+                .checked_add(1)
+                .and_then(|next| cursor.token_kind_at(next))
+                == Some(TokenKind::Colon)
+        })
+        .unwrap_or_else(|_| token_stream.peek_next_token() == Some(&TokenKind::Colon));
+    if !next_is_colon {
         return None;
     }
 
