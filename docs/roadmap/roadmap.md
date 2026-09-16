@@ -11,21 +11,23 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
-- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Phase 1 is complete on main. Phase 2 complete-path interning is accepted at checkpoint `c17672bb5` on `diagnostic-data-layout-changes` (diagnostic correction `e7d9a7ab5` plus validation-lane stabilization). Next: Phase 3, starting at Slice 3A. The plan pauses after Phase 3 and is explicitly reactivated for Phase 4 later (see below).
+- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Phase 1 is complete on main. Phase 2 complete-path interning is accepted at checkpoint `c17672bb5` on `diagnostic-data-layout-changes` (diagnostic correction `e7d9a7ab5` plus validation-lane stabilization). Phase 3 is active. Its owning plan tracks the current slice. The plan pauses after Phase 3 and is explicitly reactivated for Phase 4 later (see below).
+- TODO plan: Post-Phase-3 compiler cleanup. Complete this separate maintainer-selected checkpoint after the accepted Phase 3 merge and before the MON syntax cutover. Its scope and filename belong to its own planning task.
+- [MON syntax and nested const records](./plans/mon-syntax-and-nested-const-records-plan.md) - Queued after Phase 3 and the separate cleanup checkpoint. Deliver parenthesised value construction through the shared argument parser, inline nested const records and a complete source/documentation cutover before Wiring and later directive work. Runtime records and MON serialisation remain separate follow-ups.
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Phase 0 foundations and Phase 1 workflow activation are merged. Delivered on `packages-and-builder-progress-plan`: the bounded pre-checkpoint hardening slice for the five existing `@core/text` functions; `@core/math` activated ahead of order, its whole surface covered, its registration simplified and the accepted scalar expansion of thirteen functions and three constants published and implemented; and the `@core/time` v1, where the semantic contract was published first and the implementation then replaced host-defined parsing and rendering with an explicit grammar, calendar and offset validation, compiler-owned error codes, a fallible `to_iso_string` and the accepted Duration and Timestamp arithmetic. Package development is now paused by the user until accepted diagnostics Phase 3 is complete; integrating at the accepted Phase 2 checkpoint synchronises the branch without resuming the lane. Package slices that need result-slot or const-eval changes stay blocked independently.
-- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after data-layout Phase 3 and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
+- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after the post-Phase-3 cleanup and MON syntax checkpoints and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
 - [Native result slots and Core constant evaluation](./plans/native-result-slots-and-core-const-eval.md) - Run after the Wiring checkpoint and before data-layout Phase 4. Package implementation that requires these capabilities remains blocked until they are merged.
 - [Boracle research plans](./plans/boracle-next-research-plans): Will be ongoing in parallel on its own branch `boracle-research` after native result slots plan completes.
-- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after the plan is explicitly reactivated: rebase onto a main containing the accepted Wiring V1 checkpoint and then the accepted native result-slot/Core const-eval checkpoint, run the fresh reactivation inventory, refresh stale names and preserve the locked architecture decisions. The reactivation gate in the plan is the authority.
+- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after the plan is explicitly reactivated: rebase onto a main containing the accepted post-Phase-3 cleanup and MON syntax checkpoints, Wiring V1 and then native result slots/Core const evaluation, run the fresh reactivation inventory, refresh stale names and preserve the locked architecture decisions. The reactivation gate in the plan is the authority.
 - [Automatic Markdown heading section links](./plans/automatic-markdown-section-links-plan.md)
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
 - Improve the `tmp/test_brackets.mtf` error example.
-- [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: shared directive syntax, explicit $config contracts and strict $project/$html_builder configuration
+- [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner for general directives, explicit $config contracts and strict $project/$html_builder configuration
 - [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
-- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)
+- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and numeric semantics. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 - [Never return contracts](./plans/never-return-contract-plan.md)
 - TODO plan: Struct layout directives. Define compiler-owned $layout contracts, permitted field types, alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
 - Collector free memory implementation (see below for notes). Should have its initial implementation here before Wasm backend implementation.
@@ -34,6 +36,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 - TODO plan: Export directives. Replace export: with compiler-owned $export while preserving module-root public surfaces and re-exports. Decide prefix-only versus optional directive-block form before implementation. Keep one final visibility syntax.
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
 - TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
+
+The required post-Phase-3 sequence is the separate compiler cleanup, MON syntax and nested const records, Wiring V1, native result slots/Core constant evaluation and then explicit data-layout Phase 4 reactivation. Refresh narrower activation notes against this order when each plan starts. This sequencing does not resume the paused package lane automatically.
 
 Parallel branches rebase after the initial squash merge, after shared compiler input or representation checkpoints land and before accepting a slice that consumes those changes. Re-run the owning validation gate after each rebase. Parallel scheduling does not remove package-specific prerequisites or permit compatibility wrappers around superseded compiler APIs.
 
@@ -58,6 +62,16 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 # Deferred design and follow-ups
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
+
+## MON format and compiler-native builder
+
+MON means Moth Object Notation. MON syntax names the shared parenthesised argument/value-construction notation. The serialisation format is a stricter const-only, named-field data profile and is not implemented by the syntax cutover.
+
+A separate design and hardening pass will define a compiler-native MON project builder and reusable compiler-library read/write services. They reuse core lexical, argument-parsing and constant-value owners. The builder defines and enforces serialisation rules, while an engine or application validates its own schema over the resulting data.
+
+Define the supported recursive value domain, root framing, numeric and optional representations, collections/maps, nominal or choice tags, escaping, deterministic output, resource-bearing strings, round trips and bounded-input handling before implementation. Distinguish compile-time authoring expressions from the self-contained serialised representation. Templates remain ordinary strings, with no implicit wire or route storage.
+
+This follow-up adds no second Moth parser, speculative format API or serialisation guarantee to the initial MON syntax work. Its exact source-file and command surface remain design work. Publish durable contracts under the language, Design Scope and compiler/build authorities as that design is accepted.
 
 ## Collector-free memory implementation
 
