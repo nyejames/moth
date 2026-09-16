@@ -33,6 +33,7 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) use artefact_emit::ModuleMaterialisationContext;
+pub(crate) use frozen_syntax::SharedDonorIdentity;
 pub(crate) use preparation_freeze::{
     ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparation,
     ModuleMaterialisationPreparationBuilder,

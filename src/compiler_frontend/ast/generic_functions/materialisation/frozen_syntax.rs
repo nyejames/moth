@@ -19,13 +19,43 @@ use crate::compiler_frontend::tokenizer::tokens::{
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Shared donor string identity for one declaring source/module domain.
+///
+/// WHAT: owns one frozen snapshot of the declaring domain's string table behind a shared
+///       owner. Every source-body capture in the domain clones this `Arc` instead of cloning
+///       and freezing the live table per body.
+/// WHY: retained token payloads interpret `StringId`s through the exact table that issued
+///      them. Freezing once per domain preserves that domain while keeping retained storage
+///      proportional to the domain, not to template count. The shared owner is drop-safe:
+///      retained bodies keep the allocation alive after the live preparation tables drop.
+///      Foreign materialised bodies keep their own donor pair and never use this owner.
+#[derive(Clone, Debug)]
+pub(crate) struct SharedDonorIdentity {
+    strings: Arc<FrozenStringTable>,
+}
+
+impl SharedDonorIdentity {
+    /// Freeze the declaring domain's string table once for every body it retains.
+    pub(crate) fn freeze(table: &StringTable) -> Self {
+        Self {
+            strings: Arc::new(table.clone().freeze()),
+        }
+    }
+
+    /// Borrow the shared frozen strings issued by the declaring domain.
+    pub(crate) fn strings(&self) -> &Arc<FrozenStringTable> {
+        &self.strings
+    }
+}
 /// Durable generic body syntax.
 ///
 /// The owner/range pair is the only retained syntax payload. Source-origin syntax shares the
 /// canonical `SourceTokens` owner from prepared-source publication; Materialised-origin syntax
 /// keeps the donor `FileTokens` shell (including its remapped compatibility lane) until H5.
-/// Neither lane retains a parser adapter or copied token vector. File-reference rows remain
-/// stable semantic facts for generated value resolution.
+/// Neither lane retains a parser adapter or copied token vector. Source bodies additionally
+/// share one declaring-domain frozen string owner created once per `freeze()` or request
+/// capture; foreign bodies retain their exact donor path/string pair. File-reference rows
+/// remain stable semantic facts for generated value resolution.
 #[derive(Clone)]
 pub(super) struct StableBodySyntax {
     pub(super) declaration_path: PathId,
@@ -35,6 +65,8 @@ pub(super) struct StableBodySyntax {
     pub(super) token_range: TokenRange,
     pub(super) token_sequence: Option<TokenSequenceId>,
     pub(super) source_path_table: Option<Arc<PathTable>>,
+    /// Shared declaring-domain donor strings for source bodies; the exact retained donor
+    /// strings for foreign bodies. `(Some, None)` is rejected at the materialisation boundary.
     pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
     pub(super) resolved_file_references: Box<[StableResolvedFileReference]>,
 }
@@ -129,7 +161,7 @@ impl StableBodySyntax {
         body: &GenericFunctionBody,
         source_file: PathId,
         path_fork: &PathInternerFork,
-        string_table: &mut StringTable,
+        donor_identity: Option<&SharedDonorIdentity>,
         stage0_resolution_facts: Option<&Stage0ResolutionFacts>,
         frozen_identity_handle: FrozenIdentityHandle,
         content_value_at_path: &impl Fn(
@@ -160,7 +192,47 @@ impl StableBodySyntax {
                 }
             }
         };
-        let token_stream = body.parser_stream_for_capture(string_table)?;
+        // Source and same-domain bodies share the declaring domain's frozen donor owner. The
+        // domain freezes once per `freeze()`/`materialise_ast()` call; every body in the domain
+        // clones the same `Arc` instead of cloning and freezing the live table per body.
+        // Foreign materialised bodies keep their exact retained donor pair unchanged, including
+        // a retained string table without a path table. A path table without its issuing
+        // string table is rejected.
+        let (source_path_table, source_string_table) = match body {
+            GenericFunctionBody::Source { .. } => {
+                let donor_identity = donor_identity.ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "frozen generic source body has no declaring-domain donor identity",
+                    )
+                })?;
+                (None, Some(Arc::clone(donor_identity.strings())))
+            }
+            GenericFunctionBody::Materialised {
+                source_path_table,
+                source_string_table,
+                ..
+            } => match (source_path_table, source_string_table) {
+                (Some(path_table), Some(source_strings)) => (
+                    Some(Arc::clone(path_table)),
+                    Some(Arc::clone(source_strings)),
+                ),
+                (None, Some(source_strings)) => (None, Some(Arc::clone(source_strings))),
+                (None, None) => {
+                    let donor_identity = donor_identity.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "frozen generic source body has no declaring-domain donor identity",
+                        )
+                    })?;
+                    (None, Some(Arc::clone(donor_identity.strings())))
+                }
+                (Some(_), None) => {
+                    return Err(CompilerError::compiler_error(
+                        "frozen generic body has an incomplete source identity table pair",
+                    ));
+                }
+            },
+        };
+        let token_stream = body.parser_stream_for_capture()?;
         let path_syntax = token_stream.path_syntax_table()?;
         path_syntax.validate_file_tokens(
             &token_stream.tokens,
@@ -196,15 +268,6 @@ impl StableBodySyntax {
             )?);
         }
 
-        let (source_path_table, source_string_table) =
-            if let Some((source_path_table, source_string_table)) = body.source_identity_tables() {
-                (
-                    Some(Arc::clone(source_path_table)),
-                    Some(Arc::clone(source_string_table)),
-                )
-            } else {
-                (None, Some(Arc::new(string_table.clone().freeze())))
-            };
         Ok(Self {
             declaration_path: body.declaration_path(),
             donor_file_id,

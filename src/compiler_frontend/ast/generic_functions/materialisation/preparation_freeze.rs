@@ -340,6 +340,9 @@ impl ModuleMaterialisationPreparation {
         evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
         evidence.dedup_by(|left, right| left.identity == right.identity);
         let semantic_closure = self.stable_semantic_closure(resources, path_fork)?;
+        // Freeze the declaring string domain once: every source-body capture in this freeze
+        // shares the same donor owner instead of cloning and freezing the live table per body.
+        let donor_identity = super::SharedDonorIdentity::freeze(&self.string_table);
 
         let artefacts = templates
             .into_iter()
@@ -350,6 +353,7 @@ impl ModuleMaterialisationPreparation {
                     &semantic_closure,
                     resources,
                     path_fork,
+                    &donor_identity,
                 )
             })
             .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -371,6 +375,7 @@ impl ModuleMaterialisationPreparation {
         semantic_closure: &StableSemanticClosure,
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+        donor_identity: &super::SharedDonorIdentity,
     ) -> Result<GenericTemplateArtefact, CompilerError> {
         let declaration_identity = template.declaration_identity.clone().ok_or_else(|| {
             CompilerError::compiler_error(
@@ -380,7 +385,6 @@ impl ModuleMaterialisationPreparation {
         let body = template.body_tokens.as_ref().ok_or_else(|| {
             CompilerError::compiler_error("Retained generic template has no body syntax")
         })?;
-        let mut capture_string_table = self.string_table.clone();
         let generic_parameters = self.stable_generic_parameters(template)?;
         let generic_parameter_owner = template.generic_parameter_owner.clone();
         let receiver = self
@@ -397,7 +401,8 @@ impl ModuleMaterialisationPreparation {
             resources,
             path_fork,
         )?;
-        let mut referenced_names = stable_body_symbol_names(body, &mut capture_string_table)?;
+        let capture_string_table = body.capture_string_table(donor_identity.strings().as_ref())?;
+        let mut referenced_names = stable_body_symbol_names(body, capture_string_table)?;
         self.retain_generic_bound_trait_names(
             &template.source_file,
             &generic_parameters,
@@ -449,7 +454,7 @@ impl ModuleMaterialisationPreparation {
                 body,
                 template.source_file,
                 path_fork,
-                &mut capture_string_table,
+                Some(donor_identity),
                 stage0_resolution_facts,
                 frozen_identity_handle,
                 &content_value_at_path,

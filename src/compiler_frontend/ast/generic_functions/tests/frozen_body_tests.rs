@@ -12,7 +12,7 @@ use super::super::{GenericFunctionBody, GenericFunctionTemplate};
 use super::ModuleMaterialisationInput;
 use super::artefact_emit::{ModuleMaterialisationContext, check_materialisation_row_identity};
 use super::frozen_file_references::StableResolvedFileReferenceOutcome;
-use super::frozen_syntax::StableBodySyntax;
+use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
 use super::preparation_freeze::ModuleMaterialisationPreparation;
 use super::stable_types::GeneratedFoldedValueMaterialiser;
 use crate::compiler_frontend::ast::Stage0ResolutionFacts;
@@ -241,12 +241,12 @@ fn capture_test_body(
         ))
     };
     let body = body_view(original, original.src_path);
-    let mut capture_table = source_table.clone();
+    let donor_identity = SharedDonorIdentity::freeze(source_table);
     StableBodySyntax::capture(
         &body,
         *source_file,
         path_fork,
-        &mut capture_table,
+        Some(&donor_identity),
         Some(&facts),
         FrozenIdentityHandle::new(),
         &no_content_value,
@@ -347,12 +347,12 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
     let (body, source_file, path_fork, source_table, facts, _, resource_origin) =
         direct_content_body_fixture();
     let body = body_view(&body, source_file);
-    let mut capture_table = source_table.clone();
+    let donor_identity = SharedDonorIdentity::freeze(&source_table);
     let frozen = StableBodySyntax::capture(
         &body,
         source_file,
         &path_fork,
-        &mut capture_table,
+        Some(&donor_identity),
         Some(&facts),
         FrozenIdentityHandle::new(),
         &|_| {
@@ -437,12 +437,12 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
 fn missing_content_fold_fails_loudly_during_capture() {
     let (body, source_file, path_fork, source_table, facts, _, _) = direct_content_body_fixture();
     let body = body_view(&body, source_file);
-    let mut capture_table = source_table.clone();
+    let donor_identity = SharedDonorIdentity::freeze(&source_table);
     let error = match StableBodySyntax::capture(
         &body,
         source_file,
         &path_fork,
-        &mut capture_table,
+        Some(&donor_identity),
         Some(&facts),
         FrozenIdentityHandle::new(),
         &|_| {
@@ -466,12 +466,12 @@ fn missing_content_fold_fails_loudly_during_capture() {
 fn non_string_content_fold_fails_loudly_during_capture() {
     let (body, source_file, path_fork, source_table, facts, _, _) = direct_content_body_fixture();
     let body = body_view(&body, source_file);
-    let mut capture_table = source_table.clone();
+    let donor_identity = SharedDonorIdentity::freeze(&source_table);
     let error = match StableBodySyntax::capture(
         &body,
         source_file,
         &path_fork,
-        &mut capture_table,
+        Some(&donor_identity),
         Some(&facts),
         FrozenIdentityHandle::new(),
         &|_| Ok(PublicFoldedValue::Int(7)),
@@ -724,12 +724,12 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let facts =
         Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty().into());
     let generic_body = body_view(&original, source_file);
-    let mut capture_table = source_table.clone();
+    let donor_identity = SharedDonorIdentity::freeze(&source_table);
     let frozen = StableBodySyntax::capture(
         &generic_body,
         source_file,
         &path_fork,
-        &mut capture_table,
+        Some(&donor_identity),
         Some(&facts),
         FrozenIdentityHandle::new(),
         &|_| {
@@ -877,6 +877,116 @@ fn repeated_spellings_share_one_frozen_string_entry() {
         frozen.canonical_donor_file_id(),
         SourceId::COMPILATION_ROOT,
         "stable syntax should retain the canonical donor owner",
+    );
+}
+#[test]
+fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
+    let (body_file, source_file, path_fork, source_table, facts, _, _) =
+        direct_content_body_fixture();
+    let body = body_view(&body_file, source_file);
+    let donor_identity = SharedDonorIdentity::freeze(&source_table);
+    let content_value = |_path: &PathId| -> Result<PublicFoldedValue, CompilerError> {
+        Ok(PublicFoldedValue::String(OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Text("retained".to_owned()),
+        ])))
+    };
+    let capture = || {
+        StableBodySyntax::capture(
+            &body,
+            source_file,
+            &path_fork,
+            Some(&donor_identity),
+            Some(&facts),
+            FrozenIdentityHandle::new(),
+            &content_value,
+        )
+        .expect("source body should capture with one declaring donor")
+    };
+    let first = capture();
+    let second = capture();
+    let first_strings = first
+        .source_string_table
+        .as_ref()
+        .expect("source capture should retain donor strings");
+    let second_strings = second
+        .source_string_table
+        .as_ref()
+        .expect("every source capture should retain donor strings");
+    assert!(
+        Arc::ptr_eq(first_strings, second_strings),
+        "templates in one declaring domain must share one frozen donor allocation",
+    );
+
+    let (mut generated_path_fork, mut generated_table) =
+        generated_materialisation_domain(&path_fork, &source_table);
+    let generated_source_file = generated_path_fork
+        .try_intern_portable_path("@mod.moth", &mut generated_table)
+        .expect("generated source path should fit");
+    drop(donor_identity);
+    drop(source_table);
+    drop(body_file);
+    drop(body);
+
+    let materialised = first
+        .materialise(
+            generated_source_file,
+            &mut generated_path_fork,
+            &mut generated_table,
+            None,
+        )
+        .expect("shared donor strings should keep the body materialisable after source drop");
+    let materialised_body = materialised
+        .into_generic_body()
+        .expect("materialised body should retain its checked source owner");
+    let stream = materialised_body
+        .parser_stream(&mut generated_table, &mut generated_path_fork)
+        .expect("materialised body should render through the requester boundary");
+    assert_eq!(
+        stream.tokens.len(),
+        1,
+        "the retained body must remain bounded after its construction owners drop",
+    );
+}
+
+#[test]
+fn capture_rejects_a_materialised_body_with_only_a_path_identity() {
+    let source = SourceId::COMPILATION_ROOT;
+    let source_file = PathId::ROOT;
+    let path_fork = PathInternerFork::empty();
+    let source_owner = Arc::new(FileTokens::new(
+        source_file,
+        source,
+        vec![Token::new(TokenKind::Eof, token_span())],
+    ));
+    let body = GenericFunctionBody::Materialised {
+        source_owner,
+        token_range: TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
+        token_sequence: None,
+        declaration_path: source_file,
+        resolution_facts: Arc::new(
+            Stage0ResolutionFacts::frozen_generic(source, Vec::new())
+                .expect("empty frozen facts should be valid"),
+        ),
+        frozen_identity_handle: FrozenIdentityHandle::new(),
+        source_path_table: Some(Arc::new(path_fork.snapshot_table())),
+        source_string_table: None,
+    };
+    let donor_strings = SharedDonorIdentity::freeze(&StringTable::new());
+    let error = match StableBodySyntax::capture(
+        &body,
+        source_file,
+        &path_fork,
+        Some(&donor_strings),
+        body.resolution_facts().map(Arc::as_ref),
+        FrozenIdentityHandle::new(),
+        &|_| Err(CompilerError::compiler_error("no content rows")),
+    ) {
+        Ok(_) => panic!("a path identity without its string owner must be rejected"),
+        Err(error) => error,
+    };
+    assert!(
+        error.msg.contains("incomplete source identity table pair"),
+        "unexpected incomplete donor error: {error:?}",
     );
 }
 
@@ -1466,12 +1576,12 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let facts =
             Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty().into());
         let generic_body = body_view(&body, source_file);
-        let mut capture_table = source_table.clone();
+        let donor_identity = SharedDonorIdentity::freeze(&source_table);
         let frozen = StableBodySyntax::capture(
             &generic_body,
             source_file,
             &path_fork,
-            &mut capture_table,
+            Some(&donor_identity),
             Some(&facts),
             FrozenIdentityHandle::new(),
             &|_| {

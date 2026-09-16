@@ -31,7 +31,7 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, OriginDeclarationId,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
@@ -192,9 +192,9 @@ impl StableFunctionSignature {
 }
 pub(super) fn stable_body_symbol_names(
     body: &GenericFunctionBody,
-    string_table: &mut StringTable,
+    string_table: &FrozenStringTable,
 ) -> Result<FxHashSet<String>, CompilerError> {
-    let tokens = body.parser_stream_for_capture(string_table)?;
+    let tokens = body.parser_stream_for_capture()?;
     Ok(tokens
         .tokens
         .iter()

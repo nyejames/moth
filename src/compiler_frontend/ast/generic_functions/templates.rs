@@ -279,14 +279,45 @@ impl GenericFunctionBody {
             Self::Materialised { .. } => None,
         }
     }
-    /// Derive a bounded adapter for stable capture without mutating the active path fork.
+    /// Resolve the exact frozen string domain needed while capturing this body.
     ///
-    /// Source bodies share the canonical owner directly. Capture only needs donor path rows and
-    /// payload spelling. Full path rebasing happens at the generated parser boundary, after the
-    /// provider identity tables are available.
+    /// Source and same-domain bodies use the shared declaring owner. Materialised bodies retain
+    /// their foreign string owner when present; a path owner without its issuing string owner is
+    /// invalid and must not silently fall back to the current domain.
+    pub(crate) fn capture_string_table<'a>(
+        &'a self,
+        donor_strings: &'a FrozenStringTable,
+    ) -> Result<&'a FrozenStringTable, crate::compiler_frontend::compiler_errors::CompilerError>
+    {
+        match self {
+            Self::Source { .. } => Ok(donor_strings),
+            Self::Materialised {
+                source_path_table: Some(_),
+                source_string_table: None,
+                ..
+            } => Err(
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "materialised generic body has an incomplete source identity table pair",
+                ),
+            ),
+            Self::Materialised {
+                source_string_table: Some(source_strings),
+                ..
+            } => Ok(source_strings),
+            Self::Materialised {
+                source_path_table: None,
+                source_string_table: None,
+                ..
+            } => Ok(donor_strings),
+        }
+    }
+
+    /// Derive a bounded canonical adapter for stable capture without mutating identity tables.
+    ///
+    /// Capture only validates the retained owner and scans path references. Payload rebasing is
+    /// deferred to [`parser_stream`](Self::parser_stream), the requester parser boundary.
     pub(crate) fn parser_stream_for_capture(
         &self,
-        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
     ) -> Result<FileTokens, crate::compiler_frontend::compiler_errors::CompilerError> {
         match self {
             Self::Source {
@@ -307,28 +338,13 @@ impl GenericFunctionBody {
                 token_range,
                 token_sequence,
                 declaration_path,
-                source_string_table,
                 ..
-            } => match source_string_table.as_deref() {
-                Some(source_strings) => remapped_bounded_adapter(
-                    source_owner,
-                    *token_range,
-                    *token_sequence,
-                    *declaration_path,
-                    RemappedAdapterContext {
-                        source_path_table: None,
-                        source_strings,
-                        destination_strings: string_table,
-                        path_fork: None,
-                    },
-                ),
-                None => bounded_adapter(
-                    source_owner,
-                    *token_range,
-                    *token_sequence,
-                    *declaration_path,
-                ),
-            },
+            } => bounded_adapter(
+                source_owner,
+                *token_range,
+                *token_sequence,
+                *declaration_path,
+            ),
         }
     }
 }

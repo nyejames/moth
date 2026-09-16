@@ -232,7 +232,10 @@ impl ModuleMaterialisationPreparation {
             let resources = resources.borrow();
             self.stable_folded_value_at_path(&content_path, &resources, path_fork)
         };
-        let mut capture_string_table = self.string_table.clone();
+        // Freeze the declaring domain once for the selected body plus every nested body this
+        // request carries. Source bodies share the resulting donor owner; nested foreign
+        // bodies keep their own retained donor pair.
+        let donor_identity = super::SharedDonorIdentity::freeze(&self.string_table);
         let body = template.body_tokens.as_ref().ok_or_else(|| {
             CompilerMessages::from_error_ref(
                 CompilerError::compiler_error(
@@ -255,7 +258,7 @@ impl ModuleMaterialisationPreparation {
             body,
             template.source_file,
             path_fork,
-            &mut capture_string_table,
+            Some(&donor_identity),
             stage0_resolution_facts,
             frozen_identity_handle,
             &content_value_at_path,
@@ -283,7 +286,7 @@ impl ModuleMaterialisationPreparation {
                 nested_body,
                 nested_template.source_file,
                 path_fork,
-                &mut capture_string_table,
+                Some(&donor_identity),
                 nested_stage0_resolution_facts,
                 nested_frozen_identity_handle,
                 &content_value_at_path,
