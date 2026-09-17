@@ -232,10 +232,6 @@ impl ModuleMaterialisationPreparation {
             let resources = resources.borrow();
             self.stable_folded_value_at_path(&content_path, &resources, path_fork)
         };
-        // Freeze the declaring domain once for the selected body plus every nested body this
-        // request carries. Source bodies share the resulting donor owner; nested foreign
-        // bodies keep their own retained donor pair.
-        let donor_identity = super::SharedDonorIdentity::freeze(&self.string_table);
         let body = template.body_tokens.as_ref().ok_or_else(|| {
             CompilerMessages::from_error_ref(
                 CompilerError::compiler_error(
@@ -244,6 +240,10 @@ impl ModuleMaterialisationPreparation {
                 &self.string_table,
             )
         })?;
+        // Share the declaring preparation's lazily frozen donor owner across every request.
+        // Source bodies share the cached owner; nested foreign bodies keep their own retained
+        // donor pair.
+        let donor_identity = self.donor_identity().clone();
         let stage0_resolution_facts = match body {
             GenericFunctionBody::Source { .. } => self.stage0_resolution_facts.as_deref(),
             GenericFunctionBody::MaterialisedCanonical {

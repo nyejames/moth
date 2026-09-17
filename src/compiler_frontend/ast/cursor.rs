@@ -1,9 +1,10 @@
 //! Short-lived cursor used by AST parsers.
 //!
 //! Canonical parser paths use one borrowed [`TokenCursor`] over [`SourceTokens`]. During the H0
-//! cutover, unbounded compatibility-only test and synthetic streams use the explicit legacy
-//! backing variant below; it owns no second canonical store and is removed with the remaining
-//! `FileTokens` adapters in H5.
+//! cutover, unbounded compatibility-only test and remapped streams use the explicit legacy
+//! backing variant below; bounded synthetic initializer streams use the explicit synthetic
+//! backing variant below. Neither owns a second canonical store; both are removed with the
+//! remaining `FileTokens` adapters in H5.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
@@ -20,12 +21,19 @@ use std::sync::Arc;
 enum AstCursorBacking<'a> {
     Canonical(TokenCursor<'a>),
     Compatibility(&'a mut FileTokens),
-    /// Owned temporary compatibility for an explicit synthetic/remapped override.
+    /// Owned temporary compatibility for an explicit remapped/unbounded override.
     ///
     /// WHAT: holds the provided `FileTokens` without borrowing the caller.
-    /// WHY: declaration `initializer_override` content is synthetic and has no canonical
+    /// WHY: remapped or otherwise unbounded compatibility content has no canonical
     /// range; it stays on the explicit compatibility lane and never widens to canonical paths.
     OwnedCompatibility(FileTokens),
+    /// Bounded owned synthetic initializer stream.
+    ///
+    /// WHAT: holds the explicit initializer `FileTokens` built by `FileTokens::new_from_slice`.
+    /// WHY: constant-resolution initializer overrides are bounded to the explicit payload;
+    /// keeping them distinct from the generic unbounded/remapped `OwnedCompatibility` lane
+    /// preserves the bounded synthetic representation and its active-window EOF behavior.
+    Synthetic(FileTokens),
 }
 
 /// Mutable AST parser position over a canonical source-token view.
@@ -80,7 +88,7 @@ impl<'a> AstCursor<'a> {
     }
 
     /// Construct a canonical cursor when the stream has checked provenance; otherwise retain the
-    /// explicit short-lived compatibility lane for unbounded synthetic/parser fixtures.
+    /// explicit short-lived compatibility lane for unbounded/remapped parser fixtures.
     pub(crate) fn from_file_tokens(
         token_stream: &'a mut FileTokens,
     ) -> Result<Self, CompilerError> {
@@ -193,9 +201,27 @@ impl<'a> AstCursor<'a> {
     }
 
     pub(crate) fn from_owned_file_tokens_compatibility(token_stream: FileTokens) -> Self {
-        let canonical_os_path = token_stream.canonical_os_path.clone();
+        Self::from_owned_non_canonical(AstCursorBacking::OwnedCompatibility(token_stream))
+    }
+    /// Construct a bounded owned cursor over an explicit synthetic initializer stream.
+    ///
+    /// WHAT: takes the `FileTokens` built by `FileTokens::new_from_slice` for a declaration
+    /// `initializer_override` and exposes it through the bounded synthetic backing.
+    /// WHY: constant-resolution initializer payloads are bounded to their explicit vector but
+    /// have no canonical range; they need the same bounded parser facts as owned compatibility
+    /// without joining the generic unbounded/remapped compatibility lane.
+    pub(crate) fn from_synthetic_file_tokens(token_stream: FileTokens) -> Self {
+        Self::from_owned_non_canonical(AstCursorBacking::Synthetic(token_stream))
+    }
+    fn from_owned_non_canonical(backing: AstCursorBacking<'a>) -> Self {
+        let canonical_os_path = match &backing {
+            AstCursorBacking::OwnedCompatibility(stream) | AstCursorBacking::Synthetic(stream) => {
+                stream.canonical_os_path.clone()
+            }
+            AstCursorBacking::Canonical(_) | AstCursorBacking::Compatibility(_) => None,
+        };
         let mut cursor = Self {
-            backing: AstCursorBacking::OwnedCompatibility(token_stream),
+            backing,
             canonical_owner: None,
             canonical_os_path,
             limit: None,
@@ -211,8 +237,8 @@ impl<'a> AstCursor<'a> {
     }
     /// Build an owned compatibility subcursor for a non-canonical parser stream.
     ///
-    /// Canonical callers must use `nested_cursor`; this lane is only for remapped or synthetic
-    /// streams whose payload IDs cannot be interpreted through the donor canonical owner.
+    /// Canonical callers must use `nested_cursor`; this lane is only for remapped streams
+    /// whose payload IDs cannot be interpreted through the donor canonical owner.
     pub(crate) fn bounded_compatibility_expression_cursor(
         &self,
         range: TokenRange,
@@ -241,6 +267,7 @@ impl<'a> AstCursor<'a> {
         match &self.backing {
             AstCursorBacking::Compatibility(stream) => Some(stream),
             AstCursorBacking::OwnedCompatibility(stream) => Some(stream),
+            AstCursorBacking::Synthetic(stream) => Some(stream),
             AstCursorBacking::Canonical(_) => None,
         }
     }
@@ -249,6 +276,7 @@ impl<'a> AstCursor<'a> {
         match &mut self.backing {
             AstCursorBacking::Compatibility(stream) => Some(stream),
             AstCursorBacking::OwnedCompatibility(stream) => Some(stream),
+            AstCursorBacking::Synthetic(stream) => Some(stream),
             AstCursorBacking::Canonical(_) => None,
         }
     }
@@ -547,7 +575,9 @@ impl<'a> AstCursor<'a> {
             AstCursorBacking::Canonical(_) => {
                 range.start().index() >= active_start && range.end().index() <= active_end
             }
-            AstCursorBacking::Compatibility(_) | AstCursorBacking::OwnedCompatibility(_) => false,
+            AstCursorBacking::Compatibility(_)
+            | AstCursorBacking::OwnedCompatibility(_)
+            | AstCursorBacking::Synthetic(_) => false,
         };
         if !within_active_bounds {
             return Err(TokenRangeError::OutOfBounds {

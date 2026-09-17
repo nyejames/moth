@@ -107,6 +107,39 @@ struct LoopHeaderParser<'a, 'types> {
     path_fork: &'a mut PathInternerFork,
 }
 
+struct CursorExpressionInput<'a, 'types, 'cursor, 'tokens> {
+    token_stream: &'cursor mut AstCursor<'tokens>,
+    expression_start: usize,
+    expression_end: usize,
+    context: &'a ScopeContext,
+    type_interner: &'a mut AstTypeInterner<'types>,
+    value_mode: &'a ValueMode,
+    string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
+}
+
+struct CursorExpressionUntilInput<'a, 'types, 'cursor, 'tokens, 'stop> {
+    token_stream: &'cursor mut AstCursor<'tokens>,
+    expression_start: usize,
+    expression_end: usize,
+    context: &'a ScopeContext,
+    type_interner: &'a mut AstTypeInterner<'types>,
+    value_mode: &'a ValueMode,
+    string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
+    stop_tokens: &'stop [TokenKind],
+}
+
+struct RangeLoopSpecInput<'a, 'types, 'cursor, 'tokens> {
+    token_stream: &'cursor mut AstCursor<'tokens>,
+    range_start: usize,
+    range_end: usize,
+    context: &'a ScopeContext,
+    type_interner: &'a mut AstTypeInterner<'types>,
+    string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
+}
+
 /// Loop-header parsing preserves the AST body error lane. Canonical headers use bounded cursor
 /// windows; compatibility headers use temporary streams over the frozen file-owned path table.
 type LoopHeaderResult<T> = Result<T, ExpressionParseError>;
@@ -212,15 +245,15 @@ fn parse_range_loop_header_cursor(
     if let Some(pipe_binding_split) =
         parse_pipe_binding_suffix_cursor(token_stream, header_start, header_end)?
     {
-        let range = parse_range_loop_spec_cursor(
+        let range = parse_range_loop_spec_cursor(RangeLoopSpecInput {
             token_stream,
-            header_start,
-            pipe_binding_split.core_end,
-            parser.scope_context,
-            parser.type_interner,
-            parser.string_table,
-            parser.path_fork,
-        )?;
+            range_start: header_start,
+            range_end: pipe_binding_split.core_end,
+            context: parser.scope_context,
+            type_interner: parser.type_interner,
+            string_table: parser.string_table,
+            path_fork: parser.path_fork,
+        })?;
         let binding_type = range_binding_type(&range, parser.type_interner.environment())?;
         let bindings =
             declare_loop_bindings(Some(pipe_binding_split.bindings), binding_type, parser)?;
@@ -230,28 +263,28 @@ fn parse_range_loop_header_cursor(
 
     if let Some(bare_binding_suffix) =
         detect_bare_loop_binding_suffix_cursor(token_stream, header_start, header_end)
-        && parses_as_range_cursor(
+        && parses_as_range_cursor(RangeLoopSpecInput {
             token_stream,
-            header_start,
-            bare_binding_suffix.core_end,
-            parser.scope_context,
-            parser.type_interner,
-            parser.string_table,
-            parser.path_fork,
-        )
+            range_start: header_start,
+            range_end: bare_binding_suffix.core_end,
+            context: parser.scope_context,
+            type_interner: parser.type_interner,
+            string_table: parser.string_table,
+            path_fork: parser.path_fork,
+        })
     {
         return bare_loop_binding_syntax_error_cursor(&bare_binding_suffix);
     }
 
-    let range = parse_range_loop_spec_cursor(
+    let range = parse_range_loop_spec_cursor(RangeLoopSpecInput {
         token_stream,
-        header_start,
-        header_end,
-        parser.scope_context,
-        parser.type_interner,
-        parser.string_table,
-        parser.path_fork,
-    )?;
+        range_start: header_start,
+        range_end: header_end,
+        context: parser.scope_context,
+        type_interner: parser.type_interner,
+        string_table: parser.string_table,
+        path_fork: parser.path_fork,
+    })?;
     let binding_type = range_binding_type(&range, parser.type_interner.environment())?;
     let bindings = declare_loop_bindings(None, binding_type, parser)?;
     Ok(ParsedLoopHeader::Range { bindings, range })
@@ -266,15 +299,16 @@ fn parse_non_range_loop_header_cursor(
     if let Some(pipe_binding_split) =
         parse_pipe_binding_suffix_cursor(token_stream, header_start, header_end)?
     {
-        let (iterable, item_type) = parse_collection_iterable_cursor(
+        let (iterable, item_type) = parse_collection_iterable_cursor(CursorExpressionInput {
             token_stream,
-            header_start,
-            pipe_binding_split.core_end,
-            parser.scope_context,
-            parser.type_interner,
-            parser.string_table,
-            parser.path_fork,
-        )?;
+            expression_start: header_start,
+            expression_end: pipe_binding_split.core_end,
+            context: parser.scope_context,
+            type_interner: parser.type_interner,
+            value_mode: &ValueMode::ImmutableReference,
+            string_table: parser.string_table,
+            path_fork: parser.path_fork,
+        })?;
         let bindings = declare_loop_bindings(Some(pipe_binding_split.bindings), item_type, parser)?;
 
         return Ok(ParsedLoopHeader::Collection { bindings, iterable });
@@ -282,29 +316,30 @@ fn parse_non_range_loop_header_cursor(
 
     if let Some(bare_binding_suffix) =
         detect_bare_loop_binding_suffix_cursor(token_stream, header_start, header_end)
-        && parses_as_collection_cursor(
+        && parses_as_collection_cursor(CursorExpressionInput {
             token_stream,
-            header_start,
-            bare_binding_suffix.core_end,
-            parser.scope_context,
-            parser.type_interner,
-            parser.string_table,
-            parser.path_fork,
-        )
+            expression_start: header_start,
+            expression_end: bare_binding_suffix.core_end,
+            context: parser.scope_context,
+            type_interner: parser.type_interner,
+            value_mode: &ValueMode::ImmutableReference,
+            string_table: parser.string_table,
+            path_fork: parser.path_fork,
+        })
     {
         return bare_loop_binding_syntax_error_cursor(&bare_binding_suffix);
     }
 
-    let expression = parse_cursor_expression(
+    let expression = parse_cursor_expression(CursorExpressionInput {
         token_stream,
-        header_start,
-        header_end,
-        parser.scope_context,
-        parser.type_interner,
-        &ValueMode::ImmutableOwned,
-        parser.string_table,
-        parser.path_fork,
-    )?;
+        expression_start: header_start,
+        expression_end: header_end,
+        context: parser.scope_context,
+        type_interner: parser.type_interner,
+        value_mode: &ValueMode::ImmutableOwned,
+        string_table: parser.string_table,
+        path_fork: parser.path_fork,
+    })?;
 
     let item_type_id = parser
         .type_interner
@@ -554,14 +589,17 @@ fn bare_loop_binding_syntax_error_cursor<T>(
 }
 
 fn parse_range_loop_spec_cursor(
-    token_stream: &mut AstCursor,
-    range_start: usize,
-    range_end: usize,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
+    input: RangeLoopSpecInput<'_, '_, '_, '_>,
 ) -> LoopHeaderResult<RangeLoopSpec> {
+    let RangeLoopSpecInput {
+        token_stream,
+        range_start,
+        range_end,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    } = input;
     let saved_position = token_stream.position();
     let result = (|| {
         token_stream
@@ -578,17 +616,17 @@ fn parse_range_loop_spec_cursor(
                 ValueMode::ImmutableOwned,
             )
         } else {
-            parse_cursor_expression_until(
+            parse_cursor_expression_until(CursorExpressionUntilInput {
                 token_stream,
-                range_start,
-                range_end,
+                expression_start: range_start,
+                expression_end: range_end,
                 context,
                 type_interner,
-                &ValueMode::ImmutableReference,
+                value_mode: &ValueMode::ImmutableReference,
                 string_table,
                 path_fork,
-                &[TokenKind::ExclusiveRange],
-            )?
+                stop_tokens: &[TokenKind::ExclusiveRange],
+            })?
         };
 
         let end_kind = match token_stream.current_token_kind() {
@@ -625,28 +663,28 @@ fn parse_range_loop_spec_cursor(
         let by_index =
             find_top_level_expression_boundary_cursor_token(token_stream, end_start, range_end);
         let end = if by_index.is_some() {
-            parse_cursor_expression_until(
+            parse_cursor_expression_until(CursorExpressionUntilInput {
                 token_stream,
-                end_start,
-                range_end,
+                expression_start: end_start,
+                expression_end: range_end,
                 context,
                 type_interner,
-                &ValueMode::ImmutableReference,
+                value_mode: &ValueMode::ImmutableReference,
                 string_table,
                 path_fork,
-                &[TokenKind::By],
-            )?
+                stop_tokens: &[TokenKind::By],
+            })?
         } else {
-            parse_cursor_expression(
+            parse_cursor_expression(CursorExpressionInput {
                 token_stream,
-                end_start,
-                range_end,
+                expression_start: end_start,
+                expression_end: range_end,
                 context,
                 type_interner,
-                &ValueMode::ImmutableReference,
+                value_mode: &ValueMode::ImmutableReference,
                 string_table,
                 path_fork,
-            )?
+            })?
         };
 
         let step = if by_index.is_some() {
@@ -657,16 +695,17 @@ fn parse_range_loop_spec_cursor(
             {
                 return loop_header_error(InvalidLoopHeaderReason::MissingRangeStep, by_span);
             }
-            Some(parse_cursor_expression(
+            let step_start = token_stream.position();
+            Some(parse_cursor_expression(CursorExpressionInput {
                 token_stream,
-                token_stream.position(),
-                range_end,
+                expression_start: step_start,
+                expression_end: range_end,
                 context,
                 type_interner,
-                &ValueMode::ImmutableReference,
+                value_mode: &ValueMode::ImmutableReference,
                 string_table,
                 path_fork,
-            )?)
+            })?)
         } else {
             None
         };
@@ -732,15 +771,18 @@ fn parse_range_loop_spec_cursor(
 }
 
 fn parse_cursor_expression(
-    token_stream: &mut AstCursor,
-    expression_start: usize,
-    expression_end: usize,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    value_mode: &ValueMode,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
+    input: CursorExpressionInput<'_, '_, '_, '_>,
 ) -> LoopHeaderResult<Expression> {
+    let CursorExpressionInput {
+        token_stream,
+        expression_start,
+        expression_end,
+        context,
+        type_interner,
+        value_mode,
+        string_table,
+        path_fork,
+    } = input;
     if expression_start >= expression_end {
         return loop_header_error(InvalidLoopHeaderReason::ExpectedHeaderExpression, None);
     }
@@ -757,21 +799,23 @@ fn parse_cursor_expression(
             string_table,
             path_fork,
         )
-        .map_err(ExpressionParseError::from)
     })
 }
 
 fn parse_cursor_expression_until(
-    token_stream: &mut AstCursor,
-    expression_start: usize,
-    expression_end: usize,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    value_mode: &ValueMode,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-    stop_tokens: &[TokenKind],
+    input: CursorExpressionUntilInput<'_, '_, '_, '_, '_>,
 ) -> LoopHeaderResult<Expression> {
+    let CursorExpressionUntilInput {
+        token_stream,
+        expression_start,
+        expression_end,
+        context,
+        type_interner,
+        value_mode,
+        string_table,
+        path_fork,
+        stop_tokens,
+    } = input;
     if expression_start >= expression_end {
         return loop_header_error(InvalidLoopHeaderReason::ExpectedHeaderExpression, None);
     }
@@ -792,7 +836,7 @@ fn parse_cursor_expression_until(
             },
             false,
         );
-        create_expression_until(input, stop_tokens).map_err(ExpressionParseError::from)
+        create_expression_until(input, stop_tokens)
     })
 }
 
@@ -818,24 +862,33 @@ fn parse_cursor_expression_window<T>(
 }
 
 fn parse_collection_iterable_cursor(
-    token_stream: &mut AstCursor,
-    expression_start: usize,
-    expression_end: usize,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
+    input: CursorExpressionInput<'_, '_, '_, '_>,
 ) -> LoopHeaderResult<(Expression, TypeId)> {
-    let collection_expression = parse_cursor_expression(
+    let CursorExpressionInput {
         token_stream,
         expression_start,
         expression_end,
         context,
         type_interner,
-        &ValueMode::ImmutableReference,
+        value_mode,
         string_table,
         path_fork,
-    )?;
+    } = input;
+    debug_assert_eq!(
+        value_mode,
+        &ValueMode::ImmutableReference,
+        "loop collection headers parse as immutable references",
+    );
+    let collection_expression = parse_cursor_expression(CursorExpressionInput {
+        token_stream,
+        expression_start,
+        expression_end,
+        context,
+        type_interner,
+        value_mode,
+        string_table,
+        path_fork,
+    })?;
     let type_environment = type_interner.environment();
     let Some(item_type_id) =
         type_environment.collection_element_type(collection_expression.type_id)
@@ -850,25 +903,32 @@ fn parse_collection_iterable_cursor(
     Ok((collection_expression, item_type_id))
 }
 
-fn parses_as_collection_cursor(
-    token_stream: &mut AstCursor,
-    expression_start: usize,
-    expression_end: usize,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> bool {
-    let Ok(expression) = parse_cursor_expression(
+fn parses_as_collection_cursor(input: CursorExpressionInput<'_, '_, '_, '_>) -> bool {
+    let CursorExpressionInput {
         token_stream,
         expression_start,
         expression_end,
         context,
         type_interner,
-        &ValueMode::ImmutableReference,
+        value_mode,
         string_table,
         path_fork,
-    ) else {
+    } = input;
+    debug_assert_eq!(
+        value_mode,
+        &ValueMode::ImmutableReference,
+        "loop collection probes parse as immutable references",
+    );
+    let Ok(expression) = parse_cursor_expression(CursorExpressionInput {
+        token_stream,
+        expression_start,
+        expression_end,
+        context,
+        type_interner,
+        value_mode,
+        string_table,
+        path_fork,
+    }) else {
         return false;
     };
     type_interner
@@ -877,25 +937,8 @@ fn parses_as_collection_cursor(
         .is_some()
 }
 
-fn parses_as_range_cursor(
-    token_stream: &mut AstCursor,
-    expression_start: usize,
-    expression_end: usize,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> bool {
-    parse_range_loop_spec_cursor(
-        token_stream,
-        expression_start,
-        expression_end,
-        context,
-        type_interner,
-        string_table,
-        path_fork,
-    )
-    .is_ok()
+fn parses_as_range_cursor(input: RangeLoopSpecInput<'_, '_, '_, '_>) -> bool {
+    parse_range_loop_spec_cursor(input).is_ok()
 }
 
 fn has_top_level_range_marker_cursor(

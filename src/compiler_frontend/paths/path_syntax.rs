@@ -415,16 +415,6 @@ impl PathSyntaxTable {
             *path_handle = new_id;
         }
 
-        if !old_to_new.is_empty() {
-            add_frontend_counter(
-                FrontendCounter::PersistentGenericPathSyntaxSubsetCopyCount,
-                1,
-            );
-            add_frontend_counter(
-                FrontendCounter::PersistentGenericPathSyntaxRowCopyCount,
-                subset.paths.len(),
-            );
-        }
         Ok((subset, old_to_new))
     }
 

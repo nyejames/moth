@@ -2724,36 +2724,6 @@ impl FileTokens {
         stream.freeze_numeric_literals();
         Ok(stream)
     }
-    /// Wrap one canonical owner in a `FileTokens` shell that retains one checked body range.
-    ///
-    /// Materialised generic bodies must keep an `Arc<FileTokens>` donor shell while sharing one
-    /// canonical `SourceTokens` allocation. This builds that compatibility shell directly from the
-    /// shared owner plus its filesystem identity so Source-origin frozen syntax can materialise
-    /// without constructing a second canonical store. The retained range (or sequence) is the
-    /// same checked provenance that `GenericFunctionBody::materialised` validates, so the shell
-    /// stays usable through the existing `FileTokens`-shell validator and bounded adapters.
-    pub(crate) fn canonical_shell_from_canonical(
-        source_tokens: Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
-        src_path: PathId,
-        token_range: TokenRange,
-        token_sequence: Option<TokenSequenceId>,
-    ) -> Result<FileTokens, CompilerError> {
-        match token_sequence {
-            Some(sequence) => Self::new_bounded_sequence_substream_from_canonical(
-                source_tokens,
-                canonical_os_path,
-                sequence,
-                src_path,
-            ),
-            None => Self::new_bounded_substream_from_canonical(
-                source_tokens,
-                canonical_os_path,
-                token_range,
-                src_path,
-            ),
-        }
-    }
 
     /// Build the bounded parser adapter for one source-owned segmented sequence.
     pub(crate) fn new_bounded_sequence_substream(

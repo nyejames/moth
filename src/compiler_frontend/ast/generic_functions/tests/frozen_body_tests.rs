@@ -8,7 +8,7 @@
 //! `@assets/logo.svg` syntax through Stage 0 resolution. These tests own the freeze-to-sidecar
 //! seam from that resolved AST representation while keeping donor source identity explicit.
 
-use super::super::{GenericFunctionBody, GenericFunctionTemplate};
+use super::super::{GenericFunctionBody, GenericFunctionTemplate, MaterialisedDonorContext};
 use super::ModuleMaterialisationInput;
 use super::artefact_emit::{ModuleMaterialisationContext, check_materialisation_row_identity};
 use super::frozen_file_references::StableResolvedFileReferenceOutcome;
@@ -1119,7 +1119,7 @@ fn no_identity_materialised_donors_use_the_canonical_owner() {
 }
 
 #[test]
-fn foreign_string_only_donors_keep_string_remapping_on_the_compatibility_lane() {
+fn foreign_string_only_donors_canonicalize_without_a_file_tokens_shell() {
     let source = SourceId::COMPILATION_ROOT;
     let source_file = PathId::ROOT;
     let path_fork = PathInternerFork::empty();
@@ -1132,19 +1132,22 @@ fn foreign_string_only_donors_keep_string_remapping_on_the_compatibility_lane() 
         vec![Token::new(TokenKind::Symbol(donor_symbol), token_span())],
         PathSyntaxTable::new(),
     ));
-    let body = GenericFunctionBody::MaterialisedForeign {
+    let body = GenericFunctionBody::materialised(
         source_owner,
-        token_range: TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
-        token_sequence: None,
-        declaration_path: source_file,
-        resolution_facts: Arc::new(
-            Stage0ResolutionFacts::frozen_generic(source, Vec::new())
-                .expect("empty frozen facts should be valid"),
-        ),
-        frozen_identity_handle: FrozenIdentityHandle::new(),
-        source_path_table: None,
-        source_string_table: Some(Arc::new(donor_string_table.freeze())),
-    };
+        TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
+        None,
+        source_file,
+        MaterialisedDonorContext {
+            resolution_facts: Arc::new(
+                Stage0ResolutionFacts::frozen_generic(source, Vec::new())
+                    .expect("empty frozen facts should be valid"),
+            ),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+            source_path_table: None,
+            source_string_table: Some(Arc::new(donor_string_table.freeze())),
+        },
+    )
+    .expect("a string-only foreign donor should canonicalize");
     let donor_identity = SharedDonorIdentity::freeze(&StringTable::new());
     let frozen = StableBodySyntax::capture(
         &body,
@@ -1170,42 +1173,50 @@ fn foreign_string_only_donors_keep_string_remapping_on_the_compatibility_lane() 
             &mut materialised_strings,
             None,
         )
-        .expect("a string-only foreign donor should retain its identity owner");
+        .expect("a string-only donor should keep its canonical identity owner");
     assert!(
-        materialised.foreign_owner().is_some(),
-        "retained donor strings require the FileTokens compatibility lane",
+        materialised.canonical_owner().is_some(),
+        "string-only donors must share SourceTokens durably",
     );
     assert!(
-        materialised.canonical_owner().is_none(),
-        "foreign string remaps must not use the canonical lane",
+        materialised.foreign_owner().is_none(),
+        "string-only donors must not retain a FileTokens shell",
     );
     let materialised_body = materialised
         .into_generic_body()
-        .expect("foreign string-only body should retain its checked range");
+        .expect("string-only body should retain its checked range");
+    assert!(
+        materialised_body.materialised_canonical_owner().is_some(),
+        "string-only bodies must expose the canonical lane",
+    );
+    assert!(
+        materialised_body.materialised_owner().is_none(),
+        "string-only bodies must not retain FileTokens",
+    );
     {
         let (cursor, source_id) = materialised_body
             .parser_cursor(&mut materialised_strings, &mut materialised_path_fork)
-            .expect("foreign parser cursor should use the remapped compatibility lane");
+            .expect("canonical parser cursor should remap through a transient adapter");
         assert_eq!(source_id, source);
         let TokenKind::Symbol(symbol) = cursor.current_token_kind() else {
-            panic!("foreign parser cursor should expose the donor symbol");
+            panic!("canonical parser cursor should expose the donor symbol");
         };
         assert_eq!(
             materialised_strings.resolve(*symbol),
             "donor",
-            "the compatibility cursor must remap colliding donor StringIds",
+            "the canonical cursor must remap colliding donor StringIds",
         );
     }
     let stream = materialised_body
         .parser_stream(&mut materialised_strings, &mut materialised_path_fork)
-        .expect("foreign parser stream should preserve string remapping");
+        .expect("canonical parser stream should preserve string remapping");
     let TokenKind::Symbol(symbol) = stream.tokens[0].kind else {
-        panic!("foreign parser stream should expose the donor symbol");
+        panic!("canonical parser stream should expose the donor symbol");
     };
     assert_eq!(
         materialised_strings.resolve(symbol),
         "donor",
-        "the compatibility stream must remap colliding donor StringIds",
+        "the canonical stream must remap colliding donor StringIds",
     );
 }
 #[test]
@@ -1238,13 +1249,15 @@ fn canonical_string_only_donors_remap_transiently_without_retaining_file_tokens(
         range,
         None,
         source_file,
-        Arc::new(
-            Stage0ResolutionFacts::frozen_generic(source, Vec::new())
-                .expect("empty frozen facts should be valid"),
-        ),
-        FrozenIdentityHandle::new(),
-        None,
-        Some(Arc::new(donor_string_table.freeze())),
+        MaterialisedDonorContext {
+            resolution_facts: Arc::new(
+                Stage0ResolutionFacts::frozen_generic(source, Vec::new())
+                    .expect("empty frozen facts should be valid"),
+            ),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+            source_path_table: None,
+            source_string_table: Some(Arc::new(donor_string_table.freeze())),
+        },
     )
     .expect("canonical body should retain its donor strings");
     let donor_identity = SharedDonorIdentity::freeze(&StringTable::new());
@@ -1316,57 +1329,6 @@ fn canonical_string_only_donors_remap_transiently_without_retaining_file_tokens(
         materialised_strings.resolve(symbol),
         "donor",
         "the canonical stream must remap colliding donor StringIds",
-    );
-}
-
-#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-#[test]
-fn persistent_generic_subset_counts_stay_separate_from_authored_path_rows() {
-    use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
-    };
-    use crate::timing::start_benchmark_collection;
-
-    let mut source_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let (tokens, path_syntax, _) = sample_tokens(&mut source_table, &mut path_fork);
-    let source_path = path_fork
-        .try_intern_portable_path("src/@mod.moth", &mut source_table)
-        .expect("test path fits");
-    let original = FileTokens::new_with_identity(
-        source_path,
-        SourceId::COMPILATION_ROOT,
-        None,
-        tokens,
-        path_syntax,
-    );
-
-    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
-    reset_frontend_counters();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
-
-    capture_test_body(&original, &original.src_path, &path_fork, &source_table);
-
-    log_frontend_counters();
-    let observations = timing_session.finish();
-    let counter_value = |name: &str| {
-        observations
-            .counters
-            .iter()
-            .find(|counter| counter.name == name)
-            .map(|counter| counter.value)
-            .unwrap_or(-1.0)
-    };
-
-    assert_eq!(counter_value("path_syntax_row_count"), 0.0);
-    assert_eq!(
-        counter_value("persistent_generic_path_syntax_subset_copy_count"),
-        1.0
-    );
-    assert_eq!(
-        counter_value("persistent_generic_path_syntax_row_copy_count"),
-        1.0
     );
 }
 

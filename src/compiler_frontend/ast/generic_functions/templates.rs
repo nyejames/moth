@@ -32,8 +32,9 @@ use std::sync::Arc;
 /// adapters on demand.
 /// Canonical materialised bodies share the donor `SourceTokens` allocation directly with no
 /// `FileTokens` shell, plus the donor string domain used only for transient parser rebasing.
-/// Only foreign materialised bodies retain the donor `FileTokens` shell
-/// (including its remapped compatibility lane) plus the donor path/string pair.
+/// Only path-crossing foreign materialised bodies (donor path table present) retain the donor
+/// `FileTokens` shell (including its remapped compatibility lane) plus the donor path/string
+/// pair. String-only foreign donors canonicalize to the `SourceTokens` owner plus donor strings.
 #[derive(Clone)]
 pub(crate) enum GenericFunctionBody {
     /// Source templates use the declaring module's canonical source owner.
@@ -67,7 +68,9 @@ pub(crate) enum GenericFunctionBody {
         /// `None` keeps the direct canonical adapter without rebasing.
         source_string_table: Option<Arc<FrozenStringTable>>,
     },
-    /// Foreign materialised bodies retain the donor owner and frozen Stage 0/identity context.
+    /// Path-crossing foreign materialised bodies retain the donor owner and frozen
+    /// Stage 0/identity context. This lane requires a donor path table: string-only foreign
+    /// donors canonicalize through `materialised` onto `MaterialisedCanonical`.
     MaterialisedForeign {
         source_owner: Arc<FileTokens>,
         token_range: TokenRange,
@@ -75,11 +78,12 @@ pub(crate) enum GenericFunctionBody {
         declaration_path: PathId,
         resolution_facts: Arc<Stage0ResolutionFacts>,
         frozen_identity_handle: FrozenIdentityHandle,
-        /// Provider identity tables are present when the donor crossed a package boundary.
+        /// Provider identity tables for donors that crossed a package boundary.
         ///
-        /// Same-boundary materialisation uses the active path/string domain directly. A published
-        /// foreign context supplies these shared tables so transient parser adapters can rebase
-        /// donor payloads without mutating the canonical owner.
+        /// A published foreign context supplies these shared tables so transient parser adapters
+        /// can rebase donor payloads without mutating the canonical owner. The path table is
+        /// always present on this lane; a path table without its issuing string table is
+        /// rejected at construction.
         source_path_table: Option<Arc<crate::compiler_frontend::symbols::path_interner::PathTable>>,
         source_string_table:
             Option<Arc<crate::compiler_frontend::symbols::string_interning::FrozenStringTable>>,
@@ -137,12 +141,10 @@ impl GenericFunctionBody {
         token_range: TokenRange,
         token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
-        resolution_facts: Arc<Stage0ResolutionFacts>,
-        frozen_identity_handle: FrozenIdentityHandle,
-        source_path_table: Option<Arc<PathTable>>,
-        source_string_table: Option<Arc<FrozenStringTable>>,
+        donor_context: MaterialisedDonorContext,
     ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
-        if source_path_table.is_some() && source_string_table.is_none() {
+        if donor_context.source_path_table.is_some() && donor_context.source_string_table.is_none()
+        {
             return Err(
                 crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
                     "materialised generic body has an incomplete source identity table pair",
@@ -161,13 +163,19 @@ impl GenericFunctionBody {
             token_range,
             token_sequence,
             declaration_path,
-            resolution_facts,
-            frozen_identity_handle,
-            source_path_table,
-            source_string_table,
+            resolution_facts: donor_context.resolution_facts,
+            frozen_identity_handle: donor_context.frozen_identity_handle,
+            source_path_table: donor_context.source_path_table,
+            source_string_table: donor_context.source_string_table,
         })
     }
 
+    /// Build a path-crossing foreign materialised body, canonicalizing string-only donors.
+    ///
+    /// A `(None, Some(_))` donor carries only a donor string table, so its payloads are
+    /// canonical `SourceTokens` IDs in a different string domain. Canonicalize by sharing the
+    /// donor canonical owner plus the donor strings; only a donor path table keeps the
+    /// `FileTokens` compatibility shell on `MaterialisedForeign`.
     pub(crate) fn materialised(
         source_owner: Arc<FileTokens>,
         token_range: TokenRange,
@@ -182,6 +190,31 @@ impl GenericFunctionBody {
                     "materialised generic body has an incomplete source identity table pair",
                 ),
             );
+        }
+        if donor_context.source_path_table.is_none() {
+            let canonical_owner = source_owner.canonical_source_tokens_arc().map_err(|_| {
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "materialised generic body has no canonical donor owner",
+                )
+            })?;
+            let canonical_os_path = source_owner.canonical_os_path.clone();
+            validate_source_owner(
+                &canonical_owner,
+                token_range,
+                token_sequence,
+                "materialised generic body",
+            )?;
+            return Ok(Self::MaterialisedCanonical {
+                source_owner: canonical_owner,
+                canonical_os_path,
+                token_range,
+                token_sequence,
+                declaration_path,
+                resolution_facts: donor_context.resolution_facts,
+                frozen_identity_handle: donor_context.frozen_identity_handle,
+                source_path_table: donor_context.source_path_table,
+                source_string_table: donor_context.source_string_table,
+            });
         }
         validate_syntax_owner(
             &source_owner,
@@ -254,14 +287,13 @@ impl GenericFunctionBody {
             Self::MaterialisedCanonical { source_owner, .. } => Some(source_owner),
         }
     }
-
     /// Build the parser cursor for this body.
     ///
     /// Source and unrebased canonical materialised bodies borrow their canonical owner directly.
-    /// A canonical body with retained donor strings and every foreign materialised body derive a
-    /// transient remapped compatibility adapter instead: donor payloads were issued in a different
-    /// string-identity domain than the requester's, so spelling-based rebasing must run before the
-    /// parser reads them. The adapter is never retained.
+    /// A canonical body with retained donor strings and every path-crossing foreign body derive
+    /// a transient remapped compatibility adapter instead: donor payloads were issued in a
+    /// different string-identity domain than the requester's, so spelling-based rebasing must
+    /// run before the parser reads them. The adapter is never retained.
     pub(crate) fn parser_cursor<'a>(
         &'a self,
         string_table: &mut StringTable,
@@ -313,9 +345,9 @@ impl GenericFunctionBody {
     ///
     /// Source and unrebased canonical bodies share the canonical owner directly and never
     /// rebase payloads or mutate the path fork. A canonical body with donor strings derives a
-    /// transient remapped adapter from a canonical shell; foreign bodies rebase through their
-    /// retained provider pair. The returned adapter is intentionally short-lived and never
-    /// retained.
+    /// transient remapped adapter from a canonical shell; path-crossing foreign bodies rebase
+    /// through their retained provider pair. The returned adapter is intentionally short-lived
+    /// and never retained.
     pub(crate) fn parser_stream(
         &self,
         string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
@@ -502,8 +534,8 @@ impl GenericFunctionBody {
     ///
     /// Source bodies use the shared declaring owner. Canonical materialised bodies keep their
     /// retained donor strings when present; a path owner without its issuing string owner is
-    /// invalid and must not silently fall back to the current domain. Foreign materialised
-    /// bodies retain their foreign string owner when present.
+    /// invalid and must not silently fall back to the current domain. Path-crossing foreign
+    /// materialised bodies retain their foreign string owner when present.
     pub(crate) fn capture_string_table<'a>(
         &'a self,
         donor_strings: &'a FrozenStringTable,
@@ -550,6 +582,8 @@ impl GenericFunctionBody {
     ///
     /// Capture only validates the retained owner and scans path references. Payload rebasing is
     /// deferred to [`parser_stream`](Self::parser_stream), the requester parser boundary.
+    /// String-only foreign donors scan through their canonical owner; only path-crossing
+    /// foreign donors scan through the retained `FileTokens` shell.
     pub(crate) fn parser_stream_for_capture(
         &self,
     ) -> Result<FileTokens, crate::compiler_frontend::compiler_errors::CompilerError> {
@@ -575,6 +609,27 @@ impl GenericFunctionBody {
                 *token_sequence,
                 *declaration_path,
             ),
+            Self::MaterialisedForeign {
+                source_owner,
+                token_range,
+                token_sequence,
+                declaration_path,
+                source_path_table: None,
+                ..
+            } => {
+                let canonical_owner = source_owner.canonical_source_tokens_arc().map_err(|_| {
+                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                        "frozen generic body capture needs a canonical donor owner",
+                    )
+                })?;
+                bounded_adapter_from_canonical(
+                    &canonical_owner,
+                    source_owner.canonical_os_path.clone(),
+                    *token_range,
+                    *token_sequence,
+                    *declaration_path,
+                )
+            },
             Self::MaterialisedForeign {
                 source_owner,
                 token_range,

@@ -1,7 +1,7 @@
 //! Declaring-module preparation capture and publication freeze.
 use super::super::{GenericFunctionBody, GenericFunctionTemplate};
 use super::artefact_emit::ModuleMaterialisationContext;
-use super::frozen_syntax::StableBodySyntax;
+use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
 use super::nominal_blueprints::NominalMaterialisationBlueprint;
 use super::semantic_closure::{StableSemanticClosure, stable_body_symbol_names};
 use super::sidecar_build::bootstrap_call_summary_from_signature;
@@ -68,13 +68,20 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 /// Self-contained immutable semantic context owned by one successful declaring module.
 #[derive(Clone)]
 pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) string_table: StringTable,
+    /// Lazily frozen declaring-domain donor identity shared by every body this preparation captures.
+    ///
+    /// WHAT: caches one `SharedDonorIdentity` frozen from `string_table` on first capture.
+    /// WHY: `materialise_ast()` runs once per generated request; freezing per request clones
+    /// the whole table per request. The `Rc` keeps the cache shared across clones of the
+    /// preparation, and laziness keeps bodyless preparations from paying a freeze.
+    donor_identity_cache: Rc<OnceCell<SharedDonorIdentity>>,
     pub(crate) entry_dir: PathId,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
@@ -273,6 +280,18 @@ impl ModuleMaterialisationPreparationBuilder {
 }
 
 impl ModuleMaterialisationPreparation {
+    /// Borrow the cached declaring-domain donor identity, freezing `string_table` once.
+    ///
+    /// WHAT: lazily freezes the declaring string domain and shares the owner across every
+    /// body this preparation (and its clones) captures.
+    /// WHY: per-request freezes clone the whole table per generated request. `Rc<OnceCell>`
+    /// keeps one frozen snapshot per declaring preparation; bodyless preparations never call
+    /// this and pay no freeze.
+    pub(super) fn donor_identity(&self) -> &SharedDonorIdentity {
+        self.donor_identity_cache
+            .get_or_init(|| SharedDonorIdentity::freeze(&self.string_table))
+    }
+
     /// Fork one generated-local table from the live compiler identity prefix.
     ///
     /// Provider rebasing can extend the compiler table after this preparation was frozen. The
@@ -340,9 +359,8 @@ impl ModuleMaterialisationPreparation {
         evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
         evidence.dedup_by(|left, right| left.identity == right.identity);
         let semantic_closure = self.stable_semantic_closure(resources, path_fork)?;
-        // Freeze the declaring string domain once: every source-body capture in this freeze
-        // shares the same donor owner instead of cloning and freezing the live table per body.
-        let donor_identity = super::SharedDonorIdentity::freeze(&self.string_table);
+        // Share one lazily frozen declaring-domain owner across every artefact in this freeze.
+        let donor_identity = self.donor_identity().clone();
 
         let artefacts = templates
             .into_iter()
@@ -1402,6 +1420,7 @@ impl ModuleMaterialisationPreparation {
 
         Ok(Self {
             string_table: string_table.clone_preserving_inherited_prefix(),
+            donor_identity_cache: Rc::new(OnceCell::new()),
             entry_dir,
             module_origin,
             module_resources,

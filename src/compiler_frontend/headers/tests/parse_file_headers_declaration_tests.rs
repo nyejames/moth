@@ -914,10 +914,6 @@ fn retained_header_substreams_do_not_count_copied_path_rows() {
     };
 
     assert_eq!(counter_value("path_syntax_row_count"), 2.0);
-    assert_eq!(
-        counter_value("persistent_generic_path_syntax_row_copy_count"),
-        0.0
-    );
     assert_eq!(counter_value("token_rescan_count"), 0.0);
 }
 

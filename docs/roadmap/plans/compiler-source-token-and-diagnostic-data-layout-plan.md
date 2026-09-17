@@ -21,11 +21,34 @@
 > MON syntax and nested const records, then Wiring V1, then native result slots and Core const
 > evaluation, and Phase 4 resumes only after a rebase and explicit reactivation. The roadmap retains
 > those separate checkpoints.
-> Continuation guidance reports constant-chain (`frontend.ast.total`) scaling at `n^1.44` against
-> its unchanged `n^1.25` max exponent. Generic-instantiation (`frontend.generated.materialise`)
-> observations are `n^1.73` and `n^1.79` against its unchanged `n^1.70` max exponent. Both series
-> exceed their recorded budgets. Matched pre-Phase-3, pre-H0 and current attribution remains
-> outstanding for Phase 3 closeout. The budgets stay unchanged.
+> Closeout validation on the uncommitted worktree based on `f7927597e` (no new commit hash):
+> toolchain rustc/clippy `1.98.1 aarch64-apple-darwin`, host Apple Silicon `6D851D`,
+> `RAYON_NUM_THREADS` unset/default, frontend dev runner with timers build, unchanged budgets
+> nominal `n^1.25`, constant `n^1.25`, generic `n^1.70`. Latest `just validate` passed native
+> featured Clippy, feature coverage/source/first-party audits, `5193` workspace tests,
+> integration `1973/1973`, docs check, and bench-ci `82/82` preflight plus quick measurements,
+> stopping only at generic scaling: nominal `3.411/6.372/12.706/25.322ms n^0.97`, constant
+> `1.125/3.321/10.896ms n^0.82`, generic `78.442/249.278/919.138/3328.514ms n^1.81`
+> (exceeds `1.70`). Independent `just test-feature-matrix` passed all `8` standard lanes;
+> `just timers-erasure-check` passed no-timer binary clean at `8,928,192` bytes;
+> `just bench-data-layout-check` passed `2/2` cases over `10` measured iterations (`-5ms` average).
+> Three independent read-only `bench-scaling` runs (each five measured iterations) now add
+> per-size spread. Current constant-chain medians/ranges are `1.373ms (1.202–1.441)`,
+> `3.131ms (2.852–3.292)`, and `10.506ms (10.236–11.120)` for sizes `32/128/512`,
+> fitted `n^0.73`; exact pre-Phase-3 `c17672bb5` medians/ranges are `0.890ms
+> (0.814–0.979)`, `2.199ms (1.951–2.490)`, and `7.166ms (7.147–7.471)`, fitted `n^0.75`.
+> Current generic-instantiation medians/ranges are `81.244ms (77.293–84.387)`,
+> `255.924ms (243.001–263.498)`, `880.415ms (840.509–903.943)`, and
+> `3295.397ms (3281.227–3417.194)` for sizes `20/40/80/160`, fitted `n^1.78`; the
+> corresponding pre-Phase-3 medians/ranges are `74.249ms (74.206–75.991)`,
+> `232.332ms (229.410–240.732)`, `808.026ms (791.367–863.148)`, and
+> `3096.371ms (3048.797–3135.177)`, fitted `n^1.79`. Current absolute generic points are
+> higher at every size, so no no-worsening claim is made; generic remains above `n^1.70`.
+> Inferred pre-H0 `9f7438f849` remains a non-authoritative context point. Constant attribution,
+> generic attribution and the retained/intermediate ownership ledger remain open; budgets are
+> not raised.
+> Retention probes are proxies only (full retained/intermediate ledger still missing; see capsule).
+> Phase 3 remains open with no checkpoint or exit claimed.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -103,23 +126,46 @@ ACTIVE_PLAN:
   `SourceTokenOwner` bundling the canonical owner, logical path and OS path.
   `src/compiler_frontend/ast/generic_functions/materialisation/frozen_syntax.rs` owns
   `SharedDonorIdentity`, `StableBodyOwner` and canonical versus foreign materialised ownership.
-- Validation evidence (dated 2026-09-14, historical): `just ci-clippy-native` passes on
-  Rust 1.97.1 with warnings denied; the integration suite passes `1973/1973`, including
-  individually filtered passes for all 21 previously failing case IDs (the facade case expands to
-  two backend executions); the repaired evidence-projection unit test passes in isolation; and
-  `just validate` reaches the complexity gate with feature-lane-check (0 findings, lane declarations
-  only, not feature-matrix execution), source audit (1,389 files, 0 findings), first-party
-  dependency audit (21 files, 80 JavaScript sources, 0 findings), 5,134 workspace tests,
-  integration (1973/1973), docs (no errors or warnings) and bench-ci shared preflight (82/82)
-  successful. Timer-erasure status is not reported here because `just validate` runs
-  `just timers-erasure-check` after scaling, which remained red.
-- Current scaling status: continuation guidance reports constant-chain (`frontend.ast.total`) scaling
-  at `n^1.44` against its unchanged `n^1.25` max exponent. Generic-instantiation
-  (`frontend.generated.materialise`) observations are `n^1.73` and `n^1.79` against its unchanged
-  `n^1.70` max exponent. Both series exceed their recorded budgets. Earlier dedicated generic
-  reruns measured `n^1.81` and `n^1.80`; constant and nominal series were within their recorded
-  budgets in those runs. Matched pre-Phase-3, pre-H0 and current attribution remains outstanding for
-  closeout. Do not raise or loosen either budget, and Phase 3 must prove no worsening.
+- Validation evidence (closeout, uncommitted worktree based on `f7927597e`, no new commit;
+  rustc/clippy `1.98.1 aarch64-apple-darwin`, host Apple Silicon `6D851D`,
+  `RAYON_NUM_THREADS` unset/default, frontend dev runner with timers build): latest
+  `just validate` passed native featured Clippy, feature coverage/source/first-party audits,
+  `5193` workspace tests, integration `1973/1973`, docs check, and bench-ci `82/82` preflight
+  plus quick measurements, stopping only at generic scaling. Independent
+  `just test-feature-matrix` then passed all `8` standard lanes;
+  `just timers-erasure-check` passed no-timer binary clean at `8,928,192` bytes;
+  `just bench-data-layout-check` passed `2/2` cases over `10` measured iterations (`-5ms` average).
+- Current scaling status (unchanged budgets nominal `n^1.25`, constant `n^1.25`, generic `n^1.70`):
+  latest validation reported nominal `3.411/6.372/12.706/25.322ms n^0.97`, constant
+  `1.125/3.321/10.896ms n^0.82`, and generic `78.442/249.278/919.138/3328.514ms n^1.81`
+  (exceeds `1.70`).
+- Three independent read-only `bench-scaling` runs (five measured iterations each) give
+  current constant-chain medians/ranges `1.373ms (1.202–1.441)`, `3.131ms
+  (2.852–3.292)`, `10.506ms (10.236–11.120)` at sizes `32/128/512`, fitted `n^0.73`;
+  exact pre-Phase-3 `c17672bb5` gives `0.890ms (0.814–0.979)`, `2.199ms
+  (1.951–2.490)`, `7.166ms (7.147–7.471)`, fitted `n^0.75`. Current generic medians/ranges
+  are `81.244ms (77.293–84.387)`, `255.924ms (243.001–263.498)`, `880.415ms
+  (840.509–903.943)`, `3295.397ms (3281.227–3417.194)` at sizes `20/40/80/160`, fitted
+  `n^1.78`; pre-Phase-3 is `74.249ms (74.206–75.991)`, `232.332ms
+  (229.410–240.732)`, `808.026ms (791.367–863.148)`, `3096.371ms (3048.797–3135.177)`,
+  fitted `n^1.79`. Current absolute generic points are higher at every size; attribution remains
+  required. Do not raise or loosen any budget.
+- Retention probes (proxies only, not a complete owner ledger): warning-heavy `48.402ms`,
+  live/peak/after-drop `29,970/2,057,994/1,479` bytes, retained snapshot `1,200`, identity slots
+  `2`, records `39`, contexts `1`, path tables `1/78` rows/`1,536` bytes, string clones `1`, path
+  copies `7/100` rows/`1,200` bytes; diagnosed `87.707ms`, live/peak/after-drop
+  `319,702/1,978,183/1,488`, retained snapshot `903`, identity slots `42`, records `40`,
+  contexts `1`, path tables `41/6,602` rows/`79,224` bytes, string clones `42`, path copies
+  `48/6,965` rows/`83,580` bytes; generic-scaling-160 `4185.310ms` with
+  `generated.materialise 3551.072ms`, peak `360,435,524`/live `17,098`/after-drop `1,469`, string
+  clones `802`, path copies `807/3,379,512` rows/`40,554,144` bytes, retained report metrics zero
+  because the clean result drops report context. These probes do not yet count
+  `TokenShape`/common-cold bytes, parser adapters/vectors, or distinct generic donor owner counts;
+  the full retained/intermediate ownership ledger remains missing.
+- Open for closeout: `Token`/`TokenKind`/`FileTokens` are still crate-internal parser
+  representations; the foreign generic compatibility lane and metadata/adapter deletion remain;
+  the generic budget remains a red exception pending attribution. No checkpoint or Phase 3 exit is
+  claimed.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -138,20 +184,38 @@ CURRENT_WORKSPACE_STATE:
   stabilisation; refreshed probe evidence is recorded. The bounded pre-Phase-3
   restoration fixed the warning-denied native Clippy baseline, repaired the current integration
   defects, and leaves no integration exceptions to carry forward.
-- The 2026-09-14 validation run passed the recorded gates through bench-ci: feature-lane-check
-  (0 findings, lane declarations only, not feature-matrix execution), source and first-party audits,
-  5,134 workspace tests, all 1,973 integration executions, docs and 82/82 benchmark preflight
-  cases. The scaling stage then reported the generic-instantiation exception. Timer-erasure status
-  was not established because that stage follows scaling in `just validate`. Continuation guidance
-  now reports constant-chain (`frontend.ast.total`) scaling at `n^1.44` against its unchanged
-  `n^1.25` max exponent and generic-instantiation observations at `n^1.73` and `n^1.79` against its
-  unchanged `n^1.70` max exponent. Both series exceed their recorded budgets. Matched
-  pre-Phase-3, pre-H0 and current attribution remains outstanding for closeout.
+- Closeout validation on the uncommitted worktree based on `f7927597e` (no new commit;
+  rustc/clippy `1.98.1 aarch64-apple-darwin`, host Apple Silicon `6D851D`,
+  `RAYON_NUM_THREADS` unset/default, frontend dev runner with timers build) passed native
+  featured Clippy, feature coverage/source/first-party audits, `5193` workspace tests,
+  integration `1973/1973`, docs check, and bench-ci `82/82` preflight plus quick measurements
+  through `just validate`, stopping only at generic scaling: nominal
+  `3.411/6.372/12.706/25.322ms n^0.97`, constant `1.125/3.321/10.896ms n^0.82`, generic
+  `78.442/249.278/919.138/3328.514ms n^1.81` against unchanged budgets nominal `n^1.25`,
+  constant `n^1.25`, generic `n^1.70`. Independent `just test-feature-matrix` passed all `8`
+  standard lanes; `just timers-erasure-check` passed no-timer binary clean at `8,928,192` bytes;
+  `just bench-data-layout-check` passed `2/2` cases over `10` measured iterations (`-5ms`
+  average). Three independent read-only `bench-scaling` runs (five measured iterations each)
+  are now the comparison basis: current constant-chain medians/ranges are `1.373ms
+  (1.202–1.441)`, `3.131ms (2.852–3.292)`, and `10.506ms (10.236–11.120)` at sizes
+  `32/128/512`, fitted `n^0.73`; exact pre-Phase-3 `c17672bb5` is `0.890ms
+  (0.814–0.979)`, `2.199ms (1.951–2.490)`, and `7.166ms (7.147–7.471)`, fitted `n^0.75`.
+  Current generic-instantiation medians/ranges are `81.244ms (77.293–84.387)`,
+  `255.924ms (243.001–263.498)`, `880.415ms (840.509–903.943)`, and
+  `3295.397ms (3281.227–3417.194)` at sizes `20/40/80/160`, fitted `n^1.78`; exact
+  pre-Phase-3 is `74.249ms (74.206–75.991)`, `232.332ms (229.410–240.732)`,
+  `808.026ms (791.367–863.148)`, and `3096.371ms (3048.797–3135.177)`, fitted `n^1.79`.
+  Current absolute generic points are higher at every size; generic attribution, constant
+  attribution and the retained/intermediate ownership ledger remain required. Phase 3 remains
+  open; no checkpoint or exit is claimed.
 - Phase 3 fixed-token/source-owned migration is active. Slices 3A–3E and 3F1–3F5 plus 3G are
   accepted. Accepted foundations are the SoA `SourceTokens` owner, checked ranges and sequences,
-  bounded parser cursors, header range retention and shared donor identity. Outstanding 3H work is
-  adapter deletion, retained-owner checks, metadata-dedup checks and performance attribution. The
-  scaling budget is not raised or loosened.
+  bounded parser cursors, header range retention and shared donor identity. Retention probes are
+  proxies only (see ACTIVE_PLAN) and the full retained/intermediate ownership ledger remains
+  missing. Outstanding 3H work is foreign generic compatibility lane completion, metadata/adapter
+  deletion, retained-owner checks, and generic-budget attribution. The generic scaling exception is
+  retained as a red exception pending attribution; budgets are not raised or loosened. Phase 3
+  remains open with no checkpoint or exit claimed.
 - After accepted Phase 3, this plan pauses through the roadmap order: compiler tidy-up, then MON
   syntax and nested const records, then Wiring V1, then native result slots and Core const
   evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly

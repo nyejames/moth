@@ -4,10 +4,8 @@
 //! Compatibility parser adapters are materialised only for the current operation, while stable
 //! Stage 0 file-reference facts cross the source-preparation lifetime independently.
 
+use super::super::{GenericFunctionBody, MaterialisedDonorContext};
 use super::frozen_file_references::StableResolvedFileReference;
-use crate::compiler_frontend::ast::generic_functions::templates::{
-    GenericFunctionBody, MaterialisedDonorContext,
-};
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
@@ -28,14 +26,14 @@ use std::sync::Arc;
 ///      them. Freezing once per domain preserves that domain while keeping retained storage
 ///      proportional to the domain, not to template count. The shared owner is drop-safe:
 ///      retained bodies keep the allocation alive after the live preparation tables drop.
-///      Foreign materialised bodies keep their own donor pair and never use this owner.
+///      Path-crossing foreign materialised bodies keep their own donor pair and never use this
+///      owner.
 #[derive(Clone, Debug)]
 pub(crate) struct SharedDonorIdentity {
     strings: Arc<FrozenStringTable>,
 }
 
 impl SharedDonorIdentity {
-    /// Freeze the declaring domain's string table once for every body it retains.
     pub(crate) fn freeze(table: &StringTable) -> Self {
         Self {
             strings: Arc::new(table.clone().freeze()),
@@ -51,12 +49,13 @@ impl SharedDonorIdentity {
 ///
 /// The owner/range pair is the only retained syntax payload. Source-origin and same-domain
 /// materialised syntax share the canonical `SourceTokens` owner from prepared-source
-/// publication; only foreign materialised syntax keeps the donor `FileTokens` shell
-/// (including its remapped compatibility lane). No additional parser adapter or copied token
-/// vector is retained. Source bodies additionally share one declaring-domain frozen string
-/// owner created once per `freeze()` or request capture; foreign bodies retain their exact
-/// donor path/string pair. File-reference rows remain stable semantic facts for generated value
-/// resolution.
+/// publication; only path-crossing foreign materialised syntax keeps the donor `FileTokens`
+/// shell (including its remapped compatibility lane). No additional parser adapter or copied
+/// token vector is retained. Source bodies additionally share one declaring-domain frozen
+/// string owner created once per `freeze()` or request capture; path-crossing foreign bodies
+/// retain their exact donor path/string pair while string-only foreign donors canonicalize to
+/// `SourceTokens` plus donor strings. File-reference rows remain stable semantic facts for
+/// generated value resolution.
 #[derive(Clone)]
 pub(super) struct StableBodySyntax {
     pub(super) declaration_path: PathId,
@@ -67,17 +66,18 @@ pub(super) struct StableBodySyntax {
     pub(super) token_sequence: Option<TokenSequenceId>,
     pub(super) source_path_table: Option<Arc<PathTable>>,
     /// Shared declaring-domain donor strings for source bodies; the exact retained donor
-    /// strings for foreign bodies. `(Some, None)` is rejected at the materialisation boundary.
+    /// strings for canonicalized string-only and path-crossing foreign bodies. `(Some, None)`
+    /// is rejected at the materialisation boundary.
     pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
     pub(super) resolved_file_references: Box<[StableResolvedFileReference]>,
 }
-
 /// Canonical owner retained by durable generic body syntax.
 ///
 /// Source bodies share the declaring module's immutable `SourceTokens` allocation plus the
 /// filesystem identity that `SourceTokens` itself does not store. Same-domain materialised
-/// bodies share the donor canonical owner directly. Only foreign materialised bodies retain
-/// the donor `FileTokens` shell so rebased compatibility payloads survive.
+/// bodies share the donor canonical owner directly, as do canonicalized string-only foreign
+/// donors. Only path-crossing foreign materialised bodies retain the donor `FileTokens` shell
+/// so rebased compatibility payloads survive.
 #[derive(Clone, Debug)]
 pub(super) enum StableBodyOwner {
     Source {
@@ -154,10 +154,12 @@ impl MaterialisedBody {
                 self.token_range,
                 self.token_sequence,
                 self.declaration_path,
-                self.resolution_facts,
-                self.frozen_identity_handle,
-                self.source_path_table,
-                self.source_string_table,
+                MaterialisedDonorContext {
+                    resolution_facts: self.resolution_facts,
+                    frozen_identity_handle: self.frozen_identity_handle,
+                    source_path_table: self.source_path_table,
+                    source_string_table: self.source_string_table,
+                },
             ),
             MaterialisedBodyOwner::Foreign { source_owner } => GenericFunctionBody::materialised(
                 source_owner,
@@ -235,7 +237,6 @@ impl StableBodySyntax {
             GenericFunctionBody::MaterialisedForeign {
                 source_owner,
                 source_path_table: None,
-                source_string_table: None,
                 ..
             } => StableBodyOwner::Source {
                 source_tokens: source_owner.canonical_source_tokens_arc().map_err(|_| {
@@ -251,12 +252,13 @@ impl StableBodySyntax {
                 }
             }
         };
-        // Source and same-domain bodies share the declaring domain's frozen donor owner. The
-        // domain freezes once per `freeze()`/`materialise_ast()` call; every body in the domain
-        // clones the same `Arc` instead of cloning and freezing the live table per body.
-        // Foreign materialised bodies keep their exact retained donor pair unchanged, including
-        // a retained string table without a path table. A path table without its issuing
-        // string table is rejected.
+        // Source and same-domain bodies share the declaring preparation's cached donor owner.
+        // The cache freezes once per declaring preparation; every body in the domain clones
+        // the same `Arc` instead of cloning and freezing the live table per body.
+        // Only path-crossing foreign bodies keep their exact retained donor pair. A string-only
+        // foreign donor canonicalizes through its `SourceTokens` owner plus donor strings, so a
+        // retained string table without a path table is canonical metadata. A path table
+        // without its issuing string table is rejected.
         let (source_path_table, source_string_table) = match body {
             GenericFunctionBody::Source { .. } => {
                 let donor_identity = donor_identity.ok_or_else(|| {
@@ -441,9 +443,9 @@ impl StableBodySyntax {
                 }
             };
         // Durable canonical syntax always shares the canonical owner directly and never retains a
-        // `FileTokens` shell. A retained path or string pair is checked donor identity metadata
-        // only; parser consumers derive a transient remapped adapter from it when the requester
-        // table differs. Foreign materialised donors with either retained table keep the donor's
+        // `FileTokens` shell. A retained path/string pair or string-only donor is checked donor
+        // identity metadata only; parser consumers derive a transient remapped adapter from it
+        // when the requester table differs. Only path-crossing foreign donors keep the donor's
         // remapped compatibility shell.
         let source_owner = match &self.source_owner {
             StableBodyOwner::Source {
@@ -453,9 +455,7 @@ impl StableBodySyntax {
                 source_tokens: Arc::clone(source_tokens),
                 canonical_os_path: canonical_os_path.clone(),
             },
-            StableBodyOwner::Materialised { source_owner }
-                if source_path_table.is_some() || source_string_table.is_some() =>
-            {
+            StableBodyOwner::Materialised { source_owner } if source_path_table.is_some() => {
                 MaterialisedBodyOwner::Foreign {
                     source_owner: Arc::clone(source_owner),
                 }
