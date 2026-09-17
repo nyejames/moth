@@ -418,7 +418,18 @@ pub(super) fn create_header(
                 )?;
             }
 
-            body_range = capture_function_body_range(token_stream, context.string_table)?;
+            let mut body_cursor = token_stream
+                .canonical_cursor_from_current()
+                .map_err(HeaderParseFailure::Infrastructure)?;
+            body_range = capture_function_body_range_from_cursor(
+                &mut body_cursor,
+                token_stream.file_id,
+                context.string_table,
+            )?;
+            // Deferred parser handoff: the canonical cursor owns position; sync the legacy index.
+            token_stream.index = token_stream
+                .compatibility_index_for_cursor(body_cursor)
+                .map_err(HeaderParseFailure::Infrastructure)?;
 
             kind = HeaderKind::Function {
                 generic_parameters,
@@ -840,25 +851,6 @@ pub(super) fn capture_function_body_range_from_cursor(
             "function body token range was invalid: {error:?}"
         )))
     })
-}
-
-/// Compatibility wrapper for deferred declaration/AST parser handoffs.
-///
-/// The wrapper borrows the canonical cursor and synchronises the old `FileTokens` index only
-/// after the cursor-based capture completes. It does not create or retain another source owner.
-fn capture_function_body_range(
-    token_stream: &mut FileTokens,
-    string_table: &mut StringTable,
-) -> HeaderDispatchResult<TokenRange> {
-    let mut cursor = token_stream
-        .canonical_cursor_from_current()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    let range =
-        capture_function_body_range_from_cursor(&mut cursor, token_stream.file_id, string_table)?;
-    token_stream.index = token_stream
-        .compatibility_index_for_cursor(cursor)
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    Ok(range)
 }
 
 fn create_constant_header_payload(

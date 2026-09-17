@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
+use crate::compiler_frontend::headers::start_capture::capture_runtime_template_range_from_cursor;
 use crate::compiler_frontend::headers::types::{
     FileRole, HeaderBuildContext, HeaderParseContext, HeaderParseFailure, TopLevelConstFragment,
 };
@@ -123,12 +124,32 @@ fn handle_top_level_const_template(
     if context.file_role == FileRole::ImportedModuleRoot {
         let template_index = token_stream.index;
         token_stream.advance();
-        let range =
-            crate::compiler_frontend::headers::start_capture::capture_runtime_template_range(
-                template_index,
-                token_stream,
-                context.string_table,
-            )?;
+        let opening = TokenIndex::try_from_index(template_index).ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "runtime template opening exceeded the source token index space",
+            ))
+        })?;
+        let canonical_for_opening = token_stream
+            .source_tokens()
+            .map_err(HeaderParseFailure::Infrastructure)?;
+        let opening_token = canonical_for_opening.token(opening).map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "runtime template opening exceeded its source token owner: {error:?}",
+            )))
+        })?;
+        let mut template_cursor = token_stream
+            .canonical_cursor_from_current()
+            .map_err(HeaderParseFailure::Infrastructure)?;
+        let range = capture_runtime_template_range_from_cursor(
+            opening_token,
+            &mut template_cursor,
+            token_stream.file_id,
+            context.string_table,
+        )?;
+        // Deferred parser handoff: the canonical cursor owns position; sync the legacy index.
+        token_stream.index = token_stream
+            .compatibility_index_for_cursor(template_cursor)
+            .map_err(HeaderParseFailure::Infrastructure)?;
         let canonical = token_stream
             .source_tokens()
             .map_err(HeaderParseFailure::Infrastructure)?;

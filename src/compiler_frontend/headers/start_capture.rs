@@ -9,9 +9,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::types::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
-};
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenRange, TokenRef, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::TemplateBalance;
 
 /// Consume one runtime template directly through a borrowed canonical cursor.
@@ -69,41 +67,4 @@ pub(super) fn capture_runtime_template_range_from_cursor(
             "runtime template source range exceeded its canonical owner: {error:?}",
         )))
     })
-}
-
-/// Compatibility wrapper for deferred parser handoffs.
-///
-/// The old entry point keeps the established `FileTokens` cursor index synchronized, but the
-/// balanced scan itself is delegated to the canonical cursor implementation above.
-pub(super) fn capture_runtime_template_range(
-    opening_index: usize,
-    token_stream: &mut FileTokens,
-    string_table: &mut StringTable,
-) -> Result<TokenRange, HeaderParseFailure> {
-    let opening = TokenIndex::try_from_index(opening_index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "runtime template opening exceeded the source token index space",
-        ))
-    })?;
-    let canonical = token_stream
-        .source_tokens()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    let opening_token = canonical.token(opening).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "runtime template opening exceeded its source token owner: {error:?}",
-        )))
-    })?;
-    let mut cursor = token_stream
-        .canonical_cursor_from_current()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    let range = capture_runtime_template_range_from_cursor(
-        opening_token,
-        &mut cursor,
-        token_stream.file_id,
-        string_table,
-    )?;
-    token_stream.index = token_stream
-        .compatibility_index_for_cursor(cursor)
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    Ok(range)
 }
