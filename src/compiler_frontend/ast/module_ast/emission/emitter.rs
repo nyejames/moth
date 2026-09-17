@@ -62,7 +62,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceTokens};
+use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::projects::settings::{self, IMPLICIT_START_FUNC_NAME};
 use rustc_hash::FxHashMap;
@@ -372,23 +372,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         Ok((Arc::clone(owner.tokens()), owner.os_path_cloned()))
     }
 
-    fn body_parser_stream(&self, header: &Header) -> Result<FileTokens, CompilerError> {
-        let (source, os_path) = self.canonical_owner_for_header(header)?;
-        if let Some(sequence) = header.token_sequence {
-            return FileTokens::new_bounded_sequence_substream_from_canonical(
-                source,
-                os_path,
-                sequence,
-                header.declaration_path,
-            );
-        }
-        FileTokens::new_bounded_substream_from_canonical(
-            source,
-            os_path,
-            header.tokens,
-            header.declaration_path,
-        )
-    }
     pub(in crate::compiler_frontend::ast) fn emit(
         mut self,
         sorted_headers: Vec<Header>,
@@ -479,8 +462,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 HeaderKind::Constant { .. } | HeaderKind::Choice { .. } => {}
                 HeaderKind::ConstTemplate { .. } => {
                     let template_path = header.declaration_path;
-                    let mut template_tokens = self
-                        .body_parser_stream(&header)
+                    let (template_source, template_os_path) = self
+                        .canonical_owner_for_header(&header)
                         .map_err(|error| self.error_messages(error, string_table))?;
                     let context = self.build_base_scope_context(BaseScopeContextInput {
                         kind: ContextKind::Constant,
@@ -495,7 +478,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     let template = timed_stage_attributed_opt!(
                         self.context.timing_metric_family.const_template_parse(),
                         self.context.timing_context,
-                        self.parse_const_template(&mut template_tokens, &context, string_table)?
+                        self.parse_const_template(
+                            &header,
+                            &template_source,
+                            template_os_path,
+                            &context,
+                            string_table
+                        )?
                     );
                     self.warnings.extend(context.take_emitted_warnings());
 
@@ -1066,7 +1055,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // materialising a bounded `FileTokens` compatibility vector. Segmented
         // headers use the retained sequence; contiguous headers use the range.
         // Loop/template `Vec<Token>` windows and synthetic/remapped adapters stay
-        // on the explicit compatibility lane (see `body_parser_stream`).
+        // on the explicit compatibility lane.
         let (body_source, body_os_path) = self
             .canonical_owner_for_header(&header)
             .map_err(|error| self.error_messages(error, string_table))?;
@@ -1128,13 +1117,18 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             scope_frame_capacity,
         });
 
-        let mut token_stream = self
-            .body_parser_stream(&header)
+        let (start_source, start_os_path) = self
+            .canonical_owner_for_header(&header)
             .map_err(|error| self.error_messages(error, string_table))?;
         let start_scope = context.scope;
-        let start_src_path = token_stream.src_path;
-        let mut body_cursor = AstCursor::from_file_tokens(&mut token_stream)
-            .map_err(|error| self.error_messages(error, string_table))?;
+        let start_src_path = header.declaration_path;
+        let mut body_cursor = match header.token_sequence {
+            Some(sequence) => {
+                AstCursor::from_source_sequence(&start_source, start_os_path, sequence)
+            }
+            None => AstCursor::from_source_tokens(&start_source, start_os_path, header.tokens),
+        }
+        .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
@@ -1233,13 +1227,20 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
     fn parse_const_template(
         &mut self,
-        template_tokens: &mut FileTokens,
+        header: &Header,
+        template_source: &Arc<SourceTokens>,
+        template_os_path: Option<std::path::PathBuf>,
         context: &ScopeContext,
         string_table: &mut StringTable,
     ) -> Result<PreparedTemplateConstruction, CompilerMessages> {
         let source_path = context.scope;
-        let mut template_cursor = AstCursor::from_file_tokens(template_tokens)
-            .map_err(|error| self.error_messages(error, string_table))?;
+        let mut template_cursor = match header.token_sequence {
+            Some(sequence) => {
+                AstCursor::from_source_sequence(template_source, template_os_path, sequence)
+            }
+            None => AstCursor::from_source_tokens(template_source, template_os_path, header.tokens),
+        }
+        .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,

@@ -192,30 +192,6 @@ impl<'a> AstCursor<'a> {
         Ok(cursor)
     }
 
-    /// Force the compatibility lane over a remapped generic-body adapter.
-    ///
-    /// WHAT: reads the transient `FileTokens` vector (rebased payload IDs) instead of the
-    /// retained donor canonical provenance.
-    /// WHY: `new_remapped_bounded_adapter` keeps donor range/sequence metadata whose spans and
-    /// tags still match but whose payload IDs are stale; a canonical cursor would silently
-    /// ignore the rebased vector. Infallible: the compatibility lane is always available.
-    pub(crate) fn from_file_tokens_compatibility(token_stream: &'a mut FileTokens) -> Self {
-        let canonical_os_path = token_stream.canonical_os_path.clone();
-        let mut cursor = Self {
-            backing: AstCursorBacking::Compatibility(token_stream),
-            canonical_owner: None,
-            canonical_os_path,
-            limit: None,
-            window_start: None,
-            window_end: None,
-            synthetic_eof: None,
-            current_kind: TokenKind::Eof,
-            next_kind: None,
-            previous_kind: None,
-        };
-        cursor.refresh_facts();
-        cursor
-    }
     pub(crate) fn from_owned_file_tokens_compatibility(token_stream: FileTokens) -> Self {
         let canonical_os_path = token_stream.canonical_os_path.clone();
         let mut cursor = Self {
