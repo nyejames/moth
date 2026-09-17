@@ -499,12 +499,9 @@ pub(super) fn finalize_reachable_files(
                     )));
                 }
                 match source_kind {
-                    SourceKind::Compiler(SourceFileKind::MothTemplate) => {
-                        PreparedSourceKind::MothTemplate
-                    }
-                    SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
-                        PreparedSourceKind::PlainMarkdown
-                    }
+                    SourceKind::Compiler(
+                        SourceFileKind::MothTemplate | SourceFileKind::PlainMarkdown,
+                    ) => PreparedSourceKind::Deferred,
                     SourceKind::Compiler(SourceFileKind::Moth) => {
                         unreachable!("Moth sources were handled above")
                     }

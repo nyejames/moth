@@ -129,8 +129,9 @@ fn prepare_owned_source_text(
                 tokens: Box::new(tokens),
             }
         }
-        SourceFileKind::MothTemplate => PreparedSourceKind::MothTemplate,
-        SourceFileKind::PlainMarkdown => PreparedSourceKind::PlainMarkdown,
+        SourceFileKind::MothTemplate | SourceFileKind::PlainMarkdown => {
+            PreparedSourceKind::Deferred
+        }
     };
     Ok(PreparedSourceInput { source_id, source })
 }

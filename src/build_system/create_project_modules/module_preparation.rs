@@ -434,9 +434,9 @@ impl ModulePreparationContext<'_> {
 
         // 1. Prepare all selected files against one local string-table fork per worker chunk.
         //    Directory Moth inputs parse retained tokens, synthetic Moth and Moth-template inputs
-        //    consume complete outputs retained during discovery, pending MothTemplate inputs
-        //    tokenize their body once and plain Markdown bypasses tokenization. Merge/remap once
-        //    before aggregating header syntax.
+        //    consume complete outputs retained during discovery, and deferred inputs resolve
+        //    their kind from the authoritative source database before their one preparation.
+        //    Merge/remap once before aggregating header syntax.
         let (prepared_header_syntax, file_warnings) = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             timing_context,
@@ -1294,14 +1294,35 @@ fn frontend_source<'a>(
             source_path,
             tokens,
         },
-        PreparedSourceKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
-            source_code: retained_source_text(sources, source_id, selected_source_texts)?,
-            source_path,
-        },
-        PreparedSourceKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
-            source_code: retained_source_text(sources, source_id, selected_source_texts)?,
-            source_path,
-        },
+        PreparedSourceKind::Deferred => {
+            let source_code = retained_source_text(sources, source_id, selected_source_texts)?;
+            match sources.get(source_id).and_then(|record| record.kind) {
+                Some(SourceKind::Compiler(SourceFileKind::MothTemplate)) => {
+                    FrontendFilePrepareSource::MothTemplate {
+                        source_code,
+                        source_path,
+                    }
+                }
+                Some(SourceKind::Compiler(SourceFileKind::PlainMarkdown)) => {
+                    FrontendFilePrepareSource::PlainMarkdown {
+                        source_code,
+                        source_path,
+                    }
+                }
+                Some(SourceKind::Compiler(SourceFileKind::Moth)) => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "deferred prepared source {} has Moth kind but carries no retained tokens",
+                        source_id.index()
+                    )));
+                }
+                Some(SourceKind::ProviderOwned) | None => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "deferred prepared source {} has no compilable source kind",
+                        source_id.index()
+                    )));
+                }
+            }
+        }
         PreparedSourceKind::MothPrepared { .. } => {
             unreachable!("retained syntax bypasses frontend source conversion")
         }

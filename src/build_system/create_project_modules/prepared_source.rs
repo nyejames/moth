@@ -1,23 +1,25 @@
 //! State-safe prepared source input for discovered project compilation.
 //!
-//! WHAT: one build-system-private owned enum variant per source kind, plus one move-owned
-//!       `PreparedSource` slot value per selected `SourceId` and the `PreparedSourceSlots`
-//!       store that retains those values in deterministic input order. Directory Moth inputs
-//!       carry their final `SourceId` and retained tokens for the one header-preparation pass;
-//!       synthetic Moth and Moth-template inputs carry one complete prepared output produced
-//!       during discovery. PlainMarkdown carries only its final `SourceId`; paths and snapshots
-//!       come from the authoritative `SourceDatabase`.
-//! WHY: the variant makes source-kind ownership explicit. A directory Moth source cannot reach
-//!      header preparation without its retained `FileTokens`, while synthetic inputs cannot be
-//!      prepared again after their complete outputs have been retained. The slot owner makes the
-//!      exactly-once result ownership explicit: each selected source contributes one
-//!      `FileFrontendPrepareOutput` whose stamped `file_id` must match its slot's `SourceId`,
-//!      without per-source `Arc` or cloned outputs.
+//! WHAT: one token-owned variant, one retained-output variant and one deferred-text variant,
+//!       plus one move-owned `PreparedSource` slot value per selected `SourceId` and the
+//!       `PreparedSourceSlots` store that retains those values in deterministic input order.
+//!       Directory Moth inputs carry their final `SourceId` and retained tokens for the one
+//!       header-preparation pass; synthetic Moth and Moth-template inputs carry one complete
+//!       prepared output produced during discovery. Deferred Moth-template and Markdown inputs
+//!       carry only their final `SourceId`; source kind, paths and snapshots come from the
+//!       authoritative `SourceDatabase`.
+//! WHY: the variant makes work-product ownership explicit without duplicating source kind. A
+//!      directory Moth source cannot reach header preparation without its retained `FileTokens`,
+//!      while synthetic inputs cannot be prepared again after their complete outputs have been
+//!      retained. The slot owner makes the exactly-once result ownership explicit: each selected
+//!      source contributes one `FileFrontendPrepareOutput` whose stamped `file_id` must match its
+//!      slot's `SourceId`, without per-source `Arc` or cloned outputs.
 //!
 //! This type is the build-system-owned transient handoff between Stage 0 source selection and
 //! frontend file/header preparation. Each input carries its final source identity plus the one
 //! work product that cannot be recomputed without repeating Stage 0 (tokens or complete prepared
-//! output); paths and retained snapshots are resolved from the shared source database.
+//! output, or nothing for deferred text); source kind, paths and retained snapshots are resolved
+//! from the shared source database.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareOutput;
@@ -30,11 +32,12 @@ use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// tokenized once; their retained `FileTokens` are carried here so header preparation never lexes
 /// the same source again. Synthetic Moth and Moth-template files carry one complete prepared
 /// output because their complete header output was already produced while discovering the source
-/// closure.
+/// closure. Deferred Moth-template and Markdown files carry only their `SourceId` because their
+/// one preparation pass borrows retained text directly.
 ///
-/// Source paths and snapshots belong to the final `SourceDatabase`. The source ID is the only
-/// identity carried by this transient handoff, so consumers resolve paths and retained text from
-/// one authoritative database.
+/// Source kind, paths and snapshots belong to the final `SourceDatabase`. The source ID is the
+/// only identity carried by this transient handoff, so consumers resolve kind, paths and retained
+/// text from one authoritative database.
 pub(crate) struct PreparedSourceInput {
     pub(crate) source_id: SourceId,
     pub(crate) source: PreparedSourceKind,
@@ -47,10 +50,9 @@ pub(crate) enum PreparedSourceKind {
     MothPrepared {
         output: Box<FileFrontendPrepareOutput>,
     },
-    /// A Moth-template body awaiting its one template-body preparation pass.
-    MothTemplate,
-    /// Plain Markdown content, never tokenized.
-    PlainMarkdown,
+    /// A Moth-template or Markdown body awaiting its one preparation pass. The source kind is
+    /// resolved from the authoritative `SourceDatabase` at conversion time.
+    Deferred,
 }
 
 impl PreparedSourceInput {

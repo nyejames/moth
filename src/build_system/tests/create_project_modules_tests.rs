@@ -313,8 +313,9 @@ fn load_missing_source_paths_with_registered_paths_for_test(
             ));
         }
         let source = match source_kind {
-            SourceFileKind::MothTemplate => PreparedSourceKind::MothTemplate,
-            SourceFileKind::PlainMarkdown => PreparedSourceKind::PlainMarkdown,
+            SourceFileKind::MothTemplate | SourceFileKind::PlainMarkdown => {
+                PreparedSourceKind::Deferred
+            }
             SourceFileKind::Moth => {
                 return Err(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(

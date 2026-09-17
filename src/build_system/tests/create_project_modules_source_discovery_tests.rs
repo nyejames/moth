@@ -289,8 +289,8 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
     assert_eq!(loaded_names, expected_names);
     for (index, input_file) in input_files.iter().enumerate() {
         assert!(
-            matches!(input_file.source, PreparedSourceKind::PlainMarkdown),
-            "missing-source loading should produce PlainMarkdown inputs"
+            matches!(input_file.source, PreparedSourceKind::Deferred),
+            "missing-source loading should produce deferred inputs"
         );
         let source_code = source_files
             .retained_text(input_file.source_id())
