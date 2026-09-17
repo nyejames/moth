@@ -433,7 +433,10 @@ impl ModuleMaterialisationPreparation {
         };
         let stage0_resolution_facts = match body {
             GenericFunctionBody::Source { .. } => self.stage0_resolution_facts.as_deref(),
-            GenericFunctionBody::Materialised {
+            GenericFunctionBody::MaterialisedCanonical {
+                resolution_facts, ..
+            }
+            | GenericFunctionBody::MaterialisedForeign {
                 resolution_facts, ..
             } => Some(resolution_facts.as_ref()),
         };

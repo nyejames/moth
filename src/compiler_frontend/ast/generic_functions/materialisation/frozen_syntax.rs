@@ -49,13 +49,14 @@ impl SharedDonorIdentity {
 }
 /// Durable generic body syntax.
 ///
-/// The owner/range pair is the only retained syntax payload. Source-origin syntax shares the
-/// canonical `SourceTokens` owner from prepared-source publication; Materialised-origin syntax
-/// keeps the donor `FileTokens` shell (including its remapped compatibility lane) until H5.
-/// Neither lane retains a parser adapter or copied token vector. Source bodies additionally
-/// share one declaring-domain frozen string owner created once per `freeze()` or request
-/// capture; foreign bodies retain their exact donor path/string pair. File-reference rows
-/// remain stable semantic facts for generated value resolution.
+/// The owner/range pair is the only retained syntax payload. Source-origin and same-domain
+/// materialised syntax share the canonical `SourceTokens` owner from prepared-source
+/// publication; only foreign materialised syntax keeps the donor `FileTokens` shell
+/// (including its remapped compatibility lane). No additional parser adapter or copied token
+/// vector is retained. Source bodies additionally share one declaring-domain frozen string
+/// owner created once per `freeze()` or request capture; foreign bodies retain their exact
+/// donor path/string pair. File-reference rows remain stable semantic facts for generated value
+/// resolution.
 #[derive(Clone)]
 pub(super) struct StableBodySyntax {
     pub(super) declaration_path: PathId,
@@ -74,8 +75,9 @@ pub(super) struct StableBodySyntax {
 /// Canonical owner retained by durable generic body syntax.
 ///
 /// Source bodies share the declaring module's immutable `SourceTokens` allocation plus the
-/// filesystem identity that `SourceTokens` itself does not store. Materialised bodies retain the
-/// donor `FileTokens` shell so rebased compatibility payloads survive until H5.
+/// filesystem identity that `SourceTokens` itself does not store. Same-domain materialised
+/// bodies share the donor canonical owner directly. Only foreign materialised bodies retain
+/// the donor `FileTokens` shell so rebased compatibility payloads survive.
 #[derive(Clone, Debug)]
 pub(super) enum StableBodyOwner {
     Source {
@@ -86,23 +88,18 @@ pub(super) enum StableBodyOwner {
         source_owner: Arc<FileTokens>,
     },
 }
+/// Canonical-vs-foreign owner carried by a materialised generic body.
+#[derive(Clone, Debug)]
+pub(super) enum MaterialisedBodyOwner {
+    Canonical {
+        source_tokens: Arc<SourceTokens>,
+        canonical_os_path: Option<PathBuf>,
+    },
+    Foreign {
+        source_owner: Arc<FileTokens>,
+    },
+}
 impl StableBodySyntax {
-    fn materialised_owner(&self) -> Result<Arc<FileTokens>, CompilerError> {
-        match &self.source_owner {
-            StableBodyOwner::Source {
-                source_tokens,
-                canonical_os_path,
-            } => FileTokens::canonical_shell_from_canonical(
-                Arc::clone(source_tokens),
-                canonical_os_path.clone(),
-                self.declaration_path,
-                self.token_range,
-                self.token_sequence,
-            )
-            .map(Arc::new),
-            StableBodyOwner::Materialised { source_owner } => Ok(Arc::clone(source_owner)),
-        }
-    }
     #[cfg(test)]
     pub(super) fn canonical_donor_file_id(&self) -> SourceId {
         self.donor_file_id
@@ -111,7 +108,7 @@ impl StableBodySyntax {
 
 /// Materialised body payload passed to generated AST construction.
 pub(super) struct MaterialisedBody {
-    pub(super) source_owner: Arc<FileTokens>,
+    pub(super) source_owner: MaterialisedBodyOwner,
     pub(super) token_range: TokenRange,
     pub(super) token_sequence: Option<TokenSequenceId>,
     pub(super) declaration_path: PathId,
@@ -122,27 +119,71 @@ pub(super) struct MaterialisedBody {
 }
 
 impl MaterialisedBody {
+    #[cfg(test)]
+    pub(super) fn donor_file_id(&self) -> SourceId {
+        match &self.source_owner {
+            MaterialisedBodyOwner::Canonical { source_tokens, .. } => source_tokens.source(),
+            MaterialisedBodyOwner::Foreign { source_owner } => source_owner.file_id,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn canonical_owner(&self) -> Option<&Arc<SourceTokens>> {
+        match &self.source_owner {
+            MaterialisedBodyOwner::Canonical { source_tokens, .. } => Some(source_tokens),
+            MaterialisedBodyOwner::Foreign { .. } => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn foreign_owner(&self) -> Option<&Arc<FileTokens>> {
+        match &self.source_owner {
+            MaterialisedBodyOwner::Canonical { .. } => None,
+            MaterialisedBodyOwner::Foreign { source_owner } => Some(source_owner),
+        }
+    }
+
     pub(super) fn into_generic_body(self) -> Result<GenericFunctionBody, CompilerError> {
-        GenericFunctionBody::materialised(
-            self.source_owner,
-            self.token_range,
-            self.token_sequence,
-            self.declaration_path,
-            MaterialisedDonorContext {
-                resolution_facts: self.resolution_facts,
-                frozen_identity_handle: self.frozen_identity_handle,
-                source_path_table: self.source_path_table,
-                source_string_table: self.source_string_table,
-            },
-        )
+        match self.source_owner {
+            MaterialisedBodyOwner::Canonical {
+                source_tokens,
+                canonical_os_path,
+            } => GenericFunctionBody::materialised_canonical(
+                source_tokens,
+                canonical_os_path,
+                self.token_range,
+                self.token_sequence,
+                self.declaration_path,
+                self.resolution_facts,
+                self.frozen_identity_handle,
+                self.source_path_table,
+                self.source_string_table,
+            ),
+            MaterialisedBodyOwner::Foreign { source_owner } => GenericFunctionBody::materialised(
+                source_owner,
+                self.token_range,
+                self.token_sequence,
+                self.declaration_path,
+                MaterialisedDonorContext {
+                    resolution_facts: self.resolution_facts,
+                    frozen_identity_handle: self.frozen_identity_handle,
+                    source_path_table: self.source_path_table,
+                    source_string_table: self.source_string_table,
+                },
+            ),
+        }
     }
 }
 
 impl std::fmt::Debug for MaterialisedBody {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let donor_file_id = match &self.source_owner {
+            MaterialisedBodyOwner::Canonical { source_tokens, .. } => source_tokens.source(),
+            MaterialisedBodyOwner::Foreign { source_owner } => source_owner.file_id,
+        };
         formatter
             .debug_struct("MaterialisedBody")
-            .field("donor_file_id", &self.source_owner.file_id)
+            .field("donor_file_id", &donor_file_id)
             .field("token_range", &self.token_range)
             .field("token_sequence", &self.token_sequence)
             .finish_non_exhaustive()
@@ -182,11 +223,29 @@ impl StableBodySyntax {
                 source_owner,
                 canonical_os_path,
                 ..
+            }
+            | GenericFunctionBody::MaterialisedCanonical {
+                source_owner,
+                canonical_os_path,
+                ..
             } => StableBodyOwner::Source {
                 source_tokens: Arc::clone(source_owner),
                 canonical_os_path: canonical_os_path.clone(),
             },
-            GenericFunctionBody::Materialised { source_owner, .. } => {
+            GenericFunctionBody::MaterialisedForeign {
+                source_owner,
+                source_path_table: None,
+                source_string_table: None,
+                ..
+            } => StableBodyOwner::Source {
+                source_tokens: source_owner.canonical_source_tokens_arc().map_err(|_| {
+                    CompilerError::compiler_error(
+                        "frozen generic body capture needs a canonical donor owner",
+                    )
+                })?,
+                canonical_os_path: source_owner.canonical_os_path.clone(),
+            },
+            GenericFunctionBody::MaterialisedForeign { source_owner, .. } => {
                 StableBodyOwner::Materialised {
                     source_owner: Arc::clone(source_owner),
                 }
@@ -207,7 +266,31 @@ impl StableBodySyntax {
                 })?;
                 (None, Some(Arc::clone(donor_identity.strings())))
             }
-            GenericFunctionBody::Materialised {
+            GenericFunctionBody::MaterialisedCanonical {
+                source_path_table,
+                source_string_table,
+                ..
+            } => match (source_path_table, source_string_table) {
+                (Some(path_table), Some(source_strings)) => (
+                    Some(Arc::clone(path_table)),
+                    Some(Arc::clone(source_strings)),
+                ),
+                (None, Some(source_strings)) => (None, Some(Arc::clone(source_strings))),
+                (None, None) => {
+                    let donor_identity = donor_identity.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "frozen generic source body has no declaring-domain donor identity",
+                        )
+                    })?;
+                    (None, Some(Arc::clone(donor_identity.strings())))
+                }
+                (Some(_), None) => {
+                    return Err(CompilerError::compiler_error(
+                        "frozen generic body has an incomplete source identity table pair",
+                    ));
+                }
+            },
+            GenericFunctionBody::MaterialisedForeign {
                 source_path_table,
                 source_string_table,
                 ..
@@ -290,9 +373,9 @@ impl StableBodySyntax {
     ) -> Result<MaterialisedBody, CompilerError> {
         // Validate the retained canonical owner before carrying its range/sequence to a parser
         // consumer; parser adapters themselves are intentionally deferred until that boundary.
-        // Source-origin syntax validates directly against `SourceTokens`; Materialised-origin
-        // syntax keeps the `FileTokens`-shell validator so rebased compatibility payloads stay
-        // valid until H5.
+        // Source-origin syntax validates directly against `SourceTokens`; foreign
+        // Materialised-origin syntax keeps the `FileTokens`-shell validator so rebased
+        // compatibility payloads stay valid.
         match &self.source_owner {
             StableBodyOwner::Source { source_tokens, .. } => {
                 crate::compiler_frontend::ast::generic_functions::templates::validate_source_owner(
@@ -326,12 +409,22 @@ impl StableBodySyntax {
             self.donor_file_id,
             resolved_file_references,
         )?);
+        let source_owner_is_canonical =
+            matches!(&self.source_owner, StableBodyOwner::Source { .. });
         let (source_path_table, source_string_table) =
             match (&self.source_path_table, &self.source_string_table) {
                 (Some(path_table), Some(source_strings)) => (
                     Some(Arc::clone(path_table)),
                     Some(Arc::clone(source_strings)),
                 ),
+                (None, Some(source_strings)) if source_owner_is_canonical => identity_tables
+                    .map(|(path_table, source_strings)| {
+                        (
+                            Some(Arc::clone(path_table)),
+                            Some(Arc::clone(source_strings)),
+                        )
+                    })
+                    .unwrap_or((None, Some(Arc::clone(source_strings)))),
                 (None, Some(source_strings)) => (None, Some(Arc::clone(source_strings))),
                 (None, None) => identity_tables
                     .map(|(path_table, source_strings)| {
@@ -347,9 +440,40 @@ impl StableBodySyntax {
                     ));
                 }
             };
-        let materialised_owner = self.materialised_owner()?;
+        // Durable canonical syntax always shares the canonical owner directly and never retains a
+        // `FileTokens` shell. A retained path or string pair is checked donor identity metadata
+        // only; parser consumers derive a transient remapped adapter from it when the requester
+        // table differs. Foreign materialised donors with either retained table keep the donor's
+        // remapped compatibility shell.
+        let source_owner = match &self.source_owner {
+            StableBodyOwner::Source {
+                source_tokens,
+                canonical_os_path,
+            } => MaterialisedBodyOwner::Canonical {
+                source_tokens: Arc::clone(source_tokens),
+                canonical_os_path: canonical_os_path.clone(),
+            },
+            StableBodyOwner::Materialised { source_owner }
+                if source_path_table.is_some() || source_string_table.is_some() =>
+            {
+                MaterialisedBodyOwner::Foreign {
+                    source_owner: Arc::clone(source_owner),
+                }
+            }
+            StableBodyOwner::Materialised { source_owner } => {
+                let canonical_owner = source_owner.canonical_source_tokens_arc().map_err(|_| {
+                    CompilerError::compiler_error(
+                        "frozen generic body materialisation needs a canonical donor owner",
+                    )
+                })?;
+                MaterialisedBodyOwner::Canonical {
+                    source_tokens: canonical_owner,
+                    canonical_os_path: source_owner.canonical_os_path.clone(),
+                }
+            }
+        };
         Ok(MaterialisedBody {
-            source_owner: materialised_owner,
+            source_owner,
             token_range: self.token_range,
             token_sequence: self.token_sequence,
             declaration_path: self.declaration_path,
