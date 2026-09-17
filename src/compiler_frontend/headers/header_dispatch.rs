@@ -38,14 +38,14 @@ use crate::compiler_frontend::headers::ordering_hints::{
 use crate::compiler_frontend::headers::types::{
     Header, HeaderBuildContext, HeaderExportMode, HeaderKind, LocalDeclarationOrderingHint,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenIndex, TokenRange, TokenRef, TokenTag,
+    FileTokens, Token, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
@@ -754,76 +754,44 @@ fn empty_token_range(token_stream: &FileTokens) -> HeaderDispatchResult<TokenRan
         ))
     })
 }
-// WHAT: finds the source range containing a function body (`:` … `;`), tracking scope depth to
-// handle nested scopes (inner `if`/`loop`/etc.) correctly.
-//
-// WHY: extracted from `create_header` to reduce its length and make the scope-balancing
-// contract explicit. `parse_function_signature_syntax` leaves the compatibility cursor on the
-// first body token. This helper scans the canonical source owner, then synchronises that cursor
-// only for deferred 3F2–3F4 parser handoffs.
-// Local declaration-ordering hints are derived from the signature only. This helper captures the
-// structural body range; AST owns body syntax diagnostics, while Stage 0 records graph-active
-// file references from its own source-owned start-body ranges.
 
-fn capture_function_body_range(
-    token_stream: &mut FileTokens,
+/// Capture a function body directly from a canonical cursor.
+///
+/// WHAT: consumes the cursor that the declaration parser left on the first body token and returns
+/// the source range from that token through its matching `;`, tracking scope depth so nested
+/// scopes (inner `if`/`loop`/etc.) close correctly.
+/// WHY: the canonical header path must retain ranges, not clone a compatibility token vector or
+/// rescan source text, and the cursor is the sole source of parser position and EOF/span facts.
+/// Only the structural range is captured here: AST owns body syntax diagnostics, declaration
+/// ordering hints come from the signature, and Stage 0 records graph-active file references from
+/// its own source-owned start-body ranges.
+pub(super) fn capture_function_body_range_from_cursor(
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
     string_table: &mut StringTable,
 ) -> HeaderDispatchResult<TokenRange> {
-    let body_start = token_stream.index;
-    let canonical = token_stream.source_tokens().map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "function body capture is missing its source token owner: {error:?}"
-        )))
-    })?;
-    if canonical.source() != token_stream.file_id {
+    let source = cursor.source_tokens();
+    if source.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
-                "function body capture source token owner does not match its file identity",
-            ),
-        ));
-    }
-    if token_stream.length != canonical.len() || token_stream.tokens.len() != canonical.len() {
-        return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
-                "function body capture token adapter length does not match its source owner",
+            internal_header_dispatch_error(
+                "Function body cursor source owner does not match its header identity.",
+                None,
             ),
         ));
     }
 
-    let body_start = TokenIndex::try_from_index(body_start).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Function body token range start exceeded the source token index space.",
-            compatibility_cursor_span(token_stream),
-        ))
-    })?;
-    let source_end = TokenIndex::try_from_index(canonical.len()).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Function body token range end exceeded the source token index space.",
-            compatibility_cursor_span(token_stream),
-        ))
-    })?;
-    let scan_range = canonical.range(body_start, source_end).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "function body capture range exceeded its source owner: {error:?}"
-        )))
-    })?;
-    let mut cursor = canonical.cursor(scan_range).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "function body capture cursor exceeded its source owner: {error:?}"
-        )))
-    })?;
+    let body_start = cursor.position();
     let mut scopes_opened: usize = 1;
     let mut scopes_closed: usize = 0;
     let mut body_end = None;
 
-    // `parse_function_signature_syntax` stops on the first body token, so the first loop
-    // iteration must inspect the current canonical token before any deferred parser sees the
-    // compatibility cursor again.
+    // `parse_function_signature_syntax` stops on the first body token, so inspect the current
+    // canonical token before moving the cursor. EOF is handled from its exact TokenRef span.
     while scopes_opened > scopes_closed {
         let current = cursor.advance().ok_or_else(|| {
             HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
                 "Function body capture reached the source end before its closing delimiter.",
-                compatibility_cursor_span(token_stream),
+                None,
             ))
         })?;
 
@@ -839,10 +807,8 @@ fn capture_function_body_range(
                     body_end = Some(current.index());
                 }
             }
-
-            // Colons used in templates parse into a different token (StartTemplateBody), so there
-            // is no risk of templates creating a colon imbalance here. All other language
-            // constructs follow the invariant: every `:` is closed by `;`.
+            // Colons used in templates parse into a different token (`StartTemplateBody`), so
+            // every ordinary colon still contributes one balanced source scope.
             TokenTag::COLON => {
                 scopes_opened = scopes_opened.checked_add(1).ok_or_else(|| {
                     HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
@@ -851,19 +817,14 @@ fn capture_function_body_range(
                     ))
                 })?;
             }
-
             TokenTag::DOUBLE_COLON => {}
-
             TokenTag::EOF => {
-                // Diagnostic payloads carry the expected delimiter as a StringId so they can be
-                // remapped and rendered through the active string table.
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     Some(string_table.intern(";")),
                     Some(current.source_span()),
                 )
                 .into());
             }
-
             _ => {}
         }
     }
@@ -871,27 +832,33 @@ fn capture_function_body_range(
     let body_end = body_end.ok_or_else(|| {
         HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
             "Function body capture did not identify its closing delimiter.",
-            compatibility_cursor_span(token_stream),
+            None,
         ))
     })?;
-    let body_range = canonical.range(body_start, body_end).map_err(|error| {
+    TokenRange::try_new_for(source, body_start, body_end).map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "function body token range was invalid: {error:?}"
         )))
-    })?;
-    let next_index = cursor.position().index();
-    if next_index > token_stream.tokens.len() {
-        return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
-                "function body capture handoff exceeded its compatibility token adapter",
-            ),
-        ));
-    }
+    })
+}
 
-    // Canonical scanning is complete. Synchronise the compatibility index once so deferred
-    // declaration/AST/template parsers receive the established post-body position.
-    token_stream.index = next_index;
-    Ok(body_range)
+/// Compatibility wrapper for deferred declaration/AST parser handoffs.
+///
+/// The wrapper borrows the canonical cursor and synchronises the old `FileTokens` index only
+/// after the cursor-based capture completes. It does not create or retain another source owner.
+fn capture_function_body_range(
+    token_stream: &mut FileTokens,
+    string_table: &mut StringTable,
+) -> HeaderDispatchResult<TokenRange> {
+    let mut cursor = token_stream
+        .canonical_cursor_from_current()
+        .map_err(HeaderParseFailure::Infrastructure)?;
+    let range =
+        capture_function_body_range_from_cursor(&mut cursor, token_stream.file_id, string_table)?;
+    token_stream.index = token_stream
+        .compatibility_index_for_cursor(cursor)
+        .map_err(HeaderParseFailure::Infrastructure)?;
+    Ok(range)
 }
 
 fn create_constant_header_payload(
