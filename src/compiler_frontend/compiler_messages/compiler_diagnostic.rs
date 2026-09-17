@@ -35,7 +35,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRef, TokenTag, TokenViewError};
+use crate::compiler_frontend::tokenizer::tokens::{TokenRef, TokenTag, TokenViewError};
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompilerDiagnostic {
     pub kind: DiagnosticKind,
@@ -116,36 +116,29 @@ impl CompilerDiagnostic {
     //  Syntax Constructors
     // ------------------------------------------------------------------
 
-    pub(crate) fn expected_token(
-        expected: TokenKind,
-        found: Option<TokenKind>,
+    /// Projection-based `ExpectedToken` for dynamic expected spellings.
+    ///
+    /// WHAT: retains caller-projected expected/found tokens without cloning `TokenKind`.
+    /// WHY: the `#Config` qualifier names a dynamic `Symbol(Config)` expected token;
+    ///      static delimiters keep using `expected_token_from_tags`.
+    pub(crate) fn expected_token_from_projections(
+        expected: DiagnosticToken,
+        found: Option<DiagnosticToken>,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedToken),
             span,
-            DiagnosticPayload::ExpectedToken {
-                expected: expected.into(),
-                found: found.map(DiagnosticToken::from),
-            },
+            DiagnosticPayload::ExpectedToken { expected, found },
         )
     }
-
-    pub(crate) fn unexpected_token(found: TokenKind, span: Option<SourceSpan>) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken),
-            span,
-            DiagnosticPayload::UnexpectedToken {
-                found: found.into(),
-            },
-        )
-    }
-    /// Tag-based `ExpectedToken` for callsites that already classified both tokens.
+    /// Tag-based `ExpectedToken` for static/path expected spellings.
     ///
-    /// WHAT: retains the expected static/path descriptor plus the found compact
-    ///       projection without cloning `TokenKind`.
-    /// WHY: header/type parsers classify through `TokenRef`/`TokenTag` while the
-    ///      legacy `TokenKind` lane remains for parser-owned values.
+    /// WHAT: retains the expected static/path descriptor plus the caller-projected
+    ///       found token without cloning `TokenKind`.
+    /// WHY: the found side arrives as a compact projection: `expected_token_from_ref`
+    ///      over a canonical `TokenRef` when available, otherwise a
+    ///      `DiagnosticToken::from(TokenKind)` compatibility fallback.
     pub(crate) fn expected_token_from_tags(
         expected: TokenTag,
         found: Option<DiagnosticToken>,

@@ -12,13 +12,13 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
+    CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken, InvalidMatchPatternReason,
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 
 use rustc_hash::FxHashMap;
 
@@ -277,9 +277,13 @@ fn parse_choice_pattern_captures(
                         .into());
                     }
                     _ => {
-                        return Err(CompilerDiagnostic::expected_token(
-                            TokenKind::Comma,
-                            Some(token_stream.current_token_kind().clone()),
+                        let found = match token_stream.current() {
+                            Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+                            None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+                        };
+                        return Err(CompilerDiagnostic::expected_token_from_tags(
+                            TokenTag::COMMA,
+                            found,
                             current_span(token_stream),
                         )
                         .into());

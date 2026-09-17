@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression::create_express
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -119,8 +119,12 @@ fn parse_and_validate_statement_expression(
     }
 
     if !is_expression_statement(&expression) {
-        return Err(CompilerDiagnostic::unexpected_token(
-            token_stream.current_token_kind().to_owned(),
+        let found = match token_stream.current() {
+            Some(found) => DiagnosticToken::from_token_ref(found),
+            None => DiagnosticToken::from(token_stream.current_token_kind()),
+        };
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            found,
             Some(token_stream.current_span()),
         )
         .into());

@@ -14,7 +14,9 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticToken, InvalidExpressionReason,
+};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     parse_build_config_qualifier, starts_build_config_qualifier_at_cursor,
@@ -26,7 +28,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -168,9 +170,13 @@ pub(super) fn parse_anonymous_const_record_expression(
             }
 
             _ => {
-                return Err(CompilerDiagnostic::expected_token(
-                    TokenKind::Comma,
-                    Some(token_stream.current_token_kind().to_owned()),
+                let found = match token_stream.current() {
+                    Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+                    None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+                };
+                return Err(CompilerDiagnostic::expected_token_from_tags(
+                    TokenTag::COMMA,
+                    found,
                     current_span(token_stream),
                 )
                 .into());

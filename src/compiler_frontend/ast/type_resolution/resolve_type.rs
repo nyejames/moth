@@ -32,7 +32,7 @@ use crate::compiler_frontend::ast::type_resolution::{
     maps::{map_nesting_depth, validate_map_key_type},
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCollectionTypeReason, InvalidMapTypeReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidCollectionTypeReason, InvalidMapTypeReason,
     InvalidTypeAnnotationReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
@@ -48,7 +48,7 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::{
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Resolve a parsed type annotation through the parsed-ref-aware path.
 ///
@@ -306,7 +306,7 @@ fn unresolved_type_id_diagnostic(
                 CompilerDiagnostic::invalid_type_annotation(
                     TypeAnnotationContext::DeclarationTarget,
                     InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                        found: TokenKind::Eof.into(),
+                        found: DiagnosticToken::from_static_tag(TokenTag::EOF),
                     },
                     span,
                 )
@@ -319,7 +319,7 @@ fn unresolved_type_id_diagnostic(
         _ => CompilerDiagnostic::invalid_type_annotation(
             TypeAnnotationContext::DeclarationTarget,
             InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                found: TokenKind::Eof.into(),
+                found: DiagnosticToken::from_static_tag(TokenTag::EOF),
             },
             span,
         ),

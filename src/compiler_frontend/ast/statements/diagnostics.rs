@@ -11,7 +11,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword, reserved_trait_keyword_error,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidStatementPositionReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidStatementPositionReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -87,11 +87,21 @@ pub(crate) fn unexpected_statement_token(
                 reserved_trait_keyword_error(keyword, span)
             } else {
                 // Invariant: Must and TraitThis are always reserved trait keywords.
-                CompilerDiagnostic::unexpected_token(token_kind.to_owned(), span)
+                let found = match token_stream.current() {
+                    Some(found) => DiagnosticToken::from_token_ref(found),
+                    None => DiagnosticToken::from(token_kind),
+                };
+                CompilerDiagnostic::unexpected_token_from_tag(found, span)
             }
         }
 
-        _ => CompilerDiagnostic::unexpected_token(token_kind.to_owned(), span),
+        _ => {
+            let found = match token_stream.current() {
+                Some(found) => DiagnosticToken::from_token_ref(found),
+                None => DiagnosticToken::from(token_kind),
+            };
+            CompilerDiagnostic::unexpected_token_from_tag(found, span)
+        }
     };
 
     with_current_token_span(token_stream, diagnostic)

@@ -45,9 +45,9 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidBuiltinCallReason, InvalidCastReason,
-    InvalidControlFlowStatementReason, InvalidExpressionReason, InvalidTemplateStructureReason,
-    TypeMismatchContext,
+    CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
+    InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
+    InvalidTemplateStructureReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
@@ -108,7 +108,7 @@ fn unexpected_token_at_current(
     if let Some(found) = token_stream.current() {
         CompilerDiagnostic::unexpected_token_from_ref(found, span)
     } else {
-        CompilerDiagnostic::unexpected_token(fallback, span)
+        CompilerDiagnostic::unexpected_token_from_tag(DiagnosticToken::from(fallback), span)
     }
 }
 

@@ -398,11 +398,16 @@ pub(crate) fn parse_build_config_qualifier(
         TokenKind::Symbol(name) if string_table.resolve(*name) == "Config" => {
             token_stream.advance();
         }
-        found => {
+        _ => {
+            let expected = DiagnosticToken::from(TokenKind::Symbol(string_table.intern("Config")));
+            let found = match token_stream.canonical_cursor().current() {
+                Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+                None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+            };
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::expected_token(
-                    TokenKind::Symbol(string_table.intern("Config")),
-                    Some(found.to_owned()),
+                CompilerDiagnostic::expected_token_from_projections(
+                    expected,
+                    found,
                     token_stream.current_span(),
                 ),
             ));

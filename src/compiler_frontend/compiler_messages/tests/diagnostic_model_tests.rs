@@ -3,7 +3,7 @@ use super::{
     ConfigDiagnosticKind, DeferredFeatureDiagnosticKind, DeferredFeatureReason,
     DependencyClauseKind, DiagnosticBag, DiagnosticCategory, DiagnosticKind, DiagnosticLabel,
     DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload, DiagnosticPlace,
-    DiagnosticSeverity, GenericApplicationErrorReason, ImportDiagnosticKind,
+    DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason, ImportDiagnosticKind,
     ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InfrastructureDiagnosticKind,
     InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
@@ -1570,9 +1570,9 @@ fn remap_string_ids_updates_payloads_labels_and_tokens() {
 
     let mut path_syntax = PathSyntaxTable::new();
     let path_id = path_syntax.push(import_path, first_span);
-    let expected_token = CompilerDiagnostic::expected_token(
-        TokenKind::Symbol(name),
-        Some(TokenKind::Path(path_id)),
+    let expected_token = CompilerDiagnostic::expected_token_from_projections(
+        DiagnosticToken::from(TokenKind::Symbol(name)),
+        Some(DiagnosticToken::from(TokenKind::Path(path_id))),
         primary_span,
     );
     let duplicate = CompilerDiagnostic::duplicate_declaration(name, Some(first_span), primary_span);
@@ -3625,12 +3625,15 @@ fn token_diagnostics_render_source_spelling_not_token_debug_names() {
     let name = string_table.intern("item");
     let span = None;
 
-    let expected = CompilerDiagnostic::expected_token(
-        TokenKind::OpenParenthesis,
-        Some(TokenKind::Symbol(name)),
+    let expected = CompilerDiagnostic::expected_token_from_tags(
+        TokenTag::OPEN_PARENTHESIS,
+        Some(DiagnosticToken::from(TokenKind::Symbol(name))),
         span,
     );
-    let unexpected = CompilerDiagnostic::unexpected_token(TokenKind::OpenCurly, span);
+    let unexpected = CompilerDiagnostic::unexpected_token_from_tag(
+        DiagnosticToken::from(TokenKind::OpenCurly),
+        span,
+    );
 
     let render_context = DiagnosticRenderContext::new(&string_table);
     let expected_terse = terse::format_terse_diagnostic_with_context(&expected, render_context);

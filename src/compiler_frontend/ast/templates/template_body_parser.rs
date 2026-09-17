@@ -38,7 +38,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -310,8 +310,12 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                 }
 
                 found => {
+                    let found_token = match self.token_stream.current() {
+                        Some(found) => DiagnosticToken::from_token_ref(found),
+                        None => DiagnosticToken::from(found),
+                    };
                     let mut diagnostic =
-                        CompilerDiagnostic::unexpected_token(found.clone(), last_known_span);
+                        CompilerDiagnostic::unexpected_token_from_tag(found_token, last_known_span);
                     diagnostic.primary_span = last_known_span;
                     return Err(diagnostic.into());
                 }

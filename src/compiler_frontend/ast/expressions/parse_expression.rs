@@ -16,13 +16,15 @@ use super::parse_expression_input::{
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReturnShapeReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticToken, InvalidReturnShapeReason,
+};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
@@ -121,9 +123,13 @@ fn create_multiple_expressions_inner(
 
     if consume_closing_parenthesis {
         if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
-            return Err(CompilerDiagnostic::expected_token(
-                TokenKind::CloseParenthesis,
-                Some(token_stream.current_token_kind().to_owned()),
+            let found = match token_stream.current() {
+                Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+                None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+            };
+            return Err(CompilerDiagnostic::expected_token_from_tags(
+                TokenTag::CLOSE_PARENTHESIS,
+                found,
                 Some(token_stream.current_span()),
             )
             .into());
@@ -350,11 +356,19 @@ fn create_expression_until_with_policy(
     };
 
     if end_index == start_index {
-        return Err(CompilerDiagnostic::unexpected_token(end_kind, end_span).into());
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            DiagnosticToken::from(end_kind),
+            end_span,
+        )
+        .into());
     }
 
     if !stop_tokens.contains(&end_kind) {
-        return Err(CompilerDiagnostic::unexpected_token(end_kind, end_span).into());
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            DiagnosticToken::from(end_kind),
+            end_span,
+        )
+        .into());
     }
 
     // ------------------------

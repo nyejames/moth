@@ -26,14 +26,14 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidBuiltinCallReason, InvalidCallShapeReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidBuiltinCallReason, InvalidCallShapeReason,
     InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
@@ -211,9 +211,13 @@ fn parse_call_arguments_inner(
     //  Consume opening paren
     // ------------------------
     if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
-        return Err(CompilerDiagnostic::expected_token(
-            TokenKind::OpenParenthesis,
-            Some(token_stream.current_token_kind().to_owned()),
+        let found = match token_stream.current() {
+            Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+            None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+        };
+        return Err(CompilerDiagnostic::expected_token_from_tags(
+            TokenTag::OPEN_PARENTHESIS,
+            found,
             current_span(token_stream),
         )
         .into());
@@ -263,8 +267,8 @@ fn parse_call_arguments_inner(
                     .is_some_and(|kind| matches!(kind, TokenKind::Symbol(_)))
                     && lookahead_third_is_assign =>
             {
-                return Err(CompilerDiagnostic::unexpected_token(
-                    TokenKind::Mutable,
+                return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                    DiagnosticToken::from_static_tag(TokenTag::MUTABLE),
                     current_span(token_stream),
                 )
                 .into());
@@ -289,8 +293,8 @@ fn parse_call_arguments_inner(
                     && lookahead_third_is_close_paren
                     && lookahead_fourth_is_assign =>
             {
-                return Err(CompilerDiagnostic::unexpected_token(
-                    TokenKind::OpenParenthesis,
+                return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                    DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
                     current_span(token_stream),
                 )
                 .into());
@@ -314,8 +318,12 @@ fn parse_call_arguments_inner(
         if token_stream.current_token_kind() == &TokenKind::Comma
             || token_stream.current_token_kind() == &TokenKind::CloseParenthesis
         {
-            return Err(CompilerDiagnostic::unexpected_token(
-                token_stream.current_token_kind().to_owned(),
+            let found = match token_stream.current() {
+                Some(found) => DiagnosticToken::from_token_ref(found),
+                None => DiagnosticToken::from(token_stream.current_token_kind()),
+            };
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                found,
                 current_span(token_stream),
             )
             .into());
@@ -389,8 +397,12 @@ fn parse_call_arguments_inner(
                 break;
             }
             _ => {
-                return Err(CompilerDiagnostic::unexpected_token(
-                    token_stream.current_token_kind().to_owned(),
+                let found = match token_stream.current() {
+                    Some(found) => DiagnosticToken::from_token_ref(found),
+                    None => DiagnosticToken::from(token_stream.current_token_kind()),
+                };
+                return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                    found,
                     current_span(token_stream),
                 )
                 .into());

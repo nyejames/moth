@@ -33,8 +33,8 @@ use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionResult, aliases, context::TypeResolutionContext,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidGenericInstantiationReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceTypeValueMisuseKind,
+    CompilerDiagnostic, DiagnosticToken, InvalidGenericInstantiationReason,
+    InvalidTypeAnnotationReason, NameNamespace, NamespaceTypeValueMisuseKind,
 };
 use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     BuiltinGenericType, GenericBaseType,
@@ -50,7 +50,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
@@ -188,7 +188,7 @@ pub(super) fn resolve_namespaced_type_from_context(
         return Err(CompilerDiagnostic::invalid_type_annotation(
             TypeAnnotationContext::DeclarationTarget,
             InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                found: TokenKind::Eof.into(),
+                found: DiagnosticToken::from_static_tag(TokenTag::EOF),
             },
             span,
         ));

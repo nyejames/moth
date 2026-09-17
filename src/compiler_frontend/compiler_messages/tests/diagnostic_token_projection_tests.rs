@@ -62,7 +62,7 @@ fn token_payload_pairs(
     [
         (
             DiagnosticPayload::ExpectedToken {
-                expected: DiagnosticToken::from(TokenKind::Arrow),
+                expected: DiagnosticToken::from_static_tag(TokenTag::ARROW),
                 found: Some(legacy),
             },
             DiagnosticPayload::ExpectedToken {
@@ -197,12 +197,12 @@ fn projected_unexpected_and_expected_rendering_matches_legacy_before_and_after_d
             let token_ref = source_tokens
                 .token(index)
                 .expect("fixture token index should resolve");
-            let legacy_kind = legacy_token.kind.clone();
+            let legacy = DiagnosticToken::from(&legacy_token.kind);
             let legacy_unexpected =
-                super::CompilerDiagnostic::unexpected_token(legacy_kind.clone(), None);
-            let legacy_expected = super::CompilerDiagnostic::expected_token(
-                TokenKind::Arrow,
-                Some(legacy_kind),
+                super::CompilerDiagnostic::unexpected_token_from_tag(legacy, None);
+            let legacy_expected = super::CompilerDiagnostic::expected_token_from_tags(
+                TokenTag::ARROW,
+                Some(legacy),
                 None,
             );
             let projected_unexpected =

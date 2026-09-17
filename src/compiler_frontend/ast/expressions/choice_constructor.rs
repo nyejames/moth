@@ -29,7 +29,8 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidChoiceVariantReason,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
+    InvalidChoiceVariantReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -122,8 +123,12 @@ pub(super) fn parse_choice_construct(
         }
 
         found => {
-            return Err(CompilerDiagnostic::unexpected_token(
-                found.clone(),
+            let found_token = match token_stream.current() {
+                Some(found) => DiagnosticToken::from_token_ref(found),
+                None => DiagnosticToken::from(found),
+            };
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                found_token,
                 Some(token_stream.current_span()),
             )
             .into());

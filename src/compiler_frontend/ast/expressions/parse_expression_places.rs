@@ -23,7 +23,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
     InvalidReceiverCallReason, NameNamespace,
 };
 use crate::compiler_frontend::datatypes::DataType;
@@ -55,11 +55,11 @@ pub(super) fn parse_mutable_receiver_expression(
     token_stream.advance();
 
     let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
-        return Err(CompilerDiagnostic::unexpected_token(
-            token_stream.current_token_kind().to_owned(),
-            marker_span,
-        )
-        .into());
+        let found = match token_stream.current() {
+            Some(found) => DiagnosticToken::from_token_ref(found),
+            None => DiagnosticToken::from(token_stream.current_token_kind()),
+        };
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(found, marker_span).into());
     };
 
     let Some(receiver_declaration) = context.get_reference(&symbol_id) else {
@@ -172,9 +172,13 @@ fn parse_copy_place_payload(
             )?;
 
             if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
-                return Err(CompilerDiagnostic::expected_token(
-                    TokenKind::CloseParenthesis,
-                    Some(token_stream.current_token_kind().to_owned()),
+                let found = match token_stream.current() {
+                    Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+                    None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+                };
+                return Err(CompilerDiagnostic::expected_token_from_tags(
+                    TokenTag::CLOSE_PARENTHESIS,
+                    found,
                     current_span(token_stream),
                 )
                 .into());

@@ -17,12 +17,12 @@ use crate::compiler_frontend::ast::statements::value_production::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidReturnShapeReason,
-    TypeMismatchContext,
+    CompilerDiagnostic, DiagnosticToken, InvalidControlFlowStatementReason,
+    InvalidReturnShapeReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -112,8 +112,8 @@ pub(crate) fn parse_return_statement(
     }
 
     if token_stream.current_token_kind() == &TokenKind::Bang {
-        return Err(CompilerDiagnostic::unexpected_token(
-            TokenKind::Bang,
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            DiagnosticToken::from_static_tag(TokenTag::BANG),
             Some(token_stream.current_span()),
         )
         .into());

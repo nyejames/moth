@@ -38,9 +38,9 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidCollectionTypeReason,
-    InvalidConfigReason, InvalidDeclarationReason, InvalidExpressionReason,
-    InvalidFallibleHandlingReason, TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
+    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
+    InvalidExpressionReason, InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 
 use crate::compiler_frontend::build_config::BuildInputName;
@@ -586,8 +586,12 @@ pub fn resolve_declaration_syntax(
 
         initializer_stream.skip_newlines();
         if initializer_stream.current_token_kind() != &TokenKind::Eof {
-            return Err(CompilerDiagnostic::unexpected_token(
-                initializer_stream.current_token_kind().to_owned(),
+            let found = match initializer_stream.current() {
+                Some(found) => DiagnosticToken::from_token_ref(found),
+                None => DiagnosticToken::from(initializer_stream.current_token_kind()),
+            };
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                found,
                 Some(initializer_stream.current_span()),
             )
             .into());
@@ -903,8 +907,11 @@ pub fn resolve_declaration_syntax(
             .into());
         }
 
-        return Err(CompilerDiagnostic::unexpected_token(
-            initializer_stream.current_token_kind().to_owned(),
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            match initializer_stream.current() {
+                Some(found) => DiagnosticToken::from_token_ref(found),
+                None => DiagnosticToken::from(initializer_stream.current_token_kind()),
+            },
             Some(initializer_stream.current_span()),
         )
         .into());
