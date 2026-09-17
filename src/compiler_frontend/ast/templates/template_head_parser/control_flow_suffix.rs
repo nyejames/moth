@@ -146,21 +146,48 @@ pub(crate) fn parse_loop_suffix(
 
     let body_start_index = find_template_body_start(token_stream)?;
     let start_index = token_stream.position();
-    let suffix_tokens: Vec<Token> = (start_index..body_start_index)
-        .filter_map(|index| token_stream.token_at(index))
-        .collect();
-
-    if has_top_level_suffix_separator(&suffix_tokens) {
-        return Err(with_token_span(
-            token_stream,
-            marker_span,
-            CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
-                Some(SourceSpan::new(token_stream.source_id(), marker_span)),
-            ),
-        )
-        .into());
-    }
+    // Canonical suffix window first; compatibility streams return `Ok(None)` and use the
+    // explicit vector fallback below. The boundary scan stays parent-bounded because it must
+    // observe the `StartTemplateBody` terminator at `body_start_index`, while every interior
+    // suffix read below stays inside `[start_index, body_start_index)` via the window.
+    // Dense segmented coordinates are window-relative; canonical `SourceTokens` are never
+    // cloned into a new `FileTokens` vector here.
+    let suffix_window = token_stream
+        .subcursor_window(start_index, body_start_index)
+        .map_err(TemplateError::from)?;
+    let suffix_tokens: Vec<Token> = match &suffix_window {
+        Some(window) => {
+            if has_top_level_suffix_separator_at_cursor(window, start_index, body_start_index) {
+                return Err(with_token_span(
+                    token_stream,
+                    marker_span,
+                    CompilerDiagnostic::invalid_template_structure(
+                        InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
+                        Some(SourceSpan::new(token_stream.source_id(), marker_span)),
+                    ),
+                )
+                .into());
+            }
+            collect_suffix_window_for_grammar(window, start_index, body_start_index)
+        }
+        None => {
+            let tokens: Vec<Token> = (start_index..body_start_index)
+                .filter_map(|index| token_stream.token_at(index))
+                .collect();
+            if has_top_level_suffix_separator(&tokens) {
+                return Err(with_token_span(
+                    token_stream,
+                    marker_span,
+                    CompilerDiagnostic::invalid_template_structure(
+                        InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
+                        Some(SourceSpan::new(token_stream.source_id(), marker_span)),
+                    ),
+                )
+                .into());
+            }
+            tokens
+        }
+    };
 
     let path_syntax = token_stream
         .path_syntax_for_substream()
@@ -376,4 +403,57 @@ fn has_top_level_suffix_separator(tokens: &[Token]) -> bool {
     }
 
     false
+}
+
+/// Bounded canonical top-level comma scan over `[start, end)`.
+///
+/// WHAT: reports whether the canonical suffix window contains a top-level `,` without touching
+/// the parent stream.
+/// WHY: the window enforces the half-open bound (dense segmented coordinates included), so the
+/// suffix cannot observe tokens after its `StartTemplateBody` terminator.
+fn has_top_level_suffix_separator_at_cursor(window: &AstCursor, start: usize, end: usize) -> bool {
+    let mut nesting_depth = NestingDepth::default();
+    let mut pipe_depth = 0usize;
+    let mut scan = start;
+
+    while scan < end {
+        // The window already rejects reads at or beyond `end`; skip an unreadable slot the
+        // same way the legacy `(start..end).filter_map(token_at)` suffix slice did.
+        let Some(kind) = window.token_kind_at(scan) else {
+            scan += 1;
+            continue;
+        };
+        if nesting_depth.is_top_level() {
+            if matches!(kind, TokenKind::TypeParameterBracket) {
+                pipe_depth = if pipe_depth == 0 { 1 } else { 0 };
+            } else if pipe_depth == 0 && matches!(kind, TokenKind::Comma) {
+                return true;
+            }
+        }
+
+        nesting_depth.step(&kind);
+        scan += 1;
+    }
+
+    false
+}
+
+/// Explicit grammar adapter: materialize the canonical suffix window for `parse_loop_header_tokens`.
+///
+/// WHAT: copies only `[start, end)` into the transient `&[Token]` grammar boundary.
+/// WHY: loop-header internals still own the `&[Token]` grammar handoff (next task converts
+/// them); no `SourceTokens` are cloned into a new `FileTokens` vector here and no cursor is
+/// retained.
+fn collect_suffix_window_for_grammar(window: &AstCursor, start: usize, end: usize) -> Vec<Token> {
+    let mut suffix_tokens = Vec::new();
+    let mut scan = start;
+    while scan < end {
+        let Some(token) = window.token_at(scan) else {
+            scan += 1;
+            continue;
+        };
+        suffix_tokens.push(token);
+        scan += 1;
+    }
+    suffix_tokens
 }
