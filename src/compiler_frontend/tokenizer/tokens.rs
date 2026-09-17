@@ -2639,42 +2639,6 @@ impl FileTokens {
         stream.freeze_numeric_literals();
         Ok(stream)
     }
-    /// Build a bounded expression adapter directly from an already-borrowed canonical owner.
-    ///
-    /// This is the handoff used by `AstCursor::new_bounded_expression_substream` when the cursor
-    /// was created from a `FileTokens` owner. The canonical `SourceTokens` allocation is shared;
-    /// only the explicit parser compatibility vector is materialized.
-    pub(crate) fn new_bounded_expression_substream_from_canonical(
-        source_tokens: Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
-        range: TokenRange,
-        declaration_path: PathId,
-        eof_span: LocalSpan,
-    ) -> Result<FileTokens, CompilerError> {
-        let file_id = source_tokens.source();
-        source_tokens.validate_range(range).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "retained expression range does not match its source identity: {error:?}"
-            ))
-        })?;
-        let mut tokens = source_tokens.materialize_range(range)?;
-        tokens.push(Token::new(TokenKind::Eof, eof_span));
-        let path_syntax = FilePathSyntax::Shared(source_tokens.path_syntax_arc()?);
-        let mut stream = Self::with_adapter_path_syntax_and_metadata(
-            declaration_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            path_syntax,
-            FileTokenAdapterMetadata::Contiguous {
-                source_tokens,
-                range,
-                synthetic_trailing_eof: true,
-            },
-        );
-        stream.freeze_numeric_literals();
-        Ok(stream)
-    }
     /// Build a bounded parser adapter directly from one canonical source owner.
     ///
     /// The canonical `SourceTokens` allocation is shared; only the explicit parser
