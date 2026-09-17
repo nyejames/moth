@@ -4,12 +4,13 @@
 //! WHY: concrete instance emission reparses the body under inferred type substitutions while
 //! keeping the original source locations for diagnostics.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
-use crate::compiler_frontend::source::FrozenIdentityHandle;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringTable, StringTableResolver,
@@ -172,6 +173,50 @@ impl GenericFunctionBody {
         }
     }
 
+    /// Build the parser cursor for this body.
+    ///
+    /// Source bodies borrow their canonical owner directly. Materialised bodies retain the
+    /// explicit compatibility lane because donor payloads may have been remapped into the
+    /// requester's identity domain.
+    pub(crate) fn parser_cursor<'a>(
+        &'a self,
+        string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
+    ) -> Result<(AstCursor<'a>, SourceId), crate::compiler_frontend::compiler_errors::CompilerError>
+    {
+        match self {
+            Self::Source {
+                source_owner,
+                token_range,
+                token_sequence,
+                canonical_os_path,
+                ..
+            } => {
+                let cursor = match token_sequence {
+                    Some(sequence) => AstCursor::from_source_sequence(
+                        source_owner,
+                        canonical_os_path.clone(),
+                        *sequence,
+                    )?,
+                    None => AstCursor::from_source_tokens(
+                        source_owner,
+                        canonical_os_path.clone(),
+                        *token_range,
+                    )?,
+                };
+                Ok((cursor, source_owner.source()))
+            }
+            Self::Materialised { source_owner, .. } => {
+                let source_id = source_owner.file_id;
+                let token_stream = self.parser_stream(string_table, path_fork)?;
+                Ok((
+                    AstCursor::from_owned_file_tokens_compatibility(token_stream),
+                    source_id,
+                ))
+            }
+        }
+    }
+
     /// Derive the bounded parser adapter for this body.
     ///
     /// Source bodies share the canonical owner directly and never rebase payloads or mutate the
@@ -226,22 +271,6 @@ impl GenericFunctionBody {
                 ),
             },
         }
-    }
-
-    /// Whether [`parser_stream`](Self::parser_stream) returns a remapped compatibility vector.
-    ///
-    /// WHAT: true when a donor string table is retained (donor path rebasing optional).
-    /// WHY: remapped adapters keep donor canonical provenance whose spans/tags match but whose
-    /// payload IDs are stale; consumers must force the compatibility cursor lane to preserve
-    /// the rebased token/path payloads.
-    pub(crate) fn uses_remapped_adapter(&self) -> bool {
-        matches!(
-            self,
-            Self::Materialised {
-                source_string_table: Some(_),
-                ..
-            }
-        )
     }
 
     pub(crate) fn resolution_facts(&self) -> Option<&Arc<Stage0ResolutionFacts>> {

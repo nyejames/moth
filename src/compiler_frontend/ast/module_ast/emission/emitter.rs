@@ -742,8 +742,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             self.deferred_generic_requests.push(request);
             return Ok(());
         };
-        let mut token_stream = body
-            .parser_stream(string_table, &mut *self.path_fork)
+        let (mut body_cursor, body_source_id) = body
+            .parser_cursor(string_table, &mut *self.path_fork)
             .map_err(|error| self.error_messages(error, string_table))?;
         let frozen_identity_handle = body.frozen_identity_handle().cloned();
 
@@ -804,7 +804,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 // Materialised bodies carry their retained donor owner; the scope threads it so
                 // Stage 0 lookups validate against the frozen facts owner and never alias the
                 // requester call-site source.
-                declaring_file_id: token_stream.file_id,
+                declaring_file_id: body_source_id,
                 source_file_scope: template.source_file,
                 scope_frame_capacity: 0,
             })
@@ -835,25 +835,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Parse body and materialize nested instances
         // --------------------------
-        token_stream.src_path = request.instance_path;
-        let remapped = body.uses_remapped_adapter();
-        let mut compat_cursor;
-        let mut canonical_cursor;
-        let body_cursor = if remapped {
-            compat_cursor = AstCursor::from_file_tokens_compatibility(&mut token_stream);
-            &mut compat_cursor
-        } else {
-            canonical_cursor = AstCursor::from_file_tokens(&mut token_stream)
-                .map_err(|error| self.error_messages(error, string_table))?;
-            &mut canonical_cursor
-        };
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let warning_start = self.warnings.len();
         let body = match function_body_to_ast(
-            body_cursor,
+            &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.warnings,

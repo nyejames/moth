@@ -7,7 +7,6 @@
 //! guarantee before trait bounds exist.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
@@ -63,20 +62,7 @@ pub(crate) fn validate_generic_function_body(
             ),
         )));
     };
-    let remapped = body.uses_remapped_adapter();
-    let mut token_stream = body.parser_stream(string_table, path_fork)?;
-    if remapped {
-        let mut body_cursor = AstCursor::from_file_tokens_compatibility(&mut token_stream);
-        return function_body_to_ast(
-            &mut body_cursor,
-            context,
-            type_interner,
-            warnings,
-            string_table,
-            path_fork,
-        );
-    }
-    let mut body_cursor = AstCursor::from_file_tokens(&mut token_stream)?;
+    let (mut body_cursor, _) = body.parser_cursor(string_table, path_fork)?;
     function_body_to_ast(
         &mut body_cursor,
         context,
