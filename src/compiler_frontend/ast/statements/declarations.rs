@@ -960,8 +960,8 @@ pub fn resolve_declaration_syntax(
 /// Source-owned ranges stay on the canonical `AstCursor` view. Explicit synthetic overrides use
 /// the bounded synthetic backing because they are built by `FileTokens::new_from_slice` and have
 /// no canonical range to borrow. Remapped compatibility substreams keep their own owned lane.
-fn declaration_initializer_stream<'cursor, 'tokens>(
-    source_owner: Option<&'cursor AstCursor<'tokens>>,
+fn declaration_initializer_stream<'tokens>(
+    source_owner: Option<&AstCursor<'tokens>>,
     initializer_range: Option<TokenRange>,
     initializer_override: Option<FileTokens>,
     qualified_name: &PathId,
@@ -977,13 +977,12 @@ fn declaration_initializer_stream<'cursor, 'tokens>(
         .map(SourceSpan::local)
         .unwrap_or_else(LocalSpan::source_start);
 
-    if let Some(source_owner) = source_owner {
-        if let Some(cursor) = source_owner
+    if let Some(source_owner) = source_owner
+        && let Some(cursor) = source_owner
             .bounded_compatibility_expression_cursor(range, *qualified_name, eof_span)
             .map_err(ExpressionParseError::from)?
-        {
-            return Ok(cursor);
-        }
+    {
+        return Ok(cursor);
     }
 
     let source_owner = source_owner.ok_or_else(|| {

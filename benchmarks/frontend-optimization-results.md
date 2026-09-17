@@ -3667,3 +3667,93 @@ SoA was no slower in any invocation/mode (one validation pair tied at the displa
 the validation loop reported zero failures. No AoS run produced a repeatable material improvement,
 so the rejected layout has no re-entry condition beyond new representative evidence showing a
 material gain without weakening the 8-byte/4-byte contracts.
+
+## Data Layout Migration - Phase 3 Slice 3H Resumption Baseline (2026-09-18)
+
+> This section is the durable record for the Phase 3 Slice 3H resumption. It holds the matched
+> scaling distributions, the retention probes and the reproduced R0 gate baseline so the owning
+> plan keeps only a short status pointer. Budgets are unchanged throughout.
+
+Resumption baseline: pause commit `3fb55d31b96f81bd983c26efe82465353f09479a` on branch
+`diagnostic-data-layout-changes`, plus four inherited Clippy-lint corrections in
+`src/compiler_frontend/ast/cursor.rs` and
+`src/compiler_frontend/ast/statements/declarations.rs` (`collapsible_if` x2,
+`unnecessary_lazy_evaluations`, `needless_lifetimes`). Toolchain rustc/clippy
+`1.98.1 (48a229cea 2026-09-01)`, host `aarch64-apple-darwin` Apple M1 Pro,
+`RAYON_NUM_THREADS` unset. This section records an independent reproduction of the pause
+commit, not a new claim about the earlier uncommitted tree based on `f7927597e`; that earlier
+record is kept below as superseded context.
+
+### Earlier recorded closeout (superseded uncommitted-tree record)
+
+The plan previously recorded closeout validation on the uncommitted worktree based on
+`f7927597e` (no new commit hash): toolchain rustc/clippy `1.98.1 aarch64-apple-darwin`, host
+Apple Silicon `6D851D`, `RAYON_NUM_THREADS` unset/default, frontend dev runner with timers
+build, unchanged budgets nominal `n^1.25`, constant `n^1.25`, generic `n^1.70`. That record
+reported: latest `just validate` passed native featured Clippy, feature coverage, source and
+first-party audits, `5193` workspace tests, integration `1973/1973`, docs check, and bench-ci
+`82/82` preflight plus quick measurements, stopping only at generic scaling: nominal
+`3.411/6.372/12.706/25.322ms n^0.97`, constant `1.125/3.321/10.896ms n^0.82`, generic
+`78.442/249.278/919.138/3328.514ms n^1.81` (exceeds `1.70`). Independent
+`just test-feature-matrix` passed all `8` standard lanes; `just timers-erasure-check` passed
+the no-timer binary clean at `8,928,192` bytes; `just bench-data-layout-check` passed `2/2`
+cases over `10` measured iterations (`-5ms` average). The inferred pre-H0 `9f7438f849` point
+remains a non-authoritative context point.
+
+### Reproduced R0 gate baseline (pause commit)
+
+`just validate` passed native featured Clippy only after the four inherited lint corrections
+landed. The recorded "featured Clippy passed" evidence did not reproduce until those fixes:
+the recorded claim predated the pause commit's own final edits. After the corrections, the
+gate passed feature-lane coverage, source audit and first-party dependency audit, workspace
+tests `5193` + `839` + `17`, integration `1973/1973`, docs check, and bench-ci `82/82`
+preflight plus quick measurements; the gate then stopped at complexity budgets.
+
+`just bench-scaling` inside that gate:
+
+| Workload | Measurements | Fitted exponent | Budget | Outcome |
+| --- | --- | --- | --- | --- |
+| Nominal | `3.444/6.885/13.403/26.019ms` | `n^0.97` | `n^1.25` | within |
+| Constant chain | `1.137/3.221/11.481ms` | `n^0.83` | `n^1.25` | within |
+| Generic instantiation | `75.710/233.246/816.346/3166.498ms` | `n^1.80` | `n^1.70` | exceeds; the single reproduced failure |
+
+Independent gates after the fail-fast stop: `just test-feature-matrix` ran 8 standard lanes,
+8 passed, 0 failed; `just timers-erasure-check` passed with the no-timer binary clean at
+`8,928,208` bytes; `just bench-data-layout-check` passed `2/2` cases over 10 measured
+iterations (`-4ms` average).
+
+### Matched scaling comparison (three invocations, five iterations each)
+
+Three independent read-only `bench-scaling` runs, each with five measured iterations, compare
+the current tree against exact pre-Phase-3 `c17672bb5`:
+
+| Workload | Size | Pre-Phase-3 `c17672bb5` median (range) | Current median (range) |
+| --- | ---: | --- | --- |
+| Constant chain | 32 | `0.890ms (0.814-0.979)` | `1.373ms (1.202-1.441)` |
+| Constant chain | 128 | `2.199ms (1.951-2.490)` | `3.131ms (2.852-3.292)` |
+| Constant chain | 512 | `7.166ms (7.147-7.471)` | `10.506ms (10.236-11.120)` |
+| Generic instantiation | 20 | `74.249ms (74.206-75.991)` | `81.244ms (77.293-84.387)` |
+| Generic instantiation | 40 | `232.332ms (229.410-240.732)` | `255.924ms (243.001-263.498)` |
+| Generic instantiation | 80 | `808.026ms (791.367-863.148)` | `880.415ms (840.509-903.943)` |
+| Generic instantiation | 160 | `3096.371ms (3048.797-3135.177)` | `3295.397ms (3281.227-3417.194)` |
+
+The current constant-chain fit is `n^0.73` against pre-Phase-3 `n^0.75`; the current generic
+fit is `n^1.78` against pre-Phase-3 `n^1.79`. Absolute generic cost is higher at every size,
+so no no-worsening claim is made; generic remains above the unchanged `n^1.70` budget, and
+constant attribution, generic attribution and the retained/intermediate ownership ledger
+remain open.
+
+### Retention probes (proxies only)
+
+These probes are investigation leads, not a complete owner ledger. They do not yet count
+`TokenShape`/common-cold bytes, parser adapters/vectors, or distinct generic donor owner
+counts; the full retained/intermediate ownership ledger remains missing:
+
+| Probe | Elapsed | Live / peak / after-drop bytes | Retained snapshot | Identity slots | Records | Contexts | Path tables (count / rows / bytes) | String clones | Path copies (copies / rows / bytes) |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | --- |
+| Warning-heavy | `48.402ms` | `29,970/2,057,994/1,479` | `1,200` | `2` | `39` | `1` | `1/78/1,536` | `1` | `7/100/1,200` |
+| Diagnosed | `87.707ms` | `319,702/1,978,183/1,488` | `903` | `42` | `40` | `1` | `41/6,602/79,224` | `42` | `48/6,965/83,580` |
+| Generic-scaling-160 | `4185.310ms` (`generated.materialise 3551.072ms`) | `17,098/360,435,524/1,469` | `0` | `-` | `-` | `-` | `-` | `802` | `807/3,379,512/40,554,144` |
+
+Retained report metrics for generic-scaling-160 are zero because the clean result drops its
+report context. No budget is raised or loosened by this record.

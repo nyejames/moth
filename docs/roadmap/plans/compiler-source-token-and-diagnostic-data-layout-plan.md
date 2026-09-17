@@ -7,50 +7,17 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Phase 1 is delivered on main. Phase 2 complete-path interning is accepted at the continuation
-> checkpoint `c17672bb5` on `diagnostic-data-layout-changes` (diagnostic correction `e7d9a7ab5`
-> plus validation-lane stabilisation). The bounded pre-Phase-3 validation restoration is complete.
-> Phase 3 fixed-token/source-owned migration is active: Slices 3A–3E, 3F1–3F5 and 3G are accepted,
-> and 3H old-token deletion is in progress at `fbbe0119a` with Phase 3 still open. Accepted 3H work
-> canonicalises retained generic owners, removes header range compatibility wrappers, adds canonical
-> header cursor range helpers, removes canonical `FileTokens` emission adapters and windows loop
-> header parser inputs through bounded `AstCursor` subcursors. `Token`, `TokenKind` and `FileTokens`
-> remain crate-internal migration representations used by parser consumers. Full consumer containment
-> and deletion remain open 3H work. Package work stays paused until accepted Phase 3. After accepted
-> Phase 3 this plan pauses through the roadmap order: compiler tidy-up, then
-> MON syntax and nested const records, then Wiring V1, then native result slots and Core const
-> evaluation, and Phase 4 resumes only after a rebase and explicit reactivation. The roadmap retains
-> those separate checkpoints.
-> Closeout validation on the uncommitted worktree based on `f7927597e` (no new commit hash):
-> toolchain rustc/clippy `1.98.1 aarch64-apple-darwin`, host Apple Silicon `6D851D`,
-> `RAYON_NUM_THREADS` unset/default, frontend dev runner with timers build, unchanged budgets
-> nominal `n^1.25`, constant `n^1.25`, generic `n^1.70`. Latest `just validate` passed native
-> featured Clippy, feature coverage/source/first-party audits, `5193` workspace tests,
-> integration `1973/1973`, docs check, and bench-ci `82/82` preflight plus quick measurements,
-> stopping only at generic scaling: nominal `3.411/6.372/12.706/25.322ms n^0.97`, constant
-> `1.125/3.321/10.896ms n^0.82`, generic `78.442/249.278/919.138/3328.514ms n^1.81`
-> (exceeds `1.70`). Independent `just test-feature-matrix` passed all `8` standard lanes;
-> `just timers-erasure-check` passed no-timer binary clean at `8,928,192` bytes;
-> `just bench-data-layout-check` passed `2/2` cases over `10` measured iterations (`-5ms` average).
-> Three independent read-only `bench-scaling` runs (each five measured iterations) now add
-> per-size spread. Current constant-chain medians/ranges are `1.373ms (1.202–1.441)`,
-> `3.131ms (2.852–3.292)`, and `10.506ms (10.236–11.120)` for sizes `32/128/512`,
-> fitted `n^0.73`; exact pre-Phase-3 `c17672bb5` medians/ranges are `0.890ms
-> (0.814–0.979)`, `2.199ms (1.951–2.490)`, and `7.166ms (7.147–7.471)`, fitted `n^0.75`.
-> Current generic-instantiation medians/ranges are `81.244ms (77.293–84.387)`,
-> `255.924ms (243.001–263.498)`, `880.415ms (840.509–903.943)`, and
-> `3295.397ms (3281.227–3417.194)` for sizes `20/40/80/160`, fitted `n^1.78`; the
-> corresponding pre-Phase-3 medians/ranges are `74.249ms (74.206–75.991)`,
-> `232.332ms (229.410–240.732)`, `808.026ms (791.367–863.148)`, and
-> `3096.371ms (3048.797–3135.177)`, fitted `n^1.79`. Current absolute generic points are
-> higher at every size, so no no-worsening claim is made; generic remains above `n^1.70`.
-> Inferred pre-H0 `9f7438f849` remains a non-authoritative context point. Constant attribution,
-> generic attribution and the retained/intermediate ownership ledger remain open; budgets are
-> not raised.
-> Retention probes are proxies only (full retained/intermediate ledger still missing; see capsule).
-> Phase 3 remains open with no checkpoint or exit claimed.
-> Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
-> in `benchmarks/frontend-optimization-results.md`.
+> Phase 1 is delivered on main; Phase 2 is accepted at `c17672bb5`; Phase 3 Slices 3A–3E, 3F1–3F5
+> and 3G are accepted. Slice 3H old-token deletion is in progress and Phase 3 is open with no
+> checkpoint or exit claimed. The continuation baseline is the pause commit `3fb55d31b`, which is a
+> continuation baseline rather than accepted Phase 3 completion. `Token`, `TokenKind` and
+> `FileTokens` remain crate-internal migration representations pending 3H deletion.
+> Validation state: the R0 baseline is reproduced and every gate is green except
+> `generic_instantiation`, fitted `n^1.80` against budget `n^1.70`. Detailed measurements live in
+> `benchmarks/frontend-optimization-results.md`. After accepted Phase 3 this plan pauses through the
+> roadmap order: compiler tidy-up, then MON syntax and nested const records, then Wiring V1, then
+> native result slots and Core const evaluation, with Phase 4 resuming only after explicit
+> reactivation.
 
 ## Purpose
 
@@ -126,46 +93,27 @@ ACTIVE_PLAN:
   `SourceTokenOwner` bundling the canonical owner, logical path and OS path.
   `src/compiler_frontend/ast/generic_functions/materialisation/frozen_syntax.rs` owns
   `SharedDonorIdentity`, `StableBodyOwner` and canonical versus foreign materialised ownership.
-- Validation evidence (closeout, uncommitted worktree based on `f7927597e`, no new commit;
-  rustc/clippy `1.98.1 aarch64-apple-darwin`, host Apple Silicon `6D851D`,
-  `RAYON_NUM_THREADS` unset/default, frontend dev runner with timers build): latest
-  `just validate` passed native featured Clippy, feature coverage/source/first-party audits,
-  `5193` workspace tests, integration `1973/1973`, docs check, and bench-ci `82/82` preflight
-  plus quick measurements, stopping only at generic scaling. Independent
-  `just test-feature-matrix` then passed all `8` standard lanes;
-  `just timers-erasure-check` passed no-timer binary clean at `8,928,192` bytes;
-  `just bench-data-layout-check` passed `2/2` cases over `10` measured iterations (`-5ms` average).
-- Current scaling status (unchanged budgets nominal `n^1.25`, constant `n^1.25`, generic `n^1.70`):
-  latest validation reported nominal `3.411/6.372/12.706/25.322ms n^0.97`, constant
-  `1.125/3.321/10.896ms n^0.82`, and generic `78.442/249.278/919.138/3328.514ms n^1.81`
-  (exceeds `1.70`).
-- Three independent read-only `bench-scaling` runs (five measured iterations each) give
-  current constant-chain medians/ranges `1.373ms (1.202–1.441)`, `3.131ms
-  (2.852–3.292)`, `10.506ms (10.236–11.120)` at sizes `32/128/512`, fitted `n^0.73`;
-  exact pre-Phase-3 `c17672bb5` gives `0.890ms (0.814–0.979)`, `2.199ms
-  (1.951–2.490)`, `7.166ms (7.147–7.471)`, fitted `n^0.75`. Current generic medians/ranges
-  are `81.244ms (77.293–84.387)`, `255.924ms (243.001–263.498)`, `880.415ms
-  (840.509–903.943)`, `3295.397ms (3281.227–3417.194)` at sizes `20/40/80/160`, fitted
-  `n^1.78`; pre-Phase-3 is `74.249ms (74.206–75.991)`, `232.332ms
-  (229.410–240.732)`, `808.026ms (791.367–863.148)`, `3096.371ms (3048.797–3135.177)`,
-  fitted `n^1.79`. Current absolute generic points are higher at every size; attribution remains
-  required. Do not raise or loosen any budget.
-- Retention probes (proxies only, not a complete owner ledger): warning-heavy `48.402ms`,
-  live/peak/after-drop `29,970/2,057,994/1,479` bytes, retained snapshot `1,200`, identity slots
-  `2`, records `39`, contexts `1`, path tables `1/78` rows/`1,536` bytes, string clones `1`, path
-  copies `7/100` rows/`1,200` bytes; diagnosed `87.707ms`, live/peak/after-drop
-  `319,702/1,978,183/1,488`, retained snapshot `903`, identity slots `42`, records `40`,
-  contexts `1`, path tables `41/6,602` rows/`79,224` bytes, string clones `42`, path copies
-  `48/6,965` rows/`83,580` bytes; generic-scaling-160 `4185.310ms` with
-  `generated.materialise 3551.072ms`, peak `360,435,524`/live `17,098`/after-drop `1,469`, string
-  clones `802`, path copies `807/3,379,512` rows/`40,554,144` bytes, retained report metrics zero
-  because the clean result drops report context. These probes do not yet count
-  `TokenShape`/common-cold bytes, parser adapters/vectors, or distinct generic donor owner counts;
-  the full retained/intermediate ownership ledger remains missing.
+- Validation evidence: full distributions and the R0 reproduction live in
+  `benchmarks/frontend-optimization-results.md` (`Data Layout Migration - Phase 3 Slice 3H
+  Resumption Baseline (2026-09-18)`); the current gate is all green except generic scaling `n^1.80`
+  against budget `n^1.70`.
+- Scaling status: the matched comparison shows absolute generic cost higher at every size, so no
+  no-worsening claim is made; per-size medians, ranges and fits live in the evidence document. Do
+  not raise or loosen any budget.
+- Retention status: the probes are proxies only and the full retained/intermediate ownership ledger
+  remains missing. They do not yet count `TokenShape`/common-cold bytes, parser adapters and
+  vectors, or distinct generic donor owner counts; the figures live in the evidence document.
 - Open for closeout: `Token`/`TokenKind`/`FileTokens` are still crate-internal parser
   representations; the foreign generic compatibility lane and metadata/adapter deletion remain;
   the generic budget remains a red exception pending attribution. No checkpoint or Phase 3 exit is
   claimed.
+- OPEN_FINDINGS:
+  - F1 (3H-R1): active parser bounds are lost at the declaration handoff.
+  - F2 (3H-R1): indexed scans can repeat segmented prefix searches.
+  - F3 (3H-R3): final token consumers and loop grammar still have parallel paths.
+  - F4 (3H-R2, 3H-R4): generic and source ownership need a final cutover.
+  - F5 (3H-R5): Phase 3 performance acceptance is open.
+- NEXT_SUBSTEP: 3H-R1.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -184,30 +132,11 @@ CURRENT_WORKSPACE_STATE:
   stabilisation; refreshed probe evidence is recorded. The bounded pre-Phase-3
   restoration fixed the warning-denied native Clippy baseline, repaired the current integration
   defects, and leaves no integration exceptions to carry forward.
-- Closeout validation on the uncommitted worktree based on `f7927597e` (no new commit;
-  rustc/clippy `1.98.1 aarch64-apple-darwin`, host Apple Silicon `6D851D`,
-  `RAYON_NUM_THREADS` unset/default, frontend dev runner with timers build) passed native
-  featured Clippy, feature coverage/source/first-party audits, `5193` workspace tests,
-  integration `1973/1973`, docs check, and bench-ci `82/82` preflight plus quick measurements
-  through `just validate`, stopping only at generic scaling: nominal
-  `3.411/6.372/12.706/25.322ms n^0.97`, constant `1.125/3.321/10.896ms n^0.82`, generic
-  `78.442/249.278/919.138/3328.514ms n^1.81` against unchanged budgets nominal `n^1.25`,
-  constant `n^1.25`, generic `n^1.70`. Independent `just test-feature-matrix` passed all `8`
-  standard lanes; `just timers-erasure-check` passed no-timer binary clean at `8,928,192` bytes;
-  `just bench-data-layout-check` passed `2/2` cases over `10` measured iterations (`-5ms`
-  average). Three independent read-only `bench-scaling` runs (five measured iterations each)
-  are now the comparison basis: current constant-chain medians/ranges are `1.373ms
-  (1.202–1.441)`, `3.131ms (2.852–3.292)`, and `10.506ms (10.236–11.120)` at sizes
-  `32/128/512`, fitted `n^0.73`; exact pre-Phase-3 `c17672bb5` is `0.890ms
-  (0.814–0.979)`, `2.199ms (1.951–2.490)`, and `7.166ms (7.147–7.471)`, fitted `n^0.75`.
-  Current generic-instantiation medians/ranges are `81.244ms (77.293–84.387)`,
-  `255.924ms (243.001–263.498)`, `880.415ms (840.509–903.943)`, and
-  `3295.397ms (3281.227–3417.194)` at sizes `20/40/80/160`, fitted `n^1.78`; exact
-  pre-Phase-3 is `74.249ms (74.206–75.991)`, `232.332ms (229.410–240.732)`,
-  `808.026ms (791.367–863.148)`, and `3096.371ms (3048.797–3135.177)`, fitted `n^1.79`.
-  Current absolute generic points are higher at every size; generic attribution, constant
-  attribution and the retained/intermediate ownership ledger remain required. Phase 3 remains
-  open; no checkpoint or exit is claimed.
+- The R0 baseline is reproduced at the pause commit `3fb55d31b`, plus four inherited lint
+  corrections without which featured Clippy did not pass. Full distributions and gate detail live
+  in `benchmarks/frontend-optimization-results.md` (`Data Layout Migration - Phase 3 Slice 3H
+  Resumption Baseline (2026-09-18)`); the current gate is all green except generic scaling `n^1.80`
+  against budget `n^1.70`. Phase 3 remains open; no checkpoint or exit is claimed.
 - Phase 3 fixed-token/source-owned migration is active. Slices 3A–3E and 3F1–3F5 plus 3G are
   accepted. Accepted foundations are the SoA `SourceTokens` owner, checked ranges and sequences,
   bounded parser cursors, header range retention and shared donor identity. Retention probes are
@@ -325,9 +254,12 @@ BLOCKERS / RISKS:
 
 VALIDATION_STATE:
 Phase 1 final closeout is `3c9c776a8` (2026-09-10); the Phase 2 continuation checkpoint is
-`c17672bb5` (2026-09-13) with diagnostic correction `e7d9a7ab5`. The accepted Phase 2 validation
-evidence and its approved red exceptions are recorded in CURRENT_SLICE above. Earlier per-slice
-validation is Git history, not a current workspace claim.
+`c17672bb5` (2026-09-13) with diagnostic correction `e7d9a7ab5`. Earlier per-slice
+validation is Git history, not a current workspace claim. The R0 baseline is reproduced at the
+pause commit `3fb55d31b` (plus four inherited lint corrections; featured Clippy passed only
+after those fixes): full distributions and gate detail live in
+`benchmarks/frontend-optimization-results.md` (Phase 3 Slice 3H Resumption Baseline,
+2026-09-18); current gate is all green except generic scaling `n^1.80` against budget `n^1.70`.
 Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before it
 starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
 all-target Clippy gate before accepting a slice.
@@ -1259,6 +1191,165 @@ infrastructure.
   into focused files under the existing tokenizer owner
 - [ ] update module docs, codebase index and style rules
 
+Findings closed by these substeps (paths as named in the resumption handoff):
+- F1 closes in 3H-R1: `ast/cursor.rs::declaration_cursor` and
+  `declaration_syntax/mod.rs::DeclarationCursor`.
+- F2 closes in 3H-R1: `tokenizer/tokens.rs::parser_token_at` and `from_sequence_position`, and
+  indexed scanners such as `ast/statements/loops.rs::find_loop_header_colon_index`.
+- F3 closes in 3H-R3: `tokenizer/tokens.rs`, `ast/cursor.rs`, `declaration_syntax/mod.rs`,
+  `ast/statements/loop_headers.rs`, `loops.rs` and template loop suffixes.
+- F4 closes in 3H-R2 and 3H-R4: `generic_functions/templates.rs`,
+  `materialisation/frozen_syntax.rs`, `preparation_freeze.rs`, `headers/types.rs` and
+  `create_project_modules/prepared_source.rs`.
+- F5 closes in 3H-R5: matched scaling and memory evidence in
+  `benchmarks/frontend-optimization-results.md`.
+
+Each inventoried legacy-token site takes its owning deletion step from this map by area: view and
+cursor bounds sites close in 3H-R1, donor payload sites in 3H-R2, tokenizer and parser consumer
+sites in 3H-R3, and preparation, ownership, adapter-metadata and test-support sites in 3H-R4.
+
+#### [x] 3H-R0 — Resume and establish the real checkpoint (complete)
+
+- Reread the routed authorities, record branch, full HEAD, worktree status and existing diff, and
+  preserve unrelated work.
+- Reconcile the pause commit `3fb55d31b` against the recorded uncommitted `f7927597e` tree and
+  record what reproduces; historical passing counts are not a new run.
+- Inventory remaining legacy token producers, consumers, copies, synthetic inputs and foreign
+  generic handoffs, each classified as final owner, current migration path or dead path, and each
+  taking its named 3H deletion step from the area map above.
+- Compress the capsule to one short status block and move detailed measurements to the benchmark
+  evidence document.
+- Establish default/featured compilation and focused tests, then run the full gate plus the
+  independent feature-matrix and timer-erasure commands.
+- Exit satisfied: one trustworthy baseline plus a finite deletion/consumer map; accepted 3A–3G
+  design work is not restarted.
+
+#### [ ] 3H-R1 — Finish bounded view semantics and scan behaviour
+
+- Add the AST-window-to-declaration-cursor regression for contiguous and segmented input, including
+  a stricter parent limit.
+- Carry the effective active view through declaration and type parsing, nested windows and
+  diagnostic lookahead, preserving lower and upper bounds, dense sequence coordinates, source
+  coordinates and explicit EOF anchors.
+- Consolidate bounds under the existing cursor and view owner; do not add another independent limit
+  bundle or conversion wrapper.
+- Preserve O(1) logical position and length with adjacent navigation; convert sequential indexed
+  scans to cursor walks while keeping repositioning distinct from sequential traversal.
+- Cover empty ranges, stable EOF, empty and gapped segments, nested limits and source mismatch
+  through the existing test owners, without timing thresholds in unit tests.
+- Exit: a bounded input remains bounded after every supported handoff, and sequential scanning no
+  longer repeatedly searches the sequence prefix.
+
+#### [ ] 3H-R2 — Settle final donor payload interpretation
+
+- Keep the preparation-owned donor snapshot cache and verify repeated captures and cloned
+  preparations share it across every retained token payload.
+- Inventory direct donor reads of string, numeric-text, path-syntax and path-root facts, then
+  publish one ownership and remap contract before replacing the foreign lane.
+- Reconcile the stale per-generic path-row wording in the layout authority with the canonical
+  path-table ownership the implementation actually uses.
+- Make the final path work for source, same-domain materialised, string-only foreign and
+  path-bearing foreign bodies through the same syntax grammar, preserving donor spans and syntax
+  handles.
+- Verify colliding numeric IDs with different donor and requester spellings, nested
+  materialisation, numeric and path payloads, repeated captures, source diagnostics and drop safety
+  with rendered-meaning assertions rather than structural equality.
+- Remove foreign materialised storage once its state is displaced, consolidating body-owner
+  variants by final difference rather than migration history.
+- Replace capture-time vector construction with a bounded view walk that retains only the required
+  stable file-reference facts.
+- Do not deduplicate on bare numeric `SourceId` values and do not substitute a requester table for
+  a donor table.
+- Exit: all generic syntax is range- and sequence-backed, and payloads resolve in the right domain
+  without retained or transient legacy-token vectors.
+
+#### [ ] 3H-R3 — Complete lexical and parser cutover
+
+- Emit fixed shapes, spans and typed cold rows directly from the tokenizer construction owner and
+  remove the production legacy-token round trip.
+- Use checked allocation at the owning boundary, keeping user-controlled exhaustion as a typed user
+  diagnostic and malformed trusted records as invariant failures.
+- Migrate declaration, type, expression, statement and template consumers to tags, typed payload
+  access and borrowed bounded views, removing wide-value caches and duplicated classification
+  matches as their consumers leave.
+- Preserve exact diagnostic projection facts with stable code, reason and ordering contracts, and
+  retain one lexical grammar owner and one numeric-text owner.
+- Finish statement and template loop callers through one loop-header parser, keeping the statement
+  and template body parsers separate under that single owner, and delete the displaced vector
+  grammar, split records and copied helpers.
+- Replace synthetic `FileTokens` initializers with the smallest typed source-kind input the parser
+  and folding owners need, preserving the no-token route and template wrapping.
+- Do not fabricate a second source store, retokenize wrapper text, retain an unbounded synthetic
+  fallback or add a reverse-materialisation bridge.
+- Exit: every supported source kind and generic path reaches the same final token and view
+  vocabulary, and no parser needs the old full-token API.
+
+#### [ ] 3H-R4 — Finish preparation ownership and delete migration scaffolding
+
+- Complete the prepared-source owner and replace the old file-output work products with final
+  preparation inputs and results, preserving only source-kind distinctions that represent real
+  different work.
+- Prove exactly-once loading, tokenization and declaration-shell preparation across discovery,
+  aggregation, canonical compilation, check-only selections, direct templates and config; a
+  per-module slot check alone is not lifecycle proof, and finalisation must reuse the existing
+  owners rather than add a second cache.
+- Remove duplicated logical and OS-path fields from token, cursor and file outputs once their
+  adapter consumers disappear, resolving source identity from the matching source database or donor
+  context, and keep semantic declaration paths as separate facts.
+- Remove broad `Clone` support where no independent ownership use remains, while keeping
+  shared-owner handles.
+- Preserve private-discovery rebinding and independent package domains through finalisation.
+- Keep source and span builders alive through the last real span producer, then finalise once.
+- Delete the old token types, migration owner and adapter metadata, obsolete lifecycle state,
+  unused conversion and remap helpers, dead fixture constructors and stale counters, confirming
+  exact residual uses first.
+- Split the surviving tokenizer code into focused taxonomy, construction and storage, and cursor
+  and range responsibilities only after obsolete code is deleted; update the index and ownership
+  comments.
+- Exit: no old token representation or migration compatibility path remains in production or test
+  support.
+
+#### [ ] 3H-R5 — Attribute performance and close the memory evidence
+
+- Use exact `c17672bb5` as the named pre-Phase-3 comparison alongside the pause snapshot and the
+  candidate, matching fixtures and contents, toolchain, profile, features, runner, machine and
+  thread settings.
+- Run warmed, interleaved independent invocations with at least five samples per side, reporting
+  per-size distributions, medians, absolute deltas and fitted exponents.
+- Profile constant parsing and generic materialisation only where the evidence points, fixing
+  Phase 3-induced work at its owner without adding a general cache or rewriting unrelated
+  algorithms.
+- Extend the existing instrumentation and probe owner to account for shape and span bytes, numeric,
+  path and sequence stores, capacities, transient construction buffers, cutover adapter
+  allocations, donor identity snapshots and peak live generic ownership, counting distinct
+  allocations rather than shared handles.
+- Compare clean, warning and diagnosed outcomes with direct and generic-heavy compilation, sampling
+  live semantic ownership before it drops as well as final report retention.
+- Preserve all complexity budgets; a passing constant exponent or a quick-suite average does not
+  close attribution.
+- Exit: the completed representation has repeatable memory evidence with no unaccepted Phase 3
+  regression, and any remaining generic-budget exception carries exact evidence with an explicit
+  decision.
+
+#### [ ] 3H-R6 — Validate, reconcile documentation and pause
+
+- Run the format check, the full validation gate, the feature matrix, the timer-erasure check and
+  the data-layout benchmark check, plus the focused view, tokenizer, header, declaration, template,
+  generic, diagnostic-projection and source-lifecycle coverage affected by the cutover.
+- Report failures and unavailable lanes precisely without loosening budgets, weakening assertions,
+  suppressing warnings or updating semantic goldens to close the task.
+- Finish with the Slice review and the redundancy and ownership checks: one implementation owner, no
+  copied grammar, no detached identities, no user-input panic path and no diagnostic dependence on
+  discarded token stores.
+- Update the capsule, Phase 3 checks, permanent layout description, compiler and build handoffs and
+  benchmark evidence to describe the final implementation, compressing historical per-slice prose
+  and keeping detailed measurements in their evidence owner.
+- Record the accepted full SHA with its exact validation result, then pause: the roadmap order runs
+  compiler tidy-up, MON syntax with nested const records, Wiring V1, and native result slots with
+  Core const evaluation before explicit Phase 4 reactivation; do not start them, resume the package
+  lane or implement Phase 4.
+- Exit: the plan, authorities, index and evidence agree on one accepted Phase 3 pause checkpoint.
+
 ### Phase 3 — Audit / style-guide review / validation
 
 Complete the common phase close, plus:
@@ -1291,8 +1382,7 @@ Complete the common phase close, plus:
 - [ ] no wide token enum or cloned retained token vector remains
 - [ ] each tokenized source is prepared once and reused by reachability and module compilation
 - [ ] generic bodies share one donor identity per declaring domain and keep canonical versus foreign
-  ownership explicit, with no per-body table copies and no retained compatibility shell except the
-  marked foreign lane until its deletion step
+  ownership explicit, with no per-body table copies and no retained compatibility shell
 - [ ] no duplicated source, path or OS-path metadata remains after adapter deletion
 - [ ] no crate-internal migration adapter, compatibility cursor branch or conversion helper remains
 - [ ] matched scaling attribution shows no Phase 3 worsening on constant-chain and

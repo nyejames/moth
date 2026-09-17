@@ -647,10 +647,10 @@ impl<'a> AstCursor<'a> {
                 if let Some(span) = self.current().map(TokenRef::source_span) {
                     return span;
                 }
-                if self.is_at_end() {
-                    if let Some(span) = self.synthetic_eof {
-                        return span;
-                    }
+                if self.is_at_end()
+                    && let Some(span) = self.synthetic_eof
+                {
+                    return span;
                 }
                 SourceSpan::new(self.source_id(), LocalSpan::source_start())
             }
@@ -727,7 +727,7 @@ impl<'a> AstCursor<'a> {
                 .unwrap_or_else(|| {
                     let span = self
                         .is_at_end()
-                        .then(|| self.synthetic_eof)
+                        .then_some(self.synthetic_eof)
                         .flatten()
                         .map(SourceSpan::local)
                         .unwrap_or_else(LocalSpan::source_start);
