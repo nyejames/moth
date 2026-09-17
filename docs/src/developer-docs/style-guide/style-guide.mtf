@@ -161,6 +161,10 @@ Do not preserve a bad API shape because it already exists.
 - When APIs change, thread the new shape through the compiler and remove the old one.
 - Don't add compatibility wrappers, forwarding shims, parallel structs or defaulted legacy entry points just to preserve an older interface.
 - Prefer one current API shape, not transitional layers.
+- Named crate-internal migration bridges are the sole exception. A bridge qualifies only when an
+  accepted architecture plan owns it, names it as a migration bridge and assigns its deletion to one
+  exact later slice. It stays non-public, carries the migration name at its handoffs and disappears
+  at that slice. It never authorises a compatibility API or a second public surface.
 
 ### Type ordering
 

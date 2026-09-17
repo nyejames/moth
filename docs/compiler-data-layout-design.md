@@ -3,8 +3,9 @@
 > **Repository path:** `docs/compiler-data-layout-design.md`
 >
 > **Status:** Accepted end-state architecture. Implementation is active under
-> `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`; user-facing
-> diagnostic improvement work remains paused until that plan completes.
+> `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`. Phase 3 is active
+> with Slices 3A–3E, 3F1–3F5 and 3G accepted and 3H old-token deletion in progress at `fbbe0119a`.
+> User-facing diagnostic improvement work remains paused until that plan completes.
 >
 > **Activation baseline (historical, as of plan activation):** `b6f81fe58` on
 > `token-and-diagnostic-data-layout-changes`, with the delivered Compiler Test Suite Hardening
@@ -817,34 +818,52 @@ preserved per the benchmark-selectable rule above.
 
 **Slice 3B taxonomy (2026-09-14):** `src/compiler_frontend/tokenizer/tokens.rs` owns the sole
 `token_schema!` row authority for the stable 94-tag vocabulary, descriptor payload kinds, allowed
-flag masks and classification facts. It supplies the checked 8-byte `TokenShape`, exhaustive
-`TokenKind` tag mapping and classification/precedence accessors. `DiagnosticToken` remains a
-separate 8-byte projection over the same `TokenTag` and descriptor payload facts; dynamic values
-are extracted only at that projection boundary. Lexical spelling ownership remains in
-`keywords.rs` until later consumer migration.
+flag masks and classification facts. It supplies the checked 8-byte `TokenShape` and schema-owned
+classification/precedence accessors. `TokenKind` remains crate-internal and still serves parser
+consumers during 3H. Canonical-to-legacy conversion and explicit compatibility paths include
+`src/compiler_frontend/ast/cursor.rs`, `src/compiler_frontend/declaration_syntax/mod.rs`,
+`src/compiler_frontend/declaration_syntax/type_syntax/parse.rs`,
+`src/compiler_frontend/utilities/token_scan.rs` and
+`src/compiler_frontend/headers/parse_file_headers.rs`; full containment remains open.
+`DiagnosticToken` remains a separate 8-byte projection over the same `TokenTag` and descriptor
+payload facts. Dynamic values are extracted only at that projection boundary. Lexical spelling
+ownership remains in `keywords.rs` until later consumer migration.
 
 **Slice 3C cold stores (2026-09-14):** `NumericLiteralStore` in
 `src/compiler_frontend/numeric_text/store.rs` retains numeric lexical records outside the fixed
 token word and reuses the shared `numeric_text` grammar. Its one-based `NumericLiteralId` and the
 existing `PathSyntaxTable`'s one-based `PathSyntaxId` reject zero, out-of-range and foreign
 ownership at checked boundaries. Path rows now keep `PathId` plus `LocalSpan`, with one source
-identity on the table; the canonical path tag carries only that dense handle. Symbols, strings,
+identity on the table. The canonical path tag carries only that dense handle. Symbols, strings,
 booleans and scalar characters use validated direct `TokenShape` payloads. Numeric/path stores
 remap at their owner boundary, freeze at ordinary prepared-source publication, and persistent
 generic capture/materialisation uses deterministic compact path and independent numeric subsets.
-`TokenKind`/`Vec<Token>` remain compatibility adapters for the later 3F parser migration and 3H deletion.
+The legacy `TokenKind`/`Vec<Token>` representation remains crate-internal and is still consumed
+throughout parser code during the 3H migration; full containment and deletion remain open.
 
 **Slice 3D storage and cursor ownership (2026-09-14):** `SourceTokens` is the one canonical
 immutable SoA owner for a source: boxed `TokenShape`/`LocalSpan` arrays, a typed numeric
 side-store, and the source-owned `PathSyntaxTable` attached at the publication boundary.
 `TokenIndex(u32)`, checked half-open `TokenRange`, borrowed `TokenCursor`, and copyable
-`TokenRef` expose bounded views without cloning cold payloads. `FileTokens` retains a narrow
-transitional parser/lifecycle shell; its `FileTokenOwner::Adapter` path keeps legacy vectors and
+`TokenRef` expose bounded views without cloning cold payloads. `FileTokens` is a crate-internal
+transitional parser/lifecycle representation still used by legacy parser consumers and explicit
+3F handoffs pending 3H deletion. Its `FileTokenOwner::Adapter` path keeps legacy vectors and
 numeric handles for retained substreams but never constructs a second `SourceTokens` for the same
-source. Source/path/cursor metadata therefore remains outside the canonical store and is deleted
-with the 3F parser migration and 3H compatibility cutover. Cursor boundaries, stable EOF/peek,
-nested ranges, publication attachment, adapter ownership, and malformed cold-store rejection are
-covered by the focused tokenizer tests.
+source. Adapter-only source/path/cursor metadata remains outside canonical storage until the 3H
+compatibility cutover, when duplicate adapter metadata is removed.
+Cursor boundaries, stable EOF/peek, nested ranges, publication attachment, adapter ownership, and
+malformed cold-store rejection are covered by the focused tokenizer tests.
+
+**3H ownership boundary (at `fbbe0119a`, Phase 3 still open):** `Header` retains `TokenRange`
+bodies and optional `TokenSequenceId` start syntax over the canonical owner, with
+`SourceTokenOwner` bundling that owner plus logical and OS path identity and no cloned token
+vectors. Parser handoffs in `src/compiler_frontend/ast/cursor.rs` and
+`src/compiler_frontend/declaration_syntax/mod.rs` keep explicit canonical and compatibility lanes.
+Intentional source-wide inspection stays on a separate narrow bridge. Generic bodies retain
+`SharedDonorIdentity`, `StableBodyOwner` and canonical versus foreign materialised ownership.
+One declaring-domain frozen string identity is shared across templates. Same-domain bodies stay on
+the canonical `SourceTokens` owner. Foreign materialised bodies that still carry rebased donor
+payloads stay on the marked adapter lane pending 3H deletion.
 
 
 ### Token references and ranges
@@ -914,6 +933,13 @@ Rules:
 - frozen generic bodies retain only the referenced path rows, and capture the matching resolved
   file-reference entries in the same pass so a materialised body reaches its content or resource
   target through generic-local handles instead of stale donor handles or a second filesystem lookup
+- generic donor identity is one `SharedDonorIdentity` per declaring domain, frozen once and shared
+  across that domain's templates. Source bodies and same-domain materialised bodies retain the
+  canonical `SourceTokens` owner through `StableBodyOwner::Source` and
+  `MaterialisedBodyOwner::Canonical`. Foreign materialised bodies with retained rebased donor
+  payloads retain the donor compatibility shell through `StableBodyOwner::Materialised` and
+  `MaterialisedBodyOwner::Foreign`, pending 3H deletion. Capture rejects a path table without its
+  issuing string table.
 - no path row owns a vector-backed path or a global source span when the enclosing source is
   already known
 - path syntax rows stay syntax-only. Semantic resource identity, filesystem resolution, output
