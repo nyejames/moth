@@ -8,7 +8,7 @@
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
 use crate::compiler_frontend::ast::statements::loop_headers::{
-    ParsedLoopHeader, parse_loop_header_tokens,
+    ParsedLoopHeader, parse_loop_header_cursor, parse_loop_header_tokens,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -155,9 +155,10 @@ pub(crate) fn parse_loop_suffix(
     let suffix_window = token_stream
         .subcursor_window(start_index, body_start_index)
         .map_err(TemplateError::from)?;
-    let suffix_tokens: Vec<Token> = match &suffix_window {
+    let mut warnings = Vec::new();
+    let (parsed_header, body_context) = match suffix_window {
         Some(window) => {
-            if has_top_level_suffix_separator_at_cursor(window, start_index, body_start_index) {
+            if has_top_level_suffix_separator_at_cursor(&window, start_index, body_start_index) {
                 return Err(with_token_span(
                     token_stream,
                     marker_span,
@@ -168,7 +169,18 @@ pub(crate) fn parse_loop_suffix(
                 )
                 .into());
             }
-            collect_suffix_window_for_grammar(window, start_index, body_start_index)
+            let eof_span = window
+                .span_at(body_start_index.saturating_sub(1))
+                .unwrap_or_else(|| SourceSpan::new(token_stream.source_id(), marker_span));
+            let mut window = window.with_synthetic_eof_span(eof_span);
+            parse_loop_header_cursor(
+                &mut window,
+                context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
+                type_interner,
+                &mut warnings,
+                string_table,
+                path_fork,
+            )?
         }
         None => {
             let tokens: Vec<Token> = (start_index..body_start_index)
@@ -185,23 +197,20 @@ pub(crate) fn parse_loop_suffix(
                 )
                 .into());
             }
-            tokens
+            let path_syntax = token_stream
+                .path_syntax_for_substream()
+                .map_err(TemplateError::from)?;
+            parse_loop_header_tokens(
+                &tokens,
+                &path_syntax,
+                context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
+                type_interner,
+                &mut warnings,
+                string_table,
+                path_fork,
+            )?
         }
     };
-
-    let path_syntax = token_stream
-        .path_syntax_for_substream()
-        .map_err(TemplateError::from)?;
-    let mut warnings = Vec::new();
-    let (parsed_header, body_context) = parse_loop_header_tokens(
-        &suffix_tokens,
-        &path_syntax,
-        context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
-        type_interner,
-        &mut warnings,
-        string_table,
-        path_fork,
-    )?;
 
     for warning in warnings {
         context.emit_warning(warning);
@@ -379,13 +388,12 @@ fn current_token_local_span(token_stream: &AstCursor) -> LocalSpan {
     token_stream.current_span().local()
 }
 
-/// Pure top-level comma scan over the already-sliced loop-suffix window.
+/// Pure top-level comma scan for the compatibility loop-suffix fallback.
 ///
-/// WHAT: reports whether the suffix window contains a top-level `,` without
-/// touching the stream.
-/// WHY: the suffix window is a transient `Vec<Token>` feeding
-/// `parse_loop_header_tokens`, which owns the `&[Token]` grammar boundary.
-/// `Token` payloads/spans only are read — no cursor is retained.
+/// WHAT: reports whether the materialised suffix tokens contain a top-level `,` without touching
+/// the stream.
+/// WHY: compatibility streams have no canonical owner for a bounded cursor, so this explicit
+/// vector lane checks the suffix before handing it to `parse_loop_header_tokens`.
 fn has_top_level_suffix_separator(tokens: &[Token]) -> bool {
     let mut nesting_depth = NestingDepth::default();
     let mut pipe_depth = 0usize;
@@ -436,24 +444,4 @@ fn has_top_level_suffix_separator_at_cursor(window: &AstCursor, start: usize, en
     }
 
     false
-}
-
-/// Explicit grammar adapter: materialize the canonical suffix window for `parse_loop_header_tokens`.
-///
-/// WHAT: copies only `[start, end)` into the transient `&[Token]` grammar boundary.
-/// WHY: loop-header internals still own the `&[Token]` grammar handoff (next task converts
-/// them); no `SourceTokens` are cloned into a new `FileTokens` vector here and no cursor is
-/// retained.
-fn collect_suffix_window_for_grammar(window: &AstCursor, start: usize, end: usize) -> Vec<Token> {
-    let mut suffix_tokens = Vec::new();
-    let mut scan = start;
-    while scan < end {
-        let Some(token) = window.token_at(scan) else {
-            scan += 1;
-            continue;
-        };
-        suffix_tokens.push(token);
-        scan += 1;
-    }
-    suffix_tokens
 }

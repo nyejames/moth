@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::statements::loop_headers::{
-    ParsedLoopHeader, parse_loop_header_tokens,
+    ParsedLoopHeader, parse_loop_header_cursor, parse_loop_header_tokens,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
@@ -47,44 +47,54 @@ pub fn create_loop(
     // Canonical header window first; compatibility streams return `Ok(None)` and use the
     // explicit vector fallback below. Dense segmented coordinates stay window-bounded and
     // canonical `SourceTokens` are never cloned into a new `FileTokens` vector here.
-    let header_window = token_stream.subcursor_window(start_index, colon_index)?;
-    let header_tokens: Vec<Token> = match &header_window {
-        Some(window) => {
-            if is_empty_header_window(window, start_index, colon_index) {
-                return Err(CompilerDiagnostic::invalid_loop_header(
-                    InvalidLoopHeaderReason::EmptyHeader,
-                    span,
-                )
-                .into());
+    let (parsed_loop_header, body_context) =
+        match token_stream.subcursor_window(start_index, colon_index)? {
+            Some(window) => {
+                if is_empty_header_window(&window, start_index, colon_index) {
+                    return Err(CompilerDiagnostic::invalid_loop_header(
+                        InvalidLoopHeaderReason::EmptyHeader,
+                        span,
+                    )
+                    .into());
+                }
+                let eof_span = window
+                    .span_at(colon_index.saturating_sub(1))
+                    .or(span)
+                    .unwrap_or_else(|| token_stream.current_span());
+                let mut window = window.with_synthetic_eof_span(eof_span);
+                parse_loop_header_cursor(
+                    &mut window,
+                    context,
+                    type_interner,
+                    warnings,
+                    string_table,
+                    path_fork,
+                )?
             }
-            collect_header_window_for_grammar(window, start_index, colon_index)
-        }
-        None => {
-            let tokens =
-                collect_compatibility_header_tokens(token_stream, start_index, colon_index);
-            if tokens
-                .iter()
-                .all(|token| matches!(token.kind, TokenKind::Newline))
-            {
-                return Err(CompilerDiagnostic::invalid_loop_header(
-                    InvalidLoopHeaderReason::EmptyHeader,
-                    span,
-                )
-                .into());
+            None => {
+                let tokens =
+                    collect_compatibility_header_tokens(token_stream, start_index, colon_index);
+                if tokens
+                    .iter()
+                    .all(|token| matches!(token.kind, TokenKind::Newline))
+                {
+                    return Err(CompilerDiagnostic::invalid_loop_header(
+                        InvalidLoopHeaderReason::EmptyHeader,
+                        span,
+                    )
+                    .into());
+                }
+                parse_loop_header_tokens(
+                    &tokens,
+                    path_syntax,
+                    context,
+                    type_interner,
+                    warnings,
+                    string_table,
+                    path_fork,
+                )?
             }
-            tokens
-        }
-    };
-
-    let (parsed_loop_header, body_context) = parse_loop_header_tokens(
-        &header_tokens,
-        path_syntax,
-        context,
-        type_interner,
-        warnings,
-        string_table,
-        path_fork,
-    )?;
+        };
 
     token_stream.set_position(colon_index.saturating_add(1))?;
 
@@ -168,25 +178,6 @@ fn is_empty_header_window(window: &AstCursor, start: usize, end: usize) -> bool 
         }
     }
     true
-}
-
-/// Explicit grammar adapter: materialize the canonical window for `parse_loop_header_tokens`.
-///
-/// WHAT: copies only `[start, end)` into the transient `&[Token]` grammar boundary.
-/// WHY: loop-header internals still own the `&[Token]` grammar handoff (next task converts
-/// them); no `SourceTokens` are cloned into a new `FileTokens` vector here and no cursor is
-/// retained.
-fn collect_header_window_for_grammar(window: &AstCursor, start: usize, end: usize) -> Vec<Token> {
-    let mut header_tokens = Vec::new();
-    let mut scan = start;
-    while scan < end {
-        let Some(token) = window.token_at(scan) else {
-            break;
-        };
-        header_tokens.push(token);
-        scan += 1;
-    }
-    header_tokens
 }
 
 /// Explicit compatibility fallback for unowned/synthetic streams.
