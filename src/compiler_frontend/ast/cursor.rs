@@ -11,7 +11,7 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tokenizer::tokens::{
     FilePathSyntax, FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenKind,
-    TokenRange, TokenRangeError, TokenRef, TokenTag,
+    TokenRange, TokenRangeError, TokenRef, TokenSequenceId, TokenTag,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,6 +20,12 @@ use std::sync::Arc;
 enum AstCursorBacking<'a> {
     Canonical(TokenCursor<'a>),
     Compatibility(&'a mut FileTokens),
+    /// Owned temporary compatibility for an explicit synthetic/remapped override.
+    ///
+    /// WHAT: holds the provided `FileTokens` without borrowing the caller.
+    /// WHY: declaration `initializer_override` content is synthetic and has no canonical
+    /// range; it stays on the explicit compatibility lane and never widens to canonical paths.
+    OwnedCompatibility(FileTokens),
 }
 
 /// Mutable AST parser position over a canonical source-token view.
@@ -38,6 +44,11 @@ pub(crate) struct AstCursor<'a> {
     /// Filesystem identity used only when a `FileTokens`-backed cursor creates an adapter.
     canonical_os_path: Option<PathBuf>,
     limit: Option<usize>,
+    /// Synthetic parser EOF observed at the end of a bounded canonical range.
+    ///
+    /// WHAT: reports the declaration EOF span without materialising a trailing token.
+    /// WHY: canonical initializer cursors share source storage; the EOF is parser data only.
+    synthetic_eof: Option<SourceSpan>,
     current_kind: TokenKind,
     next_kind: Option<TokenKind>,
     previous_kind: Option<TokenKind>,
@@ -54,6 +65,7 @@ impl<'a> AstCursor<'a> {
             canonical_owner,
             canonical_os_path,
             limit: None,
+            synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
             previous_kind: None,
@@ -84,6 +96,7 @@ impl<'a> AstCursor<'a> {
             canonical_owner: None,
             canonical_os_path,
             limit: None,
+            synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
             previous_kind: None,
@@ -128,10 +141,43 @@ impl<'a> AstCursor<'a> {
             canonical_owner: Some(Arc::clone(source_tokens)),
             canonical_os_path,
             limit: None,
+            synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
             previous_kind: None,
         })
+    }
+    /// Construct an owner-retaining canonical cursor directly from one segmented sequence.
+    ///
+    /// Segmented start bodies retain a `TokenSequenceId` rather than a contiguous range;
+    /// this shares the same canonical owner without materialising a `FileTokens` vector.
+    pub(crate) fn from_source_sequence(
+        source_tokens: &'a Arc<SourceTokens>,
+        canonical_os_path: Option<PathBuf>,
+        sequence: TokenSequenceId,
+    ) -> Result<Self, CompilerError> {
+        let view = source_tokens.token_sequence(sequence).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "canonical source sequence cursor construction failed: {error:?}"
+            ))
+        })?;
+        let canonical = view.cursor().map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "canonical source sequence cursor construction failed: {error:?}"
+            ))
+        })?;
+        let mut cursor = Self {
+            backing: AstCursorBacking::Canonical(canonical),
+            canonical_owner: Some(Arc::clone(source_tokens)),
+            canonical_os_path,
+            limit: None,
+            synthetic_eof: None,
+            current_kind: TokenKind::Eof,
+            next_kind: None,
+            previous_kind: None,
+        };
+        cursor.refresh_facts();
+        Ok(cursor)
     }
 
     /// Force the compatibility lane over a remapped generic-body adapter.
@@ -148,6 +194,7 @@ impl<'a> AstCursor<'a> {
             canonical_owner: None,
             canonical_os_path,
             limit: None,
+            synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
             previous_kind: None,
@@ -155,43 +202,62 @@ impl<'a> AstCursor<'a> {
         cursor.refresh_facts();
         cursor
     }
-    /// Build a bounded expression adapter from the cursor's canonical source owner.
+    pub(crate) fn from_owned_file_tokens_compatibility(token_stream: FileTokens) -> Self {
+        let canonical_os_path = token_stream.canonical_os_path.clone();
+        let mut cursor = Self {
+            backing: AstCursorBacking::OwnedCompatibility(token_stream),
+            canonical_owner: None,
+            canonical_os_path,
+            limit: None,
+            synthetic_eof: None,
+            current_kind: TokenKind::Eof,
+            next_kind: None,
+            previous_kind: None,
+        };
+        cursor.refresh_facts();
+        cursor
+    }
+    /// Build an owned compatibility subcursor for a non-canonical parser stream.
     ///
-    /// Cursors created from `FileTokens` retain the canonical owner and filesystem identity so
-    /// this handoff shares source storage and preserves diagnostics' OS path. A compatibility
-    /// cursor delegates to the existing `FileTokens` constructor, including remapped payloads.
-    pub(crate) fn new_bounded_expression_substream(
-        source_owner: Option<&AstCursor>,
+    /// Canonical callers must use `nested_cursor`; this lane is only for remapped or synthetic
+    /// streams whose payload IDs cannot be interpreted through the donor canonical owner.
+    pub(crate) fn bounded_compatibility_expression_cursor(
+        &self,
         range: TokenRange,
         declaration_path: crate::compiler_frontend::symbols::path_interner::PathId,
         eof_span: LocalSpan,
-    ) -> Result<FileTokens, CompilerError> {
-        let source_owner = source_owner.ok_or_else(|| {
-            CompilerError::compiler_error("bounded expression has no canonical source owner")
-        })?;
-        match &source_owner.backing {
-            AstCursorBacking::Canonical(_) => {
-                let canonical_owner = source_owner.canonical_owner.as_ref().ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "canonical cursor has no source owner for bounded expression",
-                    )
-                })?;
-                FileTokens::new_bounded_expression_substream_from_canonical(
-                    Arc::clone(canonical_owner),
-                    source_owner.canonical_os_path.clone(),
-                    range,
-                    declaration_path,
-                    eof_span,
-                )
-            }
-            AstCursorBacking::Compatibility(stream) => {
-                FileTokens::new_bounded_expression_substream(
-                    stream,
-                    range,
-                    declaration_path,
-                    eof_span,
-                )
-            }
+    ) -> Result<Option<Self>, CompilerError> {
+        let Some(stream) = self.compatibility_stream() else {
+            return Ok(None);
+        };
+        let bounded = FileTokens::new_bounded_expression_substream(
+            stream,
+            range,
+            declaration_path,
+            eof_span,
+        )?;
+        Ok(Some(Self::from_owned_file_tokens_compatibility(bounded)))
+    }
+
+    pub(crate) fn with_synthetic_eof_span(mut self, span: SourceSpan) -> Self {
+        self.synthetic_eof = Some(span);
+        self.refresh_facts();
+        self
+    }
+
+    fn compatibility_stream(&self) -> Option<&FileTokens> {
+        match &self.backing {
+            AstCursorBacking::Compatibility(stream) => Some(stream),
+            AstCursorBacking::OwnedCompatibility(stream) => Some(stream),
+            AstCursorBacking::Canonical(_) => None,
+        }
+    }
+
+    fn compatibility_stream_mut(&mut self) -> Option<&mut FileTokens> {
+        match &mut self.backing {
+            AstCursorBacking::Compatibility(stream) => Some(stream),
+            AstCursorBacking::OwnedCompatibility(stream) => Some(stream),
+            AstCursorBacking::Canonical(_) => None,
         }
     }
 
@@ -224,7 +290,10 @@ impl<'a> AstCursor<'a> {
                 cursor.advance();
                 self.refresh_facts();
             }
-            AstCursorBacking::Compatibility(stream) => {
+            _ => {
+                let stream = self
+                    .compatibility_stream_mut()
+                    .expect("non-canonical AST cursor must have compatibility backing");
                 if limit.is_some_and(|limit| stream.index >= limit)
                     || stream.index >= stream.length
                     || matches!(
@@ -248,14 +317,21 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn position(&self) -> usize {
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => cursor.parser_position(),
-            AstCursorBacking::Compatibility(stream) => stream.index,
+            _ => {
+                self.compatibility_stream()
+                    .expect("non-canonical AST cursor must have compatibility backing")
+                    .index
+            }
         }
     }
-
     pub(crate) fn length(&self) -> usize {
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => cursor.parser_length(),
-            AstCursorBacking::Compatibility(stream) => stream.length,
+            _ => {
+                self.compatibility_stream()
+                    .expect("non-canonical AST cursor must have compatibility backing")
+                    .length
+            }
         }
     }
 
@@ -271,7 +347,9 @@ impl<'a> AstCursor<'a> {
                     .ok()
                     .map(|kind| Token::new(kind, token.span()))
             }
-            AstCursorBacking::Compatibility(stream) => stream.tokens.get(index).cloned(),
+            _ => self
+                .compatibility_stream()
+                .and_then(|stream| stream.tokens.get(index).cloned()),
         }
     }
 
@@ -292,10 +370,13 @@ impl<'a> AstCursor<'a> {
                     .ok()
                     .and_then(|token| token.to_token_kind().ok())
             }
-            AstCursorBacking::Compatibility(stream) => stream
-                .compatibility_index_for_source_index(index)
-                .and_then(|index| stream.tokens.get(index))
-                .map(|token| token.kind.clone()),
+            _ => {
+                let stream = self.compatibility_stream()?;
+                stream
+                    .compatibility_index_for_source_index(index)
+                    .and_then(|index| stream.tokens.get(index))
+                    .map(|token| token.kind.clone())
+            }
         }
     }
 
@@ -316,10 +397,13 @@ impl<'a> AstCursor<'a> {
                 let token = cursor.parser_token_at(position.checked_add(offset)?)?;
                 token.to_token_kind().ok()
             }
-            AstCursorBacking::Compatibility(stream) => stream
-                .tokens
-                .get(stream.index.checked_add(offset)?)
-                .map(|token| token.kind.clone()),
+            _ => {
+                let stream = self.compatibility_stream()?;
+                stream
+                    .tokens
+                    .get(stream.index.checked_add(offset)?)
+                    .map(|token| token.kind.clone())
+            }
         }
     }
 
@@ -331,7 +415,10 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn declaration_cursor(&self) -> Result<DeclarationCursor<'_>, CompilerError> {
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => DeclarationCursor::new(*cursor),
-            AstCursorBacking::Compatibility(stream) => DeclarationCursor::from_file_tokens(stream),
+            _ => DeclarationCursor::from_file_tokens(
+                self.compatibility_stream()
+                    .expect("non-canonical AST cursor must have compatibility backing"),
+            ),
         }
     }
 
@@ -362,8 +449,15 @@ impl<'a> AstCursor<'a> {
                     })?;
                 }
             }
-            AstCursorBacking::Compatibility(stream) => {
-                let end = self.limit.unwrap_or(stream.length);
+            _ => {
+                let end = self.limit.unwrap_or_else(|| {
+                    self.compatibility_stream()
+                        .expect("non-canonical AST cursor must have compatibility backing")
+                        .length
+                });
+                let stream = self
+                    .compatibility_stream_mut()
+                    .expect("non-canonical AST cursor must have compatibility backing");
                 if position > end || position > stream.length {
                     return Err(CompilerError::compiler_error(
                         "AST compatibility cursor position is outside its active bounds",
@@ -385,7 +479,11 @@ impl<'a> AstCursor<'a> {
         }
         let max = match &self.backing {
             AstCursorBacking::Canonical(cursor) => cursor.parser_length(),
-            AstCursorBacking::Compatibility(stream) => stream.length,
+            _ => {
+                self.compatibility_stream()
+                    .expect("non-canonical AST cursor must have compatibility backing")
+                    .length
+            }
         };
         if end > max {
             return Err(CompilerError::compiler_error(
@@ -406,14 +504,19 @@ impl<'a> AstCursor<'a> {
         self.limit.is_some_and(|limit| self.position() >= limit)
             || match &self.backing {
                 AstCursorBacking::Canonical(cursor) => cursor.is_at_end(),
-                AstCursorBacking::Compatibility(stream) => stream.index >= stream.length,
+                _ => {
+                    let stream = self
+                        .compatibility_stream()
+                        .expect("non-canonical AST cursor must have compatibility backing");
+                    stream.index >= stream.length
+                }
             }
     }
 
     pub(crate) fn nested(&self, range: TokenRange) -> Result<TokenCursor<'a>, TokenRangeError> {
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => cursor.nested(range),
-            AstCursorBacking::Compatibility(_) => Err(TokenRangeError::OutOfBounds {
+            _ => Err(TokenRangeError::OutOfBounds {
                 start: range.start().raw(),
                 end: range.end().raw(),
                 len: 0,
@@ -459,18 +562,31 @@ impl<'a> AstCursor<'a> {
 
     pub(crate) fn current_span(&self) -> SourceSpan {
         match &self.backing {
-            AstCursorBacking::Canonical(_) => self
-                .current()
-                .map(TokenRef::source_span)
-                .unwrap_or_else(|| SourceSpan::new(self.source_id(), LocalSpan::source_start())),
-            AstCursorBacking::Compatibility(stream) => stream.current_span(),
+            AstCursorBacking::Canonical(cursor) => {
+                if let Some(span) = self.current().map(TokenRef::source_span) {
+                    return span;
+                }
+                if cursor.is_at_end() {
+                    if let Some(span) = self.synthetic_eof {
+                        return span;
+                    }
+                }
+                SourceSpan::new(self.source_id(), LocalSpan::source_start())
+            }
+            _ => self
+                .compatibility_stream()
+                .expect("non-canonical AST cursor must have compatibility backing")
+                .current_span(),
         }
     }
 
     pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => cursor.source_tokens().path_syntax_table(),
-            AstCursorBacking::Compatibility(stream) => stream.path_syntax_table(),
+            _ => self
+                .compatibility_stream()
+                .expect("non-canonical AST cursor must have compatibility backing")
+                .path_syntax_table(),
         }
     }
 
@@ -479,25 +595,38 @@ impl<'a> AstCursor<'a> {
             AstCursorBacking::Canonical(cursor) => Ok(FilePathSyntax::Shared(
                 cursor.source_tokens().path_syntax_arc()?,
             )),
-            AstCursorBacking::Compatibility(stream) => stream.path_syntax.frozen_substream(),
+            _ => self
+                .compatibility_stream()
+                .expect("non-canonical AST cursor must have compatibility backing")
+                .path_syntax
+                .frozen_substream(),
         }
     }
 
     pub(crate) fn previous_span(&self) -> Option<SourceSpan> {
         match &self.backing {
             AstCursorBacking::Canonical(_) => self.previous().map(TokenRef::source_span),
-            AstCursorBacking::Compatibility(stream) => stream
-                .index
-                .checked_sub(1)
-                .and_then(|index| stream.tokens.get(index))
-                .map(|token| SourceSpan::new(stream.file_id, token.span)),
+            _ => {
+                let stream = self
+                    .compatibility_stream()
+                    .expect("non-canonical AST cursor must have compatibility backing");
+                stream
+                    .index
+                    .checked_sub(1)
+                    .and_then(|index| stream.tokens.get(index))
+                    .map(|token| SourceSpan::new(stream.file_id, token.span))
+            }
         }
     }
 
     pub(crate) fn source_id(&self) -> SourceId {
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => cursor.range().source(),
-            AstCursorBacking::Compatibility(stream) => stream.file_id,
+            _ => {
+                self.compatibility_stream()
+                    .expect("non-canonical AST cursor must have compatibility backing")
+                    .file_id
+            }
         }
     }
 
@@ -511,18 +640,32 @@ impl<'a> AstCursor<'a> {
 
     pub(crate) fn current_token(&self) -> Token {
         match &self.backing {
-            AstCursorBacking::Canonical(_) => self
+            AstCursorBacking::Canonical(cursor) => self
                 .current()
                 .map(|token| Token::new(self.current_kind.clone(), token.span()))
-                .unwrap_or_else(Self::eof_token),
-            AstCursorBacking::Compatibility(stream) => stream.current_token(),
+                .unwrap_or_else(|| {
+                    let span = cursor
+                        .is_at_end()
+                        .then(|| self.synthetic_eof)
+                        .flatten()
+                        .map(SourceSpan::local)
+                        .unwrap_or_else(LocalSpan::source_start);
+                    Token::new(TokenKind::Eof, span)
+                }),
+            _ => self
+                .compatibility_stream()
+                .expect("non-canonical AST cursor must have compatibility backing")
+                .current_token(),
         }
     }
 
     pub(crate) fn current_token_kind(&self) -> &TokenKind {
         match &self.backing {
             AstCursorBacking::Canonical(_) => &self.current_kind,
-            AstCursorBacking::Compatibility(stream) => {
+            _ => {
+                let stream = self
+                    .compatibility_stream()
+                    .expect("non-canonical AST cursor must have compatibility backing");
                 if self.limit.is_some_and(|limit| stream.index >= limit) {
                     return &self.current_kind;
                 }
@@ -538,7 +681,8 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn peek_next_token(&self) -> Option<&TokenKind> {
         match &self.backing {
             AstCursorBacking::Canonical(_) => self.next_kind.as_ref(),
-            AstCursorBacking::Compatibility(stream) => {
+            _ => {
+                let stream = self.compatibility_stream()?;
                 let index = stream.index.checked_add(1)?;
                 let end = self.limit.unwrap_or(stream.length);
                 (index < end)
@@ -552,12 +696,15 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn previous_token(&self) -> Option<&TokenKind> {
         match &self.backing {
             AstCursorBacking::Canonical(_) => self.previous_kind.as_ref(),
-            AstCursorBacking::Compatibility(stream) => stream
-                .index
-                .checked_sub(1)
-                .filter(|index| self.limit.is_none_or(|limit| *index < limit))
-                .and_then(|index| stream.tokens.get(index))
-                .map(|token| &token.kind),
+            _ => {
+                let stream = self.compatibility_stream()?;
+                stream
+                    .index
+                    .checked_sub(1)
+                    .filter(|index| self.limit.is_none_or(|limit| *index < limit))
+                    .and_then(|index| stream.tokens.get(index))
+                    .map(|token| &token.kind)
+            }
         }
     }
 
@@ -629,9 +776,5 @@ impl<'a> AstCursor<'a> {
         self.current_kind = current.unwrap_or(TokenKind::Eof);
         self.next_kind = next;
         self.previous_kind = previous;
-    }
-
-    fn eof_token() -> Token {
-        Token::new(TokenKind::Eof, LocalSpan::source_start())
     }
 }

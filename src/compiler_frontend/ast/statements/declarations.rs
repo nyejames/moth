@@ -527,15 +527,13 @@ pub fn resolve_declaration_syntax(
         )
         .map_err(|diagnostic| diagnostic.into_diagnostic())?;
 
-        let mut initializer_file_tokens = declaration_initializer_stream(
+        let mut initializer_stream = declaration_initializer_stream(
             source_owner,
             declaration_syntax.initializer_range,
             initializer_override.take(),
             &qualified_name,
             declaration_syntax.span,
         )?;
-        let mut initializer_stream =
-            AstCursor::from_file_tokens_compatibility(&mut initializer_file_tokens);
 
         // Shorthand requires an immediate collection literal initializer.
         if initializer_stream.current_token_kind() != &TokenKind::OpenCurly {
@@ -689,18 +687,13 @@ pub fn resolve_declaration_syntax(
             config_qualifier,
         });
     }
-    let mut initializer_file_tokens = declaration_initializer_stream(
+    let mut initializer_stream = declaration_initializer_stream(
         source_owner,
         declaration_syntax.initializer_range,
         initializer_override.take(),
         &qualified_name,
         declaration_syntax.span,
     )?;
-    let mut initializer_stream =
-        AstCursor::from_file_tokens_compatibility(&mut initializer_file_tokens);
-
-    // Check the first token before dispatching so we don't wastefully call
-    // `create_expression` recursively when the initializer is a struct definition.
 
     let mut parsed_initializer = match initializer_stream.current_token_kind() {
         // Struct Definition
@@ -955,28 +948,46 @@ pub fn resolve_declaration_syntax(
         config_qualifier,
     })
 }
-
-/// Build the explicit transient expression adapter for a source-owned initializer range.
+/// Build the bounded parser cursor for a declaration initializer.
 ///
-/// The declaration shell keeps only `initializer_range`; this boundary materializes the bounded
-/// range and appends a parser-only EOF while retaining the canonical owner's provenance.
-fn declaration_initializer_stream(
-    source_owner: Option<&AstCursor>,
+/// Source-owned ranges stay on the canonical `AstCursor` view. Explicit synthetic/remapped
+/// overrides use the owned compatibility lane because they have no canonical range to borrow.
+fn declaration_initializer_stream<'cursor, 'tokens>(
+    source_owner: Option<&'cursor AstCursor<'tokens>>,
     initializer_range: Option<TokenRange>,
     initializer_override: Option<FileTokens>,
     qualified_name: &PathId,
     declaration_span: Option<SourceSpan>,
-) -> DeclarationResult<FileTokens> {
+) -> DeclarationResult<AstCursor<'tokens>> {
     if let Some(stream) = initializer_override {
-        return Ok(stream);
+        return Ok(AstCursor::from_owned_file_tokens_compatibility(stream));
     }
+
     let range = initializer_range
         .ok_or_else(|| CompilerError::compiler_error("declaration initializer range is missing"))?;
     let eof_span = declaration_span
         .map(SourceSpan::local)
         .unwrap_or_else(LocalSpan::source_start);
-    AstCursor::new_bounded_expression_substream(source_owner, range, *qualified_name, eof_span)
-        .map_err(ExpressionParseError::from)
+
+    if let Some(source_owner) = source_owner {
+        if let Some(cursor) = source_owner
+            .bounded_compatibility_expression_cursor(range, *qualified_name, eof_span)
+            .map_err(ExpressionParseError::from)?
+        {
+            return Ok(cursor);
+        }
+    }
+
+    let source_owner = source_owner.ok_or_else(|| {
+        CompilerError::compiler_error("declaration initializer has no canonical source owner")
+    })?;
+    let cursor = source_owner.nested_cursor(range).map_err(|error| {
+        ExpressionParseError::from(CompilerError::compiler_error(format!(
+            "declaration initializer range cursor construction failed: {error:?}"
+        )))
+    })?;
+    let source_id = cursor.source_id();
+    Ok(cursor.with_synthetic_eof_span(SourceSpan::new(source_id, eof_span)))
 }
 #[cfg(test)]
 #[path = "tests/declaration_tests.rs"]

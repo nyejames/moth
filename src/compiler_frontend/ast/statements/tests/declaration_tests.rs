@@ -522,10 +522,11 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let declaration_path = path_fork
             .try_intern_child(source_path, name)
             .expect("declaration path should intern");
+
         let mut owner = tokens;
         let owner = AstCursor::from_file_tokens(&mut owner)
             .expect("the tokenized source must expose an AST cursor");
-        let initializer = super::declaration_initializer_stream(
+        let mut initializer = super::declaration_initializer_stream(
             Some(&owner),
             declaration.initializer_range,
             None,
@@ -533,18 +534,20 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             declaration.span,
         )
         .expect("initializer must retain its declaration's source owner");
-        let terminator = initializer.tokens.last().unwrap();
-        assert_eq!(initializer.file_id, file_id);
+        assert_eq!(initializer.source_id(), file_id);
+        let eof_position = initializer.length();
+        initializer
+            .set_position(eof_position)
+            .expect("initializer EOF position must be within its range");
+        assert_eq!(initializer.current_span(), declaration_span);
         sources
             .install_extended_spans(file_id, builder.freeze())
             .expect("the original table must install after the final span producer");
-        let range = SourceSpan::new(file_id, terminator.span).byte_range(&sources);
+        let range = initializer.current_span().byte_range(&sources);
         assert_eq!(
             (range.start(), range.end()),
             expected_range,
             "target {target}"
         );
-        let terminator_span = SourceSpan::new(file_id, terminator.span);
-        assert_eq!(terminator_span, declaration_span);
     }
 }
