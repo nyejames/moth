@@ -71,6 +71,135 @@ fn bounded_canonical_reads_respect_range_and_offset_limits() {
     cursor.restore_limit(active_limit);
 }
 #[test]
+fn canonical_subcursor_window_bounds_contiguous_reads() {
+    let source = SourceId::COMPILATION_ROOT;
+    let owner = Arc::new(
+        SourceTokens::try_from_tokens(
+            source,
+            vec![
+                Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
+                Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
+                Token::new(TokenKind::BoolLiteral(false), LocalSpan::source_start()),
+                Token::new(TokenKind::Eof, LocalSpan::source_start()),
+            ],
+            NumericLiteralStore::with_source(source),
+            PathSyntaxTable::with_source(source),
+            TokenStats::default(),
+        )
+        .expect("cursor fixture should satisfy canonical ownership checks"),
+    );
+    let mut parent =
+        AstCursor::from_source_tokens(&owner, None, TokenRange::from_raw(source, 0, 4).unwrap())
+            .expect("bounded cursor should build");
+    let mut child = parent
+        .subcursor_window(1, 3)
+        .expect("interior window should validate")
+        .expect("canonical backing should produce a child");
+
+    assert_eq!(child.position(), 1);
+    assert_eq!(child.length(), 3);
+    assert!(child.token_kind_at(0).is_none());
+    assert_eq!(child.token_kind_at(1), Some(TokenKind::BoolLiteral(true)));
+    assert_eq!(child.token_kind_at(2), Some(TokenKind::BoolLiteral(false)));
+    assert!(child.token_kind_at(3).is_none());
+    assert!(
+        child
+            .nested_cursor(TokenRange::from_raw(source, 0, 2).unwrap())
+            .is_err(),
+        "nested views must retain the window's lower bound",
+    );
+    let nested = child
+        .nested_cursor(TokenRange::from_raw(source, 1, 3).unwrap())
+        .expect("a nested view wholly inside the window should be accepted");
+    assert_eq!(
+        nested.token_kind_at(1),
+        Some(TokenKind::BoolLiteral(true)),
+        "nested views must retain the window's visible tokens",
+    );
+    assert!(child.peek_next_token().is_some());
+    child.advance();
+    child.advance();
+    assert!(child.current().is_none());
+    assert!(child.span_at(3).is_none());
+
+    assert!(parent.subcursor_window(3, 2).is_err());
+    parent
+        .set_limit(3)
+        .expect("parent limit should fit the canonical range");
+    assert!(parent.subcursor_window(1, 4).is_err());
+}
+
+#[test]
+fn canonical_subcursor_window_skips_segmented_source_gaps() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut owner = FileTokens::new(
+        crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
+        source,
+        (0..5)
+            .map(|index| {
+                Token::new(
+                    TokenKind::BoolLiteral(index % 2 == 0),
+                    LocalSpan::source_start(),
+                )
+            })
+            .collect(),
+    );
+    let segments = [
+        TokenRange::from_raw(source, 0, 1).unwrap(),
+        TokenRange::from_raw(source, 3, 5).unwrap(),
+    ];
+    let sequence = owner
+        .try_register_token_sequence(&segments)
+        .expect("segmented fixture should register");
+    owner.freeze_path_syntax_for_test();
+    let mut adapter = FileTokens::new_bounded_sequence_substream(
+        &owner,
+        sequence,
+        crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
+    )
+    .expect("segmented adapter should retain canonical provenance");
+    let mut parent =
+        AstCursor::from_file_tokens(&mut adapter).expect("segmented AST cursor should build");
+
+    parent
+        .set_limit(2)
+        .expect("the parent limit should be in dense sequence coordinates");
+    assert!(parent.subcursor_window(1, 3).is_err());
+    parent.restore_limit(None);
+
+    let mut child = parent
+        .subcursor_window(1, 3)
+        .expect("segmented window should validate")
+        .expect("canonical backing should produce a child");
+    let narrow = parent
+        .subcursor_window(2, 3)
+        .expect("a dense window inside the sequence should validate")
+        .expect("canonical segmented backing should produce a child");
+    assert!(
+        narrow
+            .nested_cursor(TokenRange::from_raw(source, 3, 4).unwrap())
+            .is_err(),
+        "segmented nested views must retain the dense lower bound",
+    );
+
+    assert_eq!(child.position(), 1);
+    assert_eq!(child.length(), 3);
+    assert!(child.token_kind_at(0).is_none());
+    assert_eq!(child.token_kind_at(1), Some(TokenKind::BoolLiteral(false)));
+    assert_eq!(child.token_kind_at(2), Some(TokenKind::BoolLiteral(true)));
+    assert!(child.token_kind_at(3).is_none());
+    assert!(child.previous().is_none());
+    child.advance();
+    assert_eq!(
+        child.previous().map(|token| token.span()),
+        Some(LocalSpan::source_start())
+    );
+    child.advance();
+    assert!(child.current().is_none());
+
+    assert!(parent.subcursor_window(3, 2).is_err());
+}
+#[test]
 fn segmented_nested_cursor_translates_active_limit() {
     let source = SourceId::COMPILATION_ROOT;
     let mut owner = FileTokens::new(

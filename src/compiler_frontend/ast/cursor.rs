@@ -44,6 +44,9 @@ pub(crate) struct AstCursor<'a> {
     /// Filesystem identity used only when a `FileTokens`-backed cursor creates an adapter.
     canonical_os_path: Option<PathBuf>,
     limit: Option<usize>,
+    /// Optional parser-position window imposed by a canonical subcursor handoff.
+    window_start: Option<usize>,
+    window_end: Option<usize>,
     /// Synthetic parser EOF observed at the end of a bounded canonical range.
     ///
     /// WHAT: reports the declaration EOF span without materialising a trailing token.
@@ -65,6 +68,8 @@ impl<'a> AstCursor<'a> {
             canonical_owner,
             canonical_os_path,
             limit: None,
+            window_start: None,
+            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -96,6 +101,8 @@ impl<'a> AstCursor<'a> {
             canonical_owner: None,
             canonical_os_path,
             limit: None,
+            window_start: None,
+            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -141,12 +148,15 @@ impl<'a> AstCursor<'a> {
             canonical_owner: Some(Arc::clone(source_tokens)),
             canonical_os_path,
             limit: None,
+            window_start: None,
+            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
             previous_kind: None,
         })
     }
+
     /// Construct an owner-retaining canonical cursor directly from one segmented sequence.
     ///
     /// Segmented start bodies retain a `TokenSequenceId` rather than a contiguous range;
@@ -171,6 +181,8 @@ impl<'a> AstCursor<'a> {
             canonical_owner: Some(Arc::clone(source_tokens)),
             canonical_os_path,
             limit: None,
+            window_start: None,
+            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -194,6 +206,8 @@ impl<'a> AstCursor<'a> {
             canonical_owner: None,
             canonical_os_path,
             limit: None,
+            window_start: None,
+            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -209,6 +223,8 @@ impl<'a> AstCursor<'a> {
             canonical_owner: None,
             canonical_os_path,
             limit: None,
+            window_start: None,
+            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -260,6 +276,30 @@ impl<'a> AstCursor<'a> {
             AstCursorBacking::Canonical(_) => None,
         }
     }
+    fn base_length(&self) -> usize {
+        match &self.backing {
+            AstCursorBacking::Canonical(cursor) => cursor.parser_length(),
+            _ => {
+                self.compatibility_stream()
+                    .expect("non-canonical AST cursor must have compatibility backing")
+                    .length
+            }
+        }
+    }
+
+    fn active_start(&self) -> usize {
+        self.window_start.unwrap_or_else(|| match &self.backing {
+            AstCursorBacking::Canonical(cursor) if cursor.is_segmented() => 0,
+            AstCursorBacking::Canonical(cursor) => cursor.range().start().index(),
+            _ => 0,
+        })
+    }
+
+    fn active_end(&self) -> usize {
+        self.window_end
+            .unwrap_or_else(|| self.base_length())
+            .min(self.limit.unwrap_or(usize::MAX))
+    }
 
     pub(crate) fn current(&self) -> Option<TokenRef<'a>> {
         let AstCursorBacking::Canonical(cursor) = &self.backing else {
@@ -279,12 +319,10 @@ impl<'a> AstCursor<'a> {
     }
 
     pub(crate) fn advance(&mut self) {
-        let limit = self.limit;
+        let active_end = self.active_end();
         match &mut self.backing {
             AstCursorBacking::Canonical(cursor) => {
-                if limit.is_some_and(|limit| cursor.parser_position() >= limit)
-                    || cursor.is_at_end()
-                {
+                if cursor.parser_position() >= active_end || cursor.is_at_end() {
                     return;
                 }
                 cursor.advance();
@@ -294,7 +332,7 @@ impl<'a> AstCursor<'a> {
                 let stream = self
                     .compatibility_stream_mut()
                     .expect("non-canonical AST cursor must have compatibility backing");
-                if limit.is_some_and(|limit| stream.index >= limit)
+                if stream.index >= active_end
                     || stream.index >= stream.length
                     || matches!(
                         stream.tokens.get(stream.index).map(|token| &token.kind),
@@ -325,18 +363,14 @@ impl<'a> AstCursor<'a> {
         }
     }
     pub(crate) fn length(&self) -> usize {
-        match &self.backing {
-            AstCursorBacking::Canonical(cursor) => cursor.parser_length(),
-            _ => {
-                self.compatibility_stream()
-                    .expect("non-canonical AST cursor must have compatibility backing")
-                    .length
-            }
-        }
+        self.window_end.unwrap_or_else(|| self.base_length())
     }
 
     pub(crate) fn token_at(&self, index: usize) -> Option<Token> {
-        if index >= self.length() || self.limit.is_some_and(|limit| index >= limit) {
+        if index < self.active_start()
+            || index >= self.length()
+            || self.limit.is_some_and(|limit| index >= limit)
+        {
             return None;
         }
         match &self.backing {
@@ -385,15 +419,12 @@ impl<'a> AstCursor<'a> {
     /// The offset is logical-parser relative for both contiguous and segmented canonical cursors;
     /// the cursor resolves that dense position without changing the live parser position.
     pub(crate) fn token_kind_at_offset(&self, offset: usize) -> Option<TokenKind> {
-        if self
-            .limit
-            .is_some_and(|limit| offset >= limit.saturating_sub(self.position()))
-        {
+        let position = self.position();
+        if position.checked_add(offset)? >= self.active_end() {
             return None;
         }
         match &self.backing {
             AstCursorBacking::Canonical(cursor) => {
-                let position = cursor.parser_position();
                 let token = cursor.parser_token_at(position.checked_add(offset)?)?;
                 token.to_token_kind().ok()
             }
@@ -423,7 +454,12 @@ impl<'a> AstCursor<'a> {
     }
 
     pub(crate) fn set_position(&mut self, position: usize) -> Result<(), CompilerError> {
-        if self.limit.is_some_and(|limit| position > limit) {
+        if position < self.active_start() {
+            return Err(CompilerError::compiler_error(
+                "AST cursor position precedes its active parser window",
+            ));
+        }
+        if position > self.active_end() {
             return Err(CompilerError::compiler_error(
                 "AST cursor position exceeds its active parser limit",
             ));
@@ -450,11 +486,7 @@ impl<'a> AstCursor<'a> {
                 }
             }
             _ => {
-                let end = self.limit.unwrap_or_else(|| {
-                    self.compatibility_stream()
-                        .expect("non-canonical AST cursor must have compatibility backing")
-                        .length
-                });
+                let end = self.active_end();
                 let stream = self
                     .compatibility_stream_mut()
                     .expect("non-canonical AST cursor must have compatibility backing");
@@ -477,14 +509,7 @@ impl<'a> AstCursor<'a> {
                 "AST cursor parser limit precedes its current position",
             ));
         }
-        let max = match &self.backing {
-            AstCursorBacking::Canonical(cursor) => cursor.parser_length(),
-            _ => {
-                self.compatibility_stream()
-                    .expect("non-canonical AST cursor must have compatibility backing")
-                    .length
-            }
-        };
+        let max = self.length();
         if end > max {
             return Err(CompilerError::compiler_error(
                 "AST cursor parser limit exceeds its active range",
@@ -501,7 +526,7 @@ impl<'a> AstCursor<'a> {
         self.refresh_facts();
     }
     pub(crate) fn is_at_end(&self) -> bool {
-        self.limit.is_some_and(|limit| self.position() >= limit)
+        self.position() >= self.active_end()
             || match &self.backing {
                 AstCursorBacking::Canonical(cursor) => cursor.is_at_end(),
                 _ => {
@@ -523,26 +548,39 @@ impl<'a> AstCursor<'a> {
             }),
         }
     }
-    /// Create a nested canonical cursor while preserving this cursor's provenance metadata and
-    /// active parser limit.
+
+    /// Create a nested canonical cursor while preserving this cursor's active parser bounds.
     ///
     /// The nested range must fit inside both the current canonical range and any active parser
-    /// limit. A child built from a bounded parent therefore cannot widen ordinary parser reads.
+    /// window/limit. A child built from a bounded parent therefore cannot widen ordinary parser
+    /// reads before the window start or after its effective end.
     pub(crate) fn nested_cursor(&self, range: TokenRange) -> Result<Self, TokenRangeError> {
-        if let Some(limit) = self.limit {
-            if let AstCursorBacking::Canonical(cursor) = &self.backing {
-                if cursor
-                    .parser_position_at_range_end(range)
-                    .is_none_or(|range_end| range_end > limit)
-                {
-                    return Err(TokenRangeError::OutOfBounds {
-                        start: range.start().raw(),
-                        end: range.end().raw(),
-                        len: limit,
-                    });
+        let active_start = self.active_start();
+        let active_end = self.active_end();
+        let within_active_bounds = match &self.backing {
+            AstCursorBacking::Canonical(cursor) if cursor.is_segmented() => {
+                let start_range = TokenRange::new(range.source(), range.start(), range.start());
+                match (
+                    start_range.and_then(|range| cursor.parser_position_at_range_end(range)),
+                    cursor.parser_position_at_range_end(range),
+                ) {
+                    (Some(start), Some(end)) => start >= active_start && end <= active_end,
+                    _ => true,
                 }
             }
+            AstCursorBacking::Canonical(_) => {
+                range.start().index() >= active_start && range.end().index() <= active_end
+            }
+            AstCursorBacking::Compatibility(_) | AstCursorBacking::OwnedCompatibility(_) => false,
+        };
+        if !within_active_bounds {
+            return Err(TokenRangeError::OutOfBounds {
+                start: range.start().raw(),
+                end: range.end().raw(),
+                len: active_end,
+            });
         }
+
         let nested = self.nested(range)?;
         let nested_limit = match (&self.backing, self.limit) {
             (AstCursorBacking::Canonical(cursor), Some(_)) if cursor.is_segmented() => {
@@ -559,14 +597,51 @@ impl<'a> AstCursor<'a> {
         cursor.refresh_facts();
         Ok(cursor)
     }
+    /// Create a short-lived canonical child over the half-open parser-position window `[start, end)`.
+    ///
+    /// Contiguous cursors use source-local positions; segmented cursors use dense sequence
+    /// positions, so source gaps are never exposed. Compatibility-backed cursors deliberately
+    /// return `None` rather than cloning their legacy token lane.
+    pub(crate) fn subcursor_window(
+        &self,
+        start: usize,
+        end: usize,
+    ) -> Result<Option<Self>, CompilerError> {
+        let AstCursorBacking::Canonical(parent) = &self.backing else {
+            return Ok(None);
+        };
+        if start > end {
+            return Err(CompilerError::compiler_error(
+                "AST cursor subcursor window is inverted",
+            ));
+        }
+        if start < self.active_start() || end > self.active_end() {
+            return Err(CompilerError::compiler_error(
+                "AST cursor subcursor window is outside its active bounds",
+            ));
+        }
+
+        let mut child = Self::new_with_owner(
+            *parent,
+            self.canonical_owner.clone(),
+            self.canonical_os_path.clone(),
+        );
+        child.synthetic_eof = self.synthetic_eof;
+        child.set_position(start)?;
+        child.window_start = Some(start);
+        child.window_end = Some(end);
+        child.limit = Some(end);
+        child.refresh_facts();
+        Ok(Some(child))
+    }
 
     pub(crate) fn current_span(&self) -> SourceSpan {
         match &self.backing {
-            AstCursorBacking::Canonical(cursor) => {
+            AstCursorBacking::Canonical(_) => {
                 if let Some(span) = self.current().map(TokenRef::source_span) {
                     return span;
                 }
-                if cursor.is_at_end() {
+                if self.is_at_end() {
                     if let Some(span) = self.synthetic_eof {
                         return span;
                     }
@@ -640,11 +715,11 @@ impl<'a> AstCursor<'a> {
 
     pub(crate) fn current_token(&self) -> Token {
         match &self.backing {
-            AstCursorBacking::Canonical(cursor) => self
+            AstCursorBacking::Canonical(_) => self
                 .current()
                 .map(|token| Token::new(self.current_kind.clone(), token.span()))
                 .unwrap_or_else(|| {
-                    let span = cursor
+                    let span = self
                         .is_at_end()
                         .then(|| self.synthetic_eof)
                         .flatten()
@@ -713,26 +788,28 @@ impl<'a> AstCursor<'a> {
     }
 
     fn visible_at(&self, logical_position: usize, token: TokenRef<'a>) -> Option<TokenRef<'a>> {
-        self.limit
-            .is_none_or(|limit| logical_position < limit)
+        (logical_position >= self.active_start() && logical_position < self.active_end())
             .then_some(token)
     }
 
-    fn previous_from_cursor(cursor: TokenCursor<'a>, limit: Option<usize>) -> Option<TokenRef<'a>> {
+    fn previous_from_cursor(
+        cursor: TokenCursor<'a>,
+        lower_bound: usize,
+        upper_bound: usize,
+    ) -> Option<TokenRef<'a>> {
         let current = cursor.current();
         let range = cursor.range();
         let position = current
             .map(TokenRef::index)
             .unwrap_or_else(|| cursor.position());
         let previous = TokenIndex::try_from_raw(position.raw().checked_sub(1)?)?;
-        if previous < range.start() {
+        if previous < range.start()
+            || previous.index() < lower_bound
+            || previous.index() >= upper_bound
+        {
             return None;
         }
-        cursor
-            .source_tokens()
-            .token(previous)
-            .ok()
-            .filter(|token| limit.is_none_or(|limit| token.index().index() < limit))
+        cursor.source_tokens().token(previous).ok()
     }
 
     fn refresh_facts(&mut self) {
@@ -769,7 +846,7 @@ impl<'a> AstCursor<'a> {
                 })
                 .and_then(|token| token.to_token_kind().ok())
         } else {
-            Self::previous_from_cursor(*cursor, self.limit)
+            Self::previous_from_cursor(*cursor, self.active_start(), self.active_end())
                 .and_then(|token| token.to_token_kind().ok())
         };
 
