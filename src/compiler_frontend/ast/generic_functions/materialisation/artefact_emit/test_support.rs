@@ -46,7 +46,7 @@ impl ModuleMaterialisationContext {
                     declaration_path: PathId::ROOT,
                     donor_file_id: crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
                     frozen_identity_handle: frozen_identity_handle.clone(),
-                    source_owner: StableBodyOwner::Source {
+                    source_owner: StableBodyOwner {
                         source_tokens: Arc::clone(&empty_source_owner),
                         canonical_os_path: None,
                     },

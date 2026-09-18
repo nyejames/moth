@@ -837,7 +837,9 @@ ownership at checked boundaries. Path rows now keep `PathId` plus `LocalSpan`, w
 identity on the table. The canonical path tag carries only that dense handle. Symbols, strings,
 booleans and scalar characters use validated direct `TokenShape` payloads. Numeric/path stores
 remap at their owner boundary, freeze at ordinary prepared-source publication, and persistent
-generic capture/materialisation uses deterministic compact path and independent numeric subsets.
+generic capture validates donor path handles against the source-owned path table instead of
+copying a per-generic path or numeric subset. Numeric payloads carry their donor `StringId`s until
+the requester boundary rebases them by spelling.
 The legacy `TokenKind`/`Vec<Token>` representation remains crate-internal and is still consumed
 throughout parser code during the 3H migration; full containment and deletion remain open.
 
@@ -860,10 +862,11 @@ bodies and optional `TokenSequenceId` start syntax over the canonical owner, wit
 vectors. Parser handoffs in `src/compiler_frontend/ast/cursor.rs` and
 `src/compiler_frontend/declaration_syntax/mod.rs` keep explicit canonical and compatibility lanes.
 Intentional source-wide inspection stays on a separate narrow bridge. Generic bodies retain
-`SharedDonorIdentity`, `StableBodyOwner` and canonical versus foreign materialised ownership.
-One declaring-domain frozen string identity is shared across templates. Same-domain bodies stay on
-the canonical `SourceTokens` owner. Foreign materialised bodies that still carry rebased donor
-payloads stay on the marked adapter lane pending 3H deletion.
+`SharedDonorIdentity` plus one `StableBodyOwner` over the canonical `SourceTokens` owner; there is
+no canonical-versus-foreign ownership split and no retained adapter lane. One declaring-domain
+frozen string identity is shared across templates. Donor payload interpretation happens at the
+requester boundary through the retained identity tables, which derive a transient rebased adapter
+for that parse only.
 
 
 ### Token references and ranges
@@ -930,16 +933,18 @@ Rules:
 - the table is owned by the source-owned token store and freezes with it
 - string-table remapping visits the table once for path roots
 - source identity rebinding updates table locations once
-- frozen generic bodies retain only the referenced path rows, and capture the matching resolved
-  file-reference entries in the same pass so a materialised body reaches its content or resource
-  target through generic-local handles instead of stale donor handles or a second filesystem lookup
+- frozen generic bodies copy no path rows. Capture walks the retained canonical range with a
+  `TokenCursor`, validates every donor path handle against the source-owned path table, and
+  retains the matching resolved file-reference entries in the same pass so a materialised body
+  reaches its content or resource target through stable facts instead of a second filesystem lookup
 - generic donor identity is one `SharedDonorIdentity` per declaring domain, frozen once and shared
-  across that domain's templates. Source bodies and same-domain materialised bodies retain the
-  canonical `SourceTokens` owner through `StableBodyOwner::Source` and
-  `MaterialisedBodyOwner::Canonical`. Foreign materialised bodies with retained rebased donor
-  payloads retain the donor compatibility shell through `StableBodyOwner::Materialised` and
-  `MaterialisedBodyOwner::Foreign`, pending 3H deletion. Capture rejects a path table without its
-  issuing string table.
+  across that domain's templates and every clone of the declaring preparation. Every retained body
+  keeps the canonical `SourceTokens` owner plus its filesystem identity through one
+  `StableBodyOwner` struct, and keeps the identity tables that issued its payload IDs: capture
+  always retains a frozen string owner, and a path table joins it when path roots must be rebased
+  too. The requester boundary rebases by spelling through a transient adapter whenever such tables
+  are retained. The body constructor is the single owner of the rule that a donor path table is
+  invalid without its issuing string table
 - no path row owns a vector-backed path or a global source span when the enclosing source is
   already known
 - path syntax rows stay syntax-only. Semantic resource identity, filesystem resolution, output

@@ -2665,43 +2665,6 @@ impl FileTokens {
         Ok(stream)
     }
 
-    /// Build a bounded parser adapter from one contiguous canonical range.
-    ///
-    /// The adapter keeps a checked range and an `Arc` to the canonical source solely for the
-    /// transient declaration-parser handoff. Its legacy vector remains available to expression
-    /// parser code, but no `SourceTokens` rows are copied into the adapter.
-    pub(crate) fn new_bounded_substream(
-        source: &FileTokens,
-        range: TokenRange,
-        declaration_path: PathId,
-    ) -> Result<FileTokens, CompilerError> {
-        if range.source() != source.file_id {
-            return Err(CompilerError::compiler_error(
-                "retained token range does not match its source stream identity",
-            ));
-        }
-        let source_tokens = source.token_owner.canonical_arc()?;
-        if source_tokens.source() != source.file_id {
-            return Err(CompilerError::compiler_error(
-                "bounded token range source owner does not match its file stream identity",
-            ));
-        }
-        let tokens = source.materialize_token_range(range)?;
-        let mut stream = Self::with_adapter_path_syntax_and_metadata(
-            declaration_path,
-            source.file_id,
-            source.canonical_os_path.clone(),
-            tokens,
-            source.path_syntax.frozen_substream()?,
-            FileTokenAdapterMetadata::Contiguous {
-                source_tokens,
-                range,
-                synthetic_trailing_eof: false,
-            },
-        );
-        stream.freeze_numeric_literals();
-        Ok(stream)
-    }
     /// Build a bounded expression-parser adapter with an ephemeral EOF sentinel.
     ///
     /// The authored expression remains backed by `range` in the canonical owner. The trailing
@@ -2827,6 +2790,12 @@ impl FileTokens {
     }
 
     /// Build the bounded parser adapter for one source-owned segmented sequence.
+    ///
+    /// Only the compatibility-lane cursor tests still construct an adapter from another
+    /// `FileTokens` shell; retained generic syntax bounds its canonical owner directly through
+    /// `new_bounded_sequence_substream_from_canonical`. This constructor leaves with its lane in
+    /// the parser cutover.
+    #[cfg(test)]
     pub(crate) fn new_bounded_sequence_substream(
         source: &FileTokens,
         sequence: TokenSequenceId,
@@ -3333,6 +3302,9 @@ impl FileTokens {
     }
 
     /// Materialize one checked segmented sequence through the canonical cursor.
+    ///
+    /// Reached only by the compatibility-lane adapter constructor above, which is test-only.
+    #[cfg(test)]
     pub(crate) fn materialize_token_sequence(
         &self,
         id: TokenSequenceId,

@@ -15,8 +15,6 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_co
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
-#[cfg(test)]
-use rustc_hash::FxHashMap;
 
 /// Dense file-local handle into a [`PathSyntaxTable`].
 ///
@@ -373,68 +371,5 @@ impl PathSyntaxTable {
             }
         }
         Ok(())
-    }
-
-    /// Capture the canonical subset required by one persistent generic artefact.
-    ///
-    /// Rows are copied in first-token-reference order; repeated handles reuse one compact row and
-    /// the returned map is therefore deterministic regardless of hash-map iteration order.
-    #[cfg(test)]
-    pub(crate) fn capture_persistent_generic_subset(
-        &self,
-        tokens: &mut [Token],
-    ) -> Result<(PathSyntaxTable, FxHashMap<PathSyntaxId, PathSyntaxId>), CompilerError> {
-        self.validate_token_handles(tokens)?;
-
-        let mut subset = PathSyntaxTable {
-            paths: Vec::new(),
-            owner_source: self.owner_source,
-            frozen: false,
-        };
-        let mut old_to_new: FxHashMap<PathSyntaxId, PathSyntaxId> = FxHashMap::default();
-
-        for token in tokens {
-            let TokenKind::Path(path_handle) = &mut token.kind else {
-                continue;
-            };
-            let old_id = *path_handle;
-            if old_id.is_none() {
-                return Err(CompilerError::compiler_error(
-                    "persistent generic body contains an absent PathSyntaxId marker",
-                ));
-            }
-
-            let new_id = match old_to_new.get(&old_id) {
-                Some(new_id) => *new_id,
-                None => {
-                    let new_id = subset.copy_persistent_path_from(self, old_id)?;
-                    old_to_new.insert(old_id, new_id);
-                    new_id
-                }
-            };
-            *path_handle = new_id;
-        }
-
-        Ok((subset, old_to_new))
-    }
-
-    #[cfg(test)]
-    fn copy_persistent_path_from(
-        &mut self,
-        source: &PathSyntaxTable,
-        id: PathSyntaxId,
-    ) -> Result<PathSyntaxId, CompilerError> {
-        let source_path = source.try_path(id)?;
-        self.try_push_local(source_path.root, source_path.span)
-            .map_err(|error| match error {
-                PathSyntaxError::Capacity(_) => CompilerError::compiler_error(
-                    "persistent generic path syntax subset exceeded its checked row capacity",
-                ),
-                PathSyntaxError::Frozen | PathSyntaxError::ForeignSource { .. } => {
-                    CompilerError::compiler_error(
-                        "persistent generic path syntax subset wrote to a non-appendable table",
-                    )
-                }
-            })
     }
 }

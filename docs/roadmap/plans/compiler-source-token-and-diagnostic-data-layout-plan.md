@@ -92,7 +92,8 @@ ACTIVE_PLAN:
   `Header` retains `TokenRange` bodies and optional `TokenSequenceId` start syntax with
   `SourceTokenOwner` bundling the canonical owner, logical path and OS path.
   `src/compiler_frontend/ast/generic_functions/materialisation/frozen_syntax.rs` owns
-  `SharedDonorIdentity`, `StableBodyOwner` and canonical versus foreign materialised ownership.
+  `SharedDonorIdentity` plus one `StableBodyOwner` over the canonical `SourceTokens` owner and the
+  retained donor identity tables.
 - Validation evidence: full distributions and the R0 reproduction live in
   `benchmarks/frontend-optimization-results.md` (`Data Layout Migration - Phase 3 Slice 3H
   Resumption Baseline (2026-09-18)`); the current gate is all green except generic scaling `n^1.80`
@@ -104,8 +105,9 @@ ACTIVE_PLAN:
   remains missing. They do not yet count `TokenShape`/common-cold bytes, parser adapters and
   vectors, or distinct generic donor owner counts; the figures live in the evidence document.
 - Open for closeout: `Token`/`TokenKind`/`FileTokens` are still crate-internal parser
-  representations; the foreign generic compatibility lane and metadata/adapter deletion remain;
-  the generic budget remains a red exception pending attribution. No checkpoint or Phase 3 exit is
+  representations and the metadata/adapter deletion remains; the generic foreign compatibility lane
+  is gone as of 3H-R2, leaving one transient requester-boundary parser vector for 3H-R3; the
+  generic budget remains a red exception pending attribution. No checkpoint or Phase 3 exit is
   claimed.
 - OPEN_FINDINGS:
   - F1 (3H-R1a): closed — the parser view is owned by the token cursor and survives the
@@ -113,9 +115,10 @@ ACTIVE_PLAN:
   - F2 (3H-R1b): closed — monotone parser scans walk the cursor instead of re-searching the
     segmented prefix on every step.
   - F3 (3H-R3): final token consumers and loop grammar still have parallel paths.
-  - F4 (3H-R2, 3H-R4): generic and source ownership need a final cutover.
+  - F4 (3H-R2 done, 3H-R4 open): retained generic bodies bound one canonical `SourceTokens` owner;
+    header and prepared-source ownership still need their cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
-- NEXT_SUBSTEP: 3H-R2.
+- NEXT_SUBSTEP: 3H-R3.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -203,7 +206,8 @@ RELEVANT_CODE:
   explicit canonical and compatibility lanes at parser handoffs. Intentional source-wide reads stay
   separate.
 - `src/compiler_frontend/ast/generic_functions/materialisation/frozen_syntax.rs`:
-  `SharedDonorIdentity`, `StableBodyOwner` and canonical versus foreign materialised ownership
+  `SharedDonorIdentity` plus one `StableBodyOwner` over the canonical `SourceTokens` owner and the
+  retained donor identity tables
 - `src/compiler_frontend/compiler_messages/`: current diagnostic kinds, descriptors, payloads, labels, bags, messages and renderers
 - `src/compiler_frontend/compiler_messages/compiler_errors.rs`: current mixed error lane, table cloning and full type-context retention
 - `src/lib.rs` and `xtask/src/benchmark_execution.rs`: activation-era lint-bridge locations retained only as historical removal records; current workspace status makes no validation claim
@@ -1202,9 +1206,12 @@ Findings closed by these substeps (paths as named in the resumption handoff):
   restores its entry position rather than stepping an index.
 - F3 closes in 3H-R3: `tokenizer/tokens.rs`, `ast/cursor.rs`, `declaration_syntax/mod.rs`,
   `ast/statements/loop_headers.rs`, `loops.rs` and template loop suffixes.
-- F4 closes in 3H-R2 and 3H-R4: `generic_functions/templates.rs`,
-  `materialisation/frozen_syntax.rs`, `preparation_freeze.rs`, `headers/types.rs` and
-  `create_project_modules/prepared_source.rs`.
+- F4 partially closed in 3H-R2: `generic_functions/templates.rs`,
+  `materialisation/frozen_syntax.rs` and `preparation_freeze.rs` no longer retain a donor
+  `FileTokens` shell or build a capture-time token vector; every retained generic body bounds its
+  canonical `SourceTokens` owner. The remainder closes in 3H-R4: `headers/types.rs` and
+  `create_project_modules/prepared_source.rs`, plus the transient requester-boundary parser vector
+  that 3H-R3 removes with its legacy consumers.
 - F5 closes in 3H-R5: matched scaling and memory evidence in
   `benchmarks/frontend-optimization-results.md`.
 
@@ -1268,28 +1275,42 @@ sites in 3H-R4.
   5196 + 839 + 17, integration 1973/1973, featured clippy, docs and source-audit clean, and
   `bench-data-layout-check` reports -4ms average with no slower case.
 
-#### [ ] 3H-R2 — Settle final donor payload interpretation
+#### [x] 3H-R2 — Settle final donor payload interpretation (complete)
 
-- Keep the preparation-owned donor snapshot cache and verify repeated captures and cloned
-  preparations share it across every retained token payload.
-- Inventory direct donor reads of string, numeric-text, path-syntax and path-root facts, then
-  publish one ownership and remap contract before replacing the foreign lane.
-- Reconcile the stale per-generic path-row wording in the layout authority with the canonical
-  path-table ownership the implementation actually uses.
-- Make the final path work for source, same-domain materialised, string-only foreign and
-  path-bearing foreign bodies through the same syntax grammar, preserving donor spans and syntax
-  handles.
-- Verify colliding numeric IDs with different donor and requester spellings, nested
-  materialisation, numeric and path payloads, repeated captures, source diagnostics and drop safety
-  with rendered-meaning assertions rather than structural equality.
-- Remove foreign materialised storage once its state is displaced, consolidating body-owner
-  variants by final difference rather than migration history.
-- Replace capture-time vector construction with a bounded view walk that retains only the required
-  stable file-reference facts.
-- Do not deduplicate on bare numeric `SourceId` values and do not substitute a requester table for
-  a donor table.
-- Exit: all generic syntax is range- and sequence-backed, and payloads resolve in the right domain
-  without retained or transient legacy-token vectors.
+- The preparation-owned donor snapshot cache stays: `donor_identity_cache: Rc<OnceCell<..>>` freezes
+  the declaring string domain once and every clone of the preparation shares it.
+  `preparation_clones_share_one_frozen_donor_allocation` pins that sharing and fails if the cache
+  stops being shared across clones.
+- One body representation replaced three. `GenericFunctionBody` is `Source` or `Materialised`, and
+  `StableBodyOwner`/`MaterialisedBodyOwner` collapsed into one struct holding the canonical
+  `Arc<SourceTokens>` plus the filesystem identity `SourceTokens` does not store. No generic body
+  retains a `FileTokens` shell; the foreign lane and its `_indexed`-era duplicate arms are deleted.
+- Retained donor payload interpretation has one contract: a body keeps the identity tables that
+  issued its payload IDs, capture always stamps a frozen string owner, and the requester boundary
+  rebases by spelling through a transient adapter. `MaterialisedDonorContext::validate_identity_pair`
+  is the single owner of the rule that a donor path table is invalid without its issuing string
+  table; the four duplicated checks are gone.
+- Capture walks the retained canonical range with a `TokenCursor` through the shared
+  `templates::body_cursor` helper, validating donor path handles against the source-owned table and
+  retaining only the resolved file-reference facts. `parser_stream_for_capture` and its materialised
+  token vector are deleted, as are the test-only `capture_persistent_generic_subset` and
+  `copy_persistent_path_from` path-row subset helpers.
+- The requester rebase now remaps the bounded adapter's compatibility tokens in place instead of
+  building a second token vector per parse. `FileTokens::new_bounded_substream` became unreachable
+  and is deleted; the segmented compatibility-lane constructor survives as test-only and leaves
+  with its lane in 3H-R3.
+- Rendered-meaning verification, not structural equality: colliding donor/requester `StringId`s
+  behind numeric-literal authored and normalized text, colliding `PathId`s behind a path token, the
+  existing colliding-symbol and colliding-diagnostic-owner cases, and nested materialisation
+  through the `generic_fn_nested_generic_body_file_value_collision_success` integration case. Three
+  representation-pinning unit tests were deleted after proving their observable coverage survives
+  elsewhere.
+- Exit satisfied for retained state: all generic syntax is range- and sequence-backed and payloads
+  resolve in the right domain with no retained legacy-token vector. One transient vector remains at
+  the requester parser handoff because legacy parser consumers still read `Vec<Token>`; that lane
+  is 3H-R3's cutover, not a retained representation. Workspace 5196 + 839 + 17, integration
+  1973/1973, featured clippy, docs and source-audit clean, and `bench-data-layout-check` reports
+  -3ms average with no slower case.
 
 #### [ ] 3H-R3 — Complete lexical and parser cutover
 

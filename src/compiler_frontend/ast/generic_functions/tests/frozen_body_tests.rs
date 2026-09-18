@@ -523,32 +523,12 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
         SourceId::COMPILATION_ROOT,
         "materialised generic syntax must retain its concrete donor identity",
     );
-    assert!(
-        materialised.canonical_owner().is_some(),
-        "same-domain materialised syntax must share the canonical owner directly",
-    );
-    assert!(
-        materialised.foreign_owner().is_none(),
-        "same-domain materialised syntax must not retain a compatibility shell",
-    );
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked range");
     let materialised_stream = materialised_body
         .parser_stream(&mut generated_table, &mut generated_path_fork)
         .expect("materialised body should derive a bounded parser adapter");
-    let canonical_len = materialised_body
-        .materialised_canonical_owner()
-        .expect("same-domain body should share its canonical donor owner")
-        .len();
-    assert!(
-        materialised_body.materialised_owner().is_none(),
-        "same-domain body must not retain a compatibility shell",
-    );
-    assert!(
-        canonical_len >= materialised_stream.tokens.len(),
-        "the compatibility adapter must remain bounded by its canonical owner",
-    );
     assert!(
         materialised_body
             .resolution_facts()
@@ -959,37 +939,55 @@ fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
 }
 
 #[test]
-fn capture_rejects_a_materialised_body_with_only_a_path_identity() {
+fn preparation_clones_share_one_frozen_donor_allocation() {
+    let source = "draw type T |name T| -> String:\n    return \"ok\"\n;\n";
+    let (build_result, _path_fork, _string_table) =
+        parse_single_file_ast_build_result(source).expect("generic source should build");
+    let preparation = build_result
+        .materialisation_context
+        .finish_preparation()
+        .expect("generic template identity index should build");
+    // Clone before the first cache fill: a non-shared cache would freeze once per clone here.
+    let cloned = preparation.clone();
+    assert!(
+        Arc::ptr_eq(
+            preparation.donor_identity().strings(),
+            cloned.donor_identity().strings(),
+        ),
+        "every clone of one declaring preparation must share one frozen donor allocation",
+    );
+}
+
+#[test]
+fn a_materialised_body_with_only_a_path_identity_is_rejected() {
     let source = SourceId::COMPILATION_ROOT;
     let source_file = PathId::ROOT;
     let path_fork = PathInternerFork::empty();
-    let source_owner = Arc::new(FileTokens::new(
+    let frozen = FileTokens::new_frozen(
         source_file,
         source,
+        None,
         vec![Token::new(TokenKind::Eof, token_span())],
-    ));
-    let body = GenericFunctionBody::MaterialisedForeign {
-        source_owner,
-        token_range: TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
-        token_sequence: None,
-        declaration_path: source_file,
-        resolution_facts: Arc::new(
-            Stage0ResolutionFacts::frozen_generic(source, Vec::new())
-                .expect("empty frozen facts should be valid"),
-        ),
-        frozen_identity_handle: FrozenIdentityHandle::new(),
-        source_path_table: Some(Arc::new(path_fork.snapshot_table())),
-        source_string_table: None,
-    };
-    let donor_strings = SharedDonorIdentity::freeze(&StringTable::new());
-    let error = match StableBodySyntax::capture(
-        &body,
+        PathSyntaxTable::new(),
+    );
+    let owner = frozen
+        .canonical_source_tokens_arc()
+        .expect("test fixture must use a canonical source owner");
+    let error = match GenericFunctionBody::materialised(
+        owner,
+        frozen.canonical_os_path.clone(),
+        TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
+        None,
         source_file,
-        &path_fork,
-        Some(&donor_strings),
-        body.resolution_facts().map(Arc::as_ref),
-        FrozenIdentityHandle::new(),
-        &|_| Err(CompilerError::compiler_error("no content rows")),
+        MaterialisedDonorContext {
+            resolution_facts: Arc::new(
+                Stage0ResolutionFacts::frozen_generic(source, Vec::new())
+                    .expect("empty frozen facts should be valid"),
+            ),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+            source_path_table: Some(Arc::new(path_fork.snapshot_table())),
+            source_string_table: None,
+        },
     ) {
         Ok(_) => panic!("a path identity without its string owner must be rejected"),
         Err(error) => error,
@@ -1000,225 +998,6 @@ fn capture_rejects_a_materialised_body_with_only_a_path_identity() {
     );
 }
 
-#[test]
-fn foreign_materialised_bodies_retain_their_compatibility_shell() {
-    let source = SourceId::COMPILATION_ROOT;
-    let source_file = PathId::ROOT;
-    let path_fork = PathInternerFork::empty();
-    let source_owner = Arc::new(FileTokens::new_frozen(
-        source_file,
-        source,
-        None,
-        vec![Token::new(TokenKind::Eof, token_span())],
-        PathSyntaxTable::new(),
-    ));
-    let body = GenericFunctionBody::MaterialisedForeign {
-        source_owner: Arc::clone(&source_owner),
-        token_range: TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
-        token_sequence: None,
-        declaration_path: source_file,
-        resolution_facts: Arc::new(
-            Stage0ResolutionFacts::frozen_generic(source, Vec::new())
-                .expect("empty frozen facts should be valid"),
-        ),
-        frozen_identity_handle: FrozenIdentityHandle::new(),
-        source_path_table: Some(Arc::new(path_fork.snapshot_table())),
-        source_string_table: Some(Arc::new(StringTable::new().freeze())),
-    };
-    let donor_strings = SharedDonorIdentity::freeze(&StringTable::new());
-    let frozen = StableBodySyntax::capture(
-        &body,
-        source_file,
-        &path_fork,
-        Some(&donor_strings),
-        body.resolution_facts().map(Arc::as_ref),
-        FrozenIdentityHandle::new(),
-        &|_| Err(CompilerError::compiler_error("no content rows")),
-    )
-    .expect("foreign body should capture with its donor pair");
-    let mut path_fork = PathInternerFork::empty();
-    let mut generated_table = StringTable::new();
-    let materialised = frozen
-        .materialise(source_file, &mut path_fork, &mut generated_table, None)
-        .expect("foreign body should materialise on the FileTokens lane");
-    assert!(
-        materialised.foreign_owner().is_some(),
-        "foreign remaps must retain the donor compatibility shell",
-    );
-    assert!(
-        materialised.canonical_owner().is_none(),
-        "foreign remaps must not share the canonical lane",
-    );
-    let materialised_body = materialised
-        .into_generic_body()
-        .expect("foreign body should retain its checked range");
-    assert!(
-        materialised_body.materialised_owner().is_some(),
-        "foreign bodies must retain FileTokens for remapped parsing",
-    );
-    assert!(
-        materialised_body.materialised_canonical_owner().is_none(),
-        "foreign bodies must not expose the canonical lane",
-    );
-}
-
-#[test]
-fn no_identity_materialised_donors_use_the_canonical_owner() {
-    let source = SourceId::COMPILATION_ROOT;
-    let source_file = PathId::ROOT;
-    let path_fork = PathInternerFork::empty();
-    let source_owner = Arc::new(FileTokens::new_frozen(
-        source_file,
-        source,
-        None,
-        vec![Token::new(TokenKind::Eof, token_span())],
-        PathSyntaxTable::new(),
-    ));
-    let body = GenericFunctionBody::MaterialisedForeign {
-        source_owner,
-        token_range: TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
-        token_sequence: None,
-        declaration_path: source_file,
-        resolution_facts: Arc::new(
-            Stage0ResolutionFacts::frozen_generic(source, Vec::new())
-                .expect("empty frozen facts should be valid"),
-        ),
-        frozen_identity_handle: FrozenIdentityHandle::new(),
-        source_path_table: None,
-        source_string_table: None,
-    };
-    let donor_strings = SharedDonorIdentity::freeze(&StringTable::new());
-    let frozen = StableBodySyntax::capture(
-        &body,
-        source_file,
-        &path_fork,
-        Some(&donor_strings),
-        body.resolution_facts().map(Arc::as_ref),
-        FrozenIdentityHandle::new(),
-        &|_| Err(CompilerError::compiler_error("no content rows")),
-    )
-    .expect("a no-identity donor should capture through its canonical owner");
-    let mut materialised_path_fork = PathInternerFork::empty();
-    let mut materialised_strings = StringTable::new();
-    let materialised = frozen
-        .materialise(
-            source_file,
-            &mut materialised_path_fork,
-            &mut materialised_strings,
-            None,
-        )
-        .expect("a no-identity donor should materialise canonically");
-    assert!(
-        materialised.canonical_owner().is_some(),
-        "no-identity materialised syntax must share SourceTokens",
-    );
-    assert!(
-        materialised.foreign_owner().is_none(),
-        "canonical materialised syntax must not retain FileTokens",
-    );
-}
-
-#[test]
-fn foreign_string_only_donors_canonicalize_without_a_file_tokens_shell() {
-    let source = SourceId::COMPILATION_ROOT;
-    let source_file = PathId::ROOT;
-    let path_fork = PathInternerFork::empty();
-    let mut donor_string_table = StringTable::new();
-    let donor_symbol = donor_string_table.intern("donor");
-    let source_owner = Arc::new(FileTokens::new_frozen(
-        source_file,
-        source,
-        None,
-        vec![Token::new(TokenKind::Symbol(donor_symbol), token_span())],
-        PathSyntaxTable::new(),
-    ));
-    let body = GenericFunctionBody::materialised(
-        source_owner,
-        TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
-        None,
-        source_file,
-        MaterialisedDonorContext {
-            resolution_facts: Arc::new(
-                Stage0ResolutionFacts::frozen_generic(source, Vec::new())
-                    .expect("empty frozen facts should be valid"),
-            ),
-            frozen_identity_handle: FrozenIdentityHandle::new(),
-            source_path_table: None,
-            source_string_table: Some(Arc::new(donor_string_table.freeze())),
-        },
-    )
-    .expect("a string-only foreign donor should canonicalize");
-    let donor_identity = SharedDonorIdentity::freeze(&StringTable::new());
-    let frozen = StableBodySyntax::capture(
-        &body,
-        source_file,
-        &path_fork,
-        Some(&donor_identity),
-        body.resolution_facts().map(Arc::as_ref),
-        FrozenIdentityHandle::new(),
-        &|_| Err(CompilerError::compiler_error("no content rows")),
-    )
-    .expect("a string-only foreign donor should capture");
-    let mut materialised_path_fork = PathInternerFork::empty();
-    let mut materialised_strings = StringTable::new();
-    let requester_symbol = materialised_strings.intern("requester");
-    assert_eq!(
-        requester_symbol, donor_symbol,
-        "the fixture must exercise a colliding StringId",
-    );
-    let materialised = frozen
-        .materialise(
-            source_file,
-            &mut materialised_path_fork,
-            &mut materialised_strings,
-            None,
-        )
-        .expect("a string-only donor should keep its canonical identity owner");
-    assert!(
-        materialised.canonical_owner().is_some(),
-        "string-only donors must share SourceTokens durably",
-    );
-    assert!(
-        materialised.foreign_owner().is_none(),
-        "string-only donors must not retain a FileTokens shell",
-    );
-    let materialised_body = materialised
-        .into_generic_body()
-        .expect("string-only body should retain its checked range");
-    assert!(
-        materialised_body.materialised_canonical_owner().is_some(),
-        "string-only bodies must expose the canonical lane",
-    );
-    assert!(
-        materialised_body.materialised_owner().is_none(),
-        "string-only bodies must not retain FileTokens",
-    );
-    {
-        let (cursor, source_id) = materialised_body
-            .parser_cursor(&mut materialised_strings, &mut materialised_path_fork)
-            .expect("canonical parser cursor should remap through a transient adapter");
-        assert_eq!(source_id, source);
-        let TokenKind::Symbol(symbol) = cursor.current_token_kind() else {
-            panic!("canonical parser cursor should expose the donor symbol");
-        };
-        assert_eq!(
-            materialised_strings.resolve(*symbol),
-            "donor",
-            "the canonical cursor must remap colliding donor StringIds",
-        );
-    }
-    let stream = materialised_body
-        .parser_stream(&mut materialised_strings, &mut materialised_path_fork)
-        .expect("canonical parser stream should preserve string remapping");
-    let TokenKind::Symbol(symbol) = stream.tokens[0].kind else {
-        panic!("canonical parser stream should expose the donor symbol");
-    };
-    assert_eq!(
-        materialised_strings.resolve(symbol),
-        "donor",
-        "the canonical stream must remap colliding donor StringIds",
-    );
-}
 #[test]
 fn canonical_string_only_donors_remap_transiently_without_retaining_file_tokens() {
     let source = SourceId::COMPILATION_ROOT;
@@ -1243,7 +1022,7 @@ fn canonical_string_only_donors_remap_transiently_without_retaining_file_tokens(
         end,
     )
     .expect("test token range must be in bounds");
-    let body = GenericFunctionBody::materialised_canonical(
+    let body = GenericFunctionBody::materialised(
         owner,
         frozen.canonical_os_path.clone(),
         range,
@@ -1286,25 +1065,9 @@ fn canonical_string_only_donors_remap_transiently_without_retaining_file_tokens(
             None,
         )
         .expect("a string-only canonical donor should stay on the canonical lane");
-    assert!(
-        materialised.canonical_owner().is_some(),
-        "canonical donors must share SourceTokens durably",
-    );
-    assert!(
-        materialised.foreign_owner().is_none(),
-        "canonical donors must not retain a FileTokens shell",
-    );
     let materialised_body = materialised
         .into_generic_body()
         .expect("canonical string-only body should retain its checked range");
-    assert!(
-        materialised_body.materialised_canonical_owner().is_some(),
-        "canonical bodies must expose the canonical lane",
-    );
-    assert!(
-        materialised_body.materialised_owner().is_none(),
-        "canonical bodies must not retain FileTokens",
-    );
     {
         let (cursor, source_id) = materialised_body
             .parser_cursor(&mut materialised_strings, &mut materialised_path_fork)
@@ -1329,6 +1092,214 @@ fn canonical_string_only_donors_remap_transiently_without_retaining_file_tokens(
         materialised_strings.resolve(symbol),
         "donor",
         "the canonical stream must remap colliding donor StringIds",
+    );
+}
+
+#[test]
+fn donor_numeric_literal_text_renders_the_donor_spelling_for_the_requester() {
+    let source = SourceId::COMPILATION_ROOT;
+    let source_file = PathId::ROOT;
+    let path_fork = PathInternerFork::empty();
+    let mut donor_strings = StringTable::new();
+    let donor_numeric = NumericLiteralToken::new(
+        NumericLiteralSign::Negative,
+        donor_strings.intern("-12.5"),
+        donor_strings.intern("12.5"),
+        NumericLiteralKind::DecimalPoint,
+        2,
+        1,
+        0,
+        NumericExponentSign::None,
+    );
+    let donor_authored_text = donor_numeric.source_text;
+    let donor_normalized_text = donor_numeric.normalized_text;
+    let donor_file = FileTokens::new_frozen(
+        source_file,
+        source,
+        None,
+        vec![Token::new(
+            TokenKind::NumericLiteral(donor_numeric),
+            token_span(),
+        )],
+        PathSyntaxTable::new(),
+    );
+    let owner = donor_file
+        .canonical_source_tokens_arc()
+        .expect("test fixture must use a canonical source owner");
+    let end = TokenIndex::try_from_index(donor_file.tokens.len()).expect("test token range fits");
+    let range = TokenRange::try_new_for(
+        owner.as_ref(),
+        TokenIndex::try_from_index(0).expect("test token range fits"),
+        end,
+    )
+    .expect("test token range must be in bounds");
+    let body = GenericFunctionBody::materialised(
+        owner,
+        donor_file.canonical_os_path.clone(),
+        range,
+        None,
+        source_file,
+        MaterialisedDonorContext {
+            resolution_facts: Arc::new(
+                Stage0ResolutionFacts::frozen_generic(source, Vec::new())
+                    .expect("empty frozen facts should be valid"),
+            ),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+            source_path_table: None,
+            source_string_table: Some(Arc::new(donor_strings.freeze())),
+        },
+    )
+    .expect("a numeric donor body should retain its donor strings");
+    let donor_identity = SharedDonorIdentity::freeze(&StringTable::new());
+    let stable = StableBodySyntax::capture(
+        &body,
+        source_file,
+        &path_fork,
+        Some(&donor_identity),
+        body.resolution_facts().map(Arc::as_ref),
+        FrozenIdentityHandle::new(),
+        &|_| Err(CompilerError::compiler_error("no content rows")),
+    )
+    .expect("a numeric donor body should capture");
+    let mut materialised_path_fork = PathInternerFork::empty();
+    let mut materialised_strings = StringTable::new();
+    // The requester domain names different text behind the donor's numeric literal StringIds.
+    assert_eq!(
+        materialised_strings.intern("requester authored"),
+        donor_authored_text,
+        "the fixture must collide with the donor's authored-text StringId",
+    );
+    assert_eq!(
+        materialised_strings.intern("requester normalized"),
+        donor_normalized_text,
+        "the fixture must collide with the donor's normalized-text StringId",
+    );
+    let materialised_body = stable
+        .materialise(
+            source_file,
+            &mut materialised_path_fork,
+            &mut materialised_strings,
+            None,
+        )
+        .expect("a numeric donor body should materialise")
+        .into_generic_body()
+        .expect("a numeric donor body should retain its checked range");
+    let stream = materialised_body
+        .parser_stream(&mut materialised_strings, &mut materialised_path_fork)
+        .expect("the requester boundary should rebase numeric literal text");
+    let TokenKind::NumericLiteral(numeric) = &stream.tokens[0].kind else {
+        panic!("the rebased stream should expose the donor numeric literal");
+    };
+    assert_eq!(
+        materialised_strings.resolve(numeric.source_text),
+        "-12.5",
+        "the rebased numeric literal must keep the donor's authored text",
+    );
+    assert_eq!(
+        materialised_strings.resolve(numeric.normalized_text),
+        "12.5",
+        "the rebased numeric literal must keep the donor's normalized text",
+    );
+    assert_eq!(
+        (
+            numeric.kind,
+            numeric.digit_count,
+            numeric.fractional_digit_count,
+        ),
+        (NumericLiteralKind::DecimalPoint, 2, 1),
+        "rebasing must not disturb the donor's lexical facts",
+    );
+}
+
+#[test]
+fn donor_path_handles_render_the_donor_spelling_for_the_requester() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut donor_strings = StringTable::new();
+    let mut donor_builder = PathInternerBuilder::new();
+    let donor_root = donor_builder
+        .try_intern_portable_path("provider/CONST", &mut donor_strings)
+        .expect("donor paths fit the checked table");
+    let donor_path_table = Arc::new(donor_builder.freeze());
+    let mut path_syntax = PathSyntaxTable::new();
+    let path_handle = path_syntax.push(donor_root, SourceSpan::new(source, token_span()));
+    let donor_file = FileTokens::new_frozen(
+        PathId::ROOT,
+        source,
+        None,
+        vec![Token::new(TokenKind::Path(path_handle), token_span())],
+        path_syntax,
+    );
+    let owner = donor_file
+        .canonical_source_tokens_arc()
+        .expect("test fixture must use a canonical source owner");
+    let end = TokenIndex::try_from_index(donor_file.tokens.len()).expect("test token range fits");
+    let range = TokenRange::try_new_for(
+        owner.as_ref(),
+        TokenIndex::try_from_index(0).expect("test token range fits"),
+        end,
+    )
+    .expect("test token range must be in bounds");
+    let body = GenericFunctionBody::materialised(
+        owner,
+        donor_file.canonical_os_path.clone(),
+        range,
+        None,
+        PathId::ROOT,
+        MaterialisedDonorContext {
+            resolution_facts: Arc::new(
+                Stage0ResolutionFacts::frozen_generic(source, Vec::new())
+                    .expect("empty frozen facts should be valid"),
+            ),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+            source_path_table: Some(Arc::clone(&donor_path_table)),
+            source_string_table: Some(Arc::new(donor_strings.freeze())),
+        },
+    )
+    .expect("a path-bearing donor body should retain its donor pair");
+
+    // The requester fork interns one path of the same shape with different components, so the
+    // donor's retained `PathId` names a different spelling in the requester domain.
+    let mut requester_strings = StringTable::new();
+    let mut requester_fork = PathInternerFork::empty();
+    let requester_other = requester_fork
+        .try_intern_portable_path("shared/OTHER", &mut requester_strings)
+        .expect("requester paths fit the checked table");
+    assert_eq!(
+        requester_other, donor_root,
+        "the fixture must exercise a colliding PathId",
+    );
+
+    let stream = body
+        .parser_stream(&mut requester_strings, &mut requester_fork)
+        .expect("the requester boundary should rebase donor path rows by spelling");
+    let TokenKind::Path(rebased_handle) = stream.tokens[0].kind else {
+        panic!("the rebased stream should expose the donor path token");
+    };
+    let rebased_row = stream
+        .path_syntax_table()
+        .expect("the rebased adapter should own its path table")
+        .try_path(rebased_handle)
+        .expect("the rebased row should stay addressable");
+    let requester_table = requester_fork.snapshot_table();
+    let requester_frozen_strings = requester_strings.clone().freeze();
+    let mut scratch = Vec::new();
+    assert_eq!(
+        requester_table.render_portable_frozen(
+            rebased_row.root,
+            &requester_frozen_strings,
+            &mut scratch,
+        ),
+        "provider/CONST",
+        "the rebased path row must spell the donor's components in the requester domain",
+    );
+    assert_ne!(
+        rebased_row.root, requester_other,
+        "a colliding numeric path index must not collapse the two domains",
+    );
+    assert_eq!(
+        rebased_row.span,
+        token_span(),
+        "rebasing must preserve the donor's authored span",
     );
 }
 

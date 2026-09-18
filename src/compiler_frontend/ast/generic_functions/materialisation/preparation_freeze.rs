@@ -1,5 +1,5 @@
 //! Declaring-module preparation capture and publication freeze.
-use super::super::{GenericFunctionBody, GenericFunctionTemplate};
+use super::super::GenericFunctionTemplate;
 use super::artefact_emit::ModuleMaterialisationContext;
 use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
 use super::nominal_blueprints::NominalMaterialisationBlueprint;
@@ -419,7 +419,7 @@ impl ModuleMaterialisationPreparation {
             resources,
             path_fork,
         )?;
-        let capture_string_table = body.capture_string_table(donor_identity.strings().as_ref())?;
+        let capture_string_table = body.capture_string_table(donor_identity.strings().as_ref());
         let mut referenced_names = stable_body_symbol_names(body, capture_string_table)?;
         self.retain_generic_bound_trait_names(
             &template.source_file,
@@ -449,15 +449,10 @@ impl ModuleMaterialisationPreparation {
             let content_path = self.content_constant_path_for_capture(logical_path, path_fork)?;
             self.stable_folded_value_at_path(&content_path, resources, path_fork)
         };
-        let stage0_resolution_facts = match body {
-            GenericFunctionBody::Source { .. } => self.stage0_resolution_facts.as_deref(),
-            GenericFunctionBody::MaterialisedCanonical {
-                resolution_facts, ..
-            }
-            | GenericFunctionBody::MaterialisedForeign {
-                resolution_facts, ..
-            } => Some(resolution_facts.as_ref()),
-        };
+        let stage0_resolution_facts = body
+            .resolution_facts()
+            .map(std::sync::Arc::as_ref)
+            .or(self.stage0_resolution_facts.as_deref());
         let frozen_identity_handle = body
             .frozen_identity_handle()
             .cloned()

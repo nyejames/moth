@@ -288,9 +288,9 @@ fn path_errors_remain_structured() {
     ));
 }
 
-/// Long path rows and persistent subsets retain the token's single source-owned encoding.
+/// Long path rows retain the token's single source-owned encoding.
 #[test]
-fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
+fn long_multibyte_path_retains_one_original_span() {
     let path_text = format!("@docs/\"{}.md\"", "é".repeat(700));
     let source = format!("-- 🦋\n{path_text}\n");
     let mut strings = StringTable::new();
@@ -331,19 +331,7 @@ fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
         .expect("owned path");
     assert_eq!(row.span, token.span);
 
-    let mut captured_tokens = vec![token.clone()];
-    let (subset, _) = tokens
-        .path_syntax
-        .capture_persistent_generic_subset(&mut captured_tokens)
-        .expect("persistent capture should preserve the path");
-    let TokenKind::Path(captured_id) = captured_tokens[0].kind else {
-        unreachable!()
-    };
-    let captured = subset.try_path(captured_id).expect("captured path row");
-    assert_eq!(captured.span, row.span);
-    assert_eq!(captured_tokens[0].span, captured.span);
-
-    let retained_span = SourceSpan::new(tokens.file_id, captured.span);
+    let retained_span = SourceSpan::new(tokens.file_id, row.span);
     let mut database = SourceDatabaseBuilder::new(sources);
     database
         .sources_mut()

@@ -32,7 +32,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
     TraitReceiverRequirement, TraitVisibility,
@@ -194,15 +194,26 @@ pub(super) fn stable_body_symbol_names(
     body: &GenericFunctionBody,
     string_table: &FrozenStringTable,
 ) -> Result<FxHashSet<String>, CompilerError> {
-    let tokens = body.parser_stream_for_capture()?;
-    Ok(tokens
-        .tokens
-        .iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::Symbol(symbol) => Some(string_table.resolve(symbol).to_owned()),
-            _ => None,
-        })
-        .collect())
+    let (source_owner, token_range, token_sequence) = body.canonical_view();
+    let mut cursor = crate::compiler_frontend::ast::generic_functions::templates::body_cursor(
+        source_owner,
+        token_range,
+        token_sequence,
+        "generic body symbol closure",
+    )?;
+    let mut names = FxHashSet::default();
+    while let Some(token) = cursor.advance() {
+        let is_eof = token.is_eof();
+        if token.tag() == TokenTag::SYMBOL
+            && let Some(symbol) = token.string_id()
+        {
+            names.insert(string_table.resolve(symbol).to_owned());
+        }
+        if is_eof {
+            break;
+        }
+    }
+    Ok(names)
 }
 
 /// Collect every nominal identity one canonical type reaches, including generic-instance bases.

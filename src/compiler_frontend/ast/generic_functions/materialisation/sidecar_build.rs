@@ -1,8 +1,6 @@
 //! Generated sidecar environment construction, emission and evidence installation.
 use super::super::MaterialisedGenericAst;
-use super::super::{
-    GenericFunctionBody, GenericFunctionInstantiationRequest, GenericFunctionTemplate,
-};
+use super::super::{GenericFunctionInstantiationRequest, GenericFunctionTemplate};
 use super::frozen_syntax::StableBodySyntax;
 use super::nominal_blueprints::intern_generated_canonical_type;
 use super::preparation_freeze::ModuleMaterialisationPreparation;
@@ -241,18 +239,13 @@ impl ModuleMaterialisationPreparation {
             )
         })?;
         // Share the declaring preparation's lazily frozen donor owner across every request.
-        // Source bodies share the cached owner; nested foreign bodies keep their own retained
-        // donor pair.
+        // Source bodies share the cached owner; a nested body that retained its own donor pair
+        // keeps that pair.
         let donor_identity = self.donor_identity().clone();
-        let stage0_resolution_facts = match body {
-            GenericFunctionBody::Source { .. } => self.stage0_resolution_facts.as_deref(),
-            GenericFunctionBody::MaterialisedCanonical {
-                resolution_facts, ..
-            }
-            | GenericFunctionBody::MaterialisedForeign {
-                resolution_facts, ..
-            } => Some(resolution_facts.as_ref()),
-        };
+        let stage0_resolution_facts = body
+            .resolution_facts()
+            .map(Arc::as_ref)
+            .or(self.stage0_resolution_facts.as_deref());
         let frozen_identity_handle = body
             .frozen_identity_handle()
             .cloned()
@@ -275,15 +268,10 @@ impl ModuleMaterialisationPreparation {
             let Some(nested_body) = nested_template.body_tokens.as_ref() else {
                 continue;
             };
-            let nested_stage0_resolution_facts = match nested_body {
-                GenericFunctionBody::Source { .. } => self.stage0_resolution_facts.as_deref(),
-                GenericFunctionBody::MaterialisedCanonical {
-                    resolution_facts, ..
-                }
-                | GenericFunctionBody::MaterialisedForeign {
-                    resolution_facts, ..
-                } => Some(resolution_facts.as_ref()),
-            };
+            let nested_stage0_resolution_facts = nested_body
+                .resolution_facts()
+                .map(Arc::as_ref)
+                .or(self.stage0_resolution_facts.as_deref());
             let nested_frozen_identity_handle = nested_body
                 .frozen_identity_handle()
                 .cloned()
