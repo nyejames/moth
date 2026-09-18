@@ -115,7 +115,7 @@ ACTIVE_PLAN:
   - F2 (3H-R1b): closed — monotone parser scans walk the cursor instead of re-searching the
     segmented prefix on every step.
   - F3 (3H-R3): loop-header grammar is one cursor parser; the owned non-canonical cursor is
-    gone; remaining Token/TokenKind consumers and the test-only compatibility cursor still remain.
+    gone; declaration_syntax classifies on TokenTag; remaining Token/TokenKind consumers and the test-only compatibility cursor still remain.
   - F4 (3H-R2 done, 3H-R4 open): retained generic bodies bound one canonical `SourceTokens` owner;
     header and prepared-source ownership still need their cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
@@ -1418,6 +1418,12 @@ canonical (R3b, R3c), which is what finally lets every parser consumer drop the 
   docs and source-audit clean.
 - Owned-non-canonical deletion: workspace 5203 + 839 + 17, integration 1973/1973, featured clippy,
   docs and source-audit clean.
+- Declaration-syntax TokenTag cutover: production header, type, signature and choice parsers
+  classify on `current_tag` / `peek_next_tag`; canonical `DeclarationCursor` derives the tag
+  from `TokenRef::tag` and no longer materialises `TokenKind` per advance. Leftovers: the
+  compatibility-lane Token cache, `token_kind_at` for remaining AST callers, and
+  `normalize_source_build_config_contract`. `cargo check --lib`; 74 declaration_syntax tests;
+  7 `ast::cursor_tests`.
 - Preserve exact diagnostic projection facts with stable code, reason and ordering contracts, and
   retain one lexical grammar owner and one numeric-text owner.
 

@@ -17,7 +17,7 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use rustc_hash::FxHashSet;
 
 /// Typed failure result for generic-parameter parsing.
@@ -37,7 +37,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     forbidden_names: &FxHashSet<StringId>,
     string_table: &StringTable,
 ) -> GenericParameterParseResult<GenericParameterList> {
-    if token_stream.current_token_kind() != &TokenKind::Type {
+    if token_stream.current_tag() != TokenTag::TYPE {
         return Err(CompilerError::new(
             "Generic parameter parser was called when the current token was not `type`.",
             None,
@@ -53,8 +53,14 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     let mut expecting_parameter = true;
 
     loop {
-        match token_stream.current_token_kind().to_owned() {
-            TokenKind::Symbol(name) if expecting_parameter => {
+        match token_stream.current_tag() {
+            TokenTag::SYMBOL if expecting_parameter => {
+                let Some(name) = token_stream.current_string_id() else {
+                    return Err(CompilerError::compiler_error(
+                        "symbol token is missing its string payload",
+                    )
+                    .into());
+                };
                 let span = current_source_span(token_stream);
                 parameters.push(GenericParameter {
                     id: TypeParameterId(parameters.len() as u32),
@@ -66,7 +72,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 expecting_parameter = false;
             }
 
-            TokenKind::Symbol(_) => {
+            TokenTag::SYMBOL => {
                 let span = current_source_span(token_stream);
                 let Some(found) = token_stream.canonical_cursor().current() else {
                     return Err(with_token_span(
@@ -82,7 +88,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            TokenKind::Comma => {
+            TokenTag::COMMA => {
                 if expecting_parameter {
                     let span = current_source_span(token_stream);
                     let Some(found) = token_stream.canonical_cursor().current() else {
@@ -103,7 +109,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 expecting_parameter = true;
             }
 
-            TokenKind::Is if !expecting_parameter => {
+            TokenTag::IS if !expecting_parameter => {
                 token_stream.advance();
                 parse_trait_bounds_for_current_parameter(
                     token_stream,
@@ -112,10 +118,10 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 )?;
             }
 
-            TokenKind::TypeParameterBracket
-            | TokenKind::Assign
-            | TokenKind::DoubleColon
-            | TokenKind::As => {
+            TokenTag::TYPE_PARAMETER_BRACKET
+            | TokenTag::ASSIGN
+            | TokenTag::DOUBLE_COLON
+            | TokenTag::AS => {
                 if parameters.is_empty() {
                     return Err(CompilerDiagnostic::invalid_generic_parameter(
                         InvalidGenericParameterReason::EmptyParameterList,
@@ -154,7 +160,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 return Ok(parameter_list);
             }
 
-            TokenKind::Must => {
+            TokenTag::MUST => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -165,7 +171,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            TokenKind::Colon => {
+            TokenTag::COLON => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -176,7 +182,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            TokenKind::Newline => {
+            TokenTag::NEWLINE => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -187,7 +193,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            TokenKind::Eof | TokenKind::End => {
+            TokenTag::EOF | TokenTag::END => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::unexpected_end_of_file(
@@ -198,7 +204,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            other => {
+            _other => {
                 let span = current_source_span(token_stream);
                 let found = DiagnosticToken::from_token_ref(
                     token_stream
@@ -206,7 +212,6 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                         .current()
                         .expect("validated declaration cursor token"),
                 );
-                debug_assert_eq!(other.token_tag(), found.tag());
                 return Err(with_token_span(
                     span,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -244,8 +249,14 @@ fn parse_trait_bounds_for_current_parameter(
     let mut expecting_trait_name = true;
 
     loop {
-        match token_stream.current_token_kind().to_owned() {
-            TokenKind::Symbol(trait_name) if expecting_trait_name => {
+        match token_stream.current_tag() {
+            TokenTag::SYMBOL if expecting_trait_name => {
+                let Some(trait_name) = token_stream.current_string_id() else {
+                    return Err(CompilerError::compiler_error(
+                        "symbol token is missing its string payload",
+                    )
+                    .into());
+                };
                 let span = current_source_span(token_stream);
                 if let Err(diagnostic) =
                     ensure_trait_bound_name_is_all_caps(trait_name, span, string_table)
@@ -260,22 +271,22 @@ fn parse_trait_bounds_for_current_parameter(
                 expecting_trait_name = false;
             }
 
-            TokenKind::And if !expecting_trait_name => {
+            TokenTag::AND if !expecting_trait_name => {
                 token_stream.advance();
                 expecting_trait_name = true;
             }
 
-            TokenKind::Comma
-            | TokenKind::TypeParameterBracket
-            | TokenKind::Assign
-            | TokenKind::DoubleColon
-            | TokenKind::As
+            TokenTag::COMMA
+            | TokenTag::TYPE_PARAMETER_BRACKET
+            | TokenTag::ASSIGN
+            | TokenTag::DOUBLE_COLON
+            | TokenTag::AS
                 if !expecting_trait_name =>
             {
                 return Ok(());
             }
 
-            TokenKind::Must => {
+            TokenTag::MUST => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -286,7 +297,7 @@ fn parse_trait_bounds_for_current_parameter(
                 .into());
             }
 
-            TokenKind::Eof | TokenKind::End => {
+            TokenTag::EOF | TokenTag::END => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::unexpected_end_of_file(
@@ -296,7 +307,7 @@ fn parse_trait_bounds_for_current_parameter(
                 )
                 .into());
             }
-            other => {
+            _other => {
                 let span = current_source_span(token_stream);
                 let found = DiagnosticToken::from_token_ref(
                     token_stream
@@ -304,7 +315,6 @@ fn parse_trait_bounds_for_current_parameter(
                         .current()
                         .expect("validated declaration cursor token"),
                 );
-                debug_assert_eq!(other.token_tag(), found.tag());
                 return Err(with_token_span(
                     span,
                     CompilerDiagnostic::invalid_generic_parameter(

@@ -120,10 +120,16 @@ impl<'a> TypeTokenWindow<'a> {
     }
 
     fn token_string_id_at(self, index: usize) -> Option<StringId> {
-        match self.token_kind_at(index)? {
-            TokenKind::Symbol(name) => Some(name),
-            _ => None,
+        if self.token_tag_at(index)? != TokenTag::SYMBOL {
+            return None;
         }
+        if self.compatibility_view().is_some() {
+            return match self.token_kind_at(index)? {
+                TokenKind::Symbol(name) => Some(name),
+                _ => None,
+            };
+        }
+        self.get(index).and_then(TokenRef::string_id)
     }
 
     fn token_span_at(self, index: usize) -> Option<SourceSpan> {
@@ -196,8 +202,8 @@ pub(crate) fn parse_type_annotation_cursor(
     // a required context so `#Config of = value` is rejected at the authored `=` token.
     if matches!(context, TypeAnnotationContext::DeclarationTarget)
         && matches!(
-            token_stream.current_token_kind(),
-            TokenKind::Assign | TokenKind::Newline | TokenKind::Comma
+            token_stream.current_tag(),
+            TokenTag::ASSIGN | TokenTag::NEWLINE | TokenTag::COMMA
         )
     {
         return Ok(ParsedTypeRef::Inferred);
@@ -238,33 +244,33 @@ fn parse_type_atom(
 ) -> TypeParseResult<ParsedTypeRef> {
     let span = current_source_span(token_stream);
 
-    match token_stream.current_token_kind() {
-        TokenKind::DatatypeInt => {
+    match token_stream.current_tag() {
+        TokenTag::DATATYPE_INT => {
             token_stream.advance();
             Ok(ParsedTypeRef::BuiltinInt { span })
         }
 
-        TokenKind::DatatypeFloat => {
+        TokenTag::DATATYPE_FLOAT => {
             token_stream.advance();
             Ok(ParsedTypeRef::BuiltinFloat { span })
         }
 
-        TokenKind::DatatypeBool => {
+        TokenTag::DATATYPE_BOOL => {
             token_stream.advance();
             Ok(ParsedTypeRef::BuiltinBool { span })
         }
 
-        TokenKind::DatatypeString => {
+        TokenTag::DATATYPE_STRING => {
             token_stream.advance();
             Ok(ParsedTypeRef::BuiltinString { span })
         }
 
-        TokenKind::DatatypeChar => {
+        TokenTag::DATATYPE_CHAR => {
             token_stream.advance();
             Ok(ParsedTypeRef::BuiltinChar { span })
         }
 
-        TokenKind::DatatypeNone => Err(HeaderParseFailure::Diagnostic(
+        TokenTag::DATATYPE_NONE => Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::NoneNotAllowed,
@@ -272,23 +278,15 @@ fn parse_type_atom(
             ),
         )),
 
-        TokenKind::Must | TokenKind::TraitThis => {
+        TokenTag::MUST | TokenTag::TRAIT_THIS => {
             if matches!(context, TypeAnnotationContext::TraitRequirement)
-                && token_stream
-                    .canonical_cursor()
-                    .current()
-                    .is_some_and(|token| token.tag() == TokenTag::TRAIT_THIS)
+                && token_stream.current_tag() == TokenTag::TRAIT_THIS
             {
                 token_stream.advance();
                 return Ok(ParsedTypeRef::This { span });
             }
-            let tag = token_stream
-                .canonical_cursor()
-                .current()
-                .map(|token| token.tag())
-                .expect("validated declaration cursor token");
             let _keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
-                tag,
+                token_stream.current_tag(),
                 current_source_span(token_stream),
                 compilation_stage(context),
                 "type annotation parsing",
@@ -303,9 +301,9 @@ fn parse_type_atom(
             ))
         }
 
-        TokenKind::OpenCurly => parse_collection_type(token_stream, context, string_table),
+        TokenTag::OPEN_CURLY => parse_collection_type(token_stream, context, string_table),
 
-        TokenKind::Reactive => Err(HeaderParseFailure::Diagnostic(
+        TokenTag::REACTIVE => Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::ReactiveAccessNotAllowed,
@@ -313,18 +311,18 @@ fn parse_type_atom(
             ),
         )),
 
-        TokenKind::As => Err(HeaderParseFailure::Diagnostic(
+        TokenTag::AS => Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::AsNotValidHere,
                 current_source_span(token_stream),
             ),
         )),
-        TokenKind::Type => Err(HeaderParseFailure::Diagnostic(type_keyword_deferred_error(
+        TokenTag::TYPE => Err(HeaderParseFailure::Diagnostic(type_keyword_deferred_error(
             token_stream,
             context,
         ))),
-        TokenKind::Of => {
+        TokenTag::OF => {
             let Some(found) = token_stream.canonical_cursor().current() else {
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::unexpected_end_of_file(
@@ -340,41 +338,48 @@ fn parse_type_atom(
                 ),
             ))
         }
-        TokenKind::Symbol(type_name) => {
-            let type_name = type_name.to_owned();
+        TokenTag::SYMBOL => {
+            let Some(type_name) = token_stream.current_string_id() else {
+                return Err(HeaderParseFailure::Infrastructure(
+                    CompilerError::compiler_error("symbol token is missing its string payload"),
+                ));
+            };
             token_stream.advance();
 
             // Check for namespace-qualified type syntax: `Namespace.Type` or
             // `Namespace.Child.Type`. Collect all `Symbol . Symbol` segments into a
             // single qualified path while preserving bare single-symbol types.
-            if token_stream.current_token_kind() == &TokenKind::Dot {
+            if token_stream.current_tag() == TokenTag::DOT {
                 let mut path = vec![type_name];
 
-                while token_stream.current_token_kind() == &TokenKind::Dot {
+                while token_stream.current_tag() == TokenTag::DOT {
                     token_stream.advance(); // consume '.'
 
-                    match token_stream.current_token_kind().to_owned() {
-                        TokenKind::Symbol(member_name) => {
-                            path.push(member_name);
-                            token_stream.advance();
-                        }
-                        other => {
-                            let span = current_source_span(token_stream);
-                            let found = DiagnosticToken::from_token_ref(
-                                token_stream
-                                    .canonical_cursor()
-                                    .current()
-                                    .expect("validated declaration cursor token"),
-                            );
-                            debug_assert_eq!(other.token_tag(), found.tag());
-                            return Err(HeaderParseFailure::Diagnostic(
-                                CompilerDiagnostic::invalid_type_annotation(
-                                    context,
-                                    InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
-                                    span,
+                    if token_stream.current_tag() == TokenTag::SYMBOL {
+                        let Some(member_name) = token_stream.current_string_id() else {
+                            return Err(HeaderParseFailure::Infrastructure(
+                                CompilerError::compiler_error(
+                                    "symbol token is missing its string payload",
                                 ),
                             ));
-                        }
+                        };
+                        path.push(member_name);
+                        token_stream.advance();
+                    } else {
+                        let span = current_source_span(token_stream);
+                        let found = DiagnosticToken::from_token_ref(
+                            token_stream
+                                .canonical_cursor()
+                                .current()
+                                .expect("validated declaration cursor token"),
+                        );
+                        return Err(HeaderParseFailure::Diagnostic(
+                            CompilerDiagnostic::invalid_type_annotation(
+                                context,
+                                InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
+                                span,
+                            ),
+                        ));
                     }
                 }
 
@@ -386,7 +391,7 @@ fn parse_type_atom(
                 span,
             })
         }
-        TokenKind::Colon if matches!(context, TypeAnnotationContext::DeclarationTarget) => Err(
+        TokenTag::COLON if matches!(context, TypeAnnotationContext::DeclarationTarget) => Err(
             HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::UnexpectedColon,
@@ -397,12 +402,12 @@ fn parse_type_atom(
             if matches!(context, TypeAnnotationContext::DeclarationTarget)
                 && matches!(
                     other,
-                    TokenKind::Dot
-                        | TokenKind::AddAssign
-                        | TokenKind::SubtractAssign
-                        | TokenKind::DivideAssign
-                        | TokenKind::IntDivideAssign
-                        | TokenKind::MultiplyAssign
+                    TokenTag::DOT
+                        | TokenTag::ADD_ASSIGN
+                        | TokenTag::SUBTRACT_ASSIGN
+                        | TokenTag::DIVIDE_ASSIGN
+                        | TokenTag::INT_DIVIDE_ASSIGN
+                        | TokenTag::MULTIPLY_ASSIGN
                 ) =>
         {
             let found = DiagnosticToken::from_token_ref(
@@ -411,7 +416,6 @@ fn parse_type_atom(
                     .current()
                     .expect("validated declaration cursor token"),
             );
-            debug_assert_eq!(other.token_tag(), found.tag());
             Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::invalid_type_annotation(
                     context,
@@ -605,8 +609,8 @@ fn collect_collection_inner_range(
     let mut nested_collection_depth = 0usize;
 
     loop {
-        match token_stream.current_token_kind() {
-            TokenKind::CloseCurly if nested_collection_depth == 0 => {
+        match token_stream.current_tag() {
+            TokenTag::CLOSE_CURLY if nested_collection_depth == 0 => {
                 let end = token_stream.canonical_cursor().position();
                 return TokenRange::try_new_for(
                     token_stream.canonical_cursor().source_tokens(),
@@ -619,15 +623,15 @@ fn collect_collection_inner_range(
                     )))
                 });
             }
-            TokenKind::CloseCurly => {
+            TokenTag::CLOSE_CURLY => {
                 nested_collection_depth = nested_collection_depth.saturating_sub(1);
                 token_stream.advance();
             }
-            TokenKind::OpenCurly => {
+            TokenTag::OPEN_CURLY => {
                 nested_collection_depth = nested_collection_depth.saturating_add(1);
                 token_stream.advance();
             }
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::expected_token_from_tags(
                         TokenTag::CLOSE_CURLY,
@@ -654,17 +658,35 @@ fn parsed_capacity(
     if tokens.is_empty() {
         return Ok(None);
     }
-
     if tokens.len() == 1 {
         let token_span = tokens.token_span_at(0);
-        let kind = tokens.token_kind_at(0).ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "capacity token payload is invalid",
-            ))
-        })?;
+        match tokens.token_tag_at(0) {
+            Some(TokenTag::NUMERIC_LITERAL) => {
+                let numeric = if tokens.compatibility_view().is_some() {
+                    match tokens.token_kind_at(0) {
+                        Some(TokenKind::NumericLiteral(numeric)) => numeric,
+                        _ => {
+                            return Err(HeaderParseFailure::Infrastructure(
+                                CompilerError::compiler_error("capacity token payload is invalid"),
+                            ));
+                        }
+                    }
+                } else {
+                    let token = tokens.get(0).ok_or_else(|| {
+                        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                            "capacity token payload is invalid",
+                        ))
+                    })?;
+                    match token.numeric_literal() {
+                        Ok(Some(numeric)) => numeric.clone(),
+                        _ => {
+                            return Err(HeaderParseFailure::Infrastructure(
+                                CompilerError::compiler_error("capacity token payload is invalid"),
+                            ));
+                        }
+                    }
+                };
 
-        match kind {
-            TokenKind::NumericLiteral(numeric) => {
                 if numeric.kind != NumericLiteralKind::WholeNumber {
                     return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::invalid_collection_type(
@@ -696,7 +718,12 @@ fn parsed_capacity(
                     span: token_span,
                 }));
             }
-            TokenKind::Symbol(name) => {
+            Some(TokenTag::SYMBOL) => {
+                let Some(name) = tokens.token_string_id_at(0) else {
+                    return Err(HeaderParseFailure::Infrastructure(
+                        CompilerError::compiler_error("symbol token is missing its string payload"),
+                    ));
+                };
                 return Ok(Some(ParsedCollectionCapacity::BareConstant {
                     name,
                     span: token_span,
@@ -890,8 +917,8 @@ fn map_side_looks_like_postfix_capacity(
                 continue;
             }
             return matches!(
-                remaining.token_kind_at(0),
-                Some(TokenKind::Colon) | Some(TokenKind::NumericLiteral(_))
+                remaining.token_tag_at(0),
+                Some(TokenTag::COLON) | Some(TokenTag::NUMERIC_LITERAL)
             );
         }
     }
@@ -941,12 +968,10 @@ fn parse_type_slice<'a>(
     };
     let parsed_type = parse_required_type(&mut stream, context, string_table)?;
     let next_token = match stream.canonical_cursor().current() {
-        Some(view) if stream.current_token_kind() != &TokenKind::Eof => {
-            Some(ParsedTypeSliceToken {
-                view,
-                span: view.span(),
-            })
-        }
+        Some(view) if stream.current_tag() != TokenTag::EOF => Some(ParsedTypeSliceToken {
+            view,
+            span: view.span(),
+        }),
         _ => None,
     };
 
@@ -990,8 +1015,8 @@ fn collection_type_slice_can_start_type(
         TokenTag::TRAIT_THIS => matches!(context, TypeAnnotationContext::TraitRequirement),
 
         TokenTag::SYMBOL => {
-            if tokens.token_kind_at(1) == Some(TokenKind::Dot)
-                && let Some(TokenKind::Symbol(member)) = tokens.token_kind_at(2)
+            if tokens.token_tag_at(1) == Some(TokenTag::DOT)
+                && let Some(member) = tokens.token_string_id_at(2)
             {
                 return symbol_spelling_looks_type_name(member, string_table);
             }
@@ -1022,7 +1047,7 @@ fn parse_generic_arguments(
 ) -> TypeParseResult<ParsedTypeRef> {
     let span = current_source_span(token_stream);
 
-    if token_stream.current_token_kind() != &TokenKind::Of {
+    if token_stream.current_tag() != TokenTag::OF {
         return Ok(parsed_type);
     }
 
@@ -1056,7 +1081,7 @@ fn parse_generic_arguments(
 
     let mut arguments = Vec::new();
     loop {
-        if generic_argument_list_is_finished(token_stream.current_token_kind()) {
+        if generic_argument_list_is_finished(token_stream.current_tag()) {
             if arguments.is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::invalid_generic_application(
@@ -1071,10 +1096,10 @@ fn parse_generic_arguments(
         let argument = parse_generic_type_argument(token_stream, context, string_table)?;
         arguments.push(argument);
 
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
+        match token_stream.current_tag() {
+            TokenTag::COMMA => {
                 token_stream.advance();
-                if generic_argument_list_is_finished(token_stream.current_token_kind()) {
+                if generic_argument_list_is_finished(token_stream.current_tag()) {
                     return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::invalid_generic_application(
                             GenericApplicationErrorReason::MissingArgumentAfterComma,
@@ -1084,12 +1109,12 @@ fn parse_generic_arguments(
                 }
             }
             token if generic_argument_list_is_finished(token) => break,
-            TokenKind::Of => {
+            TokenTag::OF => {
                 return Err(HeaderParseFailure::Diagnostic(
                     nested_generic_application_error(current_source_span(token_stream), context),
                 ));
             }
-            other => {
+            _other => {
                 let span = current_source_span(token_stream);
                 let found = DiagnosticToken::from_token_ref(
                     token_stream
@@ -1097,7 +1122,6 @@ fn parse_generic_arguments(
                         .current()
                         .expect("validated declaration cursor token"),
                 );
-                debug_assert_eq!(other.token_tag(), found.tag());
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::unexpected_token_from_tag(found, span),
                 ));
@@ -1122,7 +1146,7 @@ fn parse_generic_type_argument(
 
     reject_trait_this_composition(&parsed_argument, context, argument_span)?;
 
-    if token_stream.current_token_kind() == &TokenKind::Of {
+    if token_stream.current_tag() == TokenTag::OF {
         return Err(HeaderParseFailure::Diagnostic(
             nested_generic_application_error(current_source_span(token_stream), context),
         ));
@@ -1132,23 +1156,23 @@ fn parse_generic_type_argument(
 }
 /// Decide whether a token terminates the generic argument list.
 ///
-/// WHAT: lists the token kinds that cannot start a generic argument and therefore signal
+/// WHAT: lists the tags that cannot start a generic argument and therefore signal
 ///      the end of the `of <...>` application.
 /// WHY: shared predicate so both the comma-after-argument check and the main loop use the
 ///      same boundary definition.
-fn generic_argument_list_is_finished(token: &TokenKind) -> bool {
+fn generic_argument_list_is_finished(tag: TokenTag) -> bool {
     matches!(
-        token,
-        TokenKind::Assign
-            | TokenKind::Newline
-            | TokenKind::Colon
-            | TokenKind::TypeParameterBracket
-            | TokenKind::CloseCurly
-            | TokenKind::Bang
-            | TokenKind::QuestionMark
-            | TokenKind::Eof
-            | TokenKind::End
-            | TokenKind::NumericLiteral(_)
+        tag,
+        TokenTag::ASSIGN
+            | TokenTag::NEWLINE
+            | TokenTag::COLON
+            | TokenTag::TYPE_PARAMETER_BRACKET
+            | TokenTag::CLOSE_CURLY
+            | TokenTag::BANG
+            | TokenTag::QUESTION_MARK
+            | TokenTag::EOF
+            | TokenTag::END
+            | TokenTag::NUMERIC_LITERAL
     )
 }
 
@@ -1169,7 +1193,7 @@ fn parse_optional_type_suffix(
 ) -> TypeParseResult<ParsedTypeRef> {
     let span = current_source_span(token_stream);
 
-    if token_stream.current_token_kind() != &TokenKind::QuestionMark {
+    if token_stream.current_tag() != TokenTag::QUESTION_MARK {
         return Ok(parsed_type);
     }
 
@@ -1186,7 +1210,7 @@ fn parse_optional_type_suffix(
     }
 
     token_stream.advance();
-    if token_stream.current_token_kind() == &TokenKind::QuestionMark {
+    if token_stream.current_tag() == TokenTag::QUESTION_MARK {
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_type_annotation(
                 context,

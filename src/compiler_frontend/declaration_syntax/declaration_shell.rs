@@ -25,7 +25,7 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::{
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::{
     TokenScanFailure, collect_declaration_initializer_range,
 };
@@ -120,8 +120,8 @@ pub fn parse_declaration_syntax(
     // resolution barrier can supply the required input.
     if config_qualifier.is_some()
         && matches!(
-            token_stream.current_token_kind(),
-            TokenKind::Comma | TokenKind::Eof | TokenKind::Newline
+            token_stream.current_tag(),
+            TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE
         )
     {
         return Ok(DeclarationSyntax {
@@ -134,11 +134,11 @@ pub fn parse_declaration_syntax(
         });
     }
 
-    match token_stream.current_token_kind() {
-        TokenKind::Assign => {
+    match token_stream.current_tag() {
+        TokenTag::ASSIGN => {
             token_stream.advance();
         }
-        TokenKind::Comma | TokenKind::Eof | TokenKind::Newline => {
+        TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE => {
             return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::missing_declaration_initializer(
                     name,
@@ -196,11 +196,11 @@ pub fn parse_binding_target_syntax(
 ) -> DeclarationShellResult<BindingTargetSyntax> {
     let target_span = current_source_span(token_stream);
 
-    let binding_mode = if token_stream.current_token_kind() == &TokenKind::Mutable {
+    let binding_mode = if token_stream.current_tag() == TokenTag::MUTABLE {
         require_binding_marker_adjacent(token_stream, BindingMode::MutableRuntime, span_builder)?;
         token_stream.advance();
         BindingMode::MutableRuntime
-    } else if token_stream.current_token_kind() == &TokenKind::Hash {
+    } else if token_stream.current_tag() == TokenTag::HASH {
         require_binding_marker_adjacent(
             token_stream,
             BindingMode::CompileTimeConstant,
@@ -208,7 +208,7 @@ pub fn parse_binding_target_syntax(
         )?;
         token_stream.advance();
         BindingMode::CompileTimeConstant
-    } else if token_stream.current_token_kind() == &TokenKind::Reactive {
+    } else if token_stream.current_tag() == TokenTag::REACTIVE {
         require_binding_marker_adjacent(token_stream, BindingMode::ReactiveRuntime, span_builder)?;
         token_stream.advance();
         BindingMode::ReactiveRuntime

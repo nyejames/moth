@@ -1475,22 +1475,6 @@ impl<'a> TokenCursor<'a> {
         (self.window_start, self.window_end) = window;
     }
 
-    /// Materialise the current canonical token for an explicit compatibility boundary.
-    pub(crate) fn current_token_owned(self) -> Result<Option<Token>, CompilerError> {
-        self.current()
-            .map(|token| {
-                token
-                    .to_token_kind()
-                    .map(|kind| Token::new(kind, token.span()))
-                    .map_err(|error| {
-                        CompilerError::compiler_error(format!(
-                            "canonical token payload could not be materialised: {error:?}"
-                        ))
-                    })
-            })
-            .transpose()
-    }
-
     pub fn new(tokens: &'a SourceTokens, range: TokenRange) -> Result<Self, TokenRangeError> {
         tokens.validate_range(range)?;
         Ok(Self {

@@ -374,10 +374,10 @@ pub(crate) fn starts_build_config_qualifier_at_cursor(
     cursor: &DeclarationCursor<'_>,
     string_table: &StringTable,
 ) -> bool {
-    cursor.current_token_kind() == &TokenKind::Hash
-        && cursor.peek_next_token().is_some_and(|kind| {
-            matches!(kind, TokenKind::Symbol(name) if string_table.resolve(name) == "Config")
-        })
+    cursor.current_tag() == TokenTag::HASH
+        && cursor
+            .peek_next_string_id()
+            .is_some_and(|name| string_table.resolve(name) == "Config")
 }
 
 /// Parse the exact structural `#Config of T` qualifier.
@@ -390,19 +390,23 @@ pub(crate) fn parse_build_config_qualifier(
     if let Some(span_builder) = span_builder {
         require_config_marker_adjacent(token_stream, span_builder)?;
     }
-    if token_stream.current_token_kind() == &TokenKind::Hash {
+    if token_stream.current_tag() == TokenTag::HASH {
         token_stream.advance();
     }
 
-    match token_stream.current_token_kind() {
-        TokenKind::Symbol(name) if string_table.resolve(*name) == "Config" => {
+    match token_stream.current_tag() {
+        TokenTag::SYMBOL
+            if token_stream
+                .current_string_id()
+                .is_some_and(|name| string_table.resolve(name) == "Config") =>
+        {
             token_stream.advance();
         }
         _ => {
             let expected = DiagnosticToken::from(TokenKind::Symbol(string_table.intern("Config")));
             let found = match token_stream.canonical_cursor().current() {
                 Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-                None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+                None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
             };
             return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::expected_token_from_projections(
@@ -414,7 +418,7 @@ pub(crate) fn parse_build_config_qualifier(
         }
     }
 
-    if token_stream.current_token_kind() != &TokenKind::Of {
+    if token_stream.current_tag() != TokenTag::OF {
         let span = token_stream.current_span();
         let found = match token_stream.canonical_cursor().current() {
             Some(found) => Some(DiagnosticToken::from_token_ref(found)),

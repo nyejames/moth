@@ -20,7 +20,10 @@ pub(crate) mod signature_members;
 pub(crate) mod r#struct;
 
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenCursor, TokenKind};
+use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::tokenizer::tokens::{
+    Token, TokenCursor, TokenKind, TokenRef, TokenTag,
+};
 
 pub(crate) fn cursor_current_span(cursor: &TokenCursor<'_>) -> Option<SourceSpan> {
     cursor.current().map(|token| token.source_span())
@@ -30,10 +33,10 @@ pub(crate) mod type_syntax;
 
 /// Short-lived canonical adapter used by declaration/sig/type parsers.
 ///
-/// WHAT: preserves the old parser ergonomics (`current_token_kind`, `advance` and newline
-/// skipping) while the backing storage is a checked `TokenCursor` over `SourceTokens`.
-/// WHY: declaration syntax still needs the exact `TokenKind` payload at a few diagnostics and
-/// semantic handoffs, but no parser shell may retain the materialised values.
+/// WHAT: preserves parser ergonomics (`current_tag`, `advance` and newline skipping) while the
+/// backing storage is a checked `TokenCursor` over `SourceTokens`.
+/// WHY: classification uses `TokenTag`; string payloads come from the compact shape. `TokenKind`
+/// remains only for the compatibility vector lane and diagnostic constructors that still take it.
 pub(crate) struct DeclarationCursor<'a> {
     cursor: TokenCursor<'a>,
     /// Parser position for a cursor without a compatibility lane.
@@ -49,6 +52,7 @@ pub(crate) struct DeclarationCursor<'a> {
     pub(crate) length: usize,
     source: crate::compiler_frontend::source::SourceId,
     current_kind: TokenKind,
+    current_tag: TokenTag,
     current_token: Option<Token>,
     compatibility_tokens: Option<&'a [Token]>,
     compatibility_base: usize,
@@ -62,21 +66,18 @@ impl<'a> DeclarationCursor<'a> {
         // SourceTokens validates every compact payload at construction/publication. Adapters
         // validate their legacy lane when they are built, so validating the entire remaining
         // range here would repeat that work for every declaration in a file.
-        let current_token = cursor.current_token_owned()?;
         let source = cursor.range().source();
         let index = cursor.parser_position();
         let length = cursor.parser_length();
-        let current_kind = current_token
-            .as_ref()
-            .map(|token| token.kind.clone())
-            .unwrap_or(TokenKind::Eof);
+        let current_tag = cursor.current().map(TokenRef::tag).unwrap_or(TokenTag::EOF);
         Ok(Self {
             cursor,
             index,
             length,
             source,
-            current_kind,
-            current_token,
+            current_kind: TokenKind::Eof,
+            current_tag,
+            current_token: None,
             compatibility_tokens: None,
             compatibility_base: 0,
             compatibility_end: 0,
@@ -184,51 +185,85 @@ impl<'a> DeclarationCursor<'a> {
                 .then(|| tokens.get(self.index))
                 .flatten()
                 .cloned();
-        } else {
-            self.index = self.cursor.parser_position();
-            self.length = self.cursor.parser_length();
-            self.current_token = self.cursor.current().map(|token| {
-                let kind = token
-                    .to_token_kind()
-                    .expect("validated declaration cursor token");
-                Token::new(kind, token.span())
-            });
+            self.current_kind = self
+                .current_token
+                .as_ref()
+                .map(|token| token.kind.clone())
+                .unwrap_or(TokenKind::Eof);
+            self.current_tag = self.current_kind.token_tag();
+            return;
         }
-        self.current_kind = self
-            .current_token
-            .as_ref()
-            .map(|token| token.kind.clone())
-            .unwrap_or(TokenKind::Eof);
+
+        self.index = self.cursor.parser_position();
+        self.length = self.cursor.parser_length();
+        self.current_token = None;
+        self.current_kind = TokenKind::Eof;
+        self.current_tag = self
+            .cursor
+            .current()
+            .map(TokenRef::tag)
+            .unwrap_or(TokenTag::EOF);
     }
 
-    pub(crate) fn current_token_kind(&self) -> &TokenKind {
-        &self.current_kind
+    pub(crate) fn current_tag(&self) -> TokenTag {
+        self.current_tag
+    }
+
+    pub(crate) fn current_string_id(&self) -> Option<StringId> {
+        if self.current_tag != TokenTag::SYMBOL {
+            return None;
+        }
+        if self.compatibility_tokens.is_some() {
+            return match &self.current_kind {
+                TokenKind::Symbol(name) => Some(*name),
+                _ => None,
+            };
+        }
+        self.cursor.current().and_then(TokenRef::string_id)
     }
 
     pub(crate) fn current_span(&self) -> Option<SourceSpan> {
-        self.current_token
-            .as_ref()
-            .map(|token| SourceSpan::new(self.source, token.span))
+        if let Some(token) = &self.current_token {
+            return Some(SourceSpan::new(self.source, token.span));
+        }
+        self.cursor.current().map(TokenRef::source_span)
     }
 
-    pub(crate) fn peek_next_token(&self) -> Option<TokenKind> {
+    pub(crate) fn peek_next_tag(&self) -> Option<TokenTag> {
         if let Some(tokens) = self.compatibility_tokens {
             let next_index = self.index.checked_add(1)?;
             return (next_index < self.compatibility_end)
                 .then(|| tokens.get(next_index))
                 .flatten()
-                .map(|token| token.kind.clone());
+                .map(|token| token.kind.token_tag());
         }
         let token = if self.cursor.is_segmented() {
             self.cursor.parser_peek_next()
         } else {
             self.cursor.peek_next()
         }?;
-        Some(
-            token
-                .to_token_kind()
-                .expect("validated declaration cursor token"),
-        )
+        Some(token.tag())
+    }
+
+    pub(crate) fn peek_next_string_id(&self) -> Option<StringId> {
+        if let Some(tokens) = self.compatibility_tokens {
+            let next_index = self.index.checked_add(1)?;
+            if next_index >= self.compatibility_end {
+                return None;
+            }
+            return match tokens.get(next_index).map(|token| &token.kind) {
+                Some(TokenKind::Symbol(name)) => Some(*name),
+                _ => None,
+            };
+        }
+        let token = if self.cursor.is_segmented() {
+            self.cursor.parser_peek_next()
+        } else {
+            self.cursor.peek_next()
+        }?;
+        (token.tag() == TokenTag::SYMBOL)
+            .then(|| token.string_id())
+            .flatten()
     }
 
     pub(crate) fn advance(&mut self) {
@@ -237,7 +272,7 @@ impl<'a> DeclarationCursor<'a> {
     }
 
     pub(crate) fn skip_newlines(&mut self) {
-        while self.current_kind == TokenKind::Newline {
+        while self.current_tag == TokenTag::NEWLINE {
             self.advance();
         }
     }

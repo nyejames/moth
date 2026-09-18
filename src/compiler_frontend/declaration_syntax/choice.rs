@@ -17,7 +17,7 @@ use crate::compiler_frontend::compiler_messages::DeferredFeatureReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::InvalidChoiceVariantReason;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
+    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body;
@@ -31,7 +31,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug)]
@@ -129,18 +129,18 @@ impl ChoiceVariantPayloadSyntax {
     }
 }
 
-pub(crate) fn starts_rejected_choice_payload_shorthand(token: &TokenKind) -> bool {
+pub(crate) fn starts_rejected_choice_payload_shorthand(tag: TokenTag) -> bool {
     matches!(
-        token,
-        TokenKind::DatatypeInt
-            | TokenKind::DatatypeFloat
-            | TokenKind::DatatypeBool
-            | TokenKind::DatatypeString
-            | TokenKind::DatatypeChar
-            | TokenKind::DatatypeNone
-            | TokenKind::OpenCurly
-            | TokenKind::Mutable
-            | TokenKind::Symbol(_)
+        tag,
+        TokenTag::DATATYPE_INT
+            | TokenTag::DATATYPE_FLOAT
+            | TokenTag::DATATYPE_BOOL
+            | TokenTag::DATATYPE_STRING
+            | TokenTag::DATATYPE_CHAR
+            | TokenTag::DATATYPE_NONE
+            | TokenTag::OPEN_CURLY
+            | TokenTag::MUTABLE
+            | TokenTag::SYMBOL
     )
 }
 
@@ -174,10 +174,10 @@ pub(crate) fn parse_choice_shell(
         token_stream.skip_newlines();
         let current_span = current_source_span(token_stream);
 
-        match token_stream.current_token_kind() {
-            TokenKind::Must | TokenKind::TraitThis => {
-                let keyword = reserved_trait_keyword_or_dispatch_mismatch(
-                    token_stream.current_token_kind(),
+        match token_stream.current_tag() {
+            TokenTag::MUST | TokenTag::TRAIT_THIS => {
+                let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+                    token_stream.current_tag(),
                     current_span,
                     "Header Parsing",
                     "choice header payload parsing",
@@ -186,8 +186,13 @@ pub(crate) fn parse_choice_shell(
                 return Err(reserved_trait_keyword_error(keyword, current_span).into());
             }
 
-            TokenKind::Symbol(variant_name) => {
-                let variant_name = *variant_name;
+            TokenTag::SYMBOL => {
+                let Some(variant_name) = token_stream.current_string_id() else {
+                    return Err(CompilerError::compiler_error(
+                        "symbol token is missing its string payload",
+                    )
+                    .into());
+                };
                 ensure_not_keyword_shadow_identifier(variant_name, current_span, string_table)?;
 
                 // Make sure this is not a duplicate variant name.
@@ -215,8 +220,8 @@ pub(crate) fn parse_choice_shell(
                 token_stream.skip_newlines();
 
                 // Determine payload form based on the next token.
-                let payload = match token_stream.current_token_kind() {
-                    TokenKind::TypeParameterBracket => {
+                let payload = match token_stream.current_tag() {
+                    TokenTag::TYPE_PARAMETER_BRACKET => {
                         // Record body: Variant | field Type, ... |
                         let fields = parse_record_body(
                             token_stream,
@@ -262,7 +267,7 @@ pub(crate) fn parse_choice_shell(
                         ChoiceVariantPayloadSyntax::Record { fields }
                     }
 
-                    TokenKind::OpenParenthesis => {
+                    TokenTag::OPEN_PARENTHESIS => {
                         return Err(CompilerDiagnostic::invalid_choice_variant(
                             InvalidChoiceVariantReason::ConstructorStyleNotSupported,
                             None,
@@ -273,7 +278,7 @@ pub(crate) fn parse_choice_shell(
                         .into());
                     }
 
-                    TokenKind::Assign => {
+                    TokenTag::ASSIGN => {
                         return Err(choice_variant_default_value_diagnostic(current_source_span(
                             token_stream,
                         ))
@@ -302,35 +307,35 @@ pub(crate) fn parse_choice_shell(
                 });
 
                 // Handle the separator after the variant (or after its record body).
-                match token_stream.current_token_kind() {
-                    TokenKind::Comma => {
+                match token_stream.current_tag() {
+                    TokenTag::COMMA => {
                         token_stream.advance();
                         continue;
                     }
-                    TokenKind::End => {
+                    TokenTag::END => {
                         token_stream.advance();
                         break;
                     }
-                    TokenKind::Assign => {
+                    TokenTag::ASSIGN => {
                         return Err(choice_variant_default_value_diagnostic(current_source_span(
                             token_stream,
                         ))
                         .into());
                     }
-                    TokenKind::Newline => {
+                    TokenTag::NEWLINE => {
                         token_stream.skip_newlines();
-                        match token_stream.current_token_kind() {
-                            TokenKind::Comma => {
+                        match token_stream.current_tag() {
+                            TokenTag::COMMA => {
                                 token_stream.advance();
                                 continue;
                             }
-                            TokenKind::End => {
+                            TokenTag::END => {
                                 token_stream.advance();
                                 break;
                             }
-                            TokenKind::Must | TokenKind::TraitThis => {
-                                let keyword = reserved_trait_keyword_or_dispatch_mismatch(
-                                    token_stream.current_token_kind(),
+                            TokenTag::MUST | TokenTag::TRAIT_THIS => {
+                                let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+                                    token_stream.current_tag(),
                                     current_source_span(token_stream),
                                     "Header Parsing",
                                     "choice header payload parsing",
@@ -342,10 +347,10 @@ pub(crate) fn parse_choice_shell(
                                 )
                                 .into());
                             }
-                            TokenKind::Symbol(_) => {
+                            TokenTag::SYMBOL => {
                                 continue;
                             }
-                            TokenKind::TypeParameterBracket => {
+                            TokenTag::TYPE_PARAMETER_BRACKET => {
                                 return Err(CompilerDiagnostic::invalid_choice_variant(
                                     InvalidChoiceVariantReason::UnexpectedSeparator,
                                     None,
@@ -355,7 +360,7 @@ pub(crate) fn parse_choice_shell(
                                 )
                                 .into());
                             }
-                            TokenKind::Assign => {
+                            TokenTag::ASSIGN => {
                                 return Err(choice_variant_default_value_diagnostic(
                                     current_source_span(token_stream),
                                 )
@@ -385,7 +390,7 @@ pub(crate) fn parse_choice_shell(
                             }
                         }
                     }
-                    TokenKind::Eof => {
+                    TokenTag::EOF => {
                         return Err(CompilerDiagnostic::unexpected_end_of_file(
                             Some(string_table.intern(";")),
                             current_source_span(token_stream),
@@ -404,7 +409,7 @@ pub(crate) fn parse_choice_shell(
                     }
                 }
             }
-            TokenKind::TypeParameterBracket => {
+            TokenTag::TYPE_PARAMETER_BRACKET => {
                 return Err(CompilerDiagnostic::invalid_choice_variant(
                     InvalidChoiceVariantReason::UnexpectedSeparator,
                     None,
@@ -414,7 +419,7 @@ pub(crate) fn parse_choice_shell(
                 )
                 .into());
             }
-            TokenKind::End => {
+            TokenTag::END => {
                 if variants.is_empty() {
                     return Err(CompilerDiagnostic::invalid_choice_variant(
                         InvalidChoiceVariantReason::MissingVariants,
@@ -429,7 +434,7 @@ pub(crate) fn parse_choice_shell(
                 token_stream.advance();
                 break;
             }
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     Some(string_table.intern(";")),
                     current_span,

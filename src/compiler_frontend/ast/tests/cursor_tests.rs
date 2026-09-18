@@ -12,7 +12,7 @@ use crate::compiler_frontend::numeric_text::store::NumericLiteralStore;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenKind, TokenRange,
+    FileTokens, SourceTokens, Token, TokenKind, TokenRange, TokenTag,
 };
 
 #[test]
@@ -308,22 +308,19 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
     let mut walking = child
         .declaration_cursor()
         .expect("a canonical window should produce a declaration cursor");
-    assert_eq!(walking.current_token_kind(), &TokenKind::BoolLiteral(true));
-    assert_eq!(
-        walking.peek_next_token(),
-        Some(TokenKind::BoolLiteral(false))
-    );
+    assert_eq!(walking.current_tag(), TokenTag::BOOL_LITERAL);
+    assert_eq!(walking.peek_next_tag(), Some(TokenTag::BOOL_LITERAL));
     walking.advance();
-    assert_eq!(walking.current_token_kind(), &TokenKind::BoolLiteral(false));
+    assert_eq!(walking.current_tag(), TokenTag::BOOL_LITERAL);
     assert_eq!(
-        walking.peek_next_token(),
+        walking.peek_next_tag(),
         None,
         "a declaration cursor must not peek past its window"
     );
     walking.advance();
     assert_eq!(
-        walking.current_token_kind(),
-        &TokenKind::Eof,
+        walking.current_tag(),
+        TokenTag::EOF,
         "walking to the window end reports EOF rather than the following token"
     );
     assert_eq!(walking.position(), 3, "the walk stops at the window end");
