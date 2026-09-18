@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+#[cfg(test)]
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 
 /// Dense file-local handle into a [`PathSyntaxTable`].
@@ -328,6 +329,7 @@ impl PathSyntaxTable {
     }
 
     /// Validate every path handle carried by one retained token slice.
+    #[cfg(test)]
     pub(crate) fn validate_token_handles(&self, tokens: &[Token]) -> Result<(), CompilerError> {
         self.validate_structure()?;
         for token in tokens {
@@ -344,6 +346,7 @@ impl PathSyntaxTable {
     }
 
     /// Validate one retained token slice against its owning source identity.
+    #[cfg(test)]
     pub(crate) fn validate_file_tokens(
         &self,
         tokens: &[Token],

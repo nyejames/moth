@@ -85,6 +85,7 @@ impl<'a> DeclarationCursor<'a> {
 
     /// Build a declaration cursor from a parser stream's canonical provenance and compatibility
     /// lane. The lane is borrowed only for this parser handoff, never retained by a syntax shell.
+    #[cfg(test)]
     pub(crate) fn from_file_tokens(
         token_stream: &'a crate::compiler_frontend::tokenizer::tokens::FileTokens,
     ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {

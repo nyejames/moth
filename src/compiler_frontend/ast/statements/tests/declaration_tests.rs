@@ -519,9 +519,6 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             0,
         )
         .with_declaring_file_id(file_id);
-        let declaration_path = path_fork
-            .try_intern_child(source_path, name)
-            .expect("declaration path should intern");
 
         let mut owner = tokens;
         let owner = AstCursor::from_file_tokens(&mut owner)
@@ -529,7 +526,6 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let mut initializer = super::declaration_initializer_stream(
             Some(&owner),
             declaration.initializer_range,
-            &declaration_path,
             declaration.span,
         )
         .expect("initializer must retain its declaration's source owner");

@@ -527,7 +527,6 @@ pub fn resolve_declaration_syntax(
         let mut initializer_stream = declaration_initializer_stream(
             source_owner,
             declaration_syntax.initializer_range,
-            &qualified_name,
             declaration_syntax.span,
         )?;
 
@@ -690,7 +689,6 @@ pub fn resolve_declaration_syntax(
     let mut initializer_stream = declaration_initializer_stream(
         source_owner,
         declaration_syntax.initializer_range,
-        &qualified_name,
         declaration_syntax.span,
     )?;
 
@@ -952,13 +950,11 @@ pub fn resolve_declaration_syntax(
 }
 /// Build the bounded parser cursor for a declaration initializer.
 ///
-/// Source-owned ranges stay on the canonical `AstCursor` view. Streams with no canonical owner
-/// cannot borrow a range, because their payload IDs are meaningless outside the stream, so they
-/// take an owned bounded substream instead.
+/// Source-owned ranges stay on the canonical `AstCursor` view. A missing owner is an
+/// invariant failure: every declaration initializer is parsed through a nested canonical cursor.
 fn declaration_initializer_stream<'tokens>(
     source_owner: Option<&AstCursor<'tokens>>,
     initializer_range: Option<TokenRange>,
-    qualified_name: &PathId,
     declaration_span: Option<SourceSpan>,
 ) -> DeclarationResult<AstCursor<'tokens>> {
     let range = initializer_range
@@ -966,14 +962,6 @@ fn declaration_initializer_stream<'tokens>(
     let eof_span = declaration_span
         .map(SourceSpan::local)
         .unwrap_or_else(LocalSpan::source_start);
-
-    if let Some(source_owner) = source_owner
-        && let Some(cursor) = source_owner
-            .bounded_owned_expression_cursor(range, *qualified_name, eof_span)
-            .map_err(ExpressionParseError::from)?
-    {
-        return Ok(cursor);
-    }
 
     let source_owner = source_owner.ok_or_else(|| {
         CompilerError::compiler_error("declaration initializer has no canonical source owner")
