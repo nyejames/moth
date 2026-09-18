@@ -211,17 +211,15 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
     );
     let opener_index = file_tokens.index;
     // Build the explicit unbounded compatibility adapter from the valid token vector first.
-    // `new_from_slice` validates path handles against the shared table, so the `NONE`
+    // The adapter shares the frozen path table via `new_substream`, so the `NONE`
     // corruption must land after construction; the compatibility cursor reads the adapter's
     // vector directly, so the post-construction tamper is observed at parse time.
-    let mut file_tokens = FileTokens::new_from_slice(
+    let mut file_tokens = FileTokens::new_substream(
+        &file_tokens,
         file_tokens.src_path,
         file_tokens.file_id,
-        file_tokens.canonical_os_path.clone(),
         file_tokens.tokens.clone(),
-        &file_tokens.path_syntax,
-    )
-    .expect("tampered path-token adapter must retain its frozen path table");
+    );
     file_tokens.index = opener_index;
     let path_token = file_tokens
         .tokens

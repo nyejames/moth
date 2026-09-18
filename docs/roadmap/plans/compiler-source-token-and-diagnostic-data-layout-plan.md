@@ -114,7 +114,8 @@ ACTIVE_PLAN:
     declaration handoff.
   - F2 (3H-R1b): closed — monotone parser scans walk the cursor instead of re-searching the
     segmented prefix on every step.
-  - F3 (3H-R3): final token consumers and loop grammar still have parallel paths.
+  - F3 (3H-R3): loop-header grammar is one cursor parser; remaining Token/TokenKind
+    consumers and the test-only compatibility cursor still remain.
   - F4 (3H-R2 done, 3H-R4 open): retained generic bodies bound one canonical `SourceTokens` owner;
     header and prepared-source ownership still need their cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
@@ -1403,11 +1404,17 @@ canonical (R3b, R3c), which is what finally lets every parser consumer drop the 
 - Migrate declaration, type, expression, statement and template consumers to tags, typed payload
   access and borrowed bounded views, removing wide-value caches and duplicated classification
   matches as their consumers leave.
-- Finish statement and template loop callers through one loop-header parser, keeping the statement
-  and template body parsers separate under that single owner, and delete the displaced vector
-  grammar, split records and copied helpers.
-- Delete the owned non-canonical cursor backing and `FileTokens::new_from_slice` once
-  `loop_headers::token_stream_with_eof` no longer feeds them.
+- Statement `create_loop` and template `parse_loop_suffix` both parse through
+  `parse_loop_header_cursor`. `parse_loop_header_tokens`, vector split records,
+  `token_stream_with_eof`, and production `FileTokens::new_from_slice` are gone.
+  Statement bodies still use `function_body_to_ast`; template bodies still use
+  `TemplateLoopBodyParseInput`. Compatibility `subcursor_window` None is an ICE.
+  Unbounded adapters in tests use `FileTokens::new_substream`. `AstCursor::from_file_tokens`
+  and `AstCursorBacking::Compatibility` are `cfg(test)` only. `OwnedNonCanonical` has no
+  production feeder and remains for declaration-initializer test fixtures.
+- Loop-header unification: workspace 5203 + 839 + 17, integration 1973/1973, featured clippy,
+  docs and source-audit clean.
+- Delete the owned non-canonical cursor backing once test fixtures no longer need it.
 - Preserve exact diagnostic projection facts with stable code, reason and ordering contracts, and
   retain one lexical grammar owner and one numeric-text owner.
 

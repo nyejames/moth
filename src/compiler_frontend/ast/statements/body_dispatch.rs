@@ -48,7 +48,7 @@ use crate::projects::settings;
 ///
 /// The module emitter is the reporting boundary: it renders diagnostics and forwards
 /// `CompilerError` values unchanged. Nested statement parsers therefore must not collapse this
-/// result back into a diagnostic while constructing temporary frozen-table substreams.
+/// result back into a diagnostic when a loop header meets a stream without canonical provenance.
 type StatementDispatchResult<T> = Result<T, ExpressionParseError>;
 
 fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
@@ -186,7 +186,6 @@ pub(crate) fn parse_function_body_statements(
 
                 body_nodes.push(create_loop(
                     token_stream,
-                    &token_stream.path_syntax_for_substream()?,
                     context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
                     type_interner,
                     warnings,

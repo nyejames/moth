@@ -63,15 +63,13 @@ fn parse_template_diagnostic_with_replaced_body_token(
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("template source should contain a body token");
     body_token.kind = TokenKind::Comma;
-    let mut file_tokens = FileTokens::new_from_slice(
+    let mut file_tokens = FileTokens::new_substream(
+        &file_tokens,
         file_tokens.src_path,
         file_tokens.file_id,
-        file_tokens.canonical_os_path.clone(),
         mutated_tokens,
-        &file_tokens.path_syntax,
-    )
-    .expect("mutated body-token adapter must retain its frozen path table");
-    // `new_from_slice` resets the cursor to zero; restore the template-opener position so the
+    );
+    // `new_substream` resets the cursor to zero; restore the template-opener position so the
     // parser starts at the same token as the unmutated fixture.
     file_tokens.index = opener_index;
     let source_path = file_tokens.src_path;

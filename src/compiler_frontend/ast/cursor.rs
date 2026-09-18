@@ -9,8 +9,8 @@ use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenKind,
-    TokenRange, TokenRangeError, TokenRef, TokenSequenceId, TokenTag,
+    FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenKind, TokenRange,
+    TokenRangeError, TokenRef, TokenSequenceId, TokenTag,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,15 +18,21 @@ use std::sync::Arc;
 #[derive(Debug)]
 enum AstCursorBacking<'a> {
     Canonical(TokenCursor<'a>),
+    /// Unbounded parser fixture over a borrowed `FileTokens` vector.
+    ///
+    /// WHAT: the short-lived compatibility lane used by `from_file_tokens` when the stream has
+    /// no canonical owner.
+    /// WHY: production parsers no longer construct this backing after loop-header unification;
+    /// it survives only for `cfg(test)` fixtures.
+    #[cfg(test)]
     Compatibility(&'a mut FileTokens),
     /// Bounded owned stream with no canonical owner.
     ///
     /// WHAT: holds an explicit `FileTokens` the cursor owns outright, together with the bounded
     /// substreams derived from it.
-    /// WHY: the leftover production feeder is `loop_headers::token_stream_with_eof` via
-    /// `FileTokens::new_from_slice`; nested expression windows still need an owned vector until
-    /// 3H-R3d retires that stream. Canonical content never enters this lane: a stream with a
-    /// canonical owner is promoted in `from_file_tokens`.
+    /// WHY: no production feeder remains after loop-header unification. The lane survives for
+    /// declaration-initializer test fixtures via `bounded_owned_expression_cursor` /
+    /// `new_bounded_expression_substream` until that named deletion step.
     OwnedNonCanonical(FileTokens),
 }
 
@@ -83,6 +89,7 @@ impl<'a> AstCursor<'a> {
 
     /// Construct a canonical cursor when the stream has checked provenance; otherwise retain the
     /// explicit short-lived compatibility lane for unbounded parser fixtures.
+    #[cfg(test)]
     pub(crate) fn from_file_tokens(
         token_stream: &'a mut FileTokens,
     ) -> Result<Self, CompilerError> {
@@ -191,7 +198,9 @@ impl<'a> AstCursor<'a> {
     fn from_owned_non_canonical(backing: AstCursorBacking<'a>) -> Self {
         let canonical_os_path = match &backing {
             AstCursorBacking::OwnedNonCanonical(stream) => stream.canonical_os_path.clone(),
-            AstCursorBacking::Canonical(_) | AstCursorBacking::Compatibility(_) => None,
+            AstCursorBacking::Canonical(_) => None,
+            #[cfg(test)]
+            AstCursorBacking::Compatibility(_) => None,
         };
         let mut cursor = Self {
             backing,
@@ -238,6 +247,7 @@ impl<'a> AstCursor<'a> {
 
     fn compatibility_stream(&self) -> Option<&FileTokens> {
         match &self.backing {
+            #[cfg(test)]
             AstCursorBacking::Compatibility(stream) => Some(stream),
             AstCursorBacking::OwnedNonCanonical(stream) => Some(stream),
             AstCursorBacking::Canonical(_) => None,
@@ -246,6 +256,7 @@ impl<'a> AstCursor<'a> {
 
     fn compatibility_stream_mut(&mut self) -> Option<&mut FileTokens> {
         match &mut self.backing {
+            #[cfg(test)]
             AstCursorBacking::Compatibility(stream) => Some(stream),
             AstCursorBacking::OwnedNonCanonical(stream) => Some(stream),
             AstCursorBacking::Canonical(_) => None,
@@ -562,7 +573,7 @@ impl<'a> AstCursor<'a> {
             AstCursorBacking::Canonical(_) => {
                 range.start().index() >= active_start && range.end().index() <= active_end
             }
-            AstCursorBacking::Compatibility(_) | AstCursorBacking::OwnedNonCanonical(_) => false,
+            _ => false,
         };
         if !within_active_bounds {
             return Err(TokenRangeError::OutOfBounds {
@@ -649,19 +660,6 @@ impl<'a> AstCursor<'a> {
                 .compatibility_stream()
                 .expect("non-canonical AST cursor must have compatibility backing")
                 .path_syntax_table(),
-        }
-    }
-
-    pub(crate) fn path_syntax_for_substream(&self) -> Result<FilePathSyntax, CompilerError> {
-        match &self.backing {
-            AstCursorBacking::Canonical(cursor) => Ok(FilePathSyntax::Shared(
-                cursor.source_tokens().path_syntax_arc()?,
-            )),
-            _ => self
-                .compatibility_stream()
-                .expect("non-canonical AST cursor must have compatibility backing")
-                .path_syntax
-                .frozen_substream(),
         }
     }
 

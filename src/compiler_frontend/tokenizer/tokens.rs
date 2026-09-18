@@ -2388,7 +2388,7 @@ impl FileTokenOwner {
             )),
         }
     }
-
+    #[cfg(test)]
     const fn is_canonical(&self) -> bool {
         matches!(self, Self::Canonical(_))
     }
@@ -2695,12 +2695,12 @@ impl FileTokens {
         }
     }
 
-    /// Build a bounded parser substream over a token slice.
+    /// Build a test-only parser adapter over a copied token vector.
     ///
-    /// Header parsing defers the path-table attachment until the prepared-file owner freezes.
-    /// Later AST substreams clone only the immutable table handle. This adapter owns no canonical
-    /// `SourceTokens`; it keeps only the parser `Token` vector, numeric side store and lifecycle
-    /// shell for its bounded lifetime.
+    /// Test fixtures use this to model streams without canonical provenance. The adapter
+    /// derives its path-table attachment from the source but owns no canonical
+    /// `SourceTokens`; it keeps only the parser `Token` vector, numeric side store and
+    /// lifecycle shell for its bounded lifetime.
     #[cfg(test)]
     pub fn new_substream(
         source: &FileTokens,
@@ -2715,31 +2715,6 @@ impl FileTokens {
             tokens,
             source.path_syntax.permanent_substream(),
         )
-    }
-
-    /// Build a downstream parser stream over already-frozen file syntax.
-    ///
-    /// AST expression parsers use this compatibility-only constructor for copied token vectors.
-    /// It deliberately retains no canonical provenance; `canonical_cursor_from_current` returns
-    /// an honest `CompilerError` for such a stream instead of fabricating a duplicate owner.
-    /// Bounded expression handoffs from a stream with a canonical owner use
-    /// `new_bounded_expression_substream`; canonical callers use the borrowed nested cursor.
-    pub fn new_from_slice(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-        tokens: Vec<Token>,
-        source_path_syntax: &FilePathSyntax,
-    ) -> Result<FileTokens, CompilerError> {
-        let mut stream = Self::with_adapter_path_syntax(
-            src_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            source_path_syntax.frozen_substream()?,
-        );
-        stream.freeze_numeric_literals();
-        Ok(stream)
     }
 
     /// Build a bounded expression-parser adapter with an ephemeral EOF sentinel.
@@ -2864,9 +2839,8 @@ impl FileTokens {
     /// Create a checked canonical cursor at this stream's compatibility-vector position.
     ///
     /// Canonical streams use their full source range. Bounded adapters use the retained range or
-    /// sequence metadata and an `Arc` clone of that same owner. Compatibility-only vectors made
-    /// by [`Self::new_from_slice`] deliberately return an error instead of fabricating a source
-    /// owner.
+    /// sequence metadata and an `Arc` clone of that same owner. Unbounded compatibility vectors
+    /// deliberately return an error instead of fabricating a source owner.
     pub fn canonical_cursor_from_current(&self) -> Result<TokenCursor<'_>, CompilerError> {
         if self.length != self.tokens.len() || self.index > self.length {
             return Err(CompilerError::compiler_error(
@@ -3139,6 +3113,7 @@ impl FileTokens {
     }
 
     /// Whether this stream is the sole canonical `SourceTokens` owner for its construction.
+    #[cfg(test)]
     pub(crate) const fn has_canonical_source_tokens(&self) -> bool {
         self.token_owner.is_canonical()
     }
