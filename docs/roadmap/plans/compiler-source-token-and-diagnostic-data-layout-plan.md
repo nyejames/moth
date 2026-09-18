@@ -108,12 +108,13 @@ ACTIVE_PLAN:
   the generic budget remains a red exception pending attribution. No checkpoint or Phase 3 exit is
   claimed.
 - OPEN_FINDINGS:
-  - F1 (3H-R1): active parser bounds are lost at the declaration handoff.
-  - F2 (3H-R1): indexed scans can repeat segmented prefix searches.
+  - F1 (3H-R1a): closed — the parser view is owned by the token cursor and survives the
+    declaration handoff.
+  - F2 (3H-R1b): indexed scans can repeat segmented prefix searches.
   - F3 (3H-R3): final token consumers and loop grammar still have parallel paths.
   - F4 (3H-R2, 3H-R4): generic and source ownership need a final cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
-- NEXT_SUBSTEP: 3H-R1.
+- NEXT_SUBSTEP: 3H-R1b.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -1192,9 +1193,9 @@ infrastructure.
 - [ ] update module docs, codebase index and style rules
 
 Findings closed by these substeps (paths as named in the resumption handoff):
-- F1 closes in 3H-R1: `ast/cursor.rs::declaration_cursor` and
+- F1 closed in 3H-R1a: `tokenizer/tokens.rs::TokenCursor`, `ast/cursor.rs::declaration_cursor` and
   `declaration_syntax/mod.rs::DeclarationCursor`.
-- F2 closes in 3H-R1: `tokenizer/tokens.rs::parser_token_at` and `from_sequence_position`, and
+- F2 closes in 3H-R1b: `tokenizer/tokens.rs::parser_token_at` and `from_sequence_position`, and
   indexed scanners such as `ast/statements/loops.rs::find_loop_header_colon_index`.
 - F3 closes in 3H-R3: `tokenizer/tokens.rs`, `ast/cursor.rs`, `declaration_syntax/mod.rs`,
   `ast/statements/loop_headers.rs`, `loops.rs` and template loop suffixes.
@@ -1205,8 +1206,9 @@ Findings closed by these substeps (paths as named in the resumption handoff):
   `benchmarks/frontend-optimization-results.md`.
 
 Each inventoried legacy-token site takes its owning deletion step from this map by area: view and
-cursor bounds sites close in 3H-R1, donor payload sites in 3H-R2, tokenizer and parser consumer
-sites in 3H-R3, and preparation, ownership, adapter-metadata and test-support sites in 3H-R4.
+cursor bounds sites close in 3H-R1a and 3H-R1b, donor payload sites in 3H-R2, tokenizer and
+parser consumer sites in 3H-R3, and preparation, ownership, adapter-metadata and test-support
+sites in 3H-R4.
 
 #### [x] 3H-R0 — Resume and establish the real checkpoint (complete)
 
@@ -1224,21 +1226,32 @@ sites in 3H-R3, and preparation, ownership, adapter-metadata and test-support si
 - Exit satisfied: one trustworthy baseline plus a finite deletion/consumer map; accepted 3A–3G
   design work is not restarted.
 
-#### [ ] 3H-R1 — Finish bounded view semantics and scan behaviour
+#### [x] 3H-R1a — Own the bounded parser view (complete)
 
-- Add the AST-window-to-declaration-cursor regression for contiguous and segmented input, including
-  a stricter parent limit.
-- Carry the effective active view through declaration and type parsing, nested windows and
-  diagnostic lookahead, preserving lower and upper bounds, dense sequence coordinates, source
-  coordinates and explicit EOF anchors.
-- Consolidate bounds under the existing cursor and view owner; do not add another independent limit
-  bundle or conversion wrapper.
-- Preserve O(1) logical position and length with adjacent navigation; convert sequential indexed
-  scans to cursor walks while keeping repositioning distinct from sequential traversal.
+- Added the AST-window-to-declaration-cursor regression for contiguous and segmented input,
+  including a stricter parent limit, and proved each case fails without the fix.
+- `TokenCursor` owns the active parser view as a half-open window in parser coordinates: absolute
+  source indexes for contiguous bounds, dense logical positions for segmented bounds. `bounds`,
+  `TokenRange` and `logical_length` keep their natural meaning so cursor-bounds equality lookups
+  stay valid.
+- Every parser-facing read and move enforces the window, `nested` intersects rather than widens,
+  and `set_limit`/`restore_limit` exchange a saved end so a restore cannot widen a view.
+- `AstCursor` no longer owns window state; its surviving limit serves the compatibility lane only.
+  `AstCursor::length` reports the active view, which is what parser loops read as their stop bound.
+- `DeclarationCursor` inherits the window through the handoff and reads through the cursor instead
+  of addressing source-wide token storage.
+- Exit satisfied: a bounded input remains bounded after every supported handoff.
+
+#### [ ] 3H-R1b — Convert sequential indexed scans to cursor walks
+
+- Convert monotone indexed scans to bounded cursor walks in the statement loop header, template
+  control-flow suffix, branching, if-header, match-arm and expression scan owners; keep arbitrary
+  seeks and constant-bounded probes as seeks.
+- Preserve O(1) logical position and length with adjacent navigation, keeping repositioning
+  distinct from sequential traversal, and introduce no flattened index cache.
 - Cover empty ranges, stable EOF, empty and gapped segments, nested limits and source mismatch
   through the existing test owners, without timing thresholds in unit tests.
-- Exit: a bounded input remains bounded after every supported handoff, and sequential scanning no
-  longer repeatedly searches the sequence prefix.
+- Exit: sequential scanning no longer repeatedly searches the sequence prefix.
 
 #### [ ] 3H-R2 — Settle final donor payload interpretation
 

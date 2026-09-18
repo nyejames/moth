@@ -144,13 +144,7 @@ impl<'a> DeclarationCursor<'a> {
     }
     pub(crate) fn token_at(&self, index: usize) -> Option<Token> {
         let lower_bound = self.compatibility_tokens.map_or_else(
-            || {
-                if self.cursor.is_segmented() {
-                    0
-                } else {
-                    self.cursor.range().start().index()
-                }
-            },
+            || self.cursor.parser_window_start(),
             |_| self.compatibility_base,
         );
         if index < lower_bound || index >= self.length {
@@ -160,13 +154,7 @@ impl<'a> DeclarationCursor<'a> {
             return tokens.get(index).cloned();
         }
 
-        let token = if self.cursor.is_segmented() {
-            self.cursor.parser_token_at(index)?
-        } else {
-            let index =
-                crate::compiler_frontend::tokenizer::tokens::TokenIndex::try_from_index(index)?;
-            self.cursor.source_tokens().token(index).ok()?
-        };
+        let token = self.cursor.parser_token_at(index)?;
         token
             .to_token_kind()
             .ok()

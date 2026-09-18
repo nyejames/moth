@@ -51,10 +51,12 @@ pub(crate) struct AstCursor<'a> {
     canonical_owner: Option<Arc<SourceTokens>>,
     /// Filesystem identity used only when a `FileTokens`-backed cursor creates an adapter.
     canonical_os_path: Option<PathBuf>,
+    /// Parser limit for a compatibility-backed cursor.
+    ///
+    /// WHAT: bounds reads and moves over the borrowed token vector lane.
+    /// WHY: a canonical cursor carries its own active window; only the compatibility lane needs
+    /// an externally imposed end.
     limit: Option<usize>,
-    /// Optional parser-position window imposed by a canonical subcursor handoff.
-    window_start: Option<usize>,
-    window_end: Option<usize>,
     /// Synthetic parser EOF observed at the end of a bounded canonical range.
     ///
     /// WHAT: reports the declaration EOF span without materialising a trailing token.
@@ -76,8 +78,6 @@ impl<'a> AstCursor<'a> {
             canonical_owner,
             canonical_os_path,
             limit: None,
-            window_start: None,
-            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -109,8 +109,6 @@ impl<'a> AstCursor<'a> {
             canonical_owner: None,
             canonical_os_path,
             limit: None,
-            window_start: None,
-            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -156,8 +154,6 @@ impl<'a> AstCursor<'a> {
             canonical_owner: Some(Arc::clone(source_tokens)),
             canonical_os_path,
             limit: None,
-            window_start: None,
-            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -189,8 +185,6 @@ impl<'a> AstCursor<'a> {
             canonical_owner: Some(Arc::clone(source_tokens)),
             canonical_os_path,
             limit: None,
-            window_start: None,
-            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -225,8 +219,6 @@ impl<'a> AstCursor<'a> {
             canonical_owner: None,
             canonical_os_path,
             limit: None,
-            window_start: None,
-            window_end: None,
             synthetic_eof: None,
             current_kind: TokenKind::Eof,
             next_kind: None,
@@ -280,29 +272,26 @@ impl<'a> AstCursor<'a> {
             AstCursorBacking::Canonical(_) => None,
         }
     }
-    fn base_length(&self) -> usize {
+    fn active_start(&self) -> usize {
         match &self.backing {
-            AstCursorBacking::Canonical(cursor) => cursor.parser_length(),
-            _ => {
-                self.compatibility_stream()
-                    .expect("non-canonical AST cursor must have compatibility backing")
-                    .length
-            }
+            AstCursorBacking::Canonical(cursor) => cursor.parser_window_start(),
+            _ => 0,
         }
     }
 
-    fn active_start(&self) -> usize {
-        self.window_start.unwrap_or_else(|| match &self.backing {
-            AstCursorBacking::Canonical(cursor) if cursor.is_segmented() => 0,
-            AstCursorBacking::Canonical(cursor) => cursor.range().start().index(),
-            _ => 0,
-        })
-    }
-
+    /// Exclusive end of the active parser view.
+    ///
+    /// A canonical cursor owns its window, so it reports it directly. A compatibility lane has
+    /// only its borrowed vector extent and any externally imposed limit.
     fn active_end(&self) -> usize {
-        self.window_end
-            .unwrap_or_else(|| self.base_length())
-            .min(self.limit.unwrap_or(usize::MAX))
+        match &self.backing {
+            AstCursorBacking::Canonical(cursor) => cursor.parser_length(),
+            _ => self
+                .compatibility_stream()
+                .expect("non-canonical AST cursor must have compatibility backing")
+                .length
+                .min(self.limit.unwrap_or(usize::MAX)),
+        }
     }
 
     pub(crate) fn current(&self) -> Option<TokenRef<'a>> {
@@ -366,15 +355,16 @@ impl<'a> AstCursor<'a> {
             }
         }
     }
+    /// Exclusive end of what this cursor may parse.
+    ///
+    /// Parser loops read this as their stop bound, so it reports the active view rather than the
+    /// owner's natural extent.
     pub(crate) fn length(&self) -> usize {
-        self.window_end.unwrap_or_else(|| self.base_length())
+        self.active_end()
     }
 
     pub(crate) fn token_at(&self, index: usize) -> Option<Token> {
-        if index < self.active_start()
-            || index >= self.length()
-            || self.limit.is_some_and(|limit| index >= limit)
-        {
+        if index < self.active_start() || index >= self.active_end() {
             return None;
         }
         match &self.backing {
@@ -506,27 +496,45 @@ impl<'a> AstCursor<'a> {
         Ok(())
     }
 
-    pub(crate) fn set_limit(&mut self, end: usize) -> Result<Option<usize>, CompilerError> {
+    /// Narrow the active parser view's end and return the replaced end for restoration.
+    ///
+    /// A canonical cursor narrows its own window. A compatibility lane records the limit here
+    /// because its borrowed vector has no window of its own.
+    pub(crate) fn set_limit(&mut self, end: usize) -> Result<usize, CompilerError> {
         let current = self.position();
         if end < current {
             return Err(CompilerError::compiler_error(
                 "AST cursor parser limit precedes its current position",
             ));
         }
-        let max = self.length();
-        if end > max {
+        let previous = self.active_end();
+        if end > previous {
             return Err(CompilerError::compiler_error(
                 "AST cursor parser limit exceeds its active range",
             ));
         }
-        let previous = self.limit;
-        self.limit = Some(end);
+        match &mut self.backing {
+            AstCursorBacking::Canonical(cursor) => {
+                let window_start = cursor.parser_window_start();
+                cursor.narrow_parser_window(window_start, end)?;
+            }
+            _ => self.limit = Some(end),
+        }
         self.refresh_facts();
         Ok(previous)
     }
 
-    pub(crate) fn restore_limit(&mut self, limit: Option<usize>) {
-        self.limit = limit;
+    /// Restore an end returned by `set_limit`.
+    ///
+    /// Only a saved end can be restored, so a nested parse can never widen the view it inherited.
+    pub(crate) fn restore_limit(&mut self, end: usize) {
+        match &mut self.backing {
+            AstCursorBacking::Canonical(cursor) => {
+                let window_start = cursor.parser_window_start();
+                cursor.restore_parser_window((window_start, end));
+            }
+            _ => self.limit = Some(end),
+        }
         self.refresh_facts();
     }
     pub(crate) fn is_at_end(&self) -> bool {
@@ -588,18 +596,11 @@ impl<'a> AstCursor<'a> {
         }
 
         let nested = self.nested(range)?;
-        let nested_limit = match (&self.backing, self.limit) {
-            (AstCursorBacking::Canonical(cursor), Some(_)) if cursor.is_segmented() => {
-                Some(range.end().index())
-            }
-            (_, limit) => limit,
-        };
         let mut cursor = Self::new_with_owner(
             nested,
             self.canonical_owner.clone(),
             self.canonical_os_path.clone(),
         );
-        cursor.limit = nested_limit;
         cursor.refresh_facts();
         Ok(cursor)
     }
@@ -634,9 +635,12 @@ impl<'a> AstCursor<'a> {
         );
         child.synthetic_eof = self.synthetic_eof;
         child.set_position(start)?;
-        child.window_start = Some(start);
-        child.window_end = Some(end);
-        child.limit = Some(end);
+        let AstCursorBacking::Canonical(child_cursor) = &mut child.backing else {
+            return Err(CompilerError::compiler_error(
+                "a canonical subcursor window must keep its canonical backing",
+            ));
+        };
+        child_cursor.narrow_parser_window(start, end)?;
         child.refresh_facts();
         Ok(Some(child))
     }

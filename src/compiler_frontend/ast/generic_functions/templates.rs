@@ -629,7 +629,7 @@ impl GenericFunctionBody {
                     *token_sequence,
                     *declaration_path,
                 )
-            },
+            }
             Self::MaterialisedForeign {
                 source_owner,
                 token_range,

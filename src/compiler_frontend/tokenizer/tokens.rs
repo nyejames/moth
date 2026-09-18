@@ -1188,6 +1188,15 @@ pub struct TokenCursor<'a> {
     segment_start_position: usize,
     previous_segment_index: Option<usize>,
     next_segment_index: Option<usize>,
+    /// Active parser view in parser coordinates, as a half-open `[window_start, window_end)`.
+    ///
+    /// WHAT: bounds every parser-facing read and move. Contiguous cursors use absolute source
+    /// indexes; segmented cursors use dense logical positions.
+    /// WHY: a bounded parse must stay bounded across every handoff, so the window travels with
+    /// the cursor instead of being re-imposed by each parser adapter. `bounds` keeps the natural
+    /// range so a window can be narrowed and restored without losing the owner's extent.
+    window_start: usize,
+    window_end: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1244,15 +1253,52 @@ impl<'a> TokenCursor<'a> {
         }
     }
 
-    /// Return the parser-facing length while retaining raw source ranges in `range`.
+    /// Return the active parser view's lower bound in parser coordinates.
+    pub(crate) const fn parser_window_start(self) -> usize {
+        self.window_start
+    }
+
+    /// Return the active parser view's exclusive upper bound in parser coordinates.
     ///
-    /// Contiguous cursors report their active range end. Segmented cursors report the cached
-    /// total logical length.
-    pub(crate) fn parser_length(self) -> usize {
-        match self.bounds {
-            TokenCursorBounds::Contiguous(range) => range.end().index(),
-            TokenCursorBounds::Segmented(_) => self.logical_length,
+    /// Parser adapters read this as the end of what they may parse, so it reports the window
+    /// rather than the owner's natural extent.
+    pub(crate) const fn parser_length(self) -> usize {
+        self.window_end
+    }
+
+    /// Whether `position` lies inside the active parser view.
+    const fn position_in_window(self, position: usize) -> bool {
+        position >= self.window_start && position < self.window_end
+    }
+
+    /// Narrow the active parser view to `[start, end)` and return the replaced window.
+    ///
+    /// Narrowing never widens: a window outside the current one is rejected so a child parse
+    /// cannot recover tokens its parent already excluded.
+    pub(crate) fn narrow_parser_window(
+        &mut self,
+        start: usize,
+        end: usize,
+    ) -> Result<(usize, usize), CompilerError> {
+        if start > end {
+            return Err(CompilerError::compiler_error(
+                "token cursor parser window is inverted",
+            ));
         }
+        if start < self.window_start || end > self.window_end {
+            return Err(CompilerError::compiler_error(
+                "token cursor parser window would widen its parent view",
+            ));
+        }
+        let previous = (self.window_start, self.window_end);
+        self.window_start = start;
+        self.window_end = end;
+        Ok(previous)
+    }
+
+    /// Restore a window returned by `narrow_parser_window`.
+    pub(crate) const fn restore_parser_window(&mut self, window: (usize, usize)) {
+        (self.window_start, self.window_end) = window;
     }
 
     /// Materialise the current canonical token for an explicit compatibility boundary.
@@ -1283,6 +1329,8 @@ impl<'a> TokenCursor<'a> {
             segment_start_position: 0,
             previous_segment_index: None,
             next_segment_index: None,
+            window_start: range.start.index(),
+            window_end: range.end.index(),
         })
     }
 
@@ -1322,6 +1370,8 @@ impl<'a> TokenCursor<'a> {
             segment_start_position: 0,
             previous_segment_index: None,
             next_segment_index: None,
+            window_start: range.start.index(),
+            window_end: range.end.index(),
         })
     }
 
@@ -1371,6 +1421,8 @@ impl<'a> TokenCursor<'a> {
                     segment_start_position: logical_start,
                     previous_segment_index,
                     next_segment_index: Self::next_non_empty_segment(ranges, segment_index + 1),
+                    window_start: 0,
+                    window_end: logical_length,
                 });
             }
             logical_start = segment_end;
@@ -1394,6 +1446,8 @@ impl<'a> TokenCursor<'a> {
             segment_start_position: logical_length,
             previous_segment_index,
             next_segment_index: None,
+            window_start: 0,
+            window_end: logical_length,
         })
     }
 
@@ -1453,11 +1507,11 @@ impl<'a> TokenCursor<'a> {
     /// Contiguous reads accept absolute source indexes inside the active range. Segmented
     /// reads accept dense sequence positions that skip omitted source gaps.
     pub(crate) fn parser_token_at(self, index: usize) -> Option<TokenRef<'a>> {
+        if !self.position_in_window(index) {
+            return None;
+        }
         match self.bounds {
-            TokenCursorBounds::Contiguous(range) => {
-                if index < range.start().index() || index >= range.end().index() {
-                    return None;
-                }
+            TokenCursorBounds::Contiguous(_) => {
                 let index = TokenIndex::try_from_index(index)?;
                 self.tokens.token(index).ok()
             }
@@ -1480,6 +1534,9 @@ impl<'a> TokenCursor<'a> {
 
     /// Peek one token ahead in the parser-facing view.
     pub(crate) fn parser_peek_next(self) -> Option<TokenRef<'a>> {
+        if !self.position_in_window(self.parser_position().checked_add(1)?) {
+            return None;
+        }
         let TokenCursorBounds::Segmented(view) = self.bounds else {
             return self.peek_next();
         };
@@ -1496,6 +1553,9 @@ impl<'a> TokenCursor<'a> {
 
     /// Return the previous token in the parser-facing view.
     pub(crate) fn parser_previous(self) -> Option<TokenRef<'a>> {
+        if !self.position_in_window(self.parser_position().checked_sub(1)?) {
+            return None;
+        }
         let TokenCursorBounds::Segmented(view) = self.bounds else {
             let previous = TokenIndex::try_from_raw(self.next.raw().checked_sub(1)?)?;
             if previous < self.range().start() {
@@ -1525,10 +1585,10 @@ impl<'a> TokenCursor<'a> {
         let TokenCursorBounds::Segmented(view) = self.bounds else {
             return Err(TokenSequenceError::Absent);
         };
-        if position > self.logical_length {
+        if position < self.window_start || position > self.window_end {
             return Err(TokenSequenceError::OutOfRange {
                 raw: u32::try_from(position).unwrap_or(u32::MAX),
-                len: self.logical_length,
+                len: self.window_end,
             });
         }
         if position == self.logical_position {
@@ -1718,6 +1778,9 @@ impl<'a> TokenCursor<'a> {
     }
 
     pub fn current(self) -> Option<TokenRef<'a>> {
+        if !self.position_in_window(self.parser_position()) {
+            return None;
+        }
         let range = self.current_range()?;
         if self.next >= range.end {
             return None;
@@ -1734,6 +1797,9 @@ impl<'a> TokenCursor<'a> {
     ///
     /// A segmented cursor never crosses a range boundary for `peek_next`.
     pub fn peek_next(self) -> Option<TokenRef<'a>> {
+        if !self.position_in_window(self.parser_position().checked_add(1)?) {
+            return None;
+        }
         let range = self.current_range()?;
         let next = TokenIndex(self.next.raw().checked_add(1)?);
         if next >= range.end {
@@ -1750,6 +1816,13 @@ impl<'a> TokenCursor<'a> {
     pub fn set_position(&mut self, position: TokenIndex) -> Result<(), TokenRangeError> {
         match self.bounds {
             TokenCursorBounds::Contiguous(range) => {
+                if position.index() < self.window_start || position.index() > self.window_end {
+                    return Err(TokenRangeError::OutOfBounds {
+                        start: position.raw(),
+                        end: position.raw(),
+                        len: self.window_end,
+                    });
+                }
                 if position < range.start || position > range.end {
                     return Err(TokenRangeError::OutOfBounds {
                         start: position.raw(),
@@ -1785,7 +1858,18 @@ impl<'a> TokenCursor<'a> {
                                 ranges,
                                 segment_index + 1,
                             ),
+                            window_start: self.window_start,
+                            window_end: self.window_end,
                         };
+                        if candidate.logical_position < self.window_start
+                            || candidate.logical_position > self.window_end
+                        {
+                            return Err(TokenRangeError::OutOfBounds {
+                                start: position.raw(),
+                                end: position.raw(),
+                                len: self.window_end,
+                            });
+                        }
                         candidate.skip_empty_segments();
                         *self = candidate;
                         return Ok(());
@@ -1841,7 +1925,12 @@ impl<'a> TokenCursor<'a> {
         Some(current)
     }
 
-    /// Create a nested cursor after proving that the child range is inside the active segment.
+    /// Create a nested cursor after proving that the child range is inside the active view.
+    ///
+    /// The child inherits the parent's window intersected with its own range, so a nested parse
+    /// can never recover tokens the parent excluded. A segmented parent's window is expressed in
+    /// dense positions, which do not translate into the contiguous child's coordinates, so the
+    /// child takes its own range as its window; callers translate dense containment first.
     pub fn nested(&self, range: TokenRange) -> Result<TokenCursor<'a>, TokenRangeError> {
         self.tokens.validate_range(range)?;
         let parent = self.current_range().unwrap_or_else(|| self.range());
@@ -1852,7 +1941,19 @@ impl<'a> TokenCursor<'a> {
                 len: parent.end.index(),
             });
         }
-        Self::new(self.tokens, range)
+        let mut nested = Self::new(self.tokens, range)?;
+        if matches!(self.bounds, TokenCursorBounds::Contiguous(_)) {
+            if range.start.index() < self.window_start || range.end.index() > self.window_end {
+                return Err(TokenRangeError::OutOfBounds {
+                    start: range.start.raw(),
+                    end: range.end.raw(),
+                    len: self.window_end,
+                });
+            }
+            nested.window_start = range.start.index().max(self.window_start);
+            nested.window_end = range.end.index().min(self.window_end);
+        }
+        Ok(nested)
     }
 }
 
