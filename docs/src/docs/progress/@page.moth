@@ -691,6 +691,20 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [header: [: Surface] [: Status] [: Coverage] [: Current status] ]
 
         [data:
+            [: MON Rust codec]
+            [: Deferred]
+            [: None]
+            [: Accepted Rust-facing compiler-library tooling. Document encoding, nested-value encoding and strict schema-checked decoding will use literal data, owned results and bounded fail-fast errors. No implementation is claimed. This surface does not expose MON operations to compiled Moth programs.]
+        ]
+
+        [data:
+            [: Moth-native MON integration]
+            [: Deferred]
+            [: None]
+            [: Separate accepted follow-up for compiler-owned [$html:<code>$mon</code>] convenience, schemas derived from ordinary Moth types, checked anonymous-record generation and source/runtime encode/decode operations. Exact directive syntax remains undecided. Source parity for explicit empty maps, Unicode escapes and contextual choices is not implemented by the Rust codec.]
+        ]
+
+        [data:
             [: Frontend Arena + Semantic Invariant Optimisation]
             [: Partial]
             [: Broad benchmark, profiling, adversarial-fixture, scope-frame, capacity-estimate and validation coverage.]
