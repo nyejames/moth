@@ -581,6 +581,10 @@ fn source_span_capacity_message(
             "This source contains more than {length} retained numeric literals; the compact \
              numeric side store cannot address another row."
         ),
+        SourceSpanCapacityResource::Token => format!(
+            "This source contains more than {length} tokens; the compact \
+             source-owned token store cannot address another token."
+        ),
     }
 }
 

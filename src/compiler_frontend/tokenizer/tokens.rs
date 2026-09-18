@@ -554,6 +554,124 @@ pub enum TokenViewError {
     MalformedPathHandle,
 }
 
+/// Failures while packing one token into the canonical construction owner.
+///
+/// WHAT: distinguishes user-controlled token-count exhaustion from malformed trusted records.
+/// WHY: the lexer maps these lanes without a second classification pass — capacity becomes a
+/// typed user diagnostic, invariants stay infrastructure failures.
+#[derive(Clone, Debug)]
+pub(crate) enum SourceTokenBuildError {
+    Capacity,
+    Invariant(CompilerError),
+}
+
+/// Canonical construction owner for one source's token arrays.
+///
+/// WHAT: packs compact shapes, spans, stats and the positional numeric handle lane in one
+/// monotone forward pass while lexing. The numeric side-store rows themselves stay staged in
+/// the lexer's `TokenStream`; this builder only consumes their positional handles.
+/// WHY: deriving the canonical owner from a token vector needed a second positional numeric
+/// pass and a shape-packing pass over `&[Token]`; emitting directly keeps one pass.
+pub(crate) struct SourceTokensBuilder {
+    source: SourceId,
+    shapes: Vec<TokenShape>,
+    spans: Vec<LocalSpan>,
+    token_stats: TokenStats,
+    staged_numeric: usize,
+    #[cfg(test)]
+    numeric_literal_ids: Vec<Option<NumericLiteralId>>,
+}
+
+impl SourceTokensBuilder {
+    pub(crate) fn with_capacity(source: SourceId, capacity: usize) -> Self {
+        Self {
+            source,
+            shapes: Vec::with_capacity(capacity),
+            spans: Vec::with_capacity(capacity),
+            token_stats: TokenStats::default(),
+            staged_numeric: 0,
+            #[cfg(test)]
+            numeric_literal_ids: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub(crate) fn push(
+        &mut self,
+        kind: &TokenKind,
+        span: LocalSpan,
+    ) -> Result<(), SourceTokenBuildError> {
+        let next_index = self.shapes.len();
+        TokenIndex::try_from_index(next_index).ok_or(SourceTokenBuildError::Capacity)?;
+        let numeric_id = if matches!(kind, TokenKind::NumericLiteral(_)) {
+            let id = NumericLiteralId::try_from_index(self.staged_numeric)
+                .ok_or(SourceTokenBuildError::Capacity)?;
+            self.staged_numeric = self.staged_numeric.saturating_add(1);
+            id
+        } else {
+            NumericLiteralId::NONE
+        };
+        let shape =
+            TokenShape::from_token_kind_with_numeric_id(kind, numeric_id).ok_or_else(|| {
+                SourceTokenBuildError::Invariant(CompilerError::compiler_error(format!(
+                    "trusted token at index {next_index} has a malformed compact shape"
+                )))
+            })?;
+        self.token_stats.accumulate_shape(shape);
+        self.shapes.push(shape);
+        self.spans.push(span);
+        #[cfg(test)]
+        self.numeric_literal_ids
+            .push(if numeric_id == NumericLiteralId::NONE {
+                None
+            } else {
+                Some(numeric_id)
+            });
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_numeric_literal_ids(&mut self) -> Vec<Option<NumericLiteralId>> {
+        std::mem::take(&mut self.numeric_literal_ids)
+    }
+
+    pub(crate) fn finish(
+        self,
+        numeric_literals: NumericLiteralStore,
+    ) -> Result<SourceTokens, CompilerError> {
+        if numeric_literals.owner_source().is_none() && !numeric_literals.is_empty() {
+            return Err(CompilerError::compiler_error(
+                "source token numeric store has records but no source identity",
+            ));
+        }
+        if let Some(owner) = numeric_literals.owner_source()
+            && owner != self.source
+        {
+            return Err(CompilerError::compiler_error(
+                "source token numeric store does not match its source identity",
+            ));
+        }
+        if self.staged_numeric != numeric_literals.len() {
+            return Err(CompilerError::compiler_error(format!(
+                "source token numeric handles (staged {}) do not match numeric store rows ({})",
+                self.staged_numeric,
+                numeric_literals.len()
+            )));
+        }
+        let len = self.shapes.len();
+        let owner = SourceTokens {
+            source: self.source,
+            shapes: self.shapes.into_boxed_slice(),
+            spans: self.spans.into_boxed_slice(),
+            numeric_literals,
+            path_syntax: None,
+            sequence_store: TokenSequenceStore::new(self.source, len),
+            token_stats: self.token_stats,
+        };
+        owner.validate_structure()?;
+        Ok(owner)
+    }
+}
+
 /// The immutable source-owned shape/span arrays and their typed cold stores.
 ///
 /// `TokenKind` remains in [`FileTokens`] only as a private compatibility adapter for parsers that
@@ -577,145 +695,35 @@ pub struct SourceTokens {
 }
 
 impl SourceTokens {
-    /// Build the canonical source arrays from a legacy token vector.
-    ///
-    /// The returned numeric handle lane is retained only by the private `FileTokens` adapter.
-    /// When a shared table is supplied, every path handle is additionally checked against its
-    /// row span so malformed or cross-source handles cannot enter the immutable owner through
-    /// this adapter. Table-less construction keeps `path_syntax` absent until ordinary
-    /// publication attaches the frozen allocation without copying rows.
-    pub(crate) fn from_legacy_tokens(
-        source: SourceId,
-        tokens: &[Token],
-        numeric_literals: NumericLiteralStore,
-        numeric_literal_ids: Option<&[Option<NumericLiteralId>]>,
-        path_syntax_owner: Option<Arc<PathSyntaxTable>>,
-        token_stats: TokenStats,
-    ) -> Result<(Self, Vec<Option<NumericLiteralId>>), CompilerError> {
-        if numeric_literals.owner_source().is_none() && !numeric_literals.is_empty() {
-            return Err(CompilerError::compiler_error(
-                "legacy source token numeric store has records but no source identity",
-            ));
-        }
-        if let Some(owner) = numeric_literals.owner_source()
-            && owner != source
-        {
-            return Err(CompilerError::compiler_error(
-                "legacy source token numeric store does not match its source identity",
-            ));
-        }
-        if let Some(table) = path_syntax_owner.as_deref() {
-            table.validate_file_owned_locations(source).map_err(|_| {
-                CompilerError::compiler_error(
-                    "legacy source token path table does not match its source identity",
-                )
-            })?;
-        }
-        let numeric_literal_ids = match numeric_literal_ids {
-            Some(ids) if ids.len() == tokens.len() => ids.to_vec(),
-            Some(_) => {
-                return Err(CompilerError::compiler_error(
-                    "legacy token numeric handles do not align with token positions",
-                ));
-            }
-            None => numeric_ids_for_staged_store(tokens, &numeric_literals),
-        };
-        for (index, token) in tokens.iter().enumerate() {
-            let numeric_id = numeric_literal_ids[index];
-            let is_numeric = matches!(token.kind, TokenKind::NumericLiteral(_));
-            match (is_numeric, numeric_id) {
-                (true, Some(id)) => {
-                    numeric_literals
-                        .try_get_for_source(id, source)
-                        .map_err(|_| {
-                            CompilerError::compiler_error(format!(
-                                "legacy token numeric handle at staged position {index} is invalid"
-                            ))
-                        })?;
-                }
-                (true, None) => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "legacy numeric token at index {index} is missing its side-store handle"
-                    )));
-                }
-                (false, Some(_)) => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "legacy non-numeric token at index {index} carries a numeric handle"
-                    )));
-                }
-                (false, None) => {}
-            }
-        }
-        let mut shapes = Vec::with_capacity(tokens.len());
-        let mut spans = Vec::with_capacity(tokens.len());
-        // Stats accumulate from the canonical shapes packed here, so every constructed owner
-        // carries the same tag-authority counts. A non-default seed is preserved for callers
-        // that already counted alongside construction; fresh construction starts from default
-        // and fills each bucket from the packed shapes below.
-        let mut token_stats = token_stats;
-        let count_from_shapes = token_stats == TokenStats::default();
-        for (index, token) in tokens.iter().enumerate() {
-            let numeric_id = numeric_literal_ids[index].unwrap_or(NumericLiteralId::NONE);
-            let shape = TokenShape::from_token_kind_with_numeric_id(&token.kind, numeric_id)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "legacy token at index {index} has a malformed compact shape"
-                    ))
-                })?;
-            if let (Some(table), Some(path_id)) =
-                (path_syntax_owner.as_deref(), shape.path_syntax_id())
-            {
-                table
-                    .try_path_for_token(path_id, SourceSpan::new(source, token.span))
-                    .map_err(|_| {
-                        CompilerError::compiler_error(format!(
-                            "legacy token path handle at index {index} is invalid"
-                        ))
-                    })?;
-            }
-            if count_from_shapes {
-                token_stats.accumulate_shape(shape);
-            }
-            shapes.push(shape);
-            spans.push(token.span);
-        }
-        let sequence_store = TokenSequenceStore::new(source, tokens.len());
-        let owner = Self {
-            source,
-            shapes: shapes.into_boxed_slice(),
-            spans: spans.into_boxed_slice(),
-            numeric_literals,
-            path_syntax: path_syntax_owner,
-            sequence_store,
-            token_stats,
-        };
-
-        owner.validate_structure()?;
-        Ok((owner, numeric_literal_ids))
-    }
-
     /// Build an immutable source store directly from a legacy token vector.
     ///
-    /// The vector is consumed as a construction adapter; only compact shapes/spans survive in
-    /// the returned owner. Numeric and path records are moved without cloning cold payload rows.
+    /// Test-only construction adapter; only compact shapes/spans survive in the returned owner.
+    /// Numeric handles are consumed positionally from the caller-supplied store in token order,
+    /// mirroring the lexer emit boundary; path rows are validated before packing.
     #[cfg(test)]
     pub fn try_from_tokens(
         source: SourceId,
         tokens: Vec<Token>,
         numeric_literals: NumericLiteralStore,
         path_syntax: PathSyntaxTable,
-        token_stats: TokenStats,
     ) -> Result<Self, CompilerError> {
+        path_syntax.validate_file_owned_locations(source)?;
         path_syntax.validate_file_tokens(&tokens, source, "source token owner")?;
-        let path_owner = Arc::new(path_syntax);
-        let (mut owner, _) = Self::from_legacy_tokens(
-            source,
-            &tokens,
-            numeric_literals,
-            None,
-            Some(path_owner),
-            token_stats,
-        )?;
+        let mut builder = SourceTokensBuilder::with_capacity(source, tokens.len());
+        for token in &tokens {
+            builder
+                .push(&token.kind, token.span)
+                .map_err(|error| match error {
+                    SourceTokenBuildError::Capacity => CompilerError::compiler_error(
+                        "test token vector exceeds its checked u32 index domain",
+                    ),
+                    SourceTokenBuildError::Invariant(error) => error,
+                })?;
+        }
+        let mut owner = builder.finish(numeric_literals)?;
+        // The table moves into the canonical owner so the freeze below is the sole strong
+        // reference; cloning the handle here would silently skip that freeze.
+        owner.attach_shared_path_syntax(Arc::new(path_syntax));
         owner.numeric_literals.freeze();
         owner.sequence_store.freeze();
         if let Some(table) = owner.path_syntax.as_mut()
@@ -1993,13 +2001,6 @@ impl FilePathSyntax {
         }
     }
 
-    fn shared_table_for_source_tokens(&self) -> Option<Arc<PathSyntaxTable>> {
-        match self {
-            Self::Shared(table) => Some(Arc::clone(table)),
-            Self::Preparing(_) | Self::Deferred => None,
-        }
-    }
-
     pub(crate) fn frozen_substream(&self) -> Result<Self, CompilerError> {
         match self {
             Self::Shared(table) => Ok(Self::Shared(Arc::clone(table))),
@@ -2301,27 +2302,51 @@ impl FileTokens {
         )
     }
 
-    /// Source-boundary constructor used by the lexer after numeric staging has completed.
-    pub(crate) fn new_with_identity_and_numeric_store(
+    /// Source-boundary constructor for lexer output whose canonical owner was packed during lexing.
+    ///
+    /// The canonical owner already carries shapes, spans, stats and the staged numeric rows; the
+    /// preparing path table stays on the lifecycle shell until `freeze_path_syntax` attaches the
+    /// frozen allocation to the canonical owner. The test-only numeric lane is the builder's
+    /// positional lane taken before `finish`, never a re-derived second pass.
+    pub(crate) fn from_lexed_source(
         src_path: PathId,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
+        source_tokens: SourceTokens,
+        #[cfg(test)] numeric_literal_ids: Vec<Option<NumericLiteralId>>,
         path_syntax: PathSyntaxTable,
-        numeric_literals: NumericLiteralStore,
     ) -> FileTokens {
-        let numeric_literal_ids = numeric_ids_for_staged_store(&tokens, &numeric_literals);
-        Self::with_canonical_path_syntax_and_numeric_store(
+        debug_assert!(
+            source_tokens.path_syntax.is_none(),
+            "lexer-packed canonical owner must not carry a path table before publication"
+        );
+        debug_assert_eq!(
+            source_tokens.len(),
+            tokens.len(),
+            "lexer-packed shapes must align with compatibility tokens"
+        );
+        #[cfg(test)]
+        debug_assert_eq!(
+            numeric_literal_ids.len(),
+            tokens.len(),
+            "lexer-packed numeric lane must align with compatibility tokens"
+        );
+        let token_stats = source_tokens.token_stats();
+        FileTokens {
+            length: tokens.len(),
+            token_owner: FileTokenOwner::Canonical(Arc::new(source_tokens)),
+            path_syntax: FilePathSyntax::preparing(path_syntax),
+            #[cfg(test)]
+            numeric_literal_ids,
             src_path,
             file_id,
             canonical_os_path,
             tokens,
-            FilePathSyntax::preparing(path_syntax),
-            numeric_literals,
-            numeric_literal_ids,
-        )
+            token_stats,
+            index: 0,
+        }
     }
-
     /// Construct a stream from an already-frozen table owned by a generated persistent artefact.
     #[cfg(test)]
     pub(crate) fn new_frozen(
@@ -2367,16 +2392,51 @@ impl FileTokens {
         tokens: Vec<Token>,
         path_syntax: FilePathSyntax,
     ) -> FileTokens {
-        let (numeric_literals, numeric_literal_ids) = numeric_store_from_tokens(file_id, &tokens);
-        Self::with_canonical_path_syntax_and_numeric_store(
+        let (numeric_literals, _) = numeric_store_from_tokens(file_id, &tokens);
+        let mut builder = SourceTokensBuilder::with_capacity(file_id, tokens.len());
+        for token in &tokens {
+            builder
+                .push(&token.kind, token.span)
+                .expect("test token adapter must produce valid source-token shapes");
+        }
+        let numeric_literal_ids = builder.take_numeric_literal_ids();
+        debug_assert_eq!(
+            numeric_literal_ids.len(),
+            tokens.len(),
+            "numeric side-store handles must align with token positions"
+        );
+        let mut source_tokens = builder
+            .finish(numeric_literals)
+            .expect("test token adapter must produce valid source-token shapes");
+        // An already-shared table is immutable, so the canonical owner carries that same
+        // allocation immediately, and its identity and handle spans are checked first so a
+        // malformed fixture cannot enter an immutable owner. A preparing table stays on the
+        // lifecycle shell until publication attaches it.
+        if let FilePathSyntax::Shared(table) = &path_syntax {
+            table
+                .validate_file_owned_locations(file_id)
+                .expect("frozen source token path table must match its source identity");
+            table
+                .validate_file_tokens(&tokens, file_id, "frozen source token owner")
+                .expect("frozen source token path handles must match its shared table");
+            source_tokens.attach_shared_path_syntax(Arc::clone(table));
+        }
+        // The canonical owner counted from its packed shapes during construction, so the
+        // shell shares that exact snapshot instead of re-running a default-then-rewrite pass.
+        let token_stats = source_tokens.token_stats();
+        FileTokens {
+            length: tokens.len(),
+            token_owner: FileTokenOwner::Canonical(Arc::new(source_tokens)),
+            path_syntax,
+            #[cfg(test)]
+            numeric_literal_ids,
             src_path,
             file_id,
             canonical_os_path,
             tokens,
-            path_syntax,
-            numeric_literals,
-            numeric_literal_ids,
-        )
+            token_stats,
+            index: 0,
+        }
     }
 
     fn with_adapter_path_syntax(
@@ -2422,53 +2482,6 @@ impl FileTokens {
             numeric_literal_ids,
             metadata,
         )
-    }
-
-    fn with_canonical_path_syntax_and_numeric_store(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-        tokens: Vec<Token>,
-        path_syntax: FilePathSyntax,
-        numeric_literals: NumericLiteralStore,
-        numeric_literal_ids: Vec<Option<NumericLiteralId>>,
-    ) -> FileTokens {
-        debug_assert_eq!(
-            tokens.len(),
-            numeric_literal_ids.len(),
-            "numeric side-store handles must align with token positions"
-        );
-        let (source_tokens, staged_ids) = SourceTokens::from_legacy_tokens(
-            file_id,
-            &tokens,
-            numeric_literals,
-            Some(&numeric_literal_ids),
-            path_syntax.shared_table_for_source_tokens(),
-            TokenStats::default(),
-        )
-        .expect("legacy token adapter must produce valid source-token shapes");
-        debug_assert_eq!(
-            staged_ids, numeric_literal_ids,
-            "source-token and parser numeric handle lanes must stay aligned"
-        );
-        // The canonical owner counted from its packed shapes during construction, so the
-        // shell shares that exact snapshot instead of re-running a default-then-rewrite pass.
-        let token_stats = source_tokens.token_stats();
-        #[cfg(not(test))]
-        drop(numeric_literal_ids);
-        FileTokens {
-            length: tokens.len(),
-            token_owner: FileTokenOwner::Canonical(Arc::new(source_tokens)),
-            path_syntax,
-            #[cfg(test)]
-            numeric_literal_ids,
-            src_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            token_stats,
-            index: 0,
-        }
     }
 
     fn with_adapter_path_syntax_and_numeric_store(
@@ -2517,6 +2530,7 @@ impl FileTokens {
             index: 0,
         }
     }
+
     /// Build a bounded parser substream over a token slice.
     ///
     /// Header parsing defers the path-table attachment until the prepared-file owner freezes.
@@ -2563,6 +2577,7 @@ impl FileTokens {
         stream.freeze_numeric_literals();
         Ok(stream)
     }
+
     fn validate_remapped_token_pair(
         canonical: TokenRef<'_>,
         remapped: &Token,
@@ -3606,33 +3621,6 @@ fn validate_adapter_numeric_lane(
             (false, None) => {}
         }
     }
-}
-
-/// Align one handle per numeric position from a lexer-staged numeric store.
-///
-/// The staged store was pushed once per numeric token in lexer order, so handles are assigned
-/// positionally without re-reading token payloads. Any length mismatch is a lifecycle violation.
-fn numeric_ids_for_staged_store(
-    tokens: &[Token],
-    store: &NumericLiteralStore,
-) -> Vec<Option<NumericLiteralId>> {
-    let mut ids = Vec::with_capacity(tokens.len());
-    let mut next = 0usize;
-    for token in tokens {
-        if !matches!(token.kind, TokenKind::NumericLiteral(_)) {
-            ids.push(None);
-            continue;
-        }
-        let id = NumericLiteralId::try_from_index(next)
-            .expect("lexer-staged numeric literal row must fit its checked handle domain");
-        debug_assert!(
-            id.index().is_some_and(|index| index < store.len()),
-            "lexer-staged numeric handle must address a staged row"
-        );
-        ids.push(Some(id));
-        next = next.saturating_add(1);
-    }
-    ids
 }
 
 pub struct TokenStream<'a> {

@@ -868,6 +868,10 @@ frozen string identity is shared across templates. Donor payload interpretation 
 requester boundary through the retained identity tables, which derive a transient rebased adapter
 for that parse only.
 
+**Slice 3H-R3a construction ownership (2026-09-18):** the tokenizer's `SourceTokensBuilder`
+packs shapes, spans and typed cold-store handles in the lexing pass, so the canonical owner is
+no longer derived from a token vector. The compatibility vector survives only for the named
+later deletion step, and token-count exhaustion is a typed user diagnostic.
 
 ### Token references and ranges
 

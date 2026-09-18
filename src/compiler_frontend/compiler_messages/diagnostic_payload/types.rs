@@ -37,6 +37,8 @@ pub enum SourceSpanCapacityResource {
     PathSyntax,
     /// Source-owned numeric literal side-store rows.
     NumericLiteral,
+    /// Source-owned token shapes/spans for one source.
+    Token,
 }
 
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.

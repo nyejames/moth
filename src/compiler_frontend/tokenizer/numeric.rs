@@ -31,7 +31,6 @@ pub(super) fn tokenize_numeric_literal(
 ) -> TokenizeResult<Token> {
     let mut literal_text = String::new();
     literal_text.push(first_digit);
-
     // ------------------------
     //  Consume integer part
     // ------------------------
@@ -105,7 +104,14 @@ pub(super) fn tokenize_numeric_literal(
                 .numeric_literals
                 .try_push_for_source(stream.file_id, token.clone())
             {
-                Ok(_) => None,
+                Ok(id) => {
+                    debug_assert_eq!(
+                        id.index(),
+                        stream.numeric_literals.len().checked_sub(1),
+                        "numeric store must assign handles positionally in lexer order"
+                    );
+                    None
+                }
                 Err(NumericLiteralStoreError::Capacity(_)) => Some(
                     CompilerDiagnostic::source_table_capacity(
                         SourceSpanCapacityResource::NumericLiteral,
@@ -129,7 +135,6 @@ pub(super) fn tokenize_numeric_literal(
             }
             return_token!(TokenKind::NumericLiteral(token), stream);
         }
-
         Err(reason) => {
             // Report the authored source text so diagnostics preserve underscores and sign.
             let authored_id = string_table.intern(&authored);

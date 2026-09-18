@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::numeric_text::store::NumericLiteralStore;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
@@ -30,7 +29,6 @@ fn bounded_canonical_reads_respect_range_and_offset_limits() {
             ],
             NumericLiteralStore::with_source(source),
             PathSyntaxTable::with_source(source),
-            TokenStats::default(),
         )
         .expect("cursor fixture should satisfy canonical ownership checks"),
     );
@@ -84,7 +82,6 @@ fn canonical_subcursor_window_bounds_contiguous_reads() {
             ],
             NumericLiteralStore::with_source(source),
             PathSyntaxTable::with_source(source),
-            TokenStats::default(),
         )
         .expect("cursor fixture should satisfy canonical ownership checks"),
     );
@@ -273,7 +270,6 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
             ],
             NumericLiteralStore::with_source(source),
             PathSyntaxTable::with_source(source),
-            TokenStats::default(),
         )
         .expect("cursor fixture should satisfy canonical ownership checks"),
     );
@@ -417,7 +413,6 @@ fn declaration_cursor_respects_a_stricter_parent_limit() {
             ],
             NumericLiteralStore::with_source(source),
             PathSyntaxTable::with_source(source),
-            TokenStats::default(),
         )
         .expect("cursor fixture should satisfy canonical ownership checks"),
     );

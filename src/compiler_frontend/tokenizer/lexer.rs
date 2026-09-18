@@ -29,7 +29,8 @@ use crate::compiler_frontend::tokenizer::text_modes::{
     tokenize_string, tokenize_template_body,
 };
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeMode, TokenizerEntryMode,
+    FileTokens, SourceTokenBuildError, SourceTokensBuilder, TemplateBodyMode, Token, TokenKind,
+    TokenStream, TokenTag, TokenizeMode, TokenizerEntryMode,
 };
 use crate::projects::settings;
 use crate::token_log;
@@ -116,25 +117,26 @@ macro_rules! return_token {
 
 /// Immediate lexical surroundings for the next token.
 ///
-/// WHAT: carries the previous emitted token and the previous non-newline token into token
-/// recognition.
+/// WHAT: carries the tags of the previous emitted token and the previous non-newline token
+/// into token recognition.
 /// WHY: signed literals and spacing diagnostics need a small amount of left context, but the
-/// tokenizer must not ask AST parsing whether a token is in expression position.
+/// tokenizer must not ask AST parsing whether a token is in expression position. Tags carry
+/// every fact those decisions read, so the loop keeps no token payload alive.
 #[derive(Clone, Copy)]
-struct LexerTokenContext<'a> {
-    previous_token_kind: Option<&'a TokenKind>,
-    last_meaningful_token_kind: Option<&'a TokenKind>,
-    meaningful_token_before_last_kind: Option<&'a TokenKind>,
+struct LexerTokenContext {
+    previous_token_tag: Option<TokenTag>,
+    last_meaningful_token_tag: Option<TokenTag>,
+    meaningful_token_before_last_tag: Option<TokenTag>,
 }
 
-impl<'a> LexerTokenContext<'a> {
+impl LexerTokenContext {
     fn previous_can_end_expression(self) -> bool {
-        self.last_meaningful_token_kind
-            .is_some_and(TokenKind::can_end_expression)
+        self.last_meaningful_token_tag
+            .is_some_and(TokenTag::can_end_expression)
     }
 
     fn has_leading_whitespace(self, whitespace_before_current: bool) -> bool {
-        matches!(self.previous_token_kind, Some(TokenKind::Newline)) || whitespace_before_current
+        self.previous_token_tag == Some(TokenTag::NEWLINE) || whitespace_before_current
     }
 }
 
@@ -154,11 +156,8 @@ fn next_char_is_missing_rhs_boundary(stream: &mut TokenStream<'_>) -> bool {
 ///       expression-ending context from the preceding line.
 /// WHY: the AST match parser owns arm recognition after tokenization, but signed
 ///      numeric tokenization must decide before that parser can see the `=>`.
-fn line_initial_match_arm_header(
-    stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
-) -> bool {
-    if !matches!(context.previous_token_kind, Some(TokenKind::Newline)) {
+fn line_initial_match_arm_header(stream: &mut TokenStream<'_>, context: LexerTokenContext) -> bool {
+    if context.previous_token_tag != Some(TokenTag::NEWLINE) {
         return false;
     }
 
@@ -454,7 +453,7 @@ fn unary_negation_spacing_error(
 /// later parsing can reinterpret the same characters in a less readable way.
 fn require_symbolic_spacing(
     stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
+    context: LexerTokenContext,
     whitespace_before_current: bool,
     construct: SymbolicSpacingConstruct,
 ) -> TokenizeResult<()> {
@@ -474,13 +473,13 @@ fn require_symbolic_spacing(
 
 fn less_than_is_template_tag_start(
     stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
+    context: LexerTokenContext,
     whitespace_before_current: bool,
 ) -> bool {
     stream.mode != TokenizeMode::Normal
         && !whitespace_before_current
         && (matches!(stream.peek(), Some('/'))
-            || (matches!(context.previous_token_kind, Some(TokenKind::TemplateClose))
+            || (context.previous_token_tag == Some(TokenTag::TEMPLATE_CLOSE)
                 && stream
                     .peek()
                     .is_some_and(|character| character.is_alphabetic())))
@@ -488,15 +487,15 @@ fn less_than_is_template_tag_start(
 
 fn greater_than_is_template_tag_end(
     stream: &TokenStream<'_>,
-    context: LexerTokenContext<'_>,
+    context: LexerTokenContext,
     whitespace_before_current: bool,
 ) -> bool {
     stream.mode != TokenizeMode::Normal
         && !whitespace_before_current
-        && matches!(context.previous_token_kind, Some(TokenKind::Symbol(_)))
+        && context.previous_token_tag == Some(TokenTag::SYMBOL)
         && matches!(
-            context.meaningful_token_before_last_kind,
-            Some(TokenKind::LessThan | TokenKind::Divide)
+            context.meaningful_token_before_last_tag,
+            Some(TokenTag::LESS_THAN | TokenTag::DIVIDE)
         )
 }
 
@@ -526,6 +525,7 @@ pub fn tokenize(
     let initial_capacity = source_code.len() / settings::SRC_TO_TOKEN_RATIO;
 
     let mut tokens: Vec<Token> = Vec::with_capacity(initial_capacity);
+    let mut builder = SourceTokensBuilder::with_capacity(file_id, initial_capacity);
     let mut stream = TokenStream::new(source_code, file_id, entry_mode, span_builder);
 
     // `ModuleStart` is synthetic and carries the source-local empty anchor. Its owner is the
@@ -534,8 +534,8 @@ pub fn tokenize(
         TokenKind::ModuleStart,
         crate::compiler_frontend::source::LocalSpan::source_start(),
     );
-    let mut last_meaningful_token_kind: Option<TokenKind> = None;
-    let mut meaningful_token_before_last_kind: Option<TokenKind> = None;
+    let mut last_meaningful_token_tag: Option<TokenTag> = None;
+    let mut meaningful_token_before_last_tag: Option<TokenTag> = None;
 
     loop {
         // Compact tag/canonical logging keeps `show_tokens` on the stable taxonomy
@@ -551,18 +551,18 @@ pub fn tokenize(
             break;
         }
 
-        tokens.push(token);
+        emit_lexed_token(&mut builder, &mut tokens, token)?;
 
-        let previous_token_kind = tokens.last().map(|token| &token.kind);
-        if !matches!(previous_token_kind, Some(TokenKind::Newline)) {
-            meaningful_token_before_last_kind = last_meaningful_token_kind.clone();
-            last_meaningful_token_kind = previous_token_kind.cloned();
+        let previous_token_tag = tokens.last().map(|token| token.kind.token_tag());
+        if previous_token_tag != Some(TokenTag::NEWLINE) {
+            meaningful_token_before_last_tag = last_meaningful_token_tag;
+            last_meaningful_token_tag = previous_token_tag;
         }
 
         let context = LexerTokenContext {
-            previous_token_kind,
-            last_meaningful_token_kind: last_meaningful_token_kind.as_ref(),
-            meaningful_token_before_last_kind: meaningful_token_before_last_kind.as_ref(),
+            previous_token_tag,
+            last_meaningful_token_tag,
+            meaningful_token_before_last_tag,
         };
         token = match get_token_kind(
             &mut stream,
@@ -587,24 +587,54 @@ pub fn tokenize(
         };
     }
 
-    tokens.push(token);
+    emit_lexed_token(&mut builder, &mut tokens, token)?;
     let path_syntax = std::mem::replace(
         &mut stream.path_syntax,
         crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
     );
     let numeric_literals = std::mem::take(&mut stream.numeric_literals);
-    // Stats install from the canonical shapes packed inside the constructor below, so this
+    #[cfg(test)]
+    let numeric_literal_ids = builder.take_numeric_literal_ids();
+    let source_tokens = builder
+        .finish(numeric_literals)
+        .map_err(TokenizeFailure::Infrastructure)?;
+    // Stats install from the canonical shapes packed during lexing, so this
     // loop owns no separate `TokenKind` classification pass and performs no
     // default-then-rewrite on the returned stats.
-    let file_tokens = FileTokens::new_with_identity_and_numeric_store(
+    let file_tokens = FileTokens::from_lexed_source(
         src_path,
         file_id,
         None,
         tokens,
+        source_tokens,
+        #[cfg(test)]
+        numeric_literal_ids,
         path_syntax,
-        numeric_literals,
     );
     Ok(file_tokens)
+}
+
+fn emit_lexed_token(
+    builder: &mut SourceTokensBuilder,
+    tokens: &mut Vec<Token>,
+    token: Token,
+) -> TokenizeResult<()> {
+    builder
+        .push(&token.kind, token.span)
+        .map_err(map_source_token_build_error)?;
+    tokens.push(token);
+    Ok(())
+}
+
+fn map_source_token_build_error(error: SourceTokenBuildError) -> TokenizeFailure {
+    match error {
+        SourceTokenBuildError::Capacity => TokenizeFailure::Diagnosed(
+            crate::compiler_frontend::compiler_messages::CompilerDiagnostic::source_table_capacity(
+                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::Token,
+            ),
+        ),
+        SourceTokenBuildError::Invariant(error) => TokenizeFailure::Infrastructure(error),
+    }
 }
 
 fn get_token_kind(
@@ -612,7 +642,7 @@ fn get_token_kind(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-    context: LexerTokenContext<'_>,
+    context: LexerTokenContext,
 ) -> TokenizeResult<Token> {
     // WHY: Comments do not produce tokens. A labeled loop allows the comment handler
     // to restart tokenization with `continue` instead of a recursive call, preventing
@@ -809,14 +839,14 @@ fn get_token_kind(
             // instead of reporting the first `=` as a spacing error.
             if stream.peek() != Some(&'=') {
                 let previous_is_mutable_marker =
-                    matches!(context.previous_token_kind, Some(TokenKind::Mutable));
+                    context.previous_token_tag == Some(TokenTag::MUTABLE);
                 let previous_can_start_assignment = context
-                    .previous_token_kind
-                    .is_some_and(TokenKind::can_end_expression);
+                    .previous_token_tag
+                    .is_some_and(TokenTag::can_end_expression);
 
                 if !previous_is_mutable_marker
                     && previous_can_start_assignment
-                    && !matches!(context.previous_token_kind, Some(TokenKind::Bang))
+                    && context.previous_token_tag != Some(TokenTag::BANG)
                     && !next_char_is_missing_rhs_boundary(stream)
                 {
                     let missing_left = !context.has_leading_whitespace(whitespace_before_current);

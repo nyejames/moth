@@ -6,8 +6,8 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
     DiagnosticKind, DiagnosticOperator, DiagnosticPayload, InvalidStringEscapeReason,
-    MissingWhitespace, NumberLiteralErrorReason, SymbolicSpacingConstruct, SymbolicSpacingError,
-    SyntaxDiagnosticKind,
+    MissingWhitespace, NumberLiteralErrorReason, SourceSpanCapacityResource,
+    SymbolicSpacingConstruct, SymbolicSpacingError, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
@@ -21,6 +21,7 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenShape};
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 
 fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
@@ -2861,4 +2862,278 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
         &source[resolved.start() as usize..resolved.end() as usize],
         "\\🦋"
     );
+}
+
+/// Canonical and compatibility payloads agree on every token's rendered meaning.
+///
+/// WHAT: lexes numeric literals (signed, separator, exponent), an authored path, two string
+/// shapes, a char and a bool through `tokenize`, then compares each canonical `TokenRef`
+/// against the surviving compatibility `Vec<Token>` entry at the same position.
+/// WHY: the deleted `Vec<Token> -> SourceTokens` round trip previously guaranteed this
+/// agreement by construction; the lexer now packs the canonical owner in the same pass
+/// that builds the compatibility vector, so a packing regression must fail here.
+#[test]
+fn lexed_canonical_shapes_match_compatibility_payloads() {
+    // The raw-string branch runs before trivia skipping, so a backtick first reached after
+    // whitespace on the same line is not recognized as a raw literal in code mode (pre-existing
+    // lexer behavior, unchanged by this phase); the raw token leads the source instead.
+    let (file_tokens, string_table) = tokenize_source(
+        "`raw`\nvalue = -1_000\nsecond = 1.0e-10\npath = @core/math\ntext = \"text\"\nletter = 'q'\nflag = true\n",
+    );
+    let owner = file_tokens
+        .source_tokens()
+        .expect("lexer output must own its canonical source tokens");
+    assert_eq!(
+        owner.len(),
+        file_tokens.tokens.len(),
+        "canonical and compatibility lanes must cover the same token positions"
+    );
+    assert_eq!(
+        file_tokens.token_stats.total_tokens,
+        owner.len(),
+        "lexer stats must count the packed canonical tokens"
+    );
+
+    let path_rows = file_tokens
+        .path_syntax_table()
+        .expect("lexer output must expose its preparing path table");
+    for (index, compatibility) in file_tokens.tokens.iter().enumerate() {
+        let token_index = TokenIndex::try_from_index(index).expect("fixture range fits");
+        let canonical = owner.token(token_index).expect("canonical index must fit");
+        assert_eq!(
+            canonical.tag(),
+            compatibility.kind.token_tag(),
+            "tag mismatch at token {index}"
+        );
+        assert_eq!(
+            canonical.span(),
+            compatibility.span,
+            "span mismatch at token {index}"
+        );
+        match &compatibility.kind {
+            TokenKind::Symbol(id)
+            | TokenKind::StringSliceLiteral(id)
+            | TokenKind::RawStringLiteral(id) => {
+                let rendered = string_table.resolve(*id);
+                let canonical_id = canonical
+                    .shape()
+                    .string_id()
+                    .expect("string-payload token must carry a string handle");
+                assert_eq!(
+                    string_table.resolve(canonical_id),
+                    rendered,
+                    "string payload mismatch at token {index}"
+                );
+            }
+            TokenKind::NumericLiteral(expected) => {
+                let borrowed = canonical
+                    .numeric_literal()
+                    .expect("numeric handle must resolve")
+                    .expect("numeric shape must carry a handle");
+                assert_eq!(
+                    borrowed.sign, expected.sign,
+                    "numeric sign at token {index}"
+                );
+                assert_eq!(
+                    borrowed.kind, expected.kind,
+                    "numeric kind at token {index}"
+                );
+                assert_eq!(
+                    borrowed.digit_count, expected.digit_count,
+                    "numeric digit count at token {index}"
+                );
+                assert_eq!(
+                    borrowed.fractional_digit_count, expected.fractional_digit_count,
+                    "numeric fractional digits at token {index}"
+                );
+                assert_eq!(
+                    borrowed.exponent_digit_count, expected.exponent_digit_count,
+                    "numeric exponent digits at token {index}"
+                );
+                assert_eq!(
+                    borrowed.exponent_sign, expected.exponent_sign,
+                    "numeric exponent sign at token {index}"
+                );
+                assert_eq!(
+                    string_table.resolve(borrowed.source_text),
+                    string_table.resolve(expected.source_text),
+                    "numeric authored text at token {index}"
+                );
+                assert_eq!(
+                    string_table.resolve(borrowed.normalized_text),
+                    string_table.resolve(expected.normalized_text),
+                    "numeric normalized text at token {index}"
+                );
+            }
+            TokenKind::Path(expected) => {
+                let expected_row = path_rows
+                    .try_path(*expected)
+                    .expect("compatibility path handle must resolve");
+                let canonical_id = canonical
+                    .shape()
+                    .path_syntax_id()
+                    .expect("path shape must carry a handle");
+                let canonical_row = path_rows
+                    .try_path(canonical_id)
+                    .expect("canonical path handle must resolve");
+                assert_eq!(
+                    canonical_row, expected_row,
+                    "path row mismatch at token {index}"
+                );
+            }
+            TokenKind::CharLiteral(expected) => {
+                assert_eq!(
+                    canonical.char_value(),
+                    Some(*expected),
+                    "char payload mismatch at token {index}"
+                );
+            }
+            TokenKind::BoolLiteral(expected) => {
+                assert_eq!(
+                    canonical.bool_value(),
+                    Some(*expected),
+                    "bool payload mismatch at token {index}"
+                );
+            }
+            _ => {}
+        }
+    }
+
+    assert!(
+        file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(&token.kind, TokenKind::NumericLiteral(token) if token.sign == NumericLiteralSign::Negative)),
+        "the fixture must contain a signed numeric literal"
+    );
+    let normalized: Vec<String> = file_tokens
+        .tokens
+        .iter()
+        .filter_map(|token| match &token.kind {
+            TokenKind::NumericLiteral(token) => {
+                Some(string_table.resolve(token.normalized_text).to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        normalized.iter().any(|text| text == "1000"),
+        "the fixture must contain a separator literal, found {normalized:?}"
+    );
+    assert!(
+        normalized.iter().any(|text| text == "1.0e-10"),
+        "the fixture must contain an exponent literal, found {normalized:?}"
+    );
+    assert!(
+        file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(&token.kind, TokenKind::Path(_))),
+        "the fixture must contain an authored path"
+    );
+    assert!(
+        file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(&token.kind, TokenKind::StringSliceLiteral(_))),
+        "the fixture must contain a quoted string literal"
+    );
+    assert!(
+        file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(&token.kind, TokenKind::RawStringLiteral(_))),
+        "the fixture must contain a raw string literal"
+    );
+    assert!(
+        file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(&token.kind, TokenKind::CharLiteral(_))),
+        "the fixture must contain a char literal"
+    );
+    assert!(
+        file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(&token.kind, TokenKind::BoolLiteral(_))),
+        "the fixture must contain a bool literal"
+    );
+}
+
+/// Token-count exhaustion stays on the typed user diagnostic lane without huge allocation.
+///
+/// WHAT: asserts the `TokenIndex`/`NumericLiteralId` domain edges directly and proves the
+/// builder's capacity lane maps to `SourceSpanCapacityResource::Token` through the production
+/// `map_source_token_build_error`.
+/// WHY: the lexer reports `SourceTokenBuildError::Capacity` as a user diagnostic while malformed
+/// trusted records stay infrastructure failures; allocating billions of tokens to reach the edge
+/// would be absurd, so the bounded domain-plus-mapping check is the contract.
+#[test]
+fn token_count_exhaustion_reports_a_typed_user_capacity_diagnostic() {
+    use crate::compiler_frontend::numeric_text::store::NumericLiteralId;
+
+    assert!(
+        TokenIndex::try_from_index(u32::MAX as usize).is_some(),
+        "the token domain addresses its own maximum index"
+    );
+    assert_eq!(
+        TokenIndex::try_from_index((u32::MAX as usize).checked_add(1).unwrap()),
+        None,
+        "the token store cannot address another token past its u32 domain"
+    );
+    assert_eq!(
+        NumericLiteralId::try_from_index(u32::MAX as usize),
+        None,
+        "the positional numeric handle domain ends where the staged lane overflows"
+    );
+
+    let failure = map_source_token_build_error(SourceTokenBuildError::Capacity);
+    let diagnostic = match failure {
+        TokenizeFailure::Diagnosed(diagnostic) => diagnostic,
+        TokenizeFailure::Infrastructure(error) => {
+            panic!("capacity must map to the user lane, found infrastructure: {error:?}")
+        }
+    };
+    assert_eq!(
+        diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::SourceSpanCapacity)
+    );
+    match diagnostic.payload {
+        DiagnosticPayload::SourceSpanCapacity { resource, .. } => {
+            assert_eq!(resource, SourceSpanCapacityResource::Token);
+        }
+        payload => panic!("expected token capacity payload, found {payload:?}"),
+    }
+}
+
+/// A malformed trusted kind/handle combination stays on the infrastructure invariant lane.
+///
+/// WHAT: pushes `TokenKind::Path(PathSyntaxId::NONE)` — the reachable kind/handle combination
+/// that `TokenShape::from_token_kind_with_numeric_id` rejects — and asserts the builder returns
+/// `SourceTokenBuildError::Invariant`, not the capacity lane.
+/// WHY: capacity exhaustion is user-controlled and diagnosed; a trusted record that cannot pack
+/// is a compiler invariant violation and must never surface as a user diagnostic.
+#[test]
+fn malformed_trusted_record_reports_the_invariant_lane() {
+    use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+
+    let source = SourceId::COMPILATION_ROOT;
+    let malformed = TokenKind::Path(PathSyntaxId::NONE);
+    assert!(
+        TokenShape::from_token_kind_with_numeric_id(
+            &malformed,
+            crate::compiler_frontend::numeric_text::store::NumericLiteralId::NONE,
+        )
+        .is_none(),
+        "the absent path handle must not pack"
+    );
+    let mut builder = SourceTokensBuilder::with_capacity(source, 1);
+    match builder.push(&malformed, LocalSpan::source_start()) {
+        Err(SourceTokenBuildError::Invariant(_)) => {}
+        Err(SourceTokenBuildError::Capacity) => {
+            panic!("malformed trusted record must not report the capacity lane")
+        }
+        Ok(()) => panic!("absent path handle must not pack"),
+    }
 }

@@ -17,7 +17,6 @@ fn static_tokens() -> SourceTokens {
         ],
         NumericLiteralStore::with_source(source),
         PathSyntaxTable::with_source(source),
-        TokenStats::default(),
     )
     .expect("static token fixture should satisfy the source-token invariants")
 }
@@ -625,7 +624,6 @@ fn token_ref_exposes_shape_span_and_borrowed_cold_rows() {
         ],
         numeric_store,
         path_syntax,
-        TokenStats::default(),
     )
     .expect("cold-store fixture should satisfy ownership checks");
 
@@ -791,7 +789,6 @@ fn canonical_construction_rejects_unowned_cold_stores() {
         vec![Token::new(TokenKind::NumericLiteral(numeric), span)],
         unbound_numeric,
         PathSyntaxTable::with_source(source),
-        TokenStats::default(),
     );
     assert!(
         unbound_result.is_err(),
@@ -803,7 +800,6 @@ fn canonical_construction_rejects_unowned_cold_stores() {
         vec![Token::new(TokenKind::Eof, span)],
         NumericLiteralStore::with_source(source),
         PathSyntaxTable::with_source(SourceId::from_index(11)),
-        TokenStats::default(),
     );
     assert!(
         foreign_path_result.is_err(),

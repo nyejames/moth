@@ -118,7 +118,7 @@ ACTIVE_PLAN:
   - F4 (3H-R2 done, 3H-R4 open): retained generic bodies bound one canonical `SourceTokens` owner;
     header and prepared-source ownership still need their cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
-- NEXT_SUBSTEP: 3H-R3.
+- NEXT_SUBSTEP: 3H-R3b (3H-R3a complete).
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -1314,24 +1314,69 @@ sites in 3H-R4.
 
 #### [ ] 3H-R3 — Complete lexical and parser cutover
 
-- Emit fixed shapes, spans and typed cold rows directly from the tokenizer construction owner and
-  remove the production legacy-token round trip.
-- Use checked allocation at the owning boundary, keeping user-controlled exhaustion as a typed user
-  diagnostic and malformed trusted records as invariant failures.
-- Migrate declaration, type, expression, statement and template consumers to tags, typed payload
-  access and borrowed bounded views, removing wide-value caches and duplicated classification
-  matches as their consumers leave.
-- Preserve exact diagnostic projection facts with stable code, reason and ordering contracts, and
-  retain one lexical grammar owner and one numeric-text owner.
-- Finish statement and template loop callers through one loop-header parser, keeping the statement
-  and template body parsers separate under that single owner, and delete the displaced vector
-  grammar, split records and copied helpers.
-- Replace synthetic `FileTokens` initializers with the smallest typed source-kind input the parser
-  and folding owners need, preserving the no-token route and template wrapping.
+Split into four audited substeps by owner, ordered by dependency: the producer packs the canonical
+representation first (R3a), then the two remaining non-canonical production stream lanes become
+canonical (R3b, R3c), which is what finally lets every parser consumer drop the legacy lane (R3d).
+
 - Do not fabricate a second source store, retokenize wrapper text, retain an unbounded synthetic
   fallback or add a reverse-materialisation bridge.
 - Exit: every supported source kind and generic path reaches the same final token and view
   vocabulary, and no parser needs the old full-token API.
+
+##### [x] 3H-R3a — Emit the canonical representation from the tokenizer (complete)
+
+- `SourceTokensBuilder` in `tokenizer/tokens.rs` is the one construction owner. The lexer pushes
+  each emitted token into it once, packing the compact shape, span, typed cold-store handle and
+  tag-authority stats in the same forward pass that fills the surviving compatibility vector.
+- The production round trip is gone: `SourceTokens::from_legacy_tokens` and the positional
+  `numeric_ids_for_staged_store` pass are deleted, so construction no longer walks the token vector
+  twice after lexing. The numeric handle is the store-assigned row consumed positionally at the
+  emit boundary, asserted against the store's own `try_push_for_source` handle.
+- `LexerTokenContext` carries three `TokenTag` values instead of borrowed `TokenKind` values,
+  removing a per-token payload clone from the lexer loop. Every left-context decision was already
+  tag-level.
+- Checked allocation lives at the owning boundary: token-count exhaustion leaves through the
+  existing `SourceSpanCapacityResource` as a typed user diagnostic, and a malformed trusted record
+  stays an invariant failure.
+- The lexer's canonical owner still carries no path table; `FilePathSyntax::preparing` and the
+  later `freeze_path_syntax` attachment are unchanged. Test construction lanes replay through the
+  same builder and keep their table identity and per-token handle validation.
+- Three tests replace what the deleted round trip guaranteed by construction: canonical and
+  compatibility payloads agree on rendered meaning at every position, token-count exhaustion stays
+  on the typed user lane without a huge allocation, and a malformed trusted record stays on the
+  invariant lane. Each was proven by probe and revert.
+- Audited by two lanes; both required findings (a dropped shared-table validation on the frozen
+  test lane, one stale comment) are fixed. Workspace 5199 + 839 + 17, integration 1973/1973,
+  featured clippy, docs and source-audit clean, `bench-data-layout-check` -2ms average with no
+  slower case.
+
+##### [ ] 3H-R3b — Make materialised generic bodies parse canonically
+
+- Replace the remapped token-vector adapter with a transient rebased canonical owner for the
+  requester parse: shapes, spans and typed cold rows carry the requester's spellings, so no parse
+  needs a rebased `Vec<Token>`.
+- Delete the owned-compatibility cursor backing, the bounded compatibility expression substream and
+  the remapped adapter constructor once that lane is displaced.
+- Preserve donor span and diagnostic facts exactly, and keep the transient owner unretained.
+
+##### [ ] 3H-R3c — Make synthetic source kinds parse canonically
+
+- Replace synthetic `FileTokens` initializers with the smallest typed source-kind input the parser
+  and folding owners need, preserving plain Markdown's no-token route and Moth-template wrapping
+  through the same template semantics.
+- Delete the synthetic cursor backing and the slice constructor once their content builds a
+  canonical owner.
+
+##### [ ] 3H-R3d — Retire the legacy parser lane
+
+- Migrate declaration, type, expression, statement and template consumers to tags, typed payload
+  access and borrowed bounded views, removing wide-value caches and duplicated classification
+  matches as their consumers leave.
+- Finish statement and template loop callers through one loop-header parser, keeping the statement
+  and template body parsers separate under that single owner, and delete the displaced vector
+  grammar, split records and copied helpers.
+- Preserve exact diagnostic projection facts with stable code, reason and ordering contracts, and
+  retain one lexical grammar owner and one numeric-text owner.
 
 #### [ ] 3H-R4 — Finish preparation ownership and delete migration scaffolding
 
