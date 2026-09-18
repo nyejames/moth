@@ -1041,9 +1041,9 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
     }
     assert_eq!(tokens.current_token_kind(), &TokenKind::If);
     tokens.advance();
-    let cursor = AstCursor::from_file_tokens(&mut tokens)
+    let mut cursor = AstCursor::from_file_tokens(&mut tokens)
         .expect("test token stream must expose an AST cursor");
-    classify_if_header(&cursor).shape
+    classify_if_header(&mut cursor).shape
 }
 
 #[test]
@@ -1108,9 +1108,9 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
             tokens.advance();
         }
         tokens.advance();
-        let cursor = AstCursor::from_file_tokens(&mut tokens)
+        let mut cursor = AstCursor::from_file_tokens(&mut tokens)
             .expect("test token stream must expose an AST cursor");
-        classify_if_header(&cursor)
+        classify_if_header(&mut cursor)
     };
 
     assert_eq!(

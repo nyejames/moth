@@ -197,42 +197,49 @@ pub(crate) fn parse_if_header(
     Ok(ParsedIfHeader::BoolCondition { condition })
 }
 
-pub(crate) fn classify_if_header(token_stream: &AstCursor) -> IfHeaderClassification {
-    let mut nesting_depth = NestingDepth::default();
-    let mut index = token_stream.position();
+/// Classify the structural shape of the header after `if` without consuming it.
+///
+/// The scan walks the live cursor, so the entry position is restored here on the
+/// single exit. The private helpers below deliberately leave the cursor wherever
+/// their scan stopped; this function owns the restore for all of them.
+pub(crate) fn classify_if_header(token_stream: &mut AstCursor) -> IfHeaderClassification {
+    let resume = token_stream.position();
+    let classification = classify_if_header_from_position(token_stream);
+    token_stream
+        .set_position(resume)
+        .expect("if header resume stays inside the active parser view");
+    classification
+}
 
-    while index < token_stream.length() {
-        let Some(token_kind) = token_stream.token_kind_at(index) else {
-            break;
-        };
+fn classify_if_header_from_position(token_stream: &mut AstCursor) -> IfHeaderClassification {
+    let mut nesting_depth = NestingDepth::default();
+
+    while !token_stream.is_at_end() {
+        let index = token_stream.position();
 
         if nesting_depth.is_top_level() {
-            match token_kind {
-                TokenKind::Is => return classify_from_is(token_stream, index),
-                TokenKind::Colon => {
-                    return ordinary_bool_header(IfHeaderDelimiter::Colon, Some(index));
-                }
-                TokenKind::Then => {
-                    return ordinary_bool_header(IfHeaderDelimiter::InlineThen, Some(index));
-                }
-                TokenKind::StartTemplateBody => {
-                    return ordinary_bool_header(IfHeaderDelimiter::TemplateBody, Some(index));
-                }
-                TokenKind::TemplateClose => {
-                    return ordinary_bool_header(IfHeaderDelimiter::TemplateClose, Some(index));
-                }
-                TokenKind::Eof => break,
-                _ => {}
+            if token_stream.current_token_kind() == &TokenKind::Is {
+                return classify_from_is(token_stream, index);
+            }
+            if let Some(delimiter) = predicate_body_delimiter(token_stream.current_token_kind()) {
+                return ordinary_bool_header(delimiter, Some(index));
             }
         }
 
-        nesting_depth.step(&token_kind);
-        index += 1;
+        // A malformed payload also reports `Eof`, and `Eof` is stable under
+        // `advance`, so break on it at any depth: an unclosed delimiter before
+        // the end of the stream must terminate the scan.
+        if token_stream.current_token_kind() == &TokenKind::Eof {
+            break;
+        }
+        nesting_depth.step(token_stream.current_token_kind());
+        token_stream.advance();
     }
 
     ordinary_bool_header(IfHeaderDelimiter::None, None)
 }
-fn classify_from_is(token_stream: &AstCursor, is_index: usize) -> IfHeaderClassification {
+
+fn classify_from_is(token_stream: &mut AstCursor, is_index: usize) -> IfHeaderClassification {
     let token_after_is = next_meaningful_token_index(token_stream, is_index.saturating_add(1));
     let Some(after_is) = token_after_is else {
         return IfHeaderClassification {
@@ -260,20 +267,27 @@ fn classify_from_is(token_stream: &AstCursor, is_index: usize) -> IfHeaderClassi
 }
 
 fn classify_single_predicate_after_pattern(
-    token_stream: &AstCursor,
+    token_stream: &mut AstCursor,
     is_index: usize,
     pattern_start: usize,
 ) -> IfHeaderClassification {
+    let ordinary = IfHeaderClassification {
+        shape: IfHeaderShape::OrdinaryBool,
+        is_index: Some(is_index),
+        token_after_is: Some(pattern_start),
+        body_delimiter: IfHeaderDelimiter::None,
+        delimiter_index: None,
+    };
+    token_stream
+        .set_position(pattern_start)
+        .expect("single-predicate scan starts inside the active parser view");
     let mut nesting_depth = NestingDepth::default();
-    let mut index = pattern_start;
 
-    while index < token_stream.length() {
-        let Some(token_kind) = token_stream.token_kind_at(index) else {
-            break;
-        };
+    while !token_stream.is_at_end() {
+        let index = token_stream.position();
 
         if nesting_depth.is_top_level()
-            && let Some(delimiter) = predicate_body_delimiter(&token_kind)
+            && let Some(delimiter) = predicate_body_delimiter(token_stream.current_token_kind())
         {
             let shape = match delimiter {
                 IfHeaderDelimiter::InlineThen => IfHeaderShape::PotentialInlineSinglePredicate,
@@ -285,24 +299,23 @@ fn classify_single_predicate_after_pattern(
 
             return IfHeaderClassification {
                 shape,
-                is_index: Some(is_index),
-                token_after_is: Some(pattern_start),
                 body_delimiter: delimiter,
                 delimiter_index: Some(index),
+                ..ordinary
             };
         }
 
-        nesting_depth.step(&token_kind);
-        index += 1;
+        // A malformed payload also reports `Eof`, and `Eof` is stable under
+        // `advance`, so break on it: an unclosed delimiter before the end of the
+        // stream leaves the header an ordinary Bool.
+        if token_stream.current_token_kind() == &TokenKind::Eof {
+            break;
+        }
+        nesting_depth.step(token_stream.current_token_kind());
+        token_stream.advance();
     }
 
-    IfHeaderClassification {
-        shape: IfHeaderShape::OrdinaryBool,
-        is_index: Some(is_index),
-        token_after_is: Some(pattern_start),
-        body_delimiter: IfHeaderDelimiter::None,
-        delimiter_index: None,
-    }
+    ordinary
 }
 
 fn full_match_delimiter(token_kind: &TokenKind) -> Option<IfHeaderDelimiter> {
@@ -334,18 +347,21 @@ fn ordinary_bool_header(
     }
 }
 
-fn next_meaningful_token_index(token_stream: &AstCursor, start_index: usize) -> Option<usize> {
-    let mut index = start_index;
+/// Index of the first non-newline token at or after `start_index`.
+///
+/// Returns `None` at the end of the stream and on `Eof`, which is also how a
+/// malformed payload is reported.
+fn next_meaningful_token_index(token_stream: &mut AstCursor, start_index: usize) -> Option<usize> {
+    if token_stream.set_position(start_index).is_err() {
+        return None;
+    }
+    token_stream.skip_newlines();
 
-    while index < token_stream.length() {
-        match token_stream.token_kind_at(index)? {
-            TokenKind::Newline => index += 1,
-            TokenKind::Eof => return None,
-            _ => return Some(index),
-        }
+    if token_stream.is_at_end() || token_stream.current_token_kind() == &TokenKind::Eof {
+        return None;
     }
 
-    None
+    Some(token_stream.position())
 }
 
 fn parse_match_style_if_header(

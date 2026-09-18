@@ -134,75 +134,76 @@ impl BodySentinelTarget<'_> {
     }
 }
 
-pub(super) fn classify_direct_else_marker(token_stream: &AstCursor) -> Option<DirectElseMarker> {
-    classify_direct_else_marker_at_cursor(token_stream)
+/// Classify the bracket the body parser is sitting on as a direct `else` sentinel.
+///
+/// WHAT: reports the sentinel shape with the `if` and `]` positions the caller needs, or `None`
+/// when the bracket opens an ordinary nested template.
+/// WHY: the decision needs several tokens of lookahead, so the walk borrows the live cursor and
+/// hands it back at its entry position.
+pub(super) fn classify_direct_else_marker(
+    token_stream: &mut AstCursor,
+) -> Option<DirectElseMarker> {
+    let resume = token_stream.position();
+    let marker = classify_else_marker_after_bracket(token_stream);
+    token_stream
+        .set_position(resume)
+        .expect("else marker resume stays inside the active parser view");
+    marker
 }
 
-fn classify_direct_else_marker_at_cursor(cursor: &AstCursor) -> Option<DirectElseMarker> {
-    let mut index = cursor.position().checked_add(1)?;
-
-    while index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
-    {
-        index += 1;
-    }
-
-    if index >= cursor.length() || !matches!(cursor.token_kind_at(index), Some(TokenKind::Else)) {
+fn classify_else_marker_after_bracket(token_stream: &mut AstCursor) -> Option<DirectElseMarker> {
+    token_stream.advance();
+    token_stream.skip_newlines();
+    if token_stream.is_at_end() || *token_stream.current_token_kind() != TokenKind::Else {
         return None;
     }
-
-    let span = cursor.span_at(index);
-    index += 1;
-
-    while index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
-    {
-        index += 1;
+    let span = Some(token_stream.current_span());
+    token_stream.advance();
+    token_stream.skip_newlines();
+    if token_stream.is_at_end() {
+        return Some(DirectElseMarker::Malformed { span });
     }
-
-    if index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::If)) {
-        let if_index = index;
-        index += 1;
-
-        let mut scan_index = index;
-        let mut nested_templates = 0usize;
-        while scan_index < cursor.length() {
-            let Some(kind) = cursor.token_kind_at(scan_index) else {
-                break;
-            };
-            match kind {
-                TokenKind::TemplateHead => nested_templates += 1,
-                TokenKind::TemplateClose if nested_templates == 0 => {
-                    return Some(DirectElseMarker::ElseIf {
-                        if_index,
-                        close_index: scan_index,
-                        span,
-                    });
-                }
-                TokenKind::TemplateClose => nested_templates = nested_templates.saturating_sub(1),
-                TokenKind::StartTemplateBody | TokenKind::Colon if nested_templates == 0 => {
-                    return Some(DirectElseMarker::MalformedElseIf { span });
-                }
-                TokenKind::Eof => {
-                    return Some(DirectElseMarker::MalformedElseIf { span });
-                }
-                _ => {}
-            }
-
-            scan_index += 1;
+    match token_stream.current_token_kind() {
+        TokenKind::If => {}
+        TokenKind::TemplateClose => {
+            return Some(DirectElseMarker::Sentinel {
+                close_index: token_stream.position(),
+                span,
+            });
         }
-
-        return Some(DirectElseMarker::MalformedElseIf { span });
+        _ => return Some(DirectElseMarker::Malformed { span }),
     }
+    let if_index = token_stream.position();
+    token_stream.advance();
 
-    if index < cursor.length()
-        && matches!(cursor.token_kind_at(index), Some(TokenKind::TemplateClose))
-    {
-        return Some(DirectElseMarker::Sentinel {
-            close_index: index,
-            span,
-        });
+    let mut nested_templates = 0usize;
+    while !token_stream.is_at_end() {
+        // A malformed payload has no `TokenKind`; the indexed scan stopped there.
+        if token_stream
+            .current()
+            .is_some_and(|current| current.to_token_kind().is_err())
+        {
+            break;
+        }
+        match token_stream.current_token_kind() {
+            TokenKind::TemplateHead => nested_templates += 1,
+            TokenKind::TemplateClose if nested_templates == 0 => {
+                return Some(DirectElseMarker::ElseIf {
+                    if_index,
+                    close_index: token_stream.position(),
+                    span,
+                });
+            }
+            TokenKind::TemplateClose => nested_templates = nested_templates.saturating_sub(1),
+            TokenKind::StartTemplateBody | TokenKind::Colon if nested_templates == 0 => {
+                return Some(DirectElseMarker::MalformedElseIf { span });
+            }
+            TokenKind::Eof => return Some(DirectElseMarker::MalformedElseIf { span }),
+            _ => {}
+        }
+        token_stream.advance();
     }
-
-    Some(DirectElseMarker::Malformed { span })
+    Some(DirectElseMarker::MalformedElseIf { span })
 }
 
 pub(super) fn handle_direct_else_marker(
@@ -352,43 +353,43 @@ pub(super) fn with_direct_else_marker_span(
     diagnostic
 }
 
+/// Classify the bracket the body parser is sitting on as a direct `break`/`continue` sentinel.
+///
+/// WHAT: reports which control marker follows the bracket and where its `]` sits, or `None` when
+/// the bracket opens an ordinary nested template.
+/// WHY: the decision needs several tokens of lookahead, so the walk borrows the live cursor and
+/// hands it back at its entry position.
 pub(super) fn classify_direct_loop_control_marker(
-    token_stream: &AstCursor,
+    token_stream: &mut AstCursor,
 ) -> Option<DirectLoopControlMarker> {
-    classify_direct_loop_control_marker_at_cursor(token_stream)
+    let resume = token_stream.position();
+    let marker = classify_loop_control_marker_after_bracket(token_stream);
+    token_stream
+        .set_position(resume)
+        .expect("loop control marker resume stays inside the active parser view");
+    marker
 }
 
-fn classify_direct_loop_control_marker_at_cursor(
-    cursor: &AstCursor,
+fn classify_loop_control_marker_after_bracket(
+    token_stream: &mut AstCursor,
 ) -> Option<DirectLoopControlMarker> {
-    let mut index = cursor.position().checked_add(1)?;
-
-    while index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
-    {
-        index += 1;
+    token_stream.advance();
+    token_stream.skip_newlines();
+    if token_stream.is_at_end() {
+        return None;
     }
-
-    let (kind_is_break, span) = match cursor.token_kind_at(index) {
-        Some(TokenKind::Break) => (true, cursor.span_at(index)),
-        Some(TokenKind::Continue) => (false, cursor.span_at(index)),
+    let breaks = match token_stream.current_token_kind() {
+        TokenKind::Break => true,
+        TokenKind::Continue => false,
         _ => return None,
     };
-    index += 1;
-
-    while index < cursor.length() && matches!(cursor.token_kind_at(index), Some(TokenKind::Newline))
-    {
-        index += 1;
-    }
-
-    let close_index = if index < cursor.length()
-        && matches!(cursor.token_kind_at(index), Some(TokenKind::TemplateClose))
-    {
-        Some(index)
-    } else {
-        None
-    };
-
-    if kind_is_break {
+    let span = Some(token_stream.current_span());
+    token_stream.advance();
+    token_stream.skip_newlines();
+    let close_index = (!token_stream.is_at_end()
+        && *token_stream.current_token_kind() == TokenKind::TemplateClose)
+        .then(|| token_stream.position());
+    if breaks {
         Some(DirectLoopControlMarker::Break { close_index, span })
     } else {
         Some(DirectLoopControlMarker::Continue { close_index, span })

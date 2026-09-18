@@ -202,8 +202,36 @@ pub(crate) fn parse_loop_header_cursor(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<(ParsedLoopHeader, ScopeContext)> {
-    let header_start = trim_cursor_header_start(token_stream, token_stream.position());
-    let header_end = trim_cursor_header_end(token_stream, header_start, token_stream.length());
+    let resume = token_stream.position();
+    let limit = token_stream.length();
+    // A malformed payload surfaces as `Eof` through the cached kind, so the leading trim
+    // treats it as a non-newline exactly like the indexed scan's `None` did.
+    while token_stream.position() < limit
+        && !token_stream.is_at_end()
+        && *token_stream.current_token_kind() == TokenKind::Newline
+    {
+        token_stream.advance();
+    }
+    let header_start = token_stream.position();
+    // The trailing trim records the end after the last non-newline token. `Eof` is stable
+    // under `advance` on both lanes, so the walk stops there; a malformed payload therefore
+    // ends the header at itself rather than at the view's end, and nothing after an
+    // unreadable token is parseable anyway.
+    let mut header_end = header_start;
+    while token_stream.position() < limit && !token_stream.is_at_end() {
+        let position = token_stream.position();
+        let kind = token_stream.current_token_kind();
+        if *kind != TokenKind::Newline {
+            header_end = position + 1;
+        }
+        if *kind == TokenKind::Eof {
+            break;
+        }
+        token_stream.advance();
+    }
+    token_stream
+        .set_position(resume)
+        .map_err(ExpressionParseError::from)?;
 
     if header_start >= header_end {
         return loop_header_error(
@@ -955,25 +983,46 @@ fn has_top_level_range_marker_cursor(
     .is_some()
 }
 
+/// Short-lived canonical child over the header window `[start, end)`.
+///
+/// WHAT: positions a walk cursor at `start` and bounds it at `end`.
+/// WHY: every loop-header probe below runs inside a canonical header window that already
+/// validated these bounds, so a missing child means a caller broke that invariant.
+fn header_probe_walk<'a>(token_stream: &AstCursor<'a>, start: usize, end: usize) -> AstCursor<'a> {
+    match token_stream.subcursor_window(start, end) {
+        Ok(Some(walk)) => walk,
+        _ => unreachable!("loop header probes run inside the canonical header window"),
+    }
+}
+
 fn collect_top_level_cursor_indexes(
     token_stream: &AstCursor,
     start: usize,
     end: usize,
     predicate: impl Fn(&TokenKind) -> bool,
 ) -> Vec<usize> {
+    let mut walk = header_probe_walk(token_stream, start, end);
     let mut nesting_depth = NestingDepth::default();
     let mut indexes = Vec::new();
-    let mut index = start;
-    while index < end {
-        let Some(kind) = token_stream.token_kind_at(index) else {
-            index += 1;
+    while !walk.is_at_end() {
+        // Skip a malformed payload, exactly as the indexed scan skipped a `None` kind.
+        if walk
+            .current()
+            .is_some_and(|current| current.to_token_kind().is_err())
+        {
+            walk.advance();
             continue;
-        };
-        if nesting_depth.is_top_level() && predicate(&kind) {
-            indexes.push(index);
         }
-        nesting_depth.step(&kind);
-        index += 1;
+        let kind = walk.current_token_kind();
+        if nesting_depth.is_top_level() && predicate(kind) {
+            indexes.push(walk.position());
+        }
+        let is_eof = matches!(kind, TokenKind::Eof);
+        nesting_depth.step(kind);
+        if is_eof {
+            break;
+        }
+        walk.advance();
     }
     indexes
 }
@@ -984,9 +1033,29 @@ fn find_top_level_cursor_token(
     end: usize,
     target: TokenKind,
 ) -> Option<usize> {
-    collect_top_level_cursor_indexes(token_stream, start, end, |kind| *kind == target)
-        .into_iter()
-        .next()
+    let mut walk = header_probe_walk(token_stream, start, end);
+    let mut nesting_depth = NestingDepth::default();
+    while !walk.is_at_end() {
+        // Skip malformed payloads exactly like the indexed scan's `None` continue.
+        if walk
+            .current()
+            .is_some_and(|current| current.to_token_kind().is_err())
+        {
+            walk.advance();
+            continue;
+        }
+        let kind = walk.current_token_kind();
+        if nesting_depth.is_top_level() && *kind == target {
+            return Some(walk.position());
+        }
+        let is_eof = matches!(kind, TokenKind::Eof);
+        nesting_depth.step(kind);
+        if is_eof {
+            break;
+        }
+        walk.advance();
+    }
+    None
 }
 
 /// Find a range-step separator using the same delimiter depth as
@@ -1001,33 +1070,28 @@ fn find_top_level_expression_boundary_cursor_token(
     start: usize,
     end: usize,
 ) -> Option<usize> {
+    let mut walk = header_probe_walk(token_stream, start, end);
     let mut depth = ExpressionBoundaryDepth::default();
-    let mut index = start;
-    while index < end {
-        let kind = token_stream.token_kind_at(index)?;
-        if depth.is_top_level() && kind == TokenKind::By {
-            return Some(index);
+    while !walk.is_at_end() {
+        // The indexed scan aborted on a malformed payload (`?` on `token_kind_at`).
+        if walk
+            .current()
+            .is_some_and(|current| current.to_token_kind().is_err())
+        {
+            return None;
         }
-        depth.step(&kind);
-        index += 1;
+        let kind = walk.current_token_kind();
+        if depth.is_top_level() && *kind == TokenKind::By {
+            return Some(walk.position());
+        }
+        let is_eof = matches!(kind, TokenKind::Eof);
+        depth.step(kind);
+        if is_eof {
+            break;
+        }
+        walk.advance();
     }
     None
-}
-
-fn trim_cursor_header_start(token_stream: &AstCursor, mut start: usize) -> usize {
-    while start < token_stream.length()
-        && token_stream.token_kind_at(start) == Some(TokenKind::Newline)
-    {
-        start += 1;
-    }
-    start
-}
-
-fn trim_cursor_header_end(token_stream: &AstCursor, start: usize, mut end: usize) -> usize {
-    while end > start && token_stream.token_kind_at(end - 1) == Some(TokenKind::Newline) {
-        end -= 1;
-    }
-    end
 }
 
 fn parse_range_loop_header(

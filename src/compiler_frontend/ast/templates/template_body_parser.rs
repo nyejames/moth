@@ -824,25 +824,42 @@ fn branch_selector_and_context_from_parsed_if_header(
     }
 }
 
-fn next_meaningful_token_is_template_close(token_stream: &AstCursor, close_index: usize) -> bool {
-    next_meaningful_token_is_template_close_at_cursor(token_stream, close_index).unwrap_or(true)
-}
-
-fn next_meaningful_token_is_template_close_at_cursor(
-    cursor: &AstCursor,
+/// Walk past newlines to the next meaningful token at or before `close_index`.
+///
+/// WHAT: reports whether that token is the `]` close, treating a malformed payload as a close
+/// so the caller keeps its inline-`else` diagnostic.
+/// WHY: an `else if` header may only be followed by the template close on its own line.
+fn next_meaningful_token_is_template_close(
+    token_stream: &mut AstCursor,
     close_index: usize,
-) -> Option<bool> {
-    let mut index = cursor.position();
-
-    while index <= close_index && index < cursor.length() {
-        match cursor.token_kind_at(index)? {
-            TokenKind::Newline => index += 1,
-            TokenKind::TemplateClose => return Some(true),
-            _ => return Some(false),
+) -> bool {
+    let resume = token_stream.position();
+    let end = token_stream.length();
+    let mut closes = true;
+    while token_stream.position() <= close_index
+        && token_stream.position() < end
+        && !token_stream.is_at_end()
+    {
+        if token_stream
+            .current()
+            .is_some_and(|current| current.to_token_kind().is_err())
+        {
+            break;
         }
+        let kind = token_stream.current_token_kind();
+        if matches!(kind, TokenKind::TemplateClose) {
+            break;
+        }
+        if !matches!(kind, TokenKind::Newline) {
+            closes = false;
+            break;
+        }
+        token_stream.advance();
     }
-
-    Some(true)
+    token_stream
+        .set_position(resume)
+        .expect("template close scan resume stays inside the active parser view");
+    closes
 }
 
 #[derive(Clone, Copy)]

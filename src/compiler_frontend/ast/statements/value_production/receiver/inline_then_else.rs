@@ -420,7 +420,7 @@ fn cast_target_context_for_inline_branch(
 /// WHAT: follows only expression-continuation newlines, while still recognising
 /// a directly authored multiline `else`.
 /// WHY: a later statement's unrelated `else` must not capture this value-if branch.
-fn inline_else_follows_before_statement_end(token_stream: &AstCursor) -> bool {
+fn inline_else_follows_before_statement_end(token_stream: &mut AstCursor) -> bool {
     let stop_tokens = [
         TokenKind::Else,
         TokenKind::Newline,
@@ -430,136 +430,64 @@ fn inline_else_follows_before_statement_end(token_stream: &AstCursor) -> bool {
         TokenKind::CloseParenthesis,
         TokenKind::CloseCurly,
     ];
-    let Ok(cursor) = token_stream.declaration_cursor() else {
-        return inline_else_follows_before_statement_end_in_cursor(token_stream, &stop_tokens);
-    };
-    // Short-lived canonical view for pure lookahead; dropped before any
-    // cursor advance or expression re-entry. Compatibility-only streams fall
-    // back to the explicit AstCursor lane below.
-    let mut scan_start = cursor.position();
-
-    loop {
-        let mut depth = ExpressionBoundaryDepth::default();
-        let mut boundary_index = scan_start;
-        while let Some(kind) = cursor.token_kind_at(boundary_index) {
-            if depth.is_top_level() && stop_tokens.contains(&kind) {
-                break;
-            }
-            depth.step(&kind);
-            if matches!(kind, TokenKind::Eof) {
-                break;
-            }
-            boundary_index += 1;
-        }
-        let Some(boundary) = cursor.token_kind_at(boundary_index) else {
-            return false;
-        };
-
-        match boundary {
-            TokenKind::Else => return true,
-            TokenKind::Newline => {
-                let previous_continues = boundary_index
-                    .checked_sub(1)
-                    .filter(|previous_index| *previous_index >= scan_start)
-                    .is_some_and(|previous_index| {
-                        cursor
-                            .token_kind_at(previous_index)
-                            .is_some_and(|kind| kind.token_tag().continues_expression())
-                    });
-                let mut next_non_newline_index = boundary_index.checked_add(1);
-                let mut next_kind = None;
-                while let Some(index) = next_non_newline_index {
-                    match cursor.token_kind_at(index) {
-                        Some(TokenKind::Newline) => {
-                            next_non_newline_index = index.checked_add(1);
-                        }
-                        Some(kind) => {
-                            next_kind = Some(kind);
-                            break;
-                        }
-                        None => {
-                            next_non_newline_index = None;
-                        }
-                    }
-                }
-                let (Some(_), Some(next_kind)) = (next_non_newline_index, next_kind) else {
-                    return false;
-                };
-
-                if next_kind == TokenKind::Else {
-                    return true;
-                }
-                if !previous_continues && !next_kind.token_tag().continues_expression() {
-                    return false;
-                }
-
-                scan_start = next_non_newline_index.expect("matched index above");
-            }
-            _ => return false,
-        }
-    }
+    let resume = token_stream.position();
+    let follows = inline_else_follows_from_position(token_stream, &stop_tokens);
+    token_stream
+        .set_position(resume)
+        .expect("inline else scan resume stays inside the active parser view");
+    follows
 }
 
-fn inline_else_follows_before_statement_end_in_cursor(
-    token_stream: &AstCursor,
+/// Walk the live cursor forward across expression-continuation newlines.
+///
+/// The caller owns the single position restore.
+fn inline_else_follows_from_position(
+    token_stream: &mut AstCursor,
     stop_tokens: &[TokenKind],
 ) -> bool {
-    let mut scan_start = token_stream.position();
-
     loop {
-        // Bounded lookahead through AstCursor keeps the temporary window
-        // explicit and bounded to one scan pass.
-        let mut boundary_index = scan_start;
+        let scan_start = token_stream.position();
         let mut depth = ExpressionBoundaryDepth::default();
-        while let Some(kind) = token_stream.token_kind_at(boundary_index) {
-            if depth.is_top_level() && stop_tokens.contains(&kind) {
+        while !token_stream.is_at_end() {
+            if depth.is_top_level() && stop_tokens.contains(token_stream.current_token_kind()) {
                 break;
             }
-            depth.step(&kind);
-            if matches!(kind, TokenKind::Eof) {
+            depth.step(token_stream.current_token_kind());
+            // A malformed payload also reports `Eof`, and `Eof` is stable under `advance`.
+            if token_stream.current_token_kind() == &TokenKind::Eof {
                 break;
             }
-            boundary_index += 1;
+            token_stream.advance();
         }
-        let Some(boundary) = token_stream.token_kind_at(boundary_index) else {
+        if token_stream.is_at_end() {
             return false;
-        };
+        }
 
-        match boundary {
+        match token_stream.current_token_kind() {
             TokenKind::Else => return true,
-            TokenKind::Newline => {
-                let previous_continues = boundary_index
-                    .checked_sub(1)
-                    .filter(|previous_index| *previous_index >= scan_start)
-                    .is_some_and(|previous_index| {
-                        token_stream
-                            .token_kind_at(previous_index)
-                            .is_some_and(|kind| kind.token_tag().continues_expression())
-                    });
-                let mut next_non_newline_index = boundary_index.checked_add(1);
-                while token_stream.token_kind_at(next_non_newline_index.unwrap_or(usize::MAX))
-                    == Some(TokenKind::Newline)
-                {
-                    next_non_newline_index =
-                        next_non_newline_index.and_then(|index| index.checked_add(1));
-                }
-                let Some(next_non_newline_index) = next_non_newline_index else {
-                    return false;
-                };
-                let Some(next_kind) = token_stream.token_kind_at(next_non_newline_index) else {
-                    return false;
-                };
-
-                if next_kind == TokenKind::Else {
-                    return true;
-                }
-                if !previous_continues && !next_kind.token_tag().continues_expression() {
-                    return false;
-                }
-
-                scan_start = next_non_newline_index;
-            }
+            TokenKind::Newline => {}
             _ => return false,
+        }
+
+        // The branch survives this newline only when the expression continues
+        // across it, either from the token before or the one after.
+        let previous_continues = token_stream.position() > scan_start
+            && token_stream
+                .previous_token()
+                .is_some_and(|kind| kind.token_tag().continues_expression());
+
+        token_stream.advance();
+        token_stream.skip_newlines();
+        if token_stream.is_at_end() {
+            return false;
+        }
+
+        let next_kind = token_stream.current_token_kind();
+        if next_kind == &TokenKind::Else {
+            return true;
+        }
+        if !previous_continues && !next_kind.token_tag().continues_expression() {
+            return false;
         }
     }
 }

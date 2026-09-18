@@ -110,11 +110,12 @@ ACTIVE_PLAN:
 - OPEN_FINDINGS:
   - F1 (3H-R1a): closed — the parser view is owned by the token cursor and survives the
     declaration handoff.
-  - F2 (3H-R1b): indexed scans can repeat segmented prefix searches.
+  - F2 (3H-R1b): closed — monotone parser scans walk the cursor instead of re-searching the
+    segmented prefix on every step.
   - F3 (3H-R3): final token consumers and loop grammar still have parallel paths.
   - F4 (3H-R2, 3H-R4): generic and source ownership need a final cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
-- NEXT_SUBSTEP: 3H-R1b.
+- NEXT_SUBSTEP: 3H-R2.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -1195,8 +1196,10 @@ infrastructure.
 Findings closed by these substeps (paths as named in the resumption handoff):
 - F1 closed in 3H-R1a: `tokenizer/tokens.rs::TokenCursor`, `ast/cursor.rs::declaration_cursor` and
   `declaration_syntax/mod.rs::DeclarationCursor`.
-- F2 closes in 3H-R1b: `tokenizer/tokens.rs::parser_token_at` and `from_sequence_position`, and
-  indexed scanners such as `ast/statements/loops.rs::find_loop_header_colon_index`.
+- F2 closed in 3H-R1b: the monotone scan owners named above walk `TokenCursor`/`AstCursor`
+  instead of calling `parser_token_at`/`from_sequence_position` with a moving index.
+  `ast/statements/loops.rs::find_loop_header_colon_index` now advances the live cursor and
+  restores its entry position rather than stepping an index.
 - F3 closes in 3H-R3: `tokenizer/tokens.rs`, `ast/cursor.rs`, `declaration_syntax/mod.rs`,
   `ast/statements/loop_headers.rs`, `loops.rs` and template loop suffixes.
 - F4 closes in 3H-R2 and 3H-R4: `generic_functions/templates.rs`,
@@ -1242,16 +1245,28 @@ sites in 3H-R4.
   of addressing source-wide token storage.
 - Exit satisfied: a bounded input remains bounded after every supported handoff.
 
-#### [ ] 3H-R1b — Convert sequential indexed scans to cursor walks
+#### [x] 3H-R1b — Convert sequential indexed scans to cursor walks (complete)
 
-- Convert monotone indexed scans to bounded cursor walks in the statement loop header, template
-  control-flow suffix, branching, if-header, match-arm and expression scan owners; keep arbitrary
-  seeks and constant-bounded probes as seeks.
-- Preserve O(1) logical position and length with adjacent navigation, keeping repositioning
-  distinct from sequential traversal, and introduce no flattened index cache.
-- Cover empty ranges, stable EOF, empty and gapped segments, nested limits and source mismatch
-  through the existing test owners, without timing thresholds in unit tests.
-- Exit: sequential scanning no longer repeatedly searches the sequence prefix.
+- Converted every monotone indexed scan in the statement loop header, template body and
+  control-flow suffix, branching, if-header, match-arm, inline-else and expression boundary owners
+  to bounded cursor walks. Endpoint and constant-bounded probes (a single fixed index such as the
+  token after `is`) stay index reads, and no flattened index cache was introduced.
+- Two shapes carry the conversion. The preferred one takes `&mut AstCursor`, walks the live cursor
+  and restores the entry position once at the single exit, which serves the canonical and
+  compatibility lanes through one code path and let the paired `_indexed` fallbacks be deleted in
+  `if_headers.rs`, `loops.rs`, `loop_headers.rs`, `inline_then_else.rs`, `parse_expression.rs`,
+  `parse_expression_dispatch.rs` and the four template files. Where `&mut` would cascade outside
+  the file, `subcursor_window` yields a canonical child and the compatibility lane keeps its
+  indexed fallback: `match_arm_boundaries.rs` and the `FileTokens` loop-header adapter.
+- `Eof` is stable under `advance` on both lanes, so every walk breaks on `Eof` explicitly; a
+  malformed payload reports `Eof` through the cached kind, which reproduces the indexed scans'
+  `token_kind_at` `None` stop. Restores surface their failure instead of discarding it.
+- Collapsed the duplicated scan work the conversion exposed: the two identical match-arm peeks in
+  `branching.rs` became one, the loop-header start and end trims became one forward walk, and the
+  template dispatcher/walk/index triples became single walks.
+- Exit satisfied: sequential scanning no longer repeatedly searches the sequence prefix. Workspace
+  5196 + 839 + 17, integration 1973/1973, featured clippy, docs and source-audit clean, and
+  `bench-data-layout-check` reports -4ms average with no slower case.
 
 #### [ ] 3H-R2 — Settle final donor payload interpretation
 

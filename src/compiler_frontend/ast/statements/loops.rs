@@ -41,7 +41,7 @@ pub fn create_loop(
 
     let span = token_stream.previous_span();
     let scope = context.scope;
-    let colon_index = find_loop_header_colon_index(token_stream)?;
+    let colon_index = find_loop_header_colon_index(&mut *token_stream)?;
 
     let start_index = token_stream.position();
     // Canonical header window first; compatibility streams return `Ok(None)` and use the
@@ -49,8 +49,8 @@ pub fn create_loop(
     // canonical `SourceTokens` are never cloned into a new `FileTokens` vector here.
     let (parsed_loop_header, body_context) =
         match token_stream.subcursor_window(start_index, colon_index)? {
-            Some(window) => {
-                if is_empty_header_window(&window, start_index, colon_index) {
+            Some(mut window) => {
+                if is_empty_header_window(&mut window) {
                     return Err(CompilerDiagnostic::invalid_loop_header(
                         InvalidLoopHeaderReason::EmptyHeader,
                         span,
@@ -124,60 +124,85 @@ pub fn create_loop(
     Ok(AstNode { kind, span, scope })
 }
 
-fn find_loop_header_colon_index(token_stream: &AstCursor) -> LoopResult<usize> {
+fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usize> {
+    let resume = token_stream.position();
+    let end = token_stream.length();
     let mut nesting_depth = NestingDepth::default();
-    let mut search_index = token_stream.position();
-
-    while search_index < token_stream.length() {
-        let Some(kind) = token_stream.token_kind_at(search_index) else {
+    let mut outcome: Option<LoopResult<usize>> = None;
+    while token_stream.position() < end && !token_stream.is_at_end() {
+        // Mirror the indexed break: a malformed canonical payload reports MissingColon at
+        // the entry span. Compatibility cursors have no TokenRef, so only a present
+        // TokenRef can fail this check; compatibility reads its materialised kind below.
+        if let Some(current) = token_stream.current()
+            && current.to_token_kind().is_err()
+        {
             break;
-        };
-        let Some(token_span) = token_stream.span_at(search_index) else {
-            break;
-        };
+        }
+        let kind = token_stream.current_token_kind().clone();
+        let token_span = token_stream.current_span();
         let is_top_level = nesting_depth.is_top_level();
 
         if is_top_level && matches!(kind, TokenKind::Colon) {
-            return Ok(search_index);
+            outcome = Some(Ok(token_stream.position()));
+            break;
         }
 
         if is_top_level && matches!(kind, TokenKind::End | TokenKind::Eof) {
-            return Err(CompilerDiagnostic::invalid_loop_header(
+            outcome = Some(Err(CompilerDiagnostic::invalid_loop_header(
                 InvalidLoopHeaderReason::MissingColon,
                 Some(token_span),
             )
-            .into());
+            .into()));
+            break;
         }
 
         nesting_depth.step(&kind);
-        search_index += 1;
-    }
-
-    Err(CompilerDiagnostic::invalid_loop_header(
-        InvalidLoopHeaderReason::MissingColon,
-        Some(token_stream.current_span()),
-    )
-    .into())
-}
-
-/// Bounded canonical empty-header check over `[start, end)`.
-///
-/// WHAT: reports whether the window holds only newlines (or nothing) without cloning tokens.
-/// WHY: the canonical header view must not read outside its half-open window; dense segmented
-/// positions stay window-relative through `token_kind_at`.
-fn is_empty_header_window(window: &AstCursor, start: usize, end: usize) -> bool {
-    // Match the legacy scan: a truncated window reports empty only when every readable token
-    // was a newline. The half-open bound is unchanged; the window already rejects reads at
-    // or beyond `end`.
-    let mut scan = start;
-    while scan < end {
-        match window.token_kind_at(scan) {
-            Some(TokenKind::Newline) => scan += 1,
-            Some(_) => return false,
-            None => break,
+        let before = token_stream.position();
+        token_stream.advance();
+        // Eof never advances, so a stalled step ends the search.
+        if token_stream.position() == before {
+            break;
         }
     }
-    true
+
+    token_stream
+        .set_position(resume)
+        .map_err(ExpressionParseError::from)?;
+    outcome.unwrap_or_else(|| {
+        Err(CompilerDiagnostic::invalid_loop_header(
+            InvalidLoopHeaderReason::MissingColon,
+            Some(token_stream.current_span()),
+        )
+        .into())
+    })
+}
+
+/// Canonical empty-header check over the header window.
+///
+/// WHAT: reports whether the window holds only newlines (or nothing) without cloning tokens.
+/// WHY: an empty header must report `EmptyHeader` instead of an expression diagnostic.
+fn is_empty_header_window(window: &mut AstCursor) -> bool {
+    let resume = window.position();
+    let end = window.length();
+    let mut empty = true;
+    while window.position() < end && !window.is_at_end() {
+        // A malformed payload has no `TokenKind`; the indexed scan stopped and reported empty.
+        if window
+            .current()
+            .is_some_and(|current| current.to_token_kind().is_err())
+        {
+            break;
+        }
+        if *window.current_token_kind() != TokenKind::Newline {
+            empty = false;
+            break;
+        }
+        window.advance();
+    }
+    window
+        .set_position(resume)
+        .expect("empty header resume stays inside the active parser view");
+    empty
 }
 
 /// Explicit compatibility fallback for unowned/synthetic streams.

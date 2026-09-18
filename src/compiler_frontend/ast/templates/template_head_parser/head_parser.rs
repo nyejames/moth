@@ -835,43 +835,48 @@ fn parse_style_directive_from_spec(
     Ok(false)
 }
 
-/// Scans ahead for unseparated `if` / `loop` suffix tokens.
+/// Find a control-flow suffix that follows a head item without a separating comma.
 ///
-/// Early returns make the first top-level suffix span explicit.
-fn find_unseparated_control_flow_suffix(token_stream: &AstCursor) -> Option<SourceSpan> {
-    find_unseparated_control_flow_suffix_at_cursor(token_stream)
-}
-
-/// Cursor-view form of [`find_unseparated_control_flow_suffix`].
-fn find_unseparated_control_flow_suffix_at_cursor(cursor: &AstCursor) -> Option<SourceSpan> {
+/// WHAT: reports the span of the first top-level `if`/`loop` reached before a comma or a body
+/// boundary, starting from the token after the current one.
+/// WHY: the head parser turns that span into `MissingCommaBeforeControlFlowSuffix`.
+fn find_unseparated_control_flow_suffix(token_stream: &mut AstCursor) -> Option<SourceSpan> {
+    let resume = token_stream.position();
+    let end = token_stream.length();
     let mut nesting_depth = NestingDepth::default();
-    let mut index = cursor.position().checked_add(1)?;
-
-    while index < cursor.length() {
-        // A `None` kind means the canonical lane ended before the vector lane
-        // (or lost the payload); the vector fallback below replays the same
-        // adapter-relative scan rather than truncating the diagnostic.
-        let kind = cursor.token_kind_at(index);
-        let span = cursor.span_at(index);
-        let (Some(kind), Some(span)) = (kind, span) else {
-            return None;
-        };
-
+    let mut suffix_span = None;
+    token_stream.advance();
+    while token_stream.position() < end && !token_stream.is_at_end() {
+        // A malformed payload has no kind/span pair; truncate exactly as the indexed scan did.
+        if token_stream
+            .current()
+            .is_some_and(|current| current.to_token_kind().is_err())
+        {
+            break;
+        }
+        let kind = token_stream.current_token_kind();
+        // `Eof` never advances on the compatibility lane and nothing follows it on the canonical
+        // lane, so the search ends here either way.
+        if matches!(kind, TokenKind::Eof) {
+            break;
+        }
         if nesting_depth.is_top_level() {
             match kind {
                 TokenKind::Comma | TokenKind::StartTemplateBody | TokenKind::TemplateClose => {
-                    return None;
+                    break;
                 }
                 TokenKind::If | TokenKind::Loop => {
-                    return Some(span);
+                    suffix_span = Some(token_stream.current_span());
+                    break;
                 }
                 _ => {}
             }
         }
-
-        nesting_depth.step(&kind);
-        index += 1;
+        nesting_depth.step(kind);
+        token_stream.advance();
     }
-
-    None
+    token_stream
+        .set_position(resume)
+        .expect("suffix span scan resume stays inside the active parser view");
+    suffix_span
 }

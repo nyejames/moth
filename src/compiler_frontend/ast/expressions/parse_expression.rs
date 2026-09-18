@@ -306,19 +306,25 @@ fn create_expression_until_with_policy(
     //  Locate expression window
     // ------------------------
     let start_index = input.token_stream.position();
-    let mut scan = start_index;
+    // The boundary scan walks the live cursor and restores the entry position:
+    // indexed reads re-scan segment prefixes on every step.
     let mut depth = ExpressionBoundaryDepth::default();
-    while let Some(kind) = input.token_stream.token_kind_at(scan) {
-        if depth.is_top_level() && stop_tokens.contains(&kind) {
+    while !input.token_stream.is_at_end() {
+        if depth.is_top_level() && stop_tokens.contains(input.token_stream.current_token_kind()) {
             break;
         }
-        depth.step(&kind);
-        if matches!(kind, TokenKind::Eof) {
+        depth.step(input.token_stream.current_token_kind());
+        // A malformed payload also reports `Eof`, and `Eof` is stable under `advance`.
+        if input.token_stream.current_token_kind() == &TokenKind::Eof {
             break;
         }
-        scan += 1;
+        input.token_stream.advance();
     }
-    let end_index = scan;
+    let end_index = input.token_stream.position();
+    input
+        .token_stream
+        .set_position(start_index)
+        .expect("expression boundary resume stays inside the active parser view");
     let end_kind = input.token_stream.token_kind_at(end_index);
     let end_span = input.token_stream.span_at(end_index);
 

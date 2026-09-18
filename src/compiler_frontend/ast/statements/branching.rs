@@ -42,7 +42,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Branches recursively parse function bodies, so retained-data failures travel to the module
 /// emission boundary instead of being recast as authored control-flow diagnostics.
@@ -81,28 +81,27 @@ pub(crate) struct ParsedMatchBlock {
     pub exhaustiveness: MatchExhaustiveness,
     pub scope: PathId,
 }
-/// Peek at the next non-newline token without advancing the stream.
-fn peek_next_non_newline_token(token_stream: &AstCursor) -> Option<Token> {
-    let mut index = token_stream.position().checked_add(1)?;
-    loop {
-        let kind = token_stream.token_kind_at(index)?;
-        if kind != TokenKind::Newline {
-            return token_stream.token_at(index);
+/// Peek at the index and kind of the next non-newline token without advancing.
+///
+/// Restores the entry position before returning, including the not-found path.
+fn peek_next_non_newline(token_stream: &mut AstCursor) -> Option<(usize, TokenKind)> {
+    let resume = token_stream.position();
+    token_stream.advance();
+    let mut found = None;
+    while !token_stream.is_at_end() {
+        if *token_stream.current_token_kind() != TokenKind::Newline {
+            found = Some((
+                token_stream.position(),
+                token_stream.current_token_kind().clone(),
+            ));
+            break;
         }
-        index = index.checked_add(1)?;
+        token_stream.advance();
     }
-}
-
-/// Peek at the index of the next non-newline token without advancing the stream.
-fn peek_next_non_newline_token_index(token_stream: &AstCursor) -> Option<usize> {
-    let mut index = token_stream.position().checked_add(1)?;
-    loop {
-        let kind = token_stream.token_kind_at(index)?;
-        if kind != TokenKind::Newline {
-            return Some(index);
-        }
-        index = index.checked_add(1)?;
-    }
+    token_stream
+        .set_position(resume)
+        .expect("peek resume stays inside the active parser view");
+    found
 }
 
 fn reject_same_line_else_if(token_stream: &AstCursor) -> BranchingResult<()> {
@@ -425,15 +424,12 @@ pub(crate) fn parse_match_block(
 
         match token_stream.current_token_kind() {
             TokenKind::End => {
-                let next_kind = peek_next_non_newline_token(token_stream).map(|token| token.kind);
-                let next_index = peek_next_non_newline_token_index(token_stream);
+                let next = peek_next_non_newline(token_stream);
                 let semicolon_separates_same_level_arms = !seen_else
-                    && matches!(
-                        (next_kind, next_index),
-                        (Some(kind), Some(idx))
-                            if kind == TokenKind::Else
-                                || token_index_has_top_level_fat_arrow(token_stream, idx)
-                    );
+                    && next.is_some_and(|(index, kind)| {
+                        kind == TokenKind::Else
+                            || token_index_has_top_level_fat_arrow(token_stream, index)
+                    });
 
                 if semicolon_separates_same_level_arms {
                     return Err(branching_error(CompilerDiagnostic::invalid_match_arm(

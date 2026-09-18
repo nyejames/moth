@@ -1229,21 +1229,26 @@ fn parse_cast_operand_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    let mut scan = token_stream.position();
+    // The pre-scan walks the live cursor and restores the entry position:
+    // indexed reads re-scan segment prefixes on every step.
+    let resume = token_stream.position();
     let mut depth = ExpressionBoundaryDepth::default();
-    let catch_is_cast_suffix = loop {
-        let Some(kind) = token_stream.token_kind_at(scan) else {
-            break false;
-        };
-        if depth.is_top_level() && kind == TokenKind::Catch {
-            break true;
+    let mut catch_is_cast_suffix = false;
+    while !token_stream.is_at_end() {
+        if depth.is_top_level() && token_stream.current_token_kind() == &TokenKind::Catch {
+            catch_is_cast_suffix = true;
+            break;
         }
-        depth.step(&kind);
-        if matches!(kind, TokenKind::Eof) {
-            break false;
+        depth.step(token_stream.current_token_kind());
+        // A malformed payload also reports `Eof`, and `Eof` is stable under `advance`.
+        if token_stream.current_token_kind() == &TokenKind::Eof {
+            break;
         }
-        scan += 1;
-    };
+        token_stream.advance();
+    }
+    token_stream
+        .set_position(resume)
+        .expect("catch pre-scan resume stays inside the active parser view");
 
     let mut cast_target_context = CastTargetContext::None;
 
