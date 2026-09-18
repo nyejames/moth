@@ -835,7 +835,7 @@ impl SourceTokens {
         Ok(())
     }
 
-    fn validate_range(&self, range: TokenRange) -> Result<(), TokenRangeError> {
+    pub(crate) fn validate_range(&self, range: TokenRange) -> Result<(), TokenRangeError> {
         if range.source != self.source {
             return Err(TokenRangeError::ForeignSource {
                 expected: self.source,
@@ -1014,8 +1014,9 @@ impl SourceTokens {
 
     /// Materialize one checked contiguous range directly from this canonical owner.
     ///
-    /// Parser adapters use this only at an explicit handoff boundary. The returned vector is
-    /// transient compatibility data; canonical shapes, spans and cold stores remain owned here.
+    /// Test fixtures still inspect a range as `Token` values. Production parsers walk
+    /// the canonical owner instead of rebuilding a vector.
+    #[cfg(test)]
     pub(crate) fn materialize_range(&self, range: TokenRange) -> Result<Vec<Token>, CompilerError> {
         let mut cursor = self.cursor(range).map_err(|error| {
             CompilerError::compiler_error(format!("token range materialization failed: {error:?}"))

@@ -60,7 +60,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenRange};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
@@ -409,7 +409,6 @@ pub(crate) fn new_declaration(
         declaration_syntax,
         qualified_name,
         Some(token_stream),
-        None,
         &mut *context,
         type_interner,
         DeclarationLoweringTables {
@@ -460,7 +459,6 @@ pub fn resolve_declaration_syntax(
     declaration_syntax: DeclarationSyntax,
     qualified_name: PathId,
     source_owner: Option<&AstCursor>,
-    initializer_override: Option<FileTokens>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     tables: DeclarationLoweringTables<'_>,
@@ -469,7 +467,6 @@ pub fn resolve_declaration_syntax(
         string_table,
         path_fork,
     } = tables;
-    let mut initializer_override = initializer_override;
     let mut span_builder = ExtendedSpanBuilder::new();
     let config_qualifier = declaration_syntax.config_qualifier.clone();
     let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
@@ -530,7 +527,6 @@ pub fn resolve_declaration_syntax(
         let mut initializer_stream = declaration_initializer_stream(
             source_owner,
             declaration_syntax.initializer_range,
-            initializer_override.take(),
             &qualified_name,
             declaration_syntax.span,
         )?;
@@ -694,7 +690,6 @@ pub fn resolve_declaration_syntax(
     let mut initializer_stream = declaration_initializer_stream(
         source_owner,
         declaration_syntax.initializer_range,
-        initializer_override.take(),
         &qualified_name,
         declaration_syntax.span,
     )?;
@@ -963,14 +958,9 @@ pub fn resolve_declaration_syntax(
 fn declaration_initializer_stream<'tokens>(
     source_owner: Option<&AstCursor<'tokens>>,
     initializer_range: Option<TokenRange>,
-    initializer_override: Option<FileTokens>,
     qualified_name: &PathId,
     declaration_span: Option<SourceSpan>,
 ) -> DeclarationResult<AstCursor<'tokens>> {
-    if let Some(stream) = initializer_override {
-        return Ok(AstCursor::from_synthetic_file_tokens(stream));
-    }
-
     let range = initializer_range
         .ok_or_else(|| CompilerError::compiler_error("declaration initializer range is missing"))?;
     let eof_span = declaration_span

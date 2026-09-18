@@ -52,12 +52,9 @@ use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::headers::synthetic_content_header::materialize_synthetic_content_initializer;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -65,12 +62,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-fn frozen_empty_path_syntax(source: SourceId) -> Result<FilePathSyntax, CompilerError> {
-    let mut table = PathSyntaxTable::with_source(source);
-    table.validate_file_owned_locations(source)?;
-    table.freeze();
-    Ok(FilePathSyntax::Shared(Arc::new(table)))
-}
 /// The module view every constant in the pass reads.
 ///
 /// WHY: separating this from the per-constant call keeps the session constructor honest about
@@ -202,9 +193,6 @@ impl ConstantResolutionSession {
             .source_token_owners
             .get(&header.tokens.source());
         let file_tokens = file_owner.map(|owner| owner.tokens_ref());
-        let file_source_path = file_owner
-            .map(|owner| owner.logical_path())
-            .unwrap_or(source_file_scope);
         let payload = header.synthetic_content_payload;
         if matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) && file_owner.is_some()
         {
@@ -213,82 +201,79 @@ impl ConstantResolutionSession {
             )
             .into());
         }
-
-        let fallback_path_syntax = if file_tokens.is_none() {
-            if !matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) {
-                return Err(CompilerError::compiler_error(
-                    "constant header has no canonical source token owner for its retained syntax",
-                )
-                .into());
-            }
-            Some(frozen_empty_path_syntax(header.tokens.source())?)
-        } else {
-            None
-        };
-        let owned_path_syntax = if let Some(owner) = file_tokens {
-            Some(owner.path_syntax_arc()?)
-        } else {
-            None
-        };
-        let borrowed_path_syntax = owned_path_syntax
-            .as_ref()
-            .map(|table| FilePathSyntax::Shared(Arc::clone(table)));
-        let path_syntax = borrowed_path_syntax
-            .as_ref()
-            .or(fallback_path_syntax.as_ref())
-            .expect("constant header path syntax fallback must be present");
-
-        let initializer_override = if let Some(payload) = payload {
-            let initializer_tokens = materialize_synthetic_content_initializer(
-                payload,
-                file_tokens,
-                header.tokens,
-                file_source_path,
-                file_owner.and_then(|owner| owner.os_path_cloned()),
+        if file_tokens.is_none()
+            && !matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_)))
+        {
+            return Err(CompilerError::compiler_error(
+                "constant header has no canonical source token owner for its retained syntax",
             )
-            .map_err(ExpressionParseError::from)?;
-            Some(
-                FileTokens::new_from_slice(
-                    file_source_path,
-                    header.tokens.source(),
-                    None,
-                    initializer_tokens,
-                    path_syntax,
-                )
-                .map_err(ExpressionParseError::from)?,
-            )
+            .into());
+        }
+
+        let synthetic_owner = if let Some(payload) = payload {
+            Some(Arc::new(
+                materialize_synthetic_content_initializer(payload, file_tokens, header.tokens)
+                    .map_err(ExpressionParseError::from)?,
+            ))
         } else {
             None
         };
+        let synthetic_range = synthetic_owner
+            .as_ref()
+            .map(|owner| {
+                owner.full_range().map_err(|error| {
+                    ExpressionParseError::from(CompilerError::compiler_error(format!(
+                        "synthetic content owner has no whole extent: {error:?}"
+                    )))
+                })
+            })
+            .transpose()?;
+        let synthetic_cursor = synthetic_owner
+            .as_ref()
+            .zip(synthetic_range)
+            .map(|(owner, range)| {
+                AstCursor::from_source_tokens_for_handoff(owner, None, range).map_err(|error| {
+                    ExpressionParseError::from(CompilerError::compiler_error(format!(
+                        "synthetic content range is outside its source owner: {error:?}"
+                    )))
+                })
+            })
+            .transpose()?;
 
         // Retain the canonical source owner for bounded initializer handoffs. This path never
         // reads parser facts from the cursor, so avoid materialising its initial token window for
-        // every constant header; synthetic content has no canonical owner and passes no cursor
-        // alongside its explicit `FileTokens`.
-        let body_cursor = file_owner
-            .map(|owner| -> Result<AstCursor<'_>, ExpressionParseError> {
-                let tokens = owner.tokens_ref();
-                let full = tokens.full_range().map_err(|error| {
-                    ExpressionParseError::from(CompilerError::compiler_error(format!(
-                        "constant header source range could not be constructed: {error:?}"
-                    )))
-                })?;
-                let os_path = owner.os_path_cloned();
-                AstCursor::from_source_tokens_for_handoff(owner.tokens(), os_path, full).map_err(
-                    |error| {
+        // every ordinary constant header. Synthetic content parses from its transient owner.
+        let body_cursor = if synthetic_cursor.is_some() {
+            None
+        } else {
+            file_owner
+                .map(|owner| -> Result<AstCursor<'_>, ExpressionParseError> {
+                    let tokens = owner.tokens_ref();
+                    let full = tokens.full_range().map_err(|error| {
                         ExpressionParseError::from(CompilerError::compiler_error(format!(
-                            "constant header source range is outside its source owner: {error:?}"
+                            "constant header source range could not be constructed: {error:?}"
                         )))
-                    },
-                )
-            })
-            .transpose()?;
-        let source_owner = body_cursor;
+                    })?;
+                    let os_path = owner.os_path_cloned();
+                    AstCursor::from_source_tokens_for_handoff(owner.tokens(), os_path, full).map_err(
+                        |error| {
+                            ExpressionParseError::from(CompilerError::compiler_error(format!(
+                                "constant header source range is outside its source owner: {error:?}"
+                            )))
+                        },
+                    )
+                })
+                .transpose()?
+        };
+        let source_owner = synthetic_cursor.as_ref().or(body_cursor.as_ref());
+        let mut declaration_syntax = declaration.clone();
+        if let Some(range) = synthetic_range {
+            declaration_syntax.initializer_range = Some(range);
+        }
         let declaration_result = resolve_declaration_syntax(
-            declaration.clone(),
+            declaration_syntax,
             header.declaration_path.to_owned(),
-            source_owner.as_ref(),
-            initializer_override,
+            source_owner,
             &mut scope_context,
             &mut type_interner,
             DeclarationLoweringTables {

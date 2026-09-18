@@ -192,8 +192,9 @@ pub(crate) fn parse_loop_header_tokens(
 ///
 /// WHAT: keeps all canonical header reads on the short-lived `AstCursor` view and represents
 /// grammar splits as parser-position ranges rather than materialised `Token` vectors.
-/// WHY: the compatibility vector parser remains only for synthetic and legacy streams; canonical
-/// source headers must not cross back into a `FileTokens` grammar adapter.
+/// WHY: the compatibility vector parser remains only for the legacy `new_from_slice` stream
+/// `token_stream_with_eof` builds, which 3H-R3d retires; canonical source headers must not
+/// cross back into a `FileTokens` grammar adapter.
 pub(crate) fn parse_loop_header_cursor(
     token_stream: &mut AstCursor,
     mut context: ScopeContext,

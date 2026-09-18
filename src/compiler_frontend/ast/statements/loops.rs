@@ -205,11 +205,11 @@ fn is_empty_header_window(window: &mut AstCursor) -> bool {
     empty
 }
 
-/// Explicit compatibility fallback for unowned/synthetic streams.
+/// Explicit compatibility fallback for the unowned legacy stream.
 ///
 /// WHAT: collects `[start, end)` from the legacy token vector when `subcursor_window`
 /// returns `Ok(None)`.
-/// WHY: synthetic and legacy `FileTokens` streams have no canonical owner to window; this lane
+/// WHY: legacy `FileTokens` streams have no canonical owner to window; this lane
 /// never clones canonical `SourceTokens`.
 fn collect_compatibility_header_tokens(
     token_stream: &AstCursor,

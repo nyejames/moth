@@ -1,9 +1,8 @@
 //! Short-lived cursor used by AST parsers.
 //!
 //! Canonical parser paths borrow one [`TokenCursor`] over [`SourceTokens`]. Unbounded
-//! compatibility fixtures borrow a `FileTokens` vector. Synthetic content with no canonical
-//! owner is parsed from an owned `FileTokens` vector. Neither non-canonical lane owns a
-//! second source store.
+//! compatibility fixtures borrow a `FileTokens` vector. Neither non-canonical lane owns a
+//! second source store. Synthetic content parses from a transient canonical owner.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
@@ -24,8 +23,9 @@ enum AstCursorBacking<'a> {
     ///
     /// WHAT: holds an explicit `FileTokens` the cursor owns outright, together with the bounded
     /// substreams derived from it.
-    /// WHY: synthetic initializer content has no canonical source owner to borrow, so it is
-    /// parsed from its own vector. Canonical content never enters this lane: a stream with a
+    /// WHY: the leftover production feeder is `loop_headers::token_stream_with_eof` via
+    /// `FileTokens::new_from_slice`; nested expression windows still need an owned vector until
+    /// 3H-R3d retires that stream. Canonical content never enters this lane: a stream with a
     /// canonical owner is promoted in `from_file_tokens`.
     OwnedNonCanonical(FileTokens),
 }
@@ -186,16 +186,6 @@ impl<'a> AstCursor<'a> {
         };
         cursor.refresh_facts();
         Ok(cursor)
-    }
-
-    /// Construct a bounded owned cursor over an explicit synthetic initializer stream.
-    ///
-    /// WHAT: takes the `FileTokens` built for a declaration `initializer_override`.
-    /// WHY: constant-resolution initializer payloads are bounded to their explicit vector but
-    /// have no canonical range, so they parse from the owned lane with the same bounded parser
-    /// facts a canonical window would give.
-    pub(crate) fn from_synthetic_file_tokens(token_stream: FileTokens) -> Self {
-        Self::from_owned_non_canonical(AstCursorBacking::OwnedNonCanonical(token_stream))
     }
 
     fn from_owned_non_canonical(backing: AstCursorBacking<'a>) -> Self {

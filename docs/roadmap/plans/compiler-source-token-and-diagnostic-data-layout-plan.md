@@ -118,7 +118,7 @@ ACTIVE_PLAN:
   - F4 (3H-R2 done, 3H-R4 open): retained generic bodies bound one canonical `SourceTokens` owner;
     header and prepared-source ownership still need their cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
-- NEXT_SUBSTEP: 3H-R3c (3H-R3a, 3H-R3b complete).
+- NEXT_SUBSTEP: 3H-R3d (3H-R3a, 3H-R3b, 3H-R3c complete).
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -1382,13 +1382,21 @@ canonical (R3b, R3c), which is what finally lets every parser consumer drop the 
 - Workspace 5199 + 839 + 17, integration 1973/1973, featured clippy, docs and source-audit clean,
   `bench-data-layout-check` -4ms average with no slower case.
 
-##### [ ] 3H-R3c — Make synthetic source kinds parse canonically
+##### [x] 3H-R3c — Make synthetic source kinds parse canonically (complete)
 
-- Replace synthetic `FileTokens` initializers with the smallest typed source-kind input the parser
-  and folding owners need, preserving plain Markdown's no-token route and Moth-template wrapping
-  through the same template semantics.
-- Delete the synthetic cursor backing and the slice constructor once their content builds a
-  canonical owner.
+- `materialize_synthetic_content_initializer` now returns a transient canonical `SourceTokens`
+  owner. Plain Markdown stays on the no-token prepare route and folds as one interned string
+  token. A Moth template copies its retained body window and wraps it in the same `$md`
+  template tokens the parser already understands, without a `Vec<Token>` or retokenizing
+  wrapper text.
+- Constant resolution parses that owner through `AstCursor::from_source_tokens_for_handoff`
+  and the ordinary declaration nested cursor. `from_synthetic_file_tokens` and the
+  `initializer_override: Option<FileTokens>` parameter are gone.
+- The owned non-canonical cursor backing and `FileTokens::new_from_slice` survive to 3H-R3d.
+  Their sole production feeder is `loop_headers::token_stream_with_eof`.
+- Test migration: focused tests cover the Markdown string token, wrapper tag order, numeric
+  densify of a body window, and path-table sharing for a copied path token.
+- Workspace 5203 + 839 + 17, integration 1973/1973, featured clippy, docs and source-audit clean.
 
 ##### [ ] 3H-R3d — Retire the legacy parser lane
 
@@ -1398,6 +1406,8 @@ canonical (R3b, R3c), which is what finally lets every parser consumer drop the 
 - Finish statement and template loop callers through one loop-header parser, keeping the statement
   and template body parsers separate under that single owner, and delete the displaced vector
   grammar, split records and copied helpers.
+- Delete the owned non-canonical cursor backing and `FileTokens::new_from_slice` once
+  `loop_headers::token_stream_with_eof` no longer feeds them.
 - Preserve exact diagnostic projection facts with stable code, reason and ordering contracts, and
   retain one lexical grammar owner and one numeric-text owner.
 

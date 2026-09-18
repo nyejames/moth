@@ -529,7 +529,6 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let mut initializer = super::declaration_initializer_stream(
             Some(&owner),
             declaration.initializer_range,
-            None,
             &declaration_path,
             declaration.span,
         )
