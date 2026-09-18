@@ -118,7 +118,7 @@ ACTIVE_PLAN:
   - F4 (3H-R2 done, 3H-R4 open): retained generic bodies bound one canonical `SourceTokens` owner;
     header and prepared-source ownership still need their cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
-- NEXT_SUBSTEP: 3H-R3b (3H-R3a complete).
+- NEXT_SUBSTEP: 3H-R3c (3H-R3a, 3H-R3b complete).
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`.
 - Non-goals: diagnostic compact-record work; package implementation (paused until accepted
@@ -1350,14 +1350,37 @@ canonical (R3b, R3c), which is what finally lets every parser consumer drop the 
   featured clippy, docs and source-audit clean, `bench-data-layout-check` -2ms average with no
   slower case.
 
-##### [ ] 3H-R3b — Make materialised generic bodies parse canonically
+##### [x] 3H-R3b — Make materialised generic bodies parse canonically (complete)
 
-- Replace the remapped token-vector adapter with a transient rebased canonical owner for the
-  requester parse: shapes, spans and typed cold rows carry the requester's spellings, so no parse
-  needs a rebased `Vec<Token>`.
-- Delete the owned-compatibility cursor backing, the bounded compatibility expression substream and
-  the remapped adapter constructor once that lane is displaced.
-- Preserve donor span and diagnostic facts exactly, and keep the transient owner unretained.
+- `SourceTokens::rebased_window_owner` copies one body window into a transient canonical owner:
+  shapes and spans are copied, string payloads are re-interned by spelling, numeric rows are
+  rebased into a fresh dense store, and a retained donor path table is remapped through the
+  destination fork. Without a donor path table the requester shares the donor's frozen table
+  allocation, so the common case copies no path rows.
+- The rebased owner keeps the donor `SourceId` and every donor span, so spans, retained syntax
+  and diagnostics still point at the donor source; only payload identifiers move. It is dense
+  and contiguous even for a segmented body, and it is never retained past the parse.
+- `GenericFunctionBody::parse_owner` returns `BodyParseOwner`, splitting "make the owner" from
+  "borrow its cursor" because a transient owner cannot be borrowed out of the retained body.
+  Source bodies still borrow their retained owner directly. Every generic parse is now canonical,
+  so no production parse builds a rebased token vector.
+- The displaced lane is gone: the remapped adapter constructor and its token-pair validation, the
+  bounded canonical substream constructors, the segmented adapter metadata variant with its
+  translation arms, and the owned-compatibility cursor backing, which merged into one owned
+  non-canonical lane that now serves only synthetic content.
+- `FileTokens::new_bounded_expression_substream` survives, reached only by a declaration
+  initializer whose cursor has no canonical owner: synthetic content, which 3H-R3c makes
+  canonical, and the legacy stream, which 3H-R3d retires. A canonical cursor now always takes
+  the borrowed `nested_cursor` route, so this constructor is unreachable from source parsing.
+- Test migration: the bounded-adapter assertions moved to the rebased owner's own payloads, and
+  the three segmented cursor fixtures build their canonical cursor directly. One deleted test
+  pinned the removed adapter's payload decoding. One new test proves segmented equivalence: the
+  rebased owner holds exactly the sequence's tokens with the donor's tags and spans, resolves
+  payloads to the donor spellings in the requester's table, and stages only the sequence's
+  numeric row. Both facts were probe-proven; the numeric probe also failed an imported-generic
+  integration test, confirming production takes this lane.
+- Workspace 5199 + 839 + 17, integration 1973/1973, featured clippy, docs and source-audit clean,
+  `bench-data-layout-check` -4ms average with no slower case.
 
 ##### [ ] 3H-R3c — Make synthetic source kinds parse canonically
 

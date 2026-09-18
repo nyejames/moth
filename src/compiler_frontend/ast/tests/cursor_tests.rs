@@ -149,14 +149,11 @@ fn canonical_subcursor_window_skips_segmented_source_gaps() {
         .try_register_token_sequence(&segments)
         .expect("segmented fixture should register");
     owner.freeze_path_syntax_for_test();
-    let mut adapter = FileTokens::new_bounded_sequence_substream(
-        &owner,
-        sequence,
-        crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-    )
-    .expect("segmented adapter should retain canonical provenance");
-    let mut parent =
-        AstCursor::from_file_tokens(&mut adapter).expect("segmented AST cursor should build");
+    let canonical = owner
+        .canonical_source_tokens_arc()
+        .expect("the segmented fixture owns its canonical source tokens");
+    let mut parent = AstCursor::from_source_sequence(&canonical, None, sequence)
+        .expect("segmented AST cursor should build");
 
     let restore = parent
         .set_limit(2)
@@ -219,14 +216,11 @@ fn segmented_nested_cursor_translates_active_limit() {
         .try_register_token_sequence(&segments)
         .expect("segmented fixture should register");
     owner.freeze_path_syntax_for_test();
-    let mut adapter = FileTokens::new_bounded_sequence_substream(
-        &owner,
-        sequence,
-        crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-    )
-    .expect("segmented adapter should retain canonical provenance");
-    let mut cursor =
-        AstCursor::from_file_tokens(&mut adapter).expect("segmented AST cursor should build");
+    let canonical = owner
+        .canonical_source_tokens_arc()
+        .expect("the segmented fixture owns its canonical source tokens");
+    let mut cursor = AstCursor::from_source_sequence(&canonical, None, sequence)
+        .expect("segmented AST cursor should build");
     cursor.advance();
     cursor
         .set_limit(2)
@@ -365,14 +359,11 @@ fn declaration_cursor_inherits_segmented_parser_window() {
         .try_register_token_sequence(&segments)
         .expect("segmented fixture should register");
     owner.freeze_path_syntax_for_test();
-    let mut adapter = FileTokens::new_bounded_sequence_substream(
-        &owner,
-        sequence,
-        crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-    )
-    .expect("segmented adapter should retain canonical provenance");
-    let parent =
-        AstCursor::from_file_tokens(&mut adapter).expect("segmented AST cursor should build");
+    let canonical = owner
+        .canonical_source_tokens_arc()
+        .expect("the segmented fixture owns its canonical source tokens");
+    let parent = AstCursor::from_source_sequence(&canonical, None, sequence)
+        .expect("segmented AST cursor should build");
     let child = parent
         .subcursor_window(1, 2)
         .expect("dense window should validate")

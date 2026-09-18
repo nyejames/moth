@@ -957,9 +957,9 @@ pub fn resolve_declaration_syntax(
 }
 /// Build the bounded parser cursor for a declaration initializer.
 ///
-/// Source-owned ranges stay on the canonical `AstCursor` view. Explicit synthetic overrides use
-/// the bounded synthetic backing because they are built by `FileTokens::new_from_slice` and have
-/// no canonical range to borrow. Remapped compatibility substreams keep their own owned lane.
+/// Source-owned ranges stay on the canonical `AstCursor` view. Streams with no canonical owner
+/// cannot borrow a range, because their payload IDs are meaningless outside the stream, so they
+/// take an owned bounded substream instead.
 fn declaration_initializer_stream<'tokens>(
     source_owner: Option<&AstCursor<'tokens>>,
     initializer_range: Option<TokenRange>,
@@ -979,7 +979,7 @@ fn declaration_initializer_stream<'tokens>(
 
     if let Some(source_owner) = source_owner
         && let Some(cursor) = source_owner
-            .bounded_compatibility_expression_cursor(range, *qualified_name, eof_span)
+            .bounded_owned_expression_cursor(range, *qualified_name, eof_span)
             .map_err(ExpressionParseError::from)?
     {
         return Ok(cursor);

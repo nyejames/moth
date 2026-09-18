@@ -97,59 +97,6 @@ fn mutable_file_tokens() -> FileTokens {
     )
 }
 
-#[test]
-fn nested_expression_materialization_preserves_remapped_adapter_payloads() {
-    let source = SourceId::COMPILATION_ROOT;
-    let mut donor_strings = StringTable::new();
-    let donor_value = donor_strings.intern("donor-value");
-    let mut destination_strings = StringTable::new();
-    destination_strings.intern("destination-prefix");
-    let destination_value = destination_strings.intern("destination-value");
-    assert_ne!(
-        donor_value, destination_value,
-        "the fixture must distinguish donor and destination string handles",
-    );
-
-    let mut source_owner = FileTokens::new_with_identity(
-        PathId::ROOT,
-        source,
-        None,
-        vec![Token::new(
-            TokenKind::StringSliceLiteral(donor_value),
-            LocalSpan::source_start(),
-        )],
-        PathSyntaxTable::new(),
-    );
-    source_owner.freeze_path_syntax_for_test();
-    let range = token_range(source, 0, 1);
-    let remapped = FileTokens::new_remapped_bounded_adapter(
-        &source_owner,
-        range,
-        None,
-        PathId::ROOT,
-        vec![Token::new(
-            TokenKind::StringSliceLiteral(destination_value),
-            LocalSpan::source_start(),
-        )],
-        PathSyntaxTable::new(),
-    )
-    .expect("the remapped bounded adapter should retain canonical provenance");
-
-    let expression = FileTokens::new_bounded_expression_substream(
-        &remapped,
-        range,
-        PathId::ROOT,
-        LocalSpan::source_start(),
-    )
-    .expect("nested expression materialization should preserve the adapter lane");
-
-    assert_eq!(
-        expression.tokens[0].kind,
-        TokenKind::StringSliceLiteral(destination_value),
-        "nested expression adapters must not decode donor payload IDs from canonical storage",
-    );
-}
-
 fn token_range(source: SourceId, start: u32, end: u32) -> TokenRange {
     TokenRange::from_raw(source, start, end).expect("fixture token range should be ordered")
 }

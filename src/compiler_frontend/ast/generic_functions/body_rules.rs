@@ -62,7 +62,8 @@ pub(crate) fn validate_generic_function_body(
             ),
         )));
     };
-    let (mut body_cursor, _) = body.parser_cursor(string_table, path_fork)?;
+    let parse_owner = body.parse_owner(string_table, path_fork)?;
+    let (mut body_cursor, _) = parse_owner.cursor()?;
     function_body_to_ast(
         &mut body_cursor,
         context,

@@ -731,8 +731,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             self.deferred_generic_requests.push(request);
             return Ok(());
         };
-        let (mut body_cursor, body_source_id) = body
-            .parser_cursor(string_table, &mut *self.path_fork)
+        let parse_owner = body
+            .parse_owner(string_table, &mut *self.path_fork)
+            .map_err(|error| self.error_messages(error, string_table))?;
+        let (mut body_cursor, body_source_id) = parse_owner
+            .cursor()
             .map_err(|error| self.error_messages(error, string_table))?;
         let frozen_identity_handle = body.frozen_identity_handle().cloned();
 
@@ -1054,7 +1057,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // Direct canonical body cursor: share the prepared-source owner without
         // materialising a bounded `FileTokens` compatibility vector. Segmented
         // headers use the retained sequence; contiguous headers use the range.
-        // Loop/template `Vec<Token>` windows and synthetic/remapped adapters stay
+        // Loop/template `Vec<Token>` windows and synthetic/legacy-stream adapters stay
         // on the explicit compatibility lane.
         let (body_source, body_os_path) = self
             .canonical_owner_for_header(&header)

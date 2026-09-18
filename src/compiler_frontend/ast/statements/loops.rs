@@ -209,7 +209,7 @@ fn is_empty_header_window(window: &mut AstCursor) -> bool {
 ///
 /// WHAT: collects `[start, end)` from the legacy token vector when `subcursor_window`
 /// returns `Ok(None)`.
-/// WHY: synthetic/remapped `FileTokens` streams have no canonical owner to window; this lane
+/// WHY: synthetic and legacy `FileTokens` streams have no canonical owner to window; this lane
 /// never clones canonical `SourceTokens`.
 fn collect_compatibility_header_tokens(
     token_stream: &AstCursor,

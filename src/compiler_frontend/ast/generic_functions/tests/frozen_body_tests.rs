@@ -1,14 +1,17 @@
 //! Focused tests for frozen generic body and resource-default materialisation.
 //!
-//! WHAT: proves canonical token payloads round-trip through one source-owned token range and
-//! its bounded parser adapter, repeated spellings share one string entry, frozen resource
-//! defaults cross the generated sidecar boundary through stable origins, and retained bodies
-//! stay `Send` without owning a second token store.
+//! WHAT: proves canonical token payloads reach a requester through one source-owned token
+//! window, repeated spellings share one string entry, frozen resource defaults cross the
+//! generated sidecar boundary through stable origins, and retained bodies stay `Send` without
+//! owning a second token store.
 //! WHY: the integration case `generic_parameter_default_file_value_success` owns authored
 //! `@assets/logo.svg` syntax through Stage 0 resolution. These tests own the freeze-to-sidecar
 //! seam from that resolved AST representation while keeping donor source identity explicit.
 
-use super::super::{GenericFunctionBody, GenericFunctionTemplate, MaterialisedDonorContext};
+use super::super::{
+    GenericFunctionBody, GenericFunctionTemplate, MaterialisedDonorContext,
+    templates::BodyParseOwner,
+};
 use super::ModuleMaterialisationInput;
 use super::artefact_emit::{ModuleMaterialisationContext, check_materialisation_row_identity};
 use super::frozen_file_references::StableResolvedFileReferenceOutcome;
@@ -57,7 +60,7 @@ use crate::compiler_frontend::semantic_identity::{
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
-    FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathInternerBuilder, PathInternerFork,
@@ -171,6 +174,43 @@ fn resolved_token_text(
         }
         other => format!("{other:?}"),
     }
+}
+
+/// Render one canonical owner's tokens through its own payloads and cold stores.
+///
+/// The rebased parse owner is the requester's view of a donor body, so every payload must
+/// resolve in the requester's tables.
+fn canonical_owner_text(
+    owner: &SourceTokens,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> Vec<String> {
+    let path_syntax = owner
+        .path_syntax_table()
+        .expect("a parse owner retains its path rows");
+    let range = owner
+        .full_range()
+        .expect("a parse owner has a whole extent");
+    let mut cursor = owner
+        .cursor(range)
+        .expect("a parse owner cursor is in bounds");
+    let mut rendered = Vec::new();
+    while let Some(token_ref) = cursor.advance() {
+        let is_eof = token_ref.is_eof();
+        let kind = token_ref
+            .to_token_kind()
+            .expect("every canonical payload resolves in its own owner");
+        rendered.push(resolved_token_text(
+            &Token::new(kind, token_ref.span()),
+            path_syntax,
+            path_fork,
+            string_table,
+        ));
+        if is_eof {
+            break;
+        }
+    }
+    rendered
 }
 fn body_view(original: &FileTokens, declaration_path: PathId) -> GenericFunctionBody {
     // Test fixtures are often still in the mutable preparing state. Model the production
@@ -526,9 +566,16 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked range");
-    let materialised_stream = materialised_body
-        .parser_stream(&mut generated_table, &mut generated_path_fork)
-        .expect("materialised body should derive a bounded parser adapter");
+    let parse_owner = materialised_body
+        .parse_owner(&mut generated_table, &mut generated_path_fork)
+        .expect("materialised body should rebase into a canonical parse owner");
+    let BodyParseOwner::Rebased {
+        owner: rebased_owner,
+        ..
+    } = &parse_owner
+    else {
+        panic!("a materialised body with retained donor strings must rebase");
+    };
     assert!(
         materialised_body
             .resolution_facts()
@@ -542,28 +589,18 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
         .iter()
         .map(|token| resolved_token_text(token, &path_syntax, &path_fork, &source_table))
         .collect::<Vec<_>>();
-    let materialised_path_syntax = materialised_stream
+    let materialised_path_syntax = rebased_owner
         .path_syntax_table()
-        .expect("materialised adapter should retain path rows");
-    let materialised_text = materialised_stream
-        .tokens
-        .iter()
-        .map(|token| {
-            resolved_token_text(
-                token,
-                materialised_path_syntax,
-                &generated_path_fork,
-                &generated_table,
-            )
-        })
-        .collect::<Vec<_>>();
+        .expect("the rebased owner should retain path rows");
+    let materialised_text =
+        canonical_owner_text(rebased_owner, &generated_path_fork, &generated_table);
     assert_eq!(
         materialised_text, original_text,
-        "every retained token payload must round-trip through a bounded adapter",
+        "every retained token payload must round-trip into the requester's domain",
     );
     assert_eq!(
         generated_path_fork.render_portable(
-            materialised_stream.src_path,
+            materialised_body.declaration_path(),
             &generated_table,
             &mut Vec::new(),
         ),
@@ -576,7 +613,7 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
     assert_eq!(
         generated_path_fork.render_portable(path, &generated_table, &mut Vec::new()),
         "provider/CONST",
-        "retained path syntax rows must round-trip through the adapter",
+        "retained path syntax rows must round-trip into the requester's domain",
     );
 }
 
@@ -630,12 +667,15 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked range");
-    let materialised_stream = materialised_body
-        .parser_stream(&mut generated_table, &mut path_fork)
-        .expect("materialised body should derive its bounded parser adapter");
-    materialised_stream
+    let parse_owner = materialised_body
+        .parse_owner(&mut generated_table, &mut path_fork)
+        .expect("materialised body should rebase into a canonical parse owner");
+    let BodyParseOwner::Rebased { owner, .. } = &parse_owner else {
+        panic!("a materialised body with retained donor strings must rebase");
+    };
+    owner
         .path_syntax_table()
-        .expect("adapter should retain donor path rows")
+        .expect("the rebased owner should retain donor path rows")
         .validate_file_owned_locations(SourceId::COMPILATION_ROOT)
         .expect("canonical path rows stay owned by the donor source file");
 }
@@ -765,20 +805,20 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked source range");
-    let parser_stream = materialised_body
-        .parser_stream(&mut generated_table, &mut path_fork)
-        .expect("same-boundary materialised body should derive a bounded adapter");
-    let parser_token_ids = parser_stream
-        .tokens
+    let parse_owner = materialised_body
+        .parse_owner(&mut generated_table, &mut path_fork)
+        .expect("same-boundary materialised body should rebase into a parse owner");
+    let BodyParseOwner::Rebased { owner, .. } = &parse_owner else {
+        panic!("a materialised body with retained donor strings must rebase");
+    };
+    let parser_token_ids = owner
+        .shapes()
         .iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::Path(path_id) => Some(path_id),
-            _ => None,
-        })
+        .filter_map(|shape| shape.path_syntax_id())
         .collect::<Vec<_>>();
     assert_eq!(
         parser_token_ids, captured_token_ids,
-        "same-boundary parser adapters must preserve the donor PathSyntaxIds used by facts",
+        "a same-boundary parse owner must preserve the donor PathSyntaxIds used by facts",
     );
     for path_id in &retained_ids {
         assert!(
@@ -928,11 +968,14 @@ fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked source owner");
-    let stream = materialised_body
-        .parser_stream(&mut generated_table, &mut generated_path_fork)
-        .expect("materialised body should render through the requester boundary");
+    let parse_owner = materialised_body
+        .parse_owner(&mut generated_table, &mut generated_path_fork)
+        .expect("materialised body should rebase through the requester boundary");
+    let BodyParseOwner::Rebased { owner, .. } = &parse_owner else {
+        panic!("a materialised body with retained donor strings must rebase");
+    };
     assert_eq!(
-        stream.tokens.len(),
+        owner.len(),
         1,
         "the retained body must remain bounded after its construction owners drop",
     );
@@ -1068,30 +1111,20 @@ fn canonical_string_only_donors_remap_transiently_without_retaining_file_tokens(
     let materialised_body = materialised
         .into_generic_body()
         .expect("canonical string-only body should retain its checked range");
-    {
-        let (cursor, source_id) = materialised_body
-            .parser_cursor(&mut materialised_strings, &mut materialised_path_fork)
-            .expect("canonical parser cursor should remap through a transient adapter");
-        assert_eq!(source_id, source);
-        let TokenKind::Symbol(symbol) = cursor.current_token_kind() else {
-            panic!("canonical parser cursor should expose the donor symbol");
-        };
-        assert_eq!(
-            materialised_strings.resolve(*symbol),
-            "donor",
-            "the canonical cursor must remap colliding donor StringIds",
-        );
-    }
-    let stream = materialised_body
-        .parser_stream(&mut materialised_strings, &mut materialised_path_fork)
-        .expect("canonical parser stream should remap colliding donor StringIds");
-    let TokenKind::Symbol(symbol) = stream.tokens[0].kind else {
-        panic!("canonical parser stream should expose the donor symbol");
+    let parse_owner = materialised_body
+        .parse_owner(&mut materialised_strings, &mut materialised_path_fork)
+        .expect("a canonical string-only donor should rebase into a parse owner");
+    let (cursor, source_id) = parse_owner
+        .cursor()
+        .expect("a rebased parse owner should borrow its canonical cursor");
+    assert_eq!(source_id, source);
+    let TokenKind::Symbol(symbol) = cursor.current_token_kind() else {
+        panic!("the rebased parser cursor should expose the donor symbol");
     };
     assert_eq!(
-        materialised_strings.resolve(symbol),
+        materialised_strings.resolve(*symbol),
         "donor",
-        "the canonical stream must remap colliding donor StringIds",
+        "the rebased cursor must resolve colliding donor StringIds to the donor spelling",
     );
 }
 
@@ -1184,12 +1217,19 @@ fn donor_numeric_literal_text_renders_the_donor_spelling_for_the_requester() {
         .expect("a numeric donor body should materialise")
         .into_generic_body()
         .expect("a numeric donor body should retain its checked range");
-    let stream = materialised_body
-        .parser_stream(&mut materialised_strings, &mut materialised_path_fork)
+    let parse_owner = materialised_body
+        .parse_owner(&mut materialised_strings, &mut materialised_path_fork)
         .expect("the requester boundary should rebase numeric literal text");
-    let TokenKind::NumericLiteral(numeric) = &stream.tokens[0].kind else {
-        panic!("the rebased stream should expose the donor numeric literal");
+    let BodyParseOwner::Rebased { owner, .. } = &parse_owner else {
+        panic!("a materialised body with retained donor strings must rebase");
     };
+    let numeric_id = owner.shapes()[0]
+        .numeric_literal_id()
+        .expect("the rebased shape should carry its numeric handle");
+    let numeric = owner
+        .numeric_literal_store()
+        .try_get(numeric_id)
+        .expect("the rebased numeric row should stay addressable");
     assert_eq!(
         materialised_strings.resolve(numeric.source_text),
         "-12.5",
@@ -1208,6 +1248,170 @@ fn donor_numeric_literal_text_renders_the_donor_spelling_for_the_requester() {
         ),
         (NumericLiteralKind::DecimalPoint, 2, 1),
         "rebasing must not disturb the donor's lexical facts",
+    );
+}
+
+/// A segmented donor body must rebase into one dense contiguous requester owner.
+///
+/// The skipped donor tokens carry their own numeric row, so the rebased store proves the body
+/// walked its sequence rather than its covering range.
+#[test]
+fn a_segmented_donor_body_rebases_into_one_contiguous_requester_owner() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut donor_strings = StringTable::new();
+    let mut spans = ExtendedSpanBuilder::default();
+    let span_at = |offset: u32, spans: &mut ExtendedSpanBuilder| {
+        LocalSpan::exact(offset, 2, spans).expect("fixture spans fit inline")
+    };
+    let skipped_numeric = NumericLiteralToken::new(
+        NumericLiteralSign::Positive,
+        donor_strings.intern("7"),
+        donor_strings.intern("7"),
+        NumericLiteralKind::WholeNumber,
+        1,
+        0,
+        0,
+        NumericExponentSign::None,
+    );
+    let kept_numeric = NumericLiteralToken::new(
+        NumericLiteralSign::Negative,
+        donor_strings.intern("-12.5"),
+        donor_strings.intern("12.5"),
+        NumericLiteralKind::DecimalPoint,
+        2,
+        1,
+        0,
+        NumericExponentSign::None,
+    );
+    let donor_tokens = vec![
+        Token::new(
+            TokenKind::Symbol(donor_strings.intern("alpha")),
+            span_at(0, &mut spans),
+        ),
+        Token::new(
+            TokenKind::NumericLiteral(skipped_numeric),
+            span_at(8, &mut spans),
+        ),
+        Token::new(
+            TokenKind::Symbol(donor_strings.intern("beta")),
+            span_at(16, &mut spans),
+        ),
+        Token::new(
+            TokenKind::NumericLiteral(kept_numeric),
+            span_at(24, &mut spans),
+        ),
+        Token::new(TokenKind::Eof, span_at(32, &mut spans)),
+    ];
+    let mut donor_file = FileTokens::new_with_identity(
+        PathId::ROOT,
+        source,
+        None,
+        donor_tokens,
+        PathSyntaxTable::new(),
+    );
+    let segments = [
+        TokenRange::from_raw(source, 0, 1).expect("fixture segment should be ordered"),
+        TokenRange::from_raw(source, 2, 5).expect("fixture segment should be ordered"),
+    ];
+    let sequence = donor_file
+        .try_register_token_sequence(&segments)
+        .expect("ordered adjacent segments should register");
+    donor_file.freeze_path_syntax_for_test();
+    let donor_owner = donor_file
+        .canonical_source_tokens_arc()
+        .expect("test fixture must use a canonical source owner");
+    let body = GenericFunctionBody::materialised(
+        Arc::clone(&donor_owner),
+        None,
+        TokenRange::from_raw(source, 0, 5).expect("covering range should be ordered"),
+        Some(sequence),
+        PathId::ROOT,
+        MaterialisedDonorContext {
+            resolution_facts: Arc::new(
+                Stage0ResolutionFacts::frozen_generic(source, Vec::new())
+                    .expect("empty frozen facts should be valid"),
+            ),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+            source_path_table: None,
+            source_string_table: Some(Arc::new(donor_strings.freeze())),
+        },
+    )
+    .expect("a segmented donor body should retain its donor strings");
+
+    // The requester names different text behind the donor's payload StringIds.
+    let mut requester_strings = StringTable::new();
+    let mut requester_fork = PathInternerFork::empty();
+    requester_strings.intern("requester alpha");
+    requester_strings.intern("requester beta");
+    let parse_owner = body
+        .parse_owner(&mut requester_strings, &mut requester_fork)
+        .expect("a segmented donor body should rebase into a parse owner");
+    let BodyParseOwner::Rebased { owner, .. } = &parse_owner else {
+        panic!("a materialised body with retained donor strings must rebase");
+    };
+
+    let donor_indices = [0usize, 2, 3, 4];
+    assert_eq!(
+        owner.len(),
+        donor_indices.len(),
+        "the rebased owner holds exactly the sequence's tokens",
+    );
+    assert_eq!(
+        owner
+            .shapes()
+            .iter()
+            .map(|shape| shape.tag())
+            .collect::<Vec<_>>(),
+        donor_indices
+            .iter()
+            .map(|index| donor_owner.shapes()[*index].tag())
+            .collect::<Vec<_>>(),
+        "rebasing preserves the donor's tags in sequence order",
+    );
+    assert_eq!(
+        owner.spans().to_vec(),
+        donor_indices
+            .iter()
+            .map(|index| donor_owner.spans()[*index])
+            .collect::<Vec<_>>(),
+        "rebasing preserves every donor span, so diagnostics still point at the donor source",
+    );
+    assert_eq!(
+        owner.source(),
+        source,
+        "the rebased owner keeps the donor source identity",
+    );
+
+    let rebased_symbols = [0usize, 1]
+        .map(|index| {
+            let string_id = owner.shapes()[index]
+                .string_id()
+                .expect("the rebased symbol shape should carry its string handle");
+            requester_strings.resolve(string_id).to_owned()
+        })
+        .to_vec();
+    assert_eq!(
+        rebased_symbols,
+        vec!["alpha".to_owned(), "beta".to_owned()],
+        "rebased payloads resolve to the donor spellings in the requester's table",
+    );
+
+    let kept_handle = owner.shapes()[2]
+        .numeric_literal_id()
+        .expect("the rebased numeric shape should carry its handle");
+    assert_eq!(
+        owner.numeric_literal_store().len(),
+        1,
+        "only the sequence's numeric row is staged, so the skipped row is not copied",
+    );
+    let kept_row = owner
+        .numeric_literal_store()
+        .try_get(kept_handle)
+        .expect("the rebased numeric row should stay addressable");
+    assert_eq!(
+        requester_strings.resolve(kept_row.source_text),
+        "-12.5",
+        "the rebased numeric handle must address the donor row the sequence kept",
     );
 }
 
@@ -1269,15 +1473,18 @@ fn donor_path_handles_render_the_donor_spelling_for_the_requester() {
         "the fixture must exercise a colliding PathId",
     );
 
-    let stream = body
-        .parser_stream(&mut requester_strings, &mut requester_fork)
+    let parse_owner = body
+        .parse_owner(&mut requester_strings, &mut requester_fork)
         .expect("the requester boundary should rebase donor path rows by spelling");
-    let TokenKind::Path(rebased_handle) = stream.tokens[0].kind else {
-        panic!("the rebased stream should expose the donor path token");
+    let BodyParseOwner::Rebased { owner, .. } = &parse_owner else {
+        panic!("a materialised body with retained donor strings must rebase");
     };
-    let rebased_row = stream
+    let rebased_handle = owner.shapes()[0]
+        .path_syntax_id()
+        .expect("the rebased shape should carry its path handle");
+    let rebased_row = owner
         .path_syntax_table()
-        .expect("the rebased adapter should own its path table")
+        .expect("the rebased owner should own its path table")
         .try_path(rebased_handle)
         .expect("the rebased row should stay addressable");
     let requester_table = requester_fork.snapshot_table();
@@ -1549,13 +1756,19 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
             .body_tokens
             .as_ref()
             .expect("the generic should retain its body tokens");
-        let mut body_fork = path_fork.fork_source().fork_for_module();
-        let mut body_table = string_table.clone();
-        let body = body
-            .parser_stream(&mut body_table, &mut body_fork)
-            .expect("the generic should derive a bounded body adapter");
-        let placeholder_span = body
-            .tokens
+        let body_table = string_table.clone();
+        let (body_owner, body_range, body_sequence) = body.canonical_view();
+        assert!(
+            body_sequence.is_none(),
+            "the authored source fixture body is contiguous"
+        );
+        let body_src_path = body.declaration_path();
+        let body_os_path = body.canonical_os_path().cloned();
+        let body_file_id = body_owner.source();
+        let mut tokens = body_owner
+            .materialize_range(body_range)
+            .expect("the source body should materialise for this fixture");
+        let placeholder_span = tokens
             .iter()
             .find_map(|token| match token.kind {
                 TokenKind::StringSliceLiteral(id) if body_table.resolve(id) == "placeholder" => {
@@ -1569,9 +1782,8 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
             path_fork
                 .try_intern_components(&[assets_component, logo_component])
                 .expect("test path fits"),
-            SourceSpan::new(body.file_id, placeholder_span),
+            SourceSpan::new(body_file_id, placeholder_span),
         );
-        let mut tokens = body.tokens.clone();
         let mut replaced = false;
         for token in &mut tokens {
             if let TokenKind::StringSliceLiteral(id) = token.kind
@@ -1583,11 +1795,10 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
             }
         }
         assert!(replaced, "the placeholder body literal should be present");
-        let body_file_id = body.file_id;
         let body = FileTokens::new_with_identity(
-            body.src_path,
+            body_src_path,
             body_file_id,
-            body.canonical_os_path.clone(),
+            body_os_path,
             tokens,
             path_syntax,
         );
