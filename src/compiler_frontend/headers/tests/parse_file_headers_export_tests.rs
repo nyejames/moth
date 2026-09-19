@@ -1,4 +1,6 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // ------------------------------
 //  Export block parsing tests
@@ -14,7 +16,7 @@ fn export_alone_is_rejected() {
         matches!(
             diagnostic.payload,
             DiagnosticPayload::ExpectedToken { expected, .. }
-                if expected == DiagnosticToken::from(TokenKind::Colon)
+                if expected == DiagnosticToken::from_static_tag(TokenTag::COLON)
         )
     }));
 }
@@ -32,7 +34,7 @@ fn legacy_inline_export_declaration_is_rejected() {
         matches!(
             diagnostic.payload,
             DiagnosticPayload::ExpectedToken { expected, .. }
-                if expected == DiagnosticToken::from(TokenKind::Colon)
+                if expected == DiagnosticToken::from_static_tag(TokenTag::COLON)
         )
     }));
 }
@@ -93,7 +95,7 @@ fn legacy_export_path_syntax_is_rejected() {
         matches!(
             diagnostic.payload,
             DiagnosticPayload::ExpectedToken { expected, .. }
-                if expected == DiagnosticToken::from(TokenKind::Colon)
+                if expected == DiagnosticToken::from_static_tag(TokenTag::COLON)
         )
     }));
 }
@@ -111,7 +113,7 @@ fn export_bare_path_rejected_as_deferred_namespace_export() {
         matches!(
             diagnostic.payload,
             DiagnosticPayload::ExpectedToken { expected, .. }
-                if expected == DiagnosticToken::from(TokenKind::Colon)
+                if expected == DiagnosticToken::from_static_tag(TokenTag::COLON)
         )
     }));
 }

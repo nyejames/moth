@@ -22,7 +22,7 @@ use crate::compiler_frontend::numeric_text::token::{
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -132,9 +132,10 @@ fn parse_whole_number_token(
         NumericLiteralSign::Negative => format!("-{normalized_text}"),
     };
     let source_text = string_table.intern(&source);
-    let tokens = vec![
-        Token::new(
-            TokenKind::NumericLiteral(NumericLiteralToken::new(
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    builder
+        .push_numeric(
+            NumericLiteralToken::new(
                 sign,
                 source_text,
                 min_text,
@@ -143,25 +144,19 @@ fn parse_whole_number_token(
                 0,
                 0,
                 NumericExponentSign::None,
-            )),
+            ),
             LocalSpan::source_start(),
-        ),
-        Token::new(TokenKind::Eof, LocalSpan::source_start()),
-    ];
-    let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    file_tokens.freeze_path_syntax_for_test();
-    let owner = file_tokens
-        .canonical_source_tokens_arc()
-        .expect("test token stream must retain its canonical source owner");
+        )
+        .expect("numeric fixture token should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF fixture token should build");
+    let owner = builder.finish().expect("canonical fixture tokens should build");
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(
-        &owner,
-        file_tokens.canonical_os_path.clone(),
-        range,
-    )
-    .expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_source_tokens(&owner, None, range)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = Vec::new();
     let mut next_number_negative = next_number_negative;
     let mut type_environment = TypeEnvironment::new();

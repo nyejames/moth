@@ -133,7 +133,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
 
-    let handoff = source_context
+    let lexed = source_context
         .tokenize(
             source,
             &mut path_fork,
@@ -145,15 +145,9 @@ pub(crate) fn parse_single_file_ast_build_result(
             TokenizeFailure::Infrastructure(error) => {
                 panic!("parse fixture tokenization encountered infrastructure failure: {error:?}")
             }
-        })?
-        .into_canonical_lexer_handoff()
-        .expect("parse fixture should produce a canonical lexer handoff");
-    let owner = SourceTokenOwner::new(
-        handoff.tokens,
-        handoff.logical_path,
-        handoff.canonical_os_path,
-    );
-    let path_syntax = handoff.path_syntax;
+        })?;
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let path_syntax = lexed.path_syntax;
     let (string_table, span_builder) = source_context.preparation_parts();
 
     let output = prepare_file_from_tokens(
@@ -168,15 +162,15 @@ pub(crate) fn parse_single_file_ast_build_result(
         &mut path_fork,
     )
     .map_err(|error| match error {
-                crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
-                    crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError {
-                        diagnostic, ..
-                    },
-                ) => diagnostic,
-                crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
-                    error,
-                ) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
-            })?;
+        crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
+            crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError {
+                diagnostic, ..
+            },
+        ) => diagnostic,
+        crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
+            error,
+        ) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
+    })?;
     let source_file_id = output.file_id;
     let file_value_resolution = test_file_value_resolution_services(
         source_file_id,

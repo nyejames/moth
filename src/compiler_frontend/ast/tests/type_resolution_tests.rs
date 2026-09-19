@@ -41,7 +41,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic, parse_single_file_ast_result,
 };
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -151,7 +151,7 @@ fn checked_conversion_rejects_inferred_type() {
             DiagnosticPayload::InvalidTypeAnnotation {
                 context: TypeAnnotationContext::DeclarationTarget,
                 reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
-            } if *found == DiagnosticToken::from(TokenKind::Eof)
+            } if *found == DiagnosticToken::from_static_tag(TokenTag::EOF)
         ),
         "expected InvalidTypeAnnotation for Inferred, got {:?}",
         error.payload

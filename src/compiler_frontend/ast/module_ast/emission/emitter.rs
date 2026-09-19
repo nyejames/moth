@@ -1054,11 +1054,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Parse body and emit node
         // --------------------------
-        // Direct canonical body cursor: share the prepared-source owner without
-        // materialising a bounded `FileTokens` compatibility vector. Segmented
-        // headers use the retained sequence; contiguous headers use the range.
-        // Loop/template `Vec<Token>` windows and synthetic/legacy-stream adapters stay
-        // on the explicit compatibility lane.
+        // Direct canonical body cursor: share the prepared-source owner over the
+        // bounded canonical source-token range. Segmented headers use the retained
+        // sequence; contiguous headers use the range. Loop/template windows and
+        // explicit synthetic streams use their own explicit cursors.
         let (body_source, body_os_path) = self
             .canonical_owner_for_header(&header)
             .map_err(|error| self.error_messages(error, string_table))?;

@@ -44,7 +44,7 @@ pub fn create_loop(
     let colon_index = find_loop_header_colon_index(&mut *token_stream)?;
 
     let mut window = token_stream.subcursor_window(start_index, colon_index)?;
-    if is_empty_header_window(&mut window) {
+    if is_empty_header_window(&mut window)? {
         return Err(CompilerDiagnostic::invalid_loop_header(
             InvalidLoopHeaderReason::EmptyHeader,
             span,
@@ -99,6 +99,7 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
     let mut nesting_depth = NestingDepth::default();
     let mut outcome: Option<LoopResult<usize>> = None;
     while token_stream.position() < end && !token_stream.is_at_end() {
+        token_stream.validate_current_payload()?;
         let tag = token_stream.current_tag();
         let token_span = token_stream.current_span();
         let is_top_level = nesting_depth.is_top_level();
@@ -141,12 +142,12 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
 /// Canonical empty-header check over the header window.
 ///
 /// WHAT: reports whether the window holds only newlines (or nothing) without cloning tokens.
-/// WHY: an empty header must report `EmptyHeader` instead of an expression diagnostic.
-fn is_empty_header_window(window: &mut AstCursor) -> bool {
+fn is_empty_header_window(window: &mut AstCursor) -> LoopResult<bool> {
     let resume = window.position();
     let end = window.length();
     let mut empty = true;
     while window.position() < end && !window.is_at_end() {
+        window.validate_current_payload()?;
         if window.current_tag() != TokenTag::NEWLINE {
             empty = false;
             break;
@@ -156,7 +157,7 @@ fn is_empty_header_window(window: &mut AstCursor) -> bool {
     window
         .set_position(resume)
         .expect("empty header resume stays inside the active parser view");
-    empty
+    Ok(empty)
 }
 
 #[cfg(test)]

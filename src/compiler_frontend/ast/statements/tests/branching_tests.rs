@@ -28,7 +28,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
@@ -1024,7 +1024,7 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
         .try_intern_portable_path("test.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = crate::compiler_frontend::source::ExtendedSpanBuilder::new();
-    let mut tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
+    let tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
         source,
         interned_path,
         crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
@@ -1035,27 +1035,17 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
         &mut span_builder,
     )
     .expect("classifier fixture should tokenize");
-
-    while tokens.index < tokens.length && tokens.current_token_kind() != &TokenKind::If {
-        tokens.advance();
-    }
-    assert_eq!(tokens.current_token_kind(), &TokenKind::If);
-    tokens.advance();
-    let owner = tokens
-        .canonical_source_tokens_arc()
-        .expect("test token stream must expose canonical source tokens");
-    let range = owner
+    let range = tokens
+        .tokens
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut cursor = AstCursor::from_source_tokens(
-        &owner,
-        tokens.canonical_os_path.clone(),
-        range,
-    )
-    .expect("test token stream must expose an AST cursor");
-    cursor
-        .set_position(tokens.index)
-        .expect("the canonical cursor must seek to the tokenized header");
+    let mut cursor = AstCursor::from_source_tokens(&tokens.tokens, None, range)
+        .expect("test token stream must expose an AST cursor");
+    while !cursor.is_at_end() && cursor.current_tag() != TokenTag::IF {
+        cursor.advance();
+    }
+    assert_eq!(cursor.current_tag(), TokenTag::IF);
+    cursor.advance();
     classify_if_header(&mut cursor).shape
 }
 
@@ -1106,7 +1096,7 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
             .try_intern_portable_path("test.moth", &mut string_table)
             .expect("test path fits");
         let mut span_builder = crate::compiler_frontend::source::ExtendedSpanBuilder::new();
-        let mut tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
+        let tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
             "if name is\n|value|:\n    io.line(\"x\")\n;\n",
             interned_path,
             crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
@@ -1117,25 +1107,17 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
             &mut span_builder,
         )
         .expect("classifier fixture should tokenize");
-        while tokens.index < tokens.length && tokens.current_token_kind() != &TokenKind::If {
-            tokens.advance();
-        }
-        tokens.advance();
-        let owner = tokens
-            .canonical_source_tokens_arc()
-            .expect("test token stream must expose canonical source tokens");
-        let range = owner
+        let range = tokens
+            .tokens
             .full_range()
             .expect("test token stream must expose a checked full range");
-        let mut cursor = AstCursor::from_source_tokens(
-            &owner,
-            tokens.canonical_os_path.clone(),
-            range,
-        )
-        .expect("test token stream must expose an AST cursor");
-        cursor
-            .set_position(tokens.index)
-            .expect("the canonical cursor must seek to the tokenized header");
+        let mut cursor = AstCursor::from_source_tokens(&tokens.tokens, None, range)
+            .expect("test token stream must expose an AST cursor");
+        while !cursor.is_at_end() && cursor.current_tag() != TokenTag::IF {
+            cursor.advance();
+        }
+        assert_eq!(cursor.current_tag(), TokenTag::IF);
+        cursor.advance();
         classify_if_header(&mut cursor)
     };
 

@@ -1,6 +1,6 @@
 use super::{
     DiagnosticPayload, DiagnosticToken, InvalidFunctionSignatureReason,
-    InvalidGenericParameterReason, InvalidTypeAnnotationReason, TokenDescriptorPayload, TokenTag,
+    InvalidGenericParameterReason, InvalidTypeAnnotationReason, TokenDescriptorPayload,
     TypeAnnotationContext,
 };
 use crate::compiler_frontend::compiler_messages::render::{
@@ -11,9 +11,12 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenIndex, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenTag,
+};
+use std::sync::Arc;
 
-fn projection_fixture() -> (FileTokens, StringTable) {
+fn projection_fixture() -> (Arc<SourceTokens>, StringTable) {
     let source = SourceId::COMPILATION_ROOT;
     let mut string_table = StringTable::new();
     let name = string_table.intern("value");
@@ -23,103 +26,39 @@ fn projection_fixture() -> (FileTokens, StringTable) {
     let integer = NumericLiteralToken::test_new("42", &mut string_table);
     let decimal = NumericLiteralToken::test_new("3.5", &mut string_table);
     let exponent = NumericLiteralToken::test_new("1e6", &mut string_table);
+    let span = LocalSpan::source_start();
 
     let mut path_syntax = PathSyntaxTable::with_source(source);
-    let path = path_syntax.push(PathId::ROOT, LocalSpan::source_start());
-    let kinds = [
-        TokenKind::Eof,
-        TokenKind::Path(path),
-        TokenKind::Symbol(name),
-        TokenKind::StyleDirective(style),
-        TokenKind::StringSliceLiteral(string),
-        TokenKind::NumericLiteral(integer),
-        TokenKind::NumericLiteral(decimal),
-        TokenKind::NumericLiteral(exponent),
-        TokenKind::CharLiteral('λ'),
-        TokenKind::RawStringLiteral(raw_string),
-        TokenKind::BoolLiteral(true),
-        TokenKind::BoolLiteral(false),
-    ];
-    let tokens = kinds
-        .into_iter()
-        .map(|kind| Token::new(kind, LocalSpan::source_start()))
-        .collect();
-
-    let mut file_tokens =
-        FileTokens::new_with_identity(PathId::ROOT, source, None, tokens, path_syntax);
-    file_tokens.freeze_path_syntax_for_test();
-    (file_tokens, string_table)
+    let path = path_syntax.push(PathId::ROOT, span);
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    builder.push_static(TokenTag::EOF, span).unwrap();
+    builder.push_path(TokenTag::PATH, path, span).unwrap();
+    builder.push_symbol(TokenTag::SYMBOL, name, span).unwrap();
+    builder
+        .push_symbol(TokenTag::STYLE_DIRECTIVE, style, span)
+        .unwrap();
+    builder
+        .push_symbol(TokenTag::STRING_SLICE_LITERAL, string, span)
+        .unwrap();
+    builder.push_numeric(integer, span).unwrap();
+    builder.push_numeric(decimal, span).unwrap();
+    builder.push_numeric(exponent, span).unwrap();
+    builder.push_char(TokenTag::CHAR_LITERAL, 'λ', span).unwrap();
+    builder
+        .push_symbol(TokenTag::RAW_STRING_LITERAL, raw_string, span)
+        .unwrap();
+    builder.push_bool(TokenTag::BOOL_LITERAL, true, span).unwrap();
+    builder.push_bool(TokenTag::BOOL_LITERAL, false, span).unwrap();
+    (
+        builder.finish().expect("projection fixture should build"),
+        string_table,
+    )
 }
 
 fn render_payload_message(payload: &DiagnosticPayload, string_table: &StringTable) -> String {
     render_payload(payload, DiagnosticRenderContext::new(string_table)).message
 }
 
-fn token_payload_pairs(
-    legacy: DiagnosticToken,
-    projected: DiagnosticToken,
-) -> [(DiagnosticPayload, DiagnosticPayload); 7] {
-    [
-        (
-            DiagnosticPayload::ExpectedToken {
-                expected: DiagnosticToken::from_static_tag(TokenTag::ARROW),
-                found: Some(legacy),
-            },
-            DiagnosticPayload::ExpectedToken {
-                expected: DiagnosticToken::from_static_tag(TokenTag::ARROW),
-                found: Some(projected),
-            },
-        ),
-        (
-            DiagnosticPayload::UnexpectedToken { found: legacy },
-            DiagnosticPayload::UnexpectedToken { found: projected },
-        ),
-        (
-            DiagnosticPayload::InvalidTypeAnnotation {
-                context: TypeAnnotationContext::DeclarationTarget,
-                reason: InvalidTypeAnnotationReason::InvalidTokenAfterName { token: legacy },
-            },
-            DiagnosticPayload::InvalidTypeAnnotation {
-                context: TypeAnnotationContext::DeclarationTarget,
-                reason: InvalidTypeAnnotationReason::InvalidTokenAfterName { token: projected },
-            },
-        ),
-        (
-            DiagnosticPayload::InvalidTypeAnnotation {
-                context: TypeAnnotationContext::DeclarationTarget,
-                reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found: legacy },
-            },
-            DiagnosticPayload::InvalidTypeAnnotation {
-                context: TypeAnnotationContext::DeclarationTarget,
-                reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found: projected },
-            },
-        ),
-        (
-            DiagnosticPayload::InvalidGenericParameter {
-                reason: InvalidGenericParameterReason::InvalidToken { found: legacy },
-            },
-            DiagnosticPayload::InvalidGenericParameter {
-                reason: InvalidGenericParameterReason::InvalidToken { found: projected },
-            },
-        ),
-        (
-            DiagnosticPayload::InvalidFunctionSignature {
-                reason: InvalidFunctionSignatureReason::MissingArrowOrColon { found: legacy },
-            },
-            DiagnosticPayload::InvalidFunctionSignature {
-                reason: InvalidFunctionSignatureReason::MissingArrowOrColon { found: projected },
-            },
-        ),
-        (
-            DiagnosticPayload::InvalidFunctionSignature {
-                reason: InvalidFunctionSignatureReason::MissingCommaOrColon { found: legacy },
-            },
-            DiagnosticPayload::InvalidFunctionSignature {
-                reason: InvalidFunctionSignatureReason::MissingCommaOrColon { found: projected },
-            },
-        ),
-    ]
-}
 
 #[test]
 fn diagnostic_token_has_the_locked_eight_byte_layout() {
@@ -143,36 +82,59 @@ fn static_and_path_descriptors_project_without_payload_data() {
 }
 
 #[test]
-fn every_token_payload_render_matches_legacy_and_survives_store_drop() {
-    let (file_tokens, string_table) = projection_fixture();
-    let (legacy_rendered, projected_payloads, projected_rendered) = {
-        let source_tokens = file_tokens
-            .source_tokens()
-            .expect("fixture should retain its canonical source token store");
-        let mut legacy_rendered = Vec::new();
+fn every_token_payload_render_survives_store_drop() {
+    let (source_tokens, string_table) = projection_fixture();
+    let (projected_payloads, projected_rendered) = {
         let mut projected_payloads = Vec::new();
         let mut projected_rendered = Vec::new();
 
-        for (index, legacy_token) in file_tokens.tokens.iter().enumerate() {
+        for index in 0..source_tokens.len() {
             let index = TokenIndex::try_from_index(index).expect("fixture index should fit");
             let token_ref = source_tokens
                 .token(index)
                 .expect("fixture token index should resolve");
-            let legacy = DiagnosticToken::from(&legacy_token.kind);
             let projected = DiagnosticToken::from_token_ref(token_ref);
-
-            for (legacy_payload, projected_payload) in token_payload_pairs(legacy, projected) {
-                legacy_rendered.push(render_payload_message(&legacy_payload, &string_table));
-                projected_rendered.push(render_payload_message(&projected_payload, &string_table));
-                projected_payloads.push(projected_payload);
+            let payloads = [
+                DiagnosticPayload::ExpectedToken {
+                    expected: DiagnosticToken::from_static_tag(TokenTag::ARROW),
+                    found: Some(projected),
+                },
+                DiagnosticPayload::UnexpectedToken { found: projected },
+                DiagnosticPayload::InvalidTypeAnnotation {
+                    context: TypeAnnotationContext::DeclarationTarget,
+                    reason: InvalidTypeAnnotationReason::InvalidTokenAfterName {
+                        token: projected,
+                    },
+                },
+                DiagnosticPayload::InvalidTypeAnnotation {
+                    context: TypeAnnotationContext::DeclarationTarget,
+                    reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
+                        found: projected,
+                    },
+                },
+                DiagnosticPayload::InvalidGenericParameter {
+                    reason: InvalidGenericParameterReason::InvalidToken { found: projected },
+                },
+                DiagnosticPayload::InvalidFunctionSignature {
+                    reason: InvalidFunctionSignatureReason::MissingArrowOrColon {
+                        found: projected,
+                    },
+                },
+                DiagnosticPayload::InvalidFunctionSignature {
+                    reason: InvalidFunctionSignatureReason::MissingCommaOrColon {
+                        found: projected,
+                    },
+                },
+            ];
+            for payload in payloads {
+                projected_rendered.push(render_payload_message(&payload, &string_table));
+                projected_payloads.push(payload);
             }
         }
 
-        (legacy_rendered, projected_payloads, projected_rendered)
+        (projected_payloads, projected_rendered)
     };
-
-    assert_eq!(legacy_rendered, projected_rendered);
-    drop(file_tokens);
+    drop(source_tokens);
 
     let after_drop = projected_payloads
         .iter()
@@ -182,29 +144,17 @@ fn every_token_payload_render_matches_legacy_and_survives_store_drop() {
 }
 
 #[test]
-fn projected_unexpected_and_expected_rendering_matches_legacy_before_and_after_drop() {
-    let (file_tokens, string_table) = projection_fixture();
-    let (legacy_rendered, projected_diagnostics, projected_rendered) = {
-        let source_tokens = file_tokens
-            .source_tokens()
-            .expect("fixture should retain its canonical source token store");
-        let mut legacy_rendered = Vec::with_capacity(file_tokens.tokens.len() * 2);
-        let mut projected_diagnostics = Vec::with_capacity(file_tokens.tokens.len() * 2);
-        let mut projected_rendered = Vec::with_capacity(file_tokens.tokens.len() * 2);
+fn projected_unexpected_and_expected_rendering_survives_store_drop() {
+    let (source_tokens, string_table) = projection_fixture();
+    let (projected_diagnostics, projected_rendered) = {
+        let mut projected_diagnostics = Vec::with_capacity(source_tokens.len() * 2);
+        let mut projected_rendered = Vec::with_capacity(source_tokens.len() * 2);
 
-        for (index, legacy_token) in file_tokens.tokens.iter().enumerate() {
+        for index in 0..source_tokens.len() {
             let index = TokenIndex::try_from_index(index).expect("fixture index should fit");
             let token_ref = source_tokens
                 .token(index)
                 .expect("fixture token index should resolve");
-            let legacy = DiagnosticToken::from(&legacy_token.kind);
-            let legacy_unexpected =
-                super::CompilerDiagnostic::unexpected_token_from_tag(legacy, None);
-            let legacy_expected = super::CompilerDiagnostic::expected_token_from_tags(
-                TokenTag::ARROW,
-                Some(legacy),
-                None,
-            );
             let projected_unexpected =
                 super::CompilerDiagnostic::unexpected_token_from_ref(token_ref, None);
             let projected_expected = super::CompilerDiagnostic::expected_token_from_ref(
@@ -213,14 +163,6 @@ fn projected_unexpected_and_expected_rendering_matches_legacy_before_and_after_d
                 None,
             );
 
-            legacy_rendered.push(render_payload_message(
-                &legacy_unexpected.payload,
-                &string_table,
-            ));
-            legacy_rendered.push(render_payload_message(
-                &legacy_expected.payload,
-                &string_table,
-            ));
             projected_rendered.push(render_payload_message(
                 &projected_unexpected.payload,
                 &string_table,
@@ -233,11 +175,10 @@ fn projected_unexpected_and_expected_rendering_matches_legacy_before_and_after_d
             projected_diagnostics.push(projected_expected);
         }
 
-        (legacy_rendered, projected_diagnostics, projected_rendered)
+        (projected_diagnostics, projected_rendered)
     };
 
-    assert_eq!(legacy_rendered, projected_rendered);
-    drop(file_tokens);
+    drop(source_tokens);
     let after_drop = projected_diagnostics
         .iter()
         .map(|diagnostic| render_payload_message(&diagnostic.payload, &string_table))
@@ -250,7 +191,7 @@ fn remapping_generic_parameter_projection_updates_symbol_text() {
     let name = local_table.intern("generic_name");
     let diagnostic = super::CompilerDiagnostic::invalid_generic_parameter(
         InvalidGenericParameterReason::InvalidToken {
-            found: DiagnosticToken::from(TokenKind::Symbol(name)),
+            found: DiagnosticToken::from_string_tag(TokenTag::SYMBOL, name),
         },
         None,
     );
@@ -267,21 +208,32 @@ fn remapping_generic_parameter_projection_updates_symbol_text() {
 }
 
 #[test]
-fn projection_uses_the_shared_tag_for_every_dynamic_descriptor() {
-    let (file_tokens, _string_table) = projection_fixture();
-    let source_tokens = file_tokens
-        .source_tokens()
-        .expect("fixture should retain its canonical source token store");
+fn projection_uses_expected_tag_and_payload_for_every_fixture_token() {
+    let (source_tokens, _string_table) = projection_fixture();
+    let expected_tags = [
+        TokenTag::EOF,
+        TokenTag::PATH,
+        TokenTag::SYMBOL,
+        TokenTag::STYLE_DIRECTIVE,
+        TokenTag::STRING_SLICE_LITERAL,
+        TokenTag::NUMERIC_LITERAL,
+        TokenTag::NUMERIC_LITERAL,
+        TokenTag::NUMERIC_LITERAL,
+        TokenTag::CHAR_LITERAL,
+        TokenTag::RAW_STRING_LITERAL,
+        TokenTag::BOOL_LITERAL,
+        TokenTag::BOOL_LITERAL,
+    ];
 
-    for (index, legacy_token) in file_tokens.tokens.iter().enumerate() {
+    for (index, expected_tag) in expected_tags.into_iter().enumerate() {
         let index = TokenIndex::try_from_index(index).expect("fixture index should fit");
         let token_ref = source_tokens
             .token(index)
             .expect("fixture token index should resolve");
         assert_eq!(
-            DiagnosticToken::from(&legacy_token.kind).tag(),
             DiagnosticToken::from_token_ref(token_ref).tag(),
-            "legacy and canonical projections must share the TokenTag descriptor"
+            expected_tag,
+            "canonical projection must preserve the schema tag",
         );
     }
 }

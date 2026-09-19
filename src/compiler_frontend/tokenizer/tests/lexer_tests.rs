@@ -9,29 +9,60 @@ use crate::compiler_frontend::compiler_messages::{
     MissingWhitespace, NumberLiteralErrorReason, SourceSpanCapacityResource,
     SymbolicSpacingConstruct, SymbolicSpacingError, SyntaxDiagnosticKind,
 };
-use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
+use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId,
 };
-
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{
-    TokenIndex, TokenShape, token_store_append_fits, token_store_length_fits,
+    SourceTokenBuildError, SourceTokens, SourceTokensBuilder, TokenIndex, TokenRange, TokenRef,
+    TokenTag, token_store_append_fits, token_store_length_fits,
 };
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 
-fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
+fn full_token_range(lexed: &LexedSource) -> TokenRange {
+    lexed
+        .tokens
+        .full_range()
+        .expect("lexer output must expose a checked full token range")
+}
+
+fn ast_cursor(lexed: &LexedSource) -> AstCursor<'_> {
+    AstCursor::from_source_tokens(&lexed.tokens, None, full_token_range(lexed))
+        .expect("lexer output must expose a canonical AST cursor")
+}
+
+fn token_string_is(token: TokenRef<'_>, string_table: &StringTable, expected: &str) -> bool {
+    token.string_id().is_some_and(|id| string_table.resolve(id) == expected)
+}
+
+fn numeric_payload(token: TokenRef<'_>) -> Option<&'_ NumericLiteralToken> {
+    if token.tag() != TokenTag::NUMERIC_LITERAL {
+        return None;
+    }
+    token
+        .numeric_literal()
+        .expect("numeric token payload must resolve")
+}
+
+fn token_has_path_payload(token: TokenRef<'_>) -> bool {
+    token.tag() == TokenTag::PATH && token.path_syntax_id().is_some()
+}
+
+fn tokenize_source(source: &str) -> (LexedSource, StringTable) {
     let style_directives = frontend_test_style_directives();
     tokenize_source_with_registry(source, &style_directives)
 }
 
-fn tokenize_html_source(source: &str) -> (FileTokens, StringTable) {
+fn tokenize_html_source(source: &str) -> (LexedSource, StringTable) {
     let style_directives = frontend_test_style_directives();
     tokenize_source_with_registry(source, &style_directives)
 }
@@ -71,14 +102,14 @@ fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
 fn tokenize_source_with_registry(
     source: &str,
     style_directives: &StyleDirectiveRegistry,
-) -> (FileTokens, StringTable) {
+) -> (LexedSource, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
         .try_intern_portable_path("test.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         TokenizerEntryMode::SourceFile,
@@ -89,13 +120,13 @@ fn tokenize_source_with_registry(
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    (file_tokens, string_table)
+    (lexed, string_table)
 }
 
 fn tokenize_source_with_directives(
     source: &str,
     directives: &[StyleDirectiveSpec],
-) -> (FileTokens, StringTable) {
+) -> (LexedSource, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
@@ -104,7 +135,7 @@ fn tokenize_source_with_directives(
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         TokenizerEntryMode::SourceFile,
@@ -115,10 +146,10 @@ fn tokenize_source_with_directives(
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    (file_tokens, string_table)
+    (lexed, string_table)
 }
 
-fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
+fn tokenize_moth_template_source(source: &str) -> (LexedSource, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let style_directives = frontend_test_style_directives();
@@ -126,7 +157,7 @@ fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
         .try_intern_portable_path("test.mtf", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
@@ -138,7 +169,7 @@ fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
         &mut span_builder,
     )
     .expect("Moth template tokenization should succeed");
-    (file_tokens, string_table)
+    (lexed, string_table)
 }
 
 fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTable) {
@@ -165,10 +196,21 @@ fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTabl
     (expect_lexical_diagnostic(diagnostic), string_table)
 }
 
-fn find_token_index(tokens: &[Token], predicate: impl Fn(&TokenKind) -> bool) -> usize {
-    tokens
-        .iter()
-        .position(|token| predicate(&token.kind))
+fn token_refs(tokens: &SourceTokens) -> impl Iterator<Item = TokenRef<'_>> {
+    (0..tokens.len()).map(|index| {
+        let index = TokenIndex::try_from_index(index).expect("source token range fits");
+        tokens.token(index).expect("source token index must resolve")
+    })
+}
+
+fn token_at(tokens: &SourceTokens, index: usize) -> TokenRef<'_> {
+    let index = TokenIndex::try_from_index(index).expect("source token range fits");
+    tokens.token(index).expect("source token index must resolve")
+}
+
+fn find_token_index(tokens: &SourceTokens, predicate: impl Fn(TokenRef<'_>) -> bool) -> usize {
+    token_refs(tokens)
+        .position(predicate)
         .expect("expected token to be present")
 }
 
@@ -178,8 +220,8 @@ fn span_byte_range(span: LocalSpan) -> (u32, u32) {
     (resolved.start(), resolved.end())
 }
 
-fn token_byte_range(token: &Token) -> (u32, u32) {
-    span_byte_range(token.span)
+fn token_byte_range(token: TokenRef<'_>) -> (u32, u32) {
+    span_byte_range(token.span())
 }
 
 fn diagnostic_byte_range(diagnostic: &CompilerDiagnostic) -> (u32, u32) {
@@ -249,26 +291,32 @@ fn assert_symbolic_spacing(
     }
 }
 
-fn numeric_literal_signs(file_tokens: &FileTokens) -> Vec<NumericLiteralSign> {
-    file_tokens
-        .tokens
-        .iter()
-        .filter_map(|token| match &token.kind {
-            TokenKind::NumericLiteral(token) => Some(token.sign),
-            _ => None,
+fn numeric_literal_signs(lexed: &LexedSource) -> Vec<NumericLiteralSign> {
+    token_refs(lexed.tokens.as_ref())
+        .filter_map(|token| {
+            (token.tag() == TokenTag::NUMERIC_LITERAL).then(|| {
+                token
+                    .numeric_literal()
+                    .expect("numeric token payload must resolve")
+                    .expect("numeric token must carry a literal")
+                    .sign
+            })
         })
         .collect()
 }
 
-fn collect_literal_texts(file_tokens: &FileTokens, string_table: &StringTable) -> Vec<String> {
-    file_tokens
-        .tokens
-        .iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::StringSliceLiteral(id) | TokenKind::RawStringLiteral(id) => {
-                Some(string_table.resolve(id).to_owned())
-            }
-            _ => None,
+fn collect_literal_texts(lexed: &LexedSource, string_table: &StringTable) -> Vec<String> {
+    token_refs(lexed.tokens.as_ref())
+        .filter_map(|token| {
+            matches!(
+                token.tag(),
+                TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL
+            )
+            .then(|| {
+                string_table
+                    .resolve(token.string_id().expect("string token must carry a handle"))
+                    .to_owned()
+            })
         })
         .collect()
 }
@@ -487,10 +535,8 @@ fn moth_template_entry_body_preserves_backslash_as_literal_text() {
 #[test]
 fn moth_template_entry_body_allows_nested_template_close() {
     let (file_tokens, string_table) = tokenize_moth_template_source("before [:inner] after");
-    let template_closes = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let template_closes = token_refs(file_tokens.tokens.as_ref())
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
     let texts = collect_literal_texts(&file_tokens, &string_table);
 
@@ -529,19 +575,14 @@ fn normalizes_code_template_body_newlines_from_crlf_and_bare_cr() {
 #[test]
 fn tokenizes_double_slash_as_integer_division_operator() {
     let (file_tokens, _string_table) = tokenize_source("value = 5 // 2\n");
+    let tokens = file_tokens.tokens.as_ref();
 
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::IntDivide)),
+        token_refs(tokens).any(|token| token.tag() == TokenTag::INT_DIVIDE),
         "expected '//' to tokenize as IntDivide"
     );
     assert!(
-        !file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::DivideAssign)),
+        !token_refs(tokens).any(|token| token.tag() == TokenTag::DIVIDE_ASSIGN),
         "integer division token should not be confused with '/='"
     );
 }
@@ -549,12 +590,9 @@ fn tokenizes_double_slash_as_integer_division_operator() {
 #[test]
 fn tokenizes_double_slash_equals_as_integer_division_assignment_operator() {
     let (file_tokens, _string_table) = tokenize_source("value ~= 10\nvalue //= 3\n");
-
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::IntDivideAssign)),
+        token_refs(file_tokens.tokens.as_ref())
+            .any(|token| token.tag() == TokenTag::INT_DIVIDE_ASSIGN),
         "expected '//=' to tokenize as IntDivideAssign"
     );
 }
@@ -627,15 +665,9 @@ fn rejects_non_ascii_numeric_leads_as_invalid_characters() {
 #[test]
 fn tokenizes_lowercase_exponent_literals() {
     let (file_tokens, string_table) = tokenize_source("value = 1e6 1e-6 1e+6 1.0e+21\n");
-    let numeric_texts: Vec<String> = file_tokens
-        .tokens
-        .iter()
-        .filter_map(|token| match &token.kind {
-            TokenKind::NumericLiteral(token) => {
-                Some(string_table.resolve(token.normalized_text).to_owned())
-            }
-            _ => None,
-        })
+    let numeric_texts: Vec<String> = token_refs(file_tokens.tokens.as_ref())
+        .filter_map(numeric_payload)
+        .map(|token| string_table.resolve(token.normalized_text).to_owned())
         .collect();
 
     assert_eq!(
@@ -648,15 +680,9 @@ fn tokenizes_lowercase_exponent_literals() {
 #[test]
 fn tokenizes_signed_numeric_literals() {
     let (file_tokens, string_table) = tokenize_source("value = {-1, -1.5, -1e6}\n");
-    let numeric_texts: Vec<String> = file_tokens
-        .tokens
-        .iter()
-        .filter_map(|token| match &token.kind {
-            TokenKind::NumericLiteral(token) => {
-                Some(string_table.resolve(token.normalized_text).to_owned())
-            }
-            _ => None,
-        })
+    let numeric_texts: Vec<String> = token_refs(file_tokens.tokens.as_ref())
+        .filter_map(numeric_payload)
+        .map(|token| string_table.resolve(token.normalized_text).to_owned())
         .collect();
 
     assert_eq!(
@@ -673,19 +699,16 @@ fn tokenizes_signed_numeric_literals() {
 #[test]
 fn preserves_signed_numeric_literal_after_binary_operator() {
     let (file_tokens, _string_table) = tokenize_source("value = count * -1\n");
+    let tokens = file_tokens.tokens.as_ref();
 
     assert!(
-        file_tokens.tokens.iter().any(|token| matches!(
-            &token.kind,
-            TokenKind::NumericLiteral(token) if token.sign == NumericLiteralSign::Negative
-        )),
+        token_refs(tokens).any(|token| {
+            numeric_payload(token).is_some_and(|numeric| numeric.sign == NumericLiteralSign::Negative)
+        }),
         "`-1` after a spaced binary operator should remain one signed numeric token"
     );
     assert!(
-        !file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::Negative)),
+        !token_refs(tokens).any(|token| token.tag() == TokenTag::NEGATIVE),
         "signed numeric literals should not also emit a unary Negative token"
     );
 }
@@ -700,28 +723,22 @@ fn tokenizes_line_initial_negative_match_pattern_after_expression_body() {
              else => value = 0\n\
          ;\n",
     );
-
-    let pattern_token = file_tokens
-        .tokens
-        .windows(2)
-        .find_map(|tokens| match tokens {
-            [
-                Token {
-                    kind: TokenKind::NumericLiteral(numeric_token),
-                    ..
-                },
-                Token {
-                    kind: TokenKind::FatArrow,
-                    ..
-                },
-            ] if numeric_token.sign == NumericLiteralSign::Negative => Some(numeric_token),
-            _ => None,
+    let tokens = file_tokens.tokens.as_ref();
+    let pattern_index = token_refs(tokens)
+        .position(|token| {
+            numeric_payload(token)
+                .is_some_and(|numeric| numeric.sign == NumericLiteralSign::Negative)
+                && token_refs(tokens)
+                    .nth(token.index().index().saturating_add(1))
+                    .is_some_and(|next| next.tag() == TokenTag::FAT_ARROW)
         })
         .expect("expected a numeric literal immediately before the negative arm arrow");
+    let pattern_token = token_at(tokens, pattern_index);
 
-    assert_eq!(pattern_token.sign, NumericLiteralSign::Negative);
+    let numeric = numeric_payload(pattern_token).expect("expected a numeric pattern token");
+    assert_eq!(numeric.sign, NumericLiteralSign::Negative);
     assert_eq!(
-        string_table.resolve(pattern_token.source_text),
+        string_table.resolve(numeric.source_text),
         "-42",
         "the line-initial match pattern should retain its authored sign"
     );
@@ -737,30 +754,28 @@ fn tokenizes_line_initial_negative_match_pattern_with_guard() {
              else => value = 0\n\
          ;\n",
     );
-
-    let pattern_index = file_tokens
-        .tokens
-        .iter()
+    let tokens = file_tokens.tokens.as_ref();
+    let pattern_index = token_refs(tokens)
         .position(|token| {
-            matches!(
-                &token.kind,
-                TokenKind::NumericLiteral(numeric_token)
-                    if numeric_token.sign == NumericLiteralSign::Negative
-            )
+            numeric_payload(token)
+                .is_some_and(|numeric| numeric.sign == NumericLiteralSign::Negative)
         })
         .expect("expected a negative numeric literal in the guarded match arm");
 
-    assert!(matches!(
-        file_tokens
-            .tokens
-            .get(pattern_index + 1)
-            .map(|token| &token.kind),
-        Some(TokenKind::If)
-    ));
+    let mut cursor = ast_cursor(&file_tokens);
+    cursor
+        .set_position(pattern_index)
+        .expect("pattern index must fit the canonical cursor");
+    assert_eq!(
+        cursor.peek_next_ref().map(|token| token.tag()),
+        Some(TokenTag::IF)
+    );
     assert!(
-        file_tokens.tokens[pattern_index..]
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::FatArrow))
+        token_refs(tokens)
+            .enumerate()
+            .skip(pattern_index)
+            .any(|(_, token)| token.tag() == TokenTag::FAT_ARROW),
+        "guarded match arm should eventually reach its arrow"
     );
 }
 
@@ -775,45 +790,36 @@ fn tokenizes_line_initial_negative_match_pattern_with_multiline_guard() {
              else => value = 0\n\
          ;\n",
     );
-
-    let pattern_index = file_tokens
-        .tokens
-        .iter()
+    let tokens = file_tokens.tokens.as_ref();
+    let pattern_index = token_refs(tokens)
         .position(|token| {
-            matches!(
-                &token.kind,
-                TokenKind::NumericLiteral(numeric_token)
-                    if numeric_token.sign == NumericLiteralSign::Negative
-            )
+            numeric_payload(token)
+                .is_some_and(|numeric| numeric.sign == NumericLiteralSign::Negative)
         })
         .expect("expected a negative numeric literal in the multiline guarded match arm");
 
-    assert!(matches!(
-        file_tokens
-            .tokens
-            .get(pattern_index + 1)
-            .map(|token| &token.kind),
-        Some(TokenKind::If)
-    ));
-    assert!(
-        file_tokens.tokens[pattern_index..]
-            .windows(2)
-            .any(|tokens| {
-                matches!(
-                    tokens,
-                    [
-                        Token {
-                            kind: TokenKind::BoolLiteral(true),
-                            ..
-                        },
-                        Token {
-                            kind: TokenKind::FatArrow,
-                            ..
-                        }
-                    ]
-                )
-            })
+    let mut cursor = ast_cursor(&file_tokens);
+    cursor
+        .set_position(pattern_index)
+        .expect("pattern index must fit the canonical cursor");
+    assert_eq!(
+        cursor.peek_next_ref().map(|token| token.tag()),
+        Some(TokenTag::IF)
     );
+    let mut found_true_arrow = false;
+    while let Some(token) = cursor.current() {
+        if token.tag() == TokenTag::BOOL_LITERAL
+            && token.bool_value() == Some(true)
+            && cursor
+                .peek_next_ref()
+                .is_some_and(|next| next.tag() == TokenTag::FAT_ARROW)
+        {
+            found_true_arrow = true;
+            break;
+        }
+        cursor.advance();
+    }
+    assert!(found_true_arrow);
 }
 
 #[test]
@@ -826,53 +832,40 @@ fn tokenizes_line_initial_negative_match_pattern_with_named_argument_guard() {
              else => value = 0\n\
          ;\n",
     );
-
-    let pattern_index = file_tokens
-        .tokens
-        .iter()
+    let tokens = file_tokens.tokens.as_ref();
+    let pattern_index = token_refs(tokens)
         .position(|token| {
-            matches!(
-                &token.kind,
-                TokenKind::NumericLiteral(numeric_token)
-                    if numeric_token.sign == NumericLiteralSign::Negative
-            )
+            numeric_payload(token)
+                .is_some_and(|numeric| numeric.sign == NumericLiteralSign::Negative)
         })
         .expect("expected a negative numeric literal in the named-argument guarded match arm");
 
-    assert!(matches!(
-        file_tokens
-            .tokens
-            .get(pattern_index + 1)
-            .map(|token| &token.kind),
-        Some(TokenKind::If)
-    ));
-
-    let arm_arrow_index = file_tokens.tokens[pattern_index..]
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::FatArrow))
-        .map(|offset| pattern_index + offset)
+    let mut cursor = ast_cursor(&file_tokens);
+    cursor
+        .set_position(pattern_index)
+        .expect("pattern index must fit the canonical cursor");
+    assert_eq!(
+        cursor.peek_next_ref().map(|token| token.tag()),
+        Some(TokenTag::IF)
+    );
+    let arm_arrow_index = token_refs(tokens)
+        .enumerate()
+        .skip(pattern_index)
+        .find_map(|(index, token)| (token.tag() == TokenTag::FAT_ARROW).then_some(index))
         .expect("expected the named-argument guarded match arm arrow");
-    assert!(matches!(
-        file_tokens
-            .tokens
-            .get(
-                arm_arrow_index
-                    .checked_sub(1)
-                    .expect("arrow must have a preceding token")
-            )
-            .map(|token| &token.kind),
-        Some(TokenKind::CloseParenthesis)
-    ));
+    let preceding = arm_arrow_index
+        .checked_sub(1)
+        .map(|index| token_at(tokens, index))
+        .expect("arrow must have a preceding token");
+    assert_eq!(preceding.tag(), TokenTag::CLOSE_PARENTHESIS);
 }
 
 #[test]
 fn tokenizes_attached_unary_negation_for_non_numeric_operands() {
     let (file_tokens, _string_table) = tokenize_source("value = -count\nother = total * -count\n");
 
-    let negative_count = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::Negative))
+    let negative_count = token_refs(file_tokens.tokens.as_ref())
+        .filter(|token| token.tag() == TokenTag::NEGATIVE)
         .count();
     assert_eq!(negative_count, 2);
 }
@@ -1001,25 +994,25 @@ fn accepts_valid_compound_assignment_spacing() {
         "count += 1\n",
         "count -= 1\n",
         "count *= 2\n",
-        "count /= 4\n",
         "count //= 3\n",
+        "count /= 4\n",
         "count %= 5\n",
         "count ^= 2\n",
         "count ~= 1\n",
     ] {
         let (file_tokens, _string_table) = tokenize_source(source);
         assert!(
-            file_tokens.tokens.iter().any(|token| {
+            token_refs(file_tokens.tokens.as_ref()).any(|token| {
                 matches!(
-                    token.kind,
-                    TokenKind::AddAssign
-                        | TokenKind::SubtractAssign
-                        | TokenKind::MultiplyAssign
-                        | TokenKind::DivideAssign
-                        | TokenKind::IntDivideAssign
-                        | TokenKind::ModulusAssign
-                        | TokenKind::ExponentAssign
-                        | TokenKind::Mutable
+                    token.tag(),
+                    TokenTag::ADD_ASSIGN
+                        | TokenTag::SUBTRACT_ASSIGN
+                        | TokenTag::MULTIPLY_ASSIGN
+                        | TokenTag::DIVIDE_ASSIGN
+                        | TokenTag::INT_DIVIDE_ASSIGN
+                        | TokenTag::MODULUS_ASSIGN
+                        | TokenTag::EXPONENT_ASSIGN
+                        | TokenTag::MUTABLE
                 )
             }),
             "expected a compound assignment or mutable token in: {source}"
@@ -1157,10 +1150,7 @@ fn internal_mutable_marker_whitespace_does_not_trigger_symbolic_spacing() {
     for source in ["value ~ = 42\n", "value ~ =42\n"] {
         let (file_tokens, _string_table) = tokenize_source(source);
         assert!(
-            file_tokens
-                .tokens
-                .iter()
-                .any(|token| matches!(token.kind, TokenKind::Mutable)),
+            token_refs(file_tokens.tokens.as_ref()).any(|token| token.tag() == TokenTag::MUTABLE),
             "expected a Mutable token in `{source}`"
         );
     }
@@ -1180,13 +1170,8 @@ fn numeric_token_preserves_source_and_normalized_text() {
         ("value = -1.0e+21\n", "-1.0e+21", "1.0e+21"),
     ] {
         let (file_tokens, string_table) = tokenize_source(source);
-        let numeric_token = file_tokens
-            .tokens
-            .iter()
-            .find_map(|token| match &token.kind {
-                TokenKind::NumericLiteral(t) => Some(t),
-                _ => None,
-            })
+        let numeric_token = token_refs(file_tokens.tokens.as_ref())
+            .find_map(numeric_payload)
             .expect("expected a numeric literal token");
 
         let resolved_source = string_table.resolve(numeric_token.source_text);
@@ -1208,13 +1193,8 @@ fn numeric_token_preserves_source_and_normalized_text() {
 #[test]
 fn signed_numeric_token_source_text_includes_sign() {
     let (file_tokens, string_table) = tokenize_source("value = -42\n");
-    let numeric_token = file_tokens
-        .tokens
-        .iter()
-        .find_map(|token| match &token.kind {
-            TokenKind::NumericLiteral(t) => Some(t),
-            _ => None,
-        })
+    let numeric_token = token_refs(file_tokens.tokens.as_ref())
+        .find_map(numeric_payload)
         .expect("expected a numeric literal token");
 
     assert_eq!(numeric_token.sign, NumericLiteralSign::Negative);
@@ -1229,13 +1209,8 @@ fn signed_numeric_token_source_text_includes_sign() {
 fn out_of_range_literal_with_separators_preserves_authored_text() {
     let (file_tokens, string_table) = tokenize_source("value = 9_999_999_999\n");
 
-    let numeric_token = file_tokens
-        .tokens
-        .iter()
-        .find_map(|token| match &token.kind {
-            TokenKind::NumericLiteral(t) => Some(t),
-            _ => None,
-        })
+    let numeric_token = token_refs(file_tokens.tokens.as_ref())
+        .find_map(numeric_payload)
         .expect("expected a numeric literal token");
 
     // The tokenizer accepts it; source_text preserves separators for later
@@ -1272,151 +1247,91 @@ fn tokenizer_does_not_steal_parser_owned_punctuation_diagnostics() {
 #[test]
 fn tokenizes_reserved_trait_keywords_as_reserved_tokens() {
     let (file_tokens, _string_table) = tokenize_source("must This\n");
+    let tokens = file_tokens.tokens.as_ref();
 
-    assert!(
-        matches!(file_tokens.tokens[0].kind, TokenKind::ModuleStart),
-        "token streams always begin with the module sentinel"
-    );
-    assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Must),
-        "expected 'must' to lex as a reserved trait token"
-    );
-    assert!(
-        matches!(file_tokens.tokens[2].kind, TokenKind::TraitThis),
-        "expected 'This' to lex as a reserved trait token"
-    );
-    assert!(
-        !matches!(file_tokens.tokens[1].kind, TokenKind::Symbol(_)),
-        "'must' should not remain a user symbol"
-    );
-    assert!(
-        !matches!(file_tokens.tokens[2].kind, TokenKind::Symbol(_)),
-        "'This' should not remain a user symbol"
-    );
+    assert_eq!(token_at(tokens, 0).tag(), TokenTag::MODULE_START);
+    assert_eq!(token_at(tokens, 1).tag(), TokenTag::MUST);
+    assert_eq!(token_at(tokens, 2).tag(), TokenTag::TRAIT_THIS);
+    assert_ne!(token_at(tokens, 1).tag(), TokenTag::SYMBOL);
+    assert_ne!(token_at(tokens, 2).tag(), TokenTag::SYMBOL);
 }
 
 #[test]
 fn tokenizes_generic_keywords_as_reserved_tokens() {
     let (file_tokens, _string_table) = tokenize_source("type of\n");
+    let tokens = file_tokens.tokens.as_ref();
 
-    assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Type),
-        "expected 'type' to lex as a reserved keyword token"
-    );
-    assert!(
-        matches!(file_tokens.tokens[2].kind, TokenKind::Of),
-        "expected 'of' to lex as a reserved keyword token"
-    );
-    assert!(
-        !matches!(file_tokens.tokens[1].kind, TokenKind::Symbol(_)),
-        "'type' should not remain a user symbol"
-    );
-    assert!(
-        !matches!(file_tokens.tokens[2].kind, TokenKind::Symbol(_)),
-        "'of' should not remain a user symbol"
-    );
+    assert_eq!(token_at(tokens, 1).tag(), TokenTag::TYPE);
+    assert_eq!(token_at(tokens, 2).tag(), TokenTag::OF);
+    assert_ne!(token_at(tokens, 1).tag(), TokenTag::SYMBOL);
+    assert_ne!(token_at(tokens, 2).tag(), TokenTag::SYMBOL);
 }
 
 #[test]
 fn tokenizes_lowercase_this_as_reserved_receiver_keyword() {
-    let (file_tokens, _string_table) = tokenize_source("this this_value This _this\n");
+    let (file_tokens, string_table) = tokenize_source("this this_value This _this\n");
+    let tokens = file_tokens.tokens.as_ref();
 
-    assert!(
-        matches!(file_tokens.tokens[0].kind, TokenKind::ModuleStart),
-        "token streams always begin with the module sentinel"
-    );
-    assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::This),
-        "expected 'this' to lex as a reserved receiver token"
-    );
-    assert!(
-        matches!(file_tokens.tokens[2].kind, TokenKind::Symbol(_)),
-        "expected 'this_value' to remain a user symbol"
-    );
-    assert!(
-        matches!(file_tokens.tokens[3].kind, TokenKind::TraitThis),
-        "expected 'This' to lex as a reserved trait token"
-    );
-    assert!(
-        matches!(file_tokens.tokens[4].kind, TokenKind::Symbol(_)),
-        "expected '_this' to remain a user symbol (shadow policy rejects it later)"
-    );
-    assert!(
-        !matches!(file_tokens.tokens[1].kind, TokenKind::Symbol(_)),
-        "'this' should not remain a user symbol"
-    );
+    assert_eq!(token_at(tokens, 0).tag(), TokenTag::MODULE_START);
+    assert_eq!(token_at(tokens, 1).tag(), TokenTag::THIS);
+    assert_eq!(token_at(tokens, 2).tag(), TokenTag::SYMBOL);
+    assert!(token_string_is(token_at(tokens, 2), &string_table, "this_value"));
+    assert_eq!(token_at(tokens, 3).tag(), TokenTag::TRAIT_THIS);
+    assert_eq!(token_at(tokens, 4).tag(), TokenTag::SYMBOL);
+    assert!(token_string_is(token_at(tokens, 4), &string_table, "_this"));
+    assert_ne!(token_at(tokens, 1).tag(), TokenTag::SYMBOL);
 }
 
 #[test]
 fn tokenizes_declared_region_names_as_symbols_and_semantic_scope_words_as_keywords() {
-    let (file_tokens, _string_table) = tokenize_source("block group region checked async\n");
+    let (file_tokens, string_table) = tokenize_source("block group region checked async\n");
+    let tokens = file_tokens.tokens.as_ref();
 
     for (index, word) in [(1, "block"), (2, "group"), (3, "region")] {
+        assert_eq!(token_at(tokens, index).tag(), TokenTag::SYMBOL);
         assert!(
-            matches!(file_tokens.tokens[index].kind, TokenKind::Symbol(_)),
+            token_string_is(token_at(tokens, index), &string_table, word),
             "expected '{word}' to lex as an ordinary symbol"
         );
     }
-    assert!(
-        matches!(file_tokens.tokens[4].kind, TokenKind::Checked),
-        "expected 'checked' to lex as a reserved checked block token"
-    );
-    assert!(
-        matches!(file_tokens.tokens[5].kind, TokenKind::Async),
-        "expected 'async' to lex as a reserved async block token"
-    );
+    assert_eq!(token_at(tokens, 4).tag(), TokenTag::CHECKED);
+    assert_eq!(token_at(tokens, 5).tag(), TokenTag::ASYNC);
 }
 
 #[test]
 fn tokenizes_assert_as_reserved_keyword() {
     let (file_tokens, _string_table) = tokenize_source("assert\n");
-
-    assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Assert),
-        "expected 'assert' to lex as a reserved keyword token"
-    );
-    assert!(
-        !matches!(file_tokens.tokens[1].kind, TokenKind::Symbol(_)),
-        "'assert' should not remain a user symbol"
-    );
+    let token = token_at(file_tokens.tokens.as_ref(), 1);
+    assert_eq!(token.tag(), TokenTag::ASSERT);
+    assert_ne!(token.tag(), TokenTag::SYMBOL);
 }
 
 #[test]
 fn tokenizes_attached_bang_keyword_forms_as_compound_tokens() {
     let (file_tokens, _string_table) = tokenize_source("return! err\ncast! text\n");
+    let tokens = file_tokens.tokens.as_ref();
 
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::ReturnBang)),
-        "expected attached 'return!' to lex as a single ReturnBang token"
-    );
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::CastBang)),
-        "expected attached 'cast!' to lex as a single CastBang token"
-    );
+    assert!(token_refs(tokens).any(|token| token.tag() == TokenTag::RETURN_BANG));
+    assert!(token_refs(tokens).any(|token| token.tag() == TokenTag::CAST_BANG));
 }
 
 #[test]
 fn tokenizes_spaced_bang_keyword_forms_as_separate_tokens() {
     let (file_tokens, _string_table) = tokenize_source("return ! err\ncast ! text\n");
+    let tokens = file_tokens.tokens.as_ref();
 
     assert!(
-        !file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::ReturnBang | TokenKind::CastBang)),
+        !token_refs(tokens).any(|token| {
+            matches!(
+                token.tag(),
+                TokenTag::RETURN_BANG | TokenTag::CAST_BANG
+            )
+        }),
         "spaced keyword/bang pairs must not become compound tokens"
     );
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .filter(|token| matches!(token.kind, TokenKind::Bang))
+        token_refs(tokens)
+            .filter(|token| token.tag() == TokenTag::BANG)
             .count()
             >= 2,
         "expected spaced keyword/bang pairs to keep standalone bang tokens"
@@ -1426,38 +1341,25 @@ fn tokenizes_spaced_bang_keyword_forms_as_separate_tokens() {
 #[test]
 fn tokenizes_export_as_reserved_keyword() {
     let (file_tokens, _string_table) = tokenize_source("export\n");
-
-    assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Export),
-        "expected 'export' to lex as a reserved keyword token"
-    );
-    assert!(
-        !matches!(file_tokens.tokens[1].kind, TokenKind::Symbol(_)),
-        "'export' should not remain a user symbol"
-    );
+    let token = token_at(file_tokens.tokens.as_ref(), 1);
+    assert_eq!(token.tag(), TokenTag::EXPORT);
+    assert_ne!(token.tag(), TokenTag::SYMBOL);
 }
 
 #[test]
 fn template_body_preserves_export_as_literal_text() {
     let (file_tokens, string_table) = tokenize_source("[: this contains export keyword]");
-
-    let body_literal = file_tokens
-        .tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::StringSliceLiteral(id) => {
-                let value = string_table.resolve(id);
-                value.contains("export").then_some(value)
-            }
-            _ => None,
+    let tokens = file_tokens.tokens.as_ref();
+    let body_literal = token_refs(tokens)
+        .find_map(|token| {
+            (token.tag() == TokenTag::STRING_SLICE_LITERAL)
+                .then(|| string_table.resolve(token.string_id().expect("literal string handle")))
         })
+        .filter(|value| value.contains("export"))
         .expect("expected template body text to preserve 'export' as literal text");
 
     assert!(
-        !file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::Export)),
+        !token_refs(tokens).any(|token| token.tag() == TokenTag::EXPORT),
         "export inside a template body should not tokenize as a keyword"
     );
     assert!(body_literal.contains("export"));
@@ -1466,68 +1368,54 @@ fn template_body_preserves_export_as_literal_text() {
 #[test]
 fn tokenizes_panic_as_normal_symbol() {
     let (file_tokens, string_table) = tokenize_source("panic\n");
-
-    assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Symbol(id) if string_table.resolve(id) == "panic"),
-        "expected 'panic' to tokenize as a normal symbol, not a keyword"
-    );
+    let token = token_at(file_tokens.tokens.as_ref(), 1);
+    assert_eq!(token.tag(), TokenTag::SYMBOL);
+    assert!(token_string_is(token, &string_table, "panic"));
 }
 
 #[test]
 fn tokenizes_standalone_underscore_as_wildcard_but_prefixed_names_as_symbols() {
     let (file_tokens, string_table) = tokenize_source("_ _true __value\n");
+    let tokens = file_tokens.tokens.as_ref();
 
-    assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Wildcard),
-        "expected standalone '_' to remain wildcard"
-    );
-    assert!(
-        matches!(file_tokens.tokens[2].kind, TokenKind::Symbol(id) if string_table.resolve(id) == "_true"),
-        "expected '_true' to tokenize as a symbol identifier"
-    );
-    assert!(
-        matches!(file_tokens.tokens[3].kind, TokenKind::Symbol(id) if string_table.resolve(id) == "__value"),
-        "expected '__value' to tokenize as a symbol identifier"
-    );
+    assert_eq!(token_at(tokens, 1).tag(), TokenTag::WILDCARD);
+    assert_eq!(token_at(tokens, 2).tag(), TokenTag::SYMBOL);
+    assert!(token_string_is(token_at(tokens, 2), &string_table, "_true"));
+    assert_eq!(token_at(tokens, 3).tag(), TokenTag::SYMBOL);
+    assert!(token_string_is(token_at(tokens, 3), &string_table, "__value"));
 }
 
 #[test]
 fn tokenizes_in_as_symbol_after_loop_syntax_removal() {
     let (file_tokens, string_table) = tokenize_source("in\n");
-
-    assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Symbol(id) if string_table.resolve(id) == "in"),
-        "expected 'in' to tokenize as a normal symbol after loop-syntax removal"
-    );
+    let token = token_at(file_tokens.tokens.as_ref(), 1);
+    assert_eq!(token.tag(), TokenTag::SYMBOL);
+    assert!(token_string_is(token, &string_table, "in"));
 }
 
 #[test]
 fn tokenizes_pipe_bindings_in_loop_headers() {
     let (file_tokens, string_table) = tokenize_source("loop items |item, index|:\n;\n");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let loop_index = find_token_index(&file_tokens.tokens, |kind| matches!(kind, TokenKind::Loop));
-    let items_index = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::Symbol(id) if string_table.resolve(*id) == "items"),
-    );
-    let item_index = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::Symbol(id) if string_table.resolve(*id) == "item"),
-    );
-    let index_index = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::Symbol(id) if string_table.resolve(*id) == "index"),
-    );
-    let first_pipe = find_token_index(&file_tokens.tokens, |kind| {
-        matches!(kind, TokenKind::TypeParameterBracket)
+    let loop_index = find_token_index(tokens, |token| token.tag() == TokenTag::LOOP);
+    let items_index = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "items")
     });
-    let second_pipe = file_tokens
-        .tokens
-        .iter()
+    let item_index = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "item")
+    });
+    let index_index = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "index")
+    });
+    let first_pipe = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::TYPE_PARAMETER_BRACKET
+    });
+    let second_pipe = token_refs(tokens)
         .enumerate()
         .skip(first_pipe + 1)
         .find_map(|(idx, token)| {
-            matches!(token.kind, TokenKind::TypeParameterBracket).then_some(idx)
+            (token.tag() == TokenTag::TYPE_PARAMETER_BRACKET).then_some(idx)
         })
         .expect("expected closing pipe token");
 
@@ -1541,21 +1429,18 @@ fn tokenizes_pipe_bindings_in_loop_headers() {
 #[test]
 fn tokenizes_bare_loop_bindings_without_special_keyword_support() {
     let (file_tokens, string_table) = tokenize_source("loop items item, index:\n;\n");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let items_index = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::Symbol(id) if string_table.resolve(*id) == "items"),
-    );
-    let item_index = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::Symbol(id) if string_table.resolve(*id) == "item"),
-    );
-    let comma_index =
-        find_token_index(&file_tokens.tokens, |kind| matches!(kind, TokenKind::Comma));
-    let index_index = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::Symbol(id) if string_table.resolve(*id) == "index"),
-    );
+    let items_index = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "items")
+    });
+    let item_index = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "item")
+    });
+    let comma_index = find_token_index(tokens, |token| token.tag() == TokenTag::COMMA);
+    let index_index = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "index")
+    });
 
     assert!(items_index < item_index);
     assert!(item_index < comma_index);
@@ -1567,42 +1452,29 @@ fn tokenizes_none_question_mark_bang_and_catch_markers() {
     let (file_tokens, _string_table) = tokenize_source(
         "value String? = none\npersist()!\nrecover = may_fail() catch:\n    then \"\"\n;\n",
     );
+    let tokens = file_tokens.tokens.as_ref();
 
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::QuestionMark)),
+        token_refs(tokens).any(|token| token.tag() == TokenTag::QUESTION_MARK),
         "expected '?' optional-type marker token"
     );
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::NoneLiteral)),
+        token_refs(tokens).any(|token| token.tag() == TokenTag::NONE_LITERAL),
         "expected lowercase 'none' literal token"
     );
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .filter(|token| matches!(token.kind, TokenKind::Bang))
+        token_refs(tokens)
+            .filter(|token| token.tag() == TokenTag::BANG)
             .count()
             >= 1,
         "expected bang token for propagation call handling"
     );
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::Catch)),
+        token_refs(tokens).any(|token| token.tag() == TokenTag::CATCH),
         "expected catch token for fallback call handling"
     );
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::Then)),
+        token_refs(tokens).any(|token| token.tag() == TokenTag::THEN),
         "expected then token for catch fallback handling"
     );
 }
@@ -1610,62 +1482,48 @@ fn tokenizes_none_question_mark_bang_and_catch_markers() {
 #[test]
 fn tokenizes_style_directives_inside_template_heads() {
     let (file_tokens, string_table) = tokenize_source("[$md, $fresh: body]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let outer_head = find_token_index(&file_tokens.tokens, |kind| {
-        matches!(kind, TokenKind::TemplateHead)
+    let outer_head = find_token_index(tokens, |token| token.tag() == TokenTag::TEMPLATE_HEAD);
+    let markdown = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "md")
     });
-    let markdown = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::StyleDirective(id) if string_table.resolve(*id) == "md"),
-    );
-    let fresh = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::StyleDirective(id) if string_table.resolve(*id) == "fresh"),
-    );
+    let fresh = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::STYLE_DIRECTIVE
+            && token_string_is(token, &string_table, "fresh")
+    });
 
     assert!(outer_head < markdown);
     assert!(markdown < fresh);
-    assert!(matches!(
-        file_tokens.tokens[markdown].kind,
-        TokenKind::StyleDirective(..)
-    ));
-    assert!(matches!(
-        file_tokens.tokens[fresh].kind,
-        TokenKind::StyleDirective(..)
-    ));
+    assert_eq!(token_at(tokens, markdown).tag(), TokenTag::STYLE_DIRECTIVE);
+    assert_eq!(token_at(tokens, fresh).tag(), TokenTag::STYLE_DIRECTIVE);
 }
 
 #[test]
 fn tokenizes_qualified_choice_inside_nested_template_head_before_body_delimiter() {
     let (file_tokens, _string_table) =
         tokenize_source("[: [handle_status(Status::Running): body]]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let template_head_count = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+    let template_head_count = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
         .count();
-    let body_start_indices: Vec<usize> = file_tokens
-        .tokens
-        .iter()
+    let body_start_indices: Vec<usize> = token_refs(tokens)
         .enumerate()
         .filter_map(|(index, token)| {
-            matches!(token.kind, TokenKind::StartTemplateBody).then_some(index)
+            (token.tag() == TokenTag::START_TEMPLATE_BODY).then_some(index)
         })
         .collect();
-    let double_colon_index = find_token_index(&file_tokens.tokens, |kind| {
-        matches!(kind, TokenKind::DoubleColon)
-    });
+    let double_colon_index =
+        find_token_index(tokens, |token| token.tag() == TokenTag::DOUBLE_COLON);
 
     assert_eq!(template_head_count, 2);
     assert_eq!(body_start_indices.len(), 2);
     assert!(body_start_indices[0] < double_colon_index);
     assert!(double_colon_index < body_start_indices[1]);
     assert_eq!(
-        file_tokens
-            .tokens
-            .iter()
-            .filter(|token| matches!(token.kind, TokenKind::DoubleColon))
+        token_refs(tokens)
+            .filter(|token| token.tag() == TokenTag::DOUBLE_COLON)
             .count(),
         1
     );
@@ -1724,55 +1582,47 @@ fn rejects_unknown_style_directive_name() {
 #[test]
 fn tokenizes_children_directive_with_template_argument() {
     let (file_tokens, string_table) = tokenize_source("[$children([:prefix]), $md:\nhello\n]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let outer_head = find_token_index(&file_tokens.tokens, |kind| {
-        matches!(kind, TokenKind::TemplateHead)
+    let outer_head = find_token_index(tokens, |token| token.tag() == TokenTag::TEMPLATE_HEAD);
+    let children = find_token_index(tokens, |token| {
+        token.tag() == TokenTag::STYLE_DIRECTIVE
+            && token_string_is(token, &string_table, "children")
     });
-    let children = find_token_index(
-        &file_tokens.tokens,
-        |kind| matches!(kind, TokenKind::StyleDirective(id) if string_table.resolve(*id) == "children"),
-    );
-    let open_paren = find_token_index(&file_tokens.tokens, |kind| {
-        matches!(kind, TokenKind::OpenParenthesis)
-    });
-    let child_template = file_tokens
-        .tokens
-        .iter()
+    let open_paren = find_token_index(tokens, |token| token.tag() == TokenTag::OPEN_PARENTHESIS);
+    let child_template = token_refs(tokens)
         .enumerate()
         .skip(open_paren + 1)
-        .find_map(|(index, token)| matches!(token.kind, TokenKind::TemplateHead).then_some(index))
+        .find_map(|(index, token)| {
+            (token.tag() == TokenTag::TEMPLATE_HEAD).then_some(index)
+        })
         .expect("expected child template opener");
-    let close = file_tokens
-        .tokens
-        .iter()
+    let close = token_refs(tokens)
         .enumerate()
         .skip(child_template + 1)
-        .find_map(|(index, token)| matches!(token.kind, TokenKind::TemplateClose).then_some(index))
+        .find_map(|(index, token)| {
+            (token.tag() == TokenTag::TEMPLATE_CLOSE).then_some(index)
+        })
         .expect("expected the child template to close");
-    let close_paren = file_tokens
-        .tokens
-        .iter()
+    let close_paren = token_refs(tokens)
         .enumerate()
         .skip(close + 1)
         .find_map(|(index, token)| {
-            matches!(token.kind, TokenKind::CloseParenthesis).then_some(index)
+            (token.tag() == TokenTag::CLOSE_PARENTHESIS).then_some(index)
         })
         .expect("expected ')' after the child template");
-    let comma = file_tokens
-        .tokens
-        .iter()
+    let comma = token_refs(tokens)
         .enumerate()
         .skip(close_paren + 1)
-        .find_map(|(index, token)| matches!(token.kind, TokenKind::Comma).then_some(index))
+        .find_map(|(index, token)| (token.tag() == TokenTag::COMMA).then_some(index))
         .expect("expected a comma after the child template");
-    let markdown = file_tokens
-        .tokens
-        .iter()
+    let markdown = token_refs(tokens)
         .enumerate()
         .skip(comma + 1)
         .find_map(|(index, token)| {
-            matches!(token.kind, TokenKind::StyleDirective(id) if string_table.resolve(id) == "md")
-                .then_some(index)
+            (token.tag() == TokenTag::STYLE_DIRECTIVE
+                && token_string_is(token, &string_table, "md"))
+            .then_some(index)
         })
         .expect("expected the outer head to continue with '$md'");
 
@@ -1814,20 +1664,12 @@ fn rejects_legacy_style_child_template_prefix_syntax() {
 #[test]
 fn tokenizes_reactive_marker_outside_template_heads() {
     let (file_tokens, _string_table) = tokenize_source("$String\n");
+    let tokens = file_tokens.tokens.as_ref();
 
+    assert_eq!(token_at(tokens, 1).tag(), TokenTag::REACTIVE);
+    assert_eq!(token_at(tokens, 2).tag(), TokenTag::DATATYPE_STRING);
     assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Reactive),
-        "`$` in ordinary code should be the reactive marker"
-    );
-    assert!(
-        matches!(file_tokens.tokens[2].kind, TokenKind::DatatypeString),
-        "reactive marker should not turn the following identifier into a style directive"
-    );
-    assert!(
-        !file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::StyleDirective(_))),
+        !token_refs(tokens).any(|token| token.tag() == TokenTag::STYLE_DIRECTIVE),
         "ordinary code should not produce style directive tokens"
     );
 }
@@ -1835,19 +1677,14 @@ fn tokenizes_reactive_marker_outside_template_heads() {
 #[test]
 fn tokenizes_template_reactive_subscription_marker() {
     let (file_tokens, _string_table) = tokenize_source("[:[$(count)]]");
+    let tokens = file_tokens.tokens.as_ref();
 
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::Reactive)),
+        token_refs(tokens).any(|token| token.tag() == TokenTag::REACTIVE),
         "`$(` in a template head should produce the reactive marker"
     );
     assert!(
-        !file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::StyleDirective(_))),
+        !token_refs(tokens).any(|token| token.tag() == TokenTag::STYLE_DIRECTIVE),
         "`$(` is subscription syntax, not a style directive"
     );
 }
@@ -1895,26 +1732,22 @@ fn unknown_style_directives_fail_under_strict_registry() {
 fn tokenizes_slot_and_insert_directives_inside_template_heads() {
     let (file_tokens, string_table) =
         tokenize_source("[wrapper: [$slot][$slot(\"style\")][$insert(\"style\"): blue]]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let slot_directive_count = file_tokens
-        .tokens
-        .iter()
+    let slot_directive_count = token_refs(tokens)
         .filter(|token| {
-            matches!(token.kind, TokenKind::StyleDirective(id) if string_table.resolve(id) == "slot")
+            token.tag() == TokenTag::STYLE_DIRECTIVE
+                && token_string_is(*token, &string_table, "slot")
         })
         .count();
-    let has_insert_directive = file_tokens.tokens.iter().any(|token| {
-        matches!(token.kind, TokenKind::StyleDirective(id) if string_table.resolve(id) == "insert")
+    let has_insert_directive = token_refs(tokens).any(|token| {
+        token.tag() == TokenTag::STYLE_DIRECTIVE
+            && token_string_is(token, &string_table, "insert")
     });
 
     assert_eq!(slot_directive_count, 2);
     assert!(has_insert_directive);
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-    );
+    assert!(token_refs(tokens).any(|token| token.tag() == TokenTag::STRING_SLICE_LITERAL));
 }
 
 #[test]
@@ -1947,16 +1780,13 @@ fn rejects_numeric_slot_directive_prefixes() {
 fn code_template_body_keeps_nested_square_brackets_as_literal_text() {
     let (file_tokens, string_table) =
         tokenize_source("[$code(\"bst\"):\nconcatenated = [string_slice, a_mutable_string]\n]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let template_heads = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+    let template_heads = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
         .count();
-    let template_closes = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let template_closes = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
 
     assert_eq!(
@@ -1965,18 +1795,12 @@ fn code_template_body_keeps_nested_square_brackets_as_literal_text() {
     );
     assert_eq!(template_closes, 1);
 
-    let body_literal = file_tokens
-        .tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::StringSliceLiteral(id) => {
-                let value = string_table.resolve(id);
-                value
-                    .contains("[string_slice, a_mutable_string]")
-                    .then_some(value)
-            }
-            _ => None,
+    let body_literal = token_refs(tokens)
+        .find_map(|token| {
+            (token.tag() == TokenTag::STRING_SLICE_LITERAL)
+                .then(|| string_table.resolve(token.string_id().expect("literal string handle")))
         })
+        .filter(|value| value.contains("[string_slice, a_mutable_string]"))
         .expect("expected code template body text to include literal square brackets");
 
     assert!(body_literal.contains("concatenated"));
@@ -1986,16 +1810,13 @@ fn code_template_body_keeps_nested_square_brackets_as_literal_text() {
 fn css_template_body_keeps_selector_brackets_as_literal_text() {
     let (file_tokens, string_table) =
         tokenize_html_source("[$css:\n.button[data-kind=\"cta\"] { color: red; }\n]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let template_heads = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+    let template_heads = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
         .count();
-    let template_closes = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let template_closes = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
 
     assert_eq!(
@@ -2004,16 +1825,12 @@ fn css_template_body_keeps_selector_brackets_as_literal_text() {
     );
     assert_eq!(template_closes, 1);
 
-    let body_literal = file_tokens
-        .tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::StringSliceLiteral(id) => {
-                let value = string_table.resolve(id);
-                value.contains("[data-kind=\"cta\"]").then_some(value)
-            }
-            _ => None,
+    let body_literal = token_refs(tokens)
+        .find_map(|token| {
+            (token.tag() == TokenTag::STRING_SLICE_LITERAL)
+                .then(|| string_table.resolve(token.string_id().expect("literal string handle")))
         })
+        .filter(|value| value.contains("[data-kind=\"cta\"]"))
         .expect("expected css template body text to include selector brackets");
 
     assert!(body_literal.contains(".button"));
@@ -2023,16 +1840,13 @@ fn css_template_body_keeps_selector_brackets_as_literal_text() {
 fn html_template_body_tokenizes_attribute_brackets_using_normal_rules() {
     let (file_tokens, string_table) =
         tokenize_html_source("[$html:\n<div data-tags=\"[one,two]\">Hello</div>\n]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let template_heads = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+    let template_heads = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
         .count();
-    let template_closes = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let template_closes = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
 
     assert_eq!(
@@ -2042,26 +1856,24 @@ fn html_template_body_tokenizes_attribute_brackets_using_normal_rules() {
     assert_eq!(template_closes, 2);
 
     assert!(
-        file_tokens.tokens.iter().any(
-            |token| matches!(token.kind, TokenKind::Symbol(id) if string_table.resolve(id) == "one")
-        ),
+        token_refs(tokens).any(|token| {
+            token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "one")
+        }),
         "expected nested template symbol 'one' from bracket content"
     );
     assert!(
-        file_tokens.tokens.iter().any(
-            |token| matches!(token.kind, TokenKind::Symbol(id) if string_table.resolve(id) == "two")
-        ),
+        token_refs(tokens).any(|token| {
+            token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "two")
+        }),
         "expected nested template symbol 'two' from bracket content"
     );
 
-    let preserves_literal_attribute_brackets =
-        file_tokens.tokens.iter().any(|token| match token.kind {
-            TokenKind::StringSliceLiteral(id) => {
-                let value = string_table.resolve(id);
-                value.contains("data-tags=\"[one,two]\"")
-            }
-            _ => false,
-        });
+    let preserves_literal_attribute_brackets = token_refs(tokens).any(|token| {
+        token.tag() == TokenTag::STRING_SLICE_LITERAL
+            && token
+                .string_id()
+                .is_some_and(|id| string_table.resolve(id).contains("data-tags=\"[one,two]\""))
+    });
     assert!(
         !preserves_literal_attribute_brackets,
         "normal $html tokenization should not preserve attribute bracket lists as one literal slice"
@@ -2073,16 +1885,13 @@ fn html_template_body_tokenizes_slot_templates_inside_quoted_attributes_with_nor
     let (file_tokens, string_table) = tokenize_html_source(
         "[$html:\n<h1 style=\"font-size: 2em;[$slot(\"style\")]\">[$slot]</h1>\n]",
     );
+    let tokens = file_tokens.tokens.as_ref();
 
-    let template_heads = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+    let template_heads = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
         .count();
-    let template_closes = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let template_closes = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
 
     assert_eq!(
@@ -2091,11 +1900,10 @@ fn html_template_body_tokenizes_slot_templates_inside_quoted_attributes_with_nor
     );
     assert_eq!(template_closes, 3);
 
-    let slot_directives = file_tokens
-        .tokens
-        .iter()
+    let slot_directives = token_refs(tokens)
         .filter(|token| {
-            matches!(token.kind, TokenKind::StyleDirective(id) if string_table.resolve(id) == "slot")
+            token.tag() == TokenTag::STYLE_DIRECTIVE
+                && token_string_is(*token, &string_table, "slot")
         })
         .count();
     assert_eq!(slot_directives, 2);
@@ -2105,16 +1913,13 @@ fn html_template_body_tokenizes_slot_templates_inside_quoted_attributes_with_nor
 fn html_template_body_tokenizes_symbol_wrappers_with_general_template_rules() {
     let (file_tokens, string_table) =
         tokenize_html_source("[$html:\n[title, center: LANGUAGE BASICS]\n]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let template_heads = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+    let template_heads = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
         .count();
-    let template_closes = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let template_closes = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
 
     assert_eq!(
@@ -2123,12 +1928,12 @@ fn html_template_body_tokenizes_symbol_wrappers_with_general_template_rules() {
     );
     assert_eq!(template_closes, 2);
 
-    assert!(file_tokens.tokens.iter().any(
-        |token| matches!(token.kind, TokenKind::Symbol(id) if string_table.resolve(id) == "title")
-    ));
-    assert!(file_tokens.tokens.iter().any(
-        |token| matches!(token.kind, TokenKind::Symbol(id) if string_table.resolve(id) == "center")
-    ));
+    assert!(token_refs(tokens).any(|token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "title")
+    }));
+    assert!(token_refs(tokens).any(|token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "center")
+    }));
 }
 
 #[test]
@@ -2141,30 +1946,23 @@ fn custom_balanced_directive_uses_general_balanced_mode() {
     )];
     let (file_tokens, string_table) =
         tokenize_source_with_directives("[$highlight:\n[data-kind=\"cta\"]\n]", &directives);
+    let tokens = file_tokens.tokens.as_ref();
 
-    let template_heads = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+    let template_heads = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
         .count();
-    let template_closes = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let template_closes = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
 
     assert_eq!(template_heads, 1);
     assert_eq!(template_closes, 1);
-    let body_literal = file_tokens
-        .tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::StringSliceLiteral(id) => {
-                let value = string_table.resolve(id);
-                value.contains("[data-kind=\"cta\"]").then_some(value)
-            }
-            _ => None,
+    let body_literal = token_refs(tokens)
+        .find_map(|token| {
+            (token.tag() == TokenTag::STRING_SLICE_LITERAL)
+                .then(|| string_table.resolve(token.string_id().expect("literal string handle")))
         })
+        .filter(|value| value.contains("[data-kind=\"cta\"]"))
         .expect("expected balanced directive body to keep brackets as literal text");
     assert!(body_literal.contains("data-kind"));
 }
@@ -2176,26 +1974,27 @@ fn note_and_todo_template_bodies_are_discarded_until_balanced_close() {
             "[${directive}:\n[this [body] has [nested [brackets]] and should be discarded]\n]"
         );
         let (file_tokens, string_table) = tokenize_source(&source);
+        let tokens = file_tokens.tokens.as_ref();
 
-        let template_heads = file_tokens
-            .tokens
-            .iter()
-            .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+        let template_heads = token_refs(tokens)
+            .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
             .count();
-        let template_closes = file_tokens
-            .tokens
-            .iter()
-            .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+        let template_closes = token_refs(tokens)
+            .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
             .count();
 
         assert_eq!(template_heads, 1);
         assert_eq!(template_closes, 1);
-        assert!(file_tokens.tokens.iter().any(|token| {
-            matches!(token.kind, TokenKind::StyleDirective(id) if string_table.resolve(id) == directive)
+        assert!(token_refs(tokens).any(|token| {
+            token.tag() == TokenTag::STYLE_DIRECTIVE
+                && token_string_is(token, &string_table, directive)
         }));
         assert!(
-            !file_tokens.tokens.iter().any(|token| {
-                matches!(token.kind, TokenKind::StringSliceLiteral(id) if string_table.resolve(id).contains("discarded"))
+            !token_refs(tokens).any(|token| {
+                token.tag() == TokenTag::STRING_SLICE_LITERAL
+                    && token.string_id().is_some_and(|id| {
+                        string_table.resolve(id).contains("discarded")
+                    })
             }),
             "expected ${directive} body text to be discarded during tokenization"
         );
@@ -2205,16 +2004,13 @@ fn note_and_todo_template_bodies_are_discarded_until_balanced_close() {
 #[test]
 fn doc_template_body_keeps_nested_templates_as_template_tokens() {
     let (file_tokens, string_table) = tokenize_source("[$doc:\n[: child]\n]");
+    let tokens = file_tokens.tokens.as_ref();
 
-    let template_heads = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+    let template_heads = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
         .count();
-    let template_closes = file_tokens
-        .tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let template_closes = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
 
     assert_eq!(
@@ -2222,8 +2018,9 @@ fn doc_template_body_keeps_nested_templates_as_template_tokens() {
         "expected doc body nested template to tokenize as a child template"
     );
     assert_eq!(template_closes, 2);
-    assert!(file_tokens.tokens.iter().any(|token| {
-        matches!(token.kind, TokenKind::StyleDirective(id) if string_table.resolve(id) == "doc")
+    assert!(token_refs(tokens).any(|token| {
+        token.tag() == TokenTag::STYLE_DIRECTIVE
+            && token_string_is(token, &string_table, "doc")
     }));
 }
 
@@ -2233,10 +2030,7 @@ fn parent_relative_path_does_not_receive_missing_at_prefix_correction() {
     // must not fabricate a dependency path or suggest `@../`.
     let (file_tokens, _string_table) = tokenize_source("import ../utils\n");
     assert!(
-        !file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(&token.kind, TokenKind::Path(_))),
+        !token_refs(file_tokens.tokens.as_ref()).any(token_has_path_payload),
         "parent-relative bare import should not tokenize as a path"
     );
 }
@@ -2252,20 +2046,14 @@ fn valid_at_prefixed_paths_and_operators_remain_unaffected() {
     ] {
         let (file_tokens, _string_table) = tokenize_source(source);
         assert!(
-            file_tokens
-                .tokens
-                .iter()
-                .any(|token| matches!(token.kind, TokenKind::Eof)),
+            token_refs(file_tokens.tokens.as_ref()).any(|token| token.tag() == TokenTag::EOF),
             "expected valid source to tokenize: {source}"
         );
     }
 
     let (at_core, _string_table) = tokenize_source("@core/math\n");
     assert!(
-        at_core
-            .tokens
-            .iter()
-            .any(|token| matches!(&token.kind, TokenKind::Path(path_id) if !path_id.is_none())),
+        token_refs(at_core.tokens.as_ref()).any(token_has_path_payload),
         "valid @-prefixed dependency should produce a path token"
     );
 }
@@ -2274,10 +2062,7 @@ fn valid_at_prefixed_paths_and_operators_remain_unaffected() {
 fn ordinary_import_identifier_does_not_receive_path_correction() {
     let (file_tokens, _string_table) = tokenize_source("import as drawing\n");
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::As)),
+        token_refs(file_tokens.tokens.as_ref()).any(|token| token.tag() == TokenTag::AS),
         "ordinary `import` followed by `as` should tokenize both words independently"
     );
 }
@@ -2290,7 +2075,7 @@ fn ordinary_import_identifier_does_not_receive_path_correction() {
 /// them would still pass a single-shape fixture.
 ///
 /// Exact token spans are resolved to bytes before line-index checks; columns are intentionally
-/// derived by the line index rather than reconstructed as legacy tokenizer state.
+/// derived by the line index rather than reconstructed from tokenizer state.
 #[test]
 fn token_start_lines_match_line_index_across_newline_shapes() {
     let source =
@@ -2302,7 +2087,7 @@ fn token_start_lines_match_line_index_across_newline_shapes() {
     let mut lines_with_token_starts: Vec<u32> = Vec::new();
     let mut columns_checked = 0;
 
-    for token in &file_tokens.tokens {
+    for token in token_refs(file_tokens.tokens.as_ref()) {
         let (start_byte, end_byte) = token_byte_range(token);
         let line = line_index
             .line_of_offset(start_byte)
@@ -2345,13 +2130,13 @@ fn token_start_lines_match_line_index_across_newline_shapes() {
         assert_eq!(
             scalar_at_column, first_authored_scalar,
             "{:?}: line-index column must point at the token's first authored scalar",
-            token.kind
+            token.tag()
         );
         assert_eq!(
             line_start + offset_in_line as u32,
             start_byte,
             "{:?}: line-index column must round-trip to the token's byte start",
-            token.kind
+            token.tag()
         );
         columns_checked += 1;
     }
@@ -2382,10 +2167,8 @@ fn discarded_template_body_close_resolves_to_its_authored_line() {
     let line_starts = line_start_offsets(source);
     let line_index = LineIndex::new(source, &line_starts);
 
-    let close = file_tokens
-        .tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::TemplateClose))
+    let close = token_refs(file_tokens.tokens.as_ref())
+        .find(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .expect("a discarded body must still emit its closing bracket");
 
     let (start_byte, end_byte) = token_byte_range(close);
@@ -2408,9 +2191,7 @@ fn token_byte_ranges_recover_the_authored_text() {
     let source = "name = \"café\"\n[outer: a\r\nb[inner: nested]c\rd]\n";
     let (file_tokens, _string_table) = tokenize_source(source);
 
-    let authored: Vec<&str> = file_tokens
-        .tokens
-        .iter()
+    let authored: Vec<&str> = token_refs(file_tokens.tokens.as_ref())
         .map(|token| {
             let (start, end) = token_byte_range(token);
             &source[start as usize..end as usize]
@@ -2446,7 +2227,7 @@ fn token_byte_ranges_recover_the_authored_text() {
 
     let source_len = source.len() as u32;
     let mut previous_end = 0u32;
-    for token in &file_tokens.tokens {
+    for token in token_refs(file_tokens.tokens.as_ref()) {
         let (start_byte, end_byte) = token_byte_range(token);
 
         assert!(
@@ -2487,9 +2268,7 @@ fn skipped_trivia_is_excluded_from_the_following_token_range() {
 
     for (source, expected) in cases {
         let (file_tokens, _string_table) = tokenize_source(source);
-        let authored: Vec<&str> = file_tokens
-            .tokens
-            .iter()
+        let authored: Vec<&str> = token_refs(file_tokens.tokens.as_ref())
             .map(|token| {
                 let (start, end) = token_byte_range(token);
                 &source[start as usize..end as usize]
@@ -2498,8 +2277,7 @@ fn skipped_trivia_is_excluded_from_the_following_token_range() {
         assert_eq!(authored, *expected, "{source:?}: token byte ranges");
 
         let end_of_source = source.len() as u32;
-        let final_token = file_tokens
-            .tokens
+        let final_token = token_refs(file_tokens.tokens.as_ref())
             .last()
             .expect("tokenization always emits Eof");
         assert_eq!(
@@ -2584,28 +2362,22 @@ fn every_token_span_matches_authored_bytes() {
     let resolver = span_builder.resolver();
 
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::TemplateHead))
+        token_refs(file_tokens.tokens.as_ref())
+            .any(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
     );
     assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        token_refs(file_tokens.tokens.as_ref())
+            .any(|token| token.tag() == TokenTag::STRING_SLICE_LITERAL)
     );
 
     let mut previous_end = 0u32;
-    let authored: Vec<&str> = file_tokens
-        .tokens
-        .iter()
+    let authored: Vec<&str> = token_refs(file_tokens.tokens.as_ref())
         .map(|token| {
-            let resolved = token.span.resolve_with(resolver);
+            let resolved = token.span().resolve_with(resolver);
             assert!(
                 resolved.start() >= previous_end,
                 "{:?} must not start before the previous token ended",
-                token.kind
+                token.tag()
             );
             previous_end = resolved.end();
 
@@ -2671,12 +2443,10 @@ fn extended_token_span_resolves_exactly_through_live_builder() {
     )
     .expect("long token should tokenize");
     let resolver = span_builder.resolver();
-    let token = file_tokens
-        .tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+    let token = token_refs(file_tokens.tokens.as_ref())
+        .find(|token| token.tag() == TokenTag::STRING_SLICE_LITERAL)
         .expect("long string token");
-    let resolved = token.span.resolve_with(resolver);
+    let resolved = token.span().resolve_with(resolver);
 
     assert_eq!(
         span_builder.len(),
@@ -2760,8 +2530,8 @@ fn diagnostic_span_allocates_exactly_when_needed() {
     }
     stream.start_byte_offset = 0;
     stream
-        .new_token(TokenKind::StringSliceLiteral(StringId::from_index(0)))
-        .expect("the long authored token should encode");
+        .emit_string_literal(StringId::from_index(0))
+        .expect("the long authored string token should encode");
     assert_eq!(
         stream.extended_span_builder.len(),
         1,
@@ -2866,201 +2636,101 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
     );
 }
 
-/// Canonical and compatibility payloads agree on every token's rendered meaning.
+/// Canonical token payloads retain their typed values and authored spans.
 ///
 /// WHAT: lexes numeric literals (signed, separator, exponent), an authored path, two string
-/// shapes, a char and a bool through `tokenize`, then compares each canonical `TokenRef`
-/// against the surviving compatibility `Vec<Token>` entry at the same position.
-/// WHY: the deleted `Vec<Token> -> SourceTokens` round trip previously guaranteed this
-/// agreement by construction; the lexer now packs the canonical owner in the same pass
-/// that builds the compatibility vector, so a packing regression must fail here.
+/// shapes, a char and a bool through `tokenize`, then inspects each source-owned token directly.
+/// WHY: lexer tests must exercise the compact canonical store and inspect typed payloads directly.
 #[test]
-fn lexed_canonical_shapes_match_compatibility_payloads() {
+fn lexed_canonical_shapes_retain_typed_payloads() {
     // The raw-string branch runs before trivia skipping, so a backtick first reached after
     // whitespace on the same line is not recognized as a raw literal in code mode (pre-existing
     // lexer behavior, unchanged by this phase); the raw token leads the source instead.
     let (file_tokens, string_table) = tokenize_source(
         "`raw`\nvalue = -1_000\nsecond = 1.0e-10\npath = @core/math\ntext = \"text\"\nletter = 'q'\nflag = true\n",
     );
-    let owner = file_tokens
-        .source_tokens()
-        .expect("lexer output must own its canonical source tokens");
+    let owner = file_tokens.tokens.as_ref();
+
+    assert!(owner.len() >= 2);
     assert_eq!(
-        owner.len(),
-        file_tokens.tokens.len(),
-        "canonical and compatibility lanes must cover the same token positions"
-    );
-    assert_eq!(
-        file_tokens.token_stats.total_tokens,
-        owner.len(),
-        "lexer stats must count the packed canonical tokens"
+        file_tokens.file_id,
+        owner.source(),
+        "canonical token owner must retain the lexer's source identity"
     );
 
-    let path_rows = file_tokens
-        .path_syntax_table()
-        .expect("lexer output must expose its preparing path table");
-    for (index, compatibility) in file_tokens.tokens.iter().enumerate() {
+    let mut saw_negative_numeric = false;
+    let mut saw_separator_numeric = false;
+    let mut saw_exponent_numeric = false;
+    let mut saw_path = false;
+    let mut saw_quoted_string = false;
+    let mut saw_raw_string = false;
+    let mut saw_char = false;
+    let mut saw_bool = false;
+
+    for (index, token) in token_refs(owner).enumerate() {
         let token_index = TokenIndex::try_from_index(index).expect("fixture range fits");
-        let canonical = owner.token(token_index).expect("canonical index must fit");
-        assert_eq!(
-            canonical.tag(),
-            compatibility.kind.token_tag(),
-            "tag mismatch at token {index}"
-        );
-        assert_eq!(
-            canonical.span(),
-            compatibility.span,
-            "span mismatch at token {index}"
-        );
-        match &compatibility.kind {
-            TokenKind::Symbol(id)
-            | TokenKind::StringSliceLiteral(id)
-            | TokenKind::RawStringLiteral(id) => {
-                let rendered = string_table.resolve(*id);
-                let canonical_id = canonical
-                    .shape()
-                    .string_id()
-                    .expect("string-payload token must carry a string handle");
-                assert_eq!(
-                    string_table.resolve(canonical_id),
-                    rendered,
-                    "string payload mismatch at token {index}"
-                );
+        assert_eq!(token.index(), token_index, "canonical index mismatch at {index}");
+        match token.tag() {
+            TokenTag::SYMBOL | TokenTag::STYLE_DIRECTIVE => {
+                let id = token.string_id().expect("string-shaped token must carry a handle");
+                string_table.resolve(id);
             }
-            TokenKind::NumericLiteral(expected) => {
-                let borrowed = canonical
-                    .numeric_literal()
-                    .expect("numeric handle must resolve")
-                    .expect("numeric shape must carry a handle");
-                assert_eq!(
-                    borrowed.sign, expected.sign,
-                    "numeric sign at token {index}"
-                );
-                assert_eq!(
-                    borrowed.kind, expected.kind,
-                    "numeric kind at token {index}"
-                );
-                assert_eq!(
-                    borrowed.digit_count, expected.digit_count,
-                    "numeric digit count at token {index}"
-                );
-                assert_eq!(
-                    borrowed.fractional_digit_count, expected.fractional_digit_count,
-                    "numeric fractional digits at token {index}"
-                );
-                assert_eq!(
-                    borrowed.exponent_digit_count, expected.exponent_digit_count,
-                    "numeric exponent digits at token {index}"
-                );
-                assert_eq!(
-                    borrowed.exponent_sign, expected.exponent_sign,
-                    "numeric exponent sign at token {index}"
-                );
-                assert_eq!(
-                    string_table.resolve(borrowed.source_text),
-                    string_table.resolve(expected.source_text),
-                    "numeric authored text at token {index}"
-                );
-                assert_eq!(
-                    string_table.resolve(borrowed.normalized_text),
-                    string_table.resolve(expected.normalized_text),
-                    "numeric normalized text at token {index}"
-                );
+            TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL => {
+                let id = token.string_id().expect("literal token must carry a handle");
+                let text = string_table.resolve(id);
+                if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                    if text == "text" {
+                        saw_quoted_string = true;
+                    }
+                } else if text == "raw" {
+                    saw_raw_string = true;
+                }
             }
-            TokenKind::Path(expected) => {
-                let expected_row = path_rows
-                    .try_path(*expected)
-                    .expect("compatibility path handle must resolve");
-                let canonical_id = canonical
-                    .shape()
+            TokenTag::NUMERIC_LITERAL => {
+                let numeric = numeric_payload(token).expect("numeric token must carry a literal");
+                let source_text = string_table.resolve(numeric.source_text);
+                let normalized_text = string_table.resolve(numeric.normalized_text);
+                if numeric.sign == NumericLiteralSign::Negative {
+                    saw_negative_numeric = true;
+                    assert_eq!(source_text, "-1_000");
+                }
+                if normalized_text == "1000" {
+                    saw_separator_numeric = true;
+                }
+                if normalized_text == "1.0e-10" {
+                    saw_exponent_numeric = true;
+                }
+            }
+            TokenTag::PATH => {
+                let path_id = token
                     .path_syntax_id()
-                    .expect("path shape must carry a handle");
-                let canonical_row = path_rows
-                    .try_path(canonical_id)
-                    .expect("canonical path handle must resolve");
-                assert_eq!(
-                    canonical_row, expected_row,
-                    "path row mismatch at token {index}"
-                );
+                    .expect("path token must carry a path handle");
+                file_tokens
+                    .path_syntax
+                    .try_path(path_id)
+                    .expect("path handle must resolve in the lexer's source table");
+                saw_path = true;
             }
-            TokenKind::CharLiteral(expected) => {
-                assert_eq!(
-                    canonical.char_value(),
-                    Some(*expected),
-                    "char payload mismatch at token {index}"
-                );
+            TokenTag::CHAR_LITERAL => {
+                assert_eq!(token.char_value(), Some('q'));
+                saw_char = true;
             }
-            TokenKind::BoolLiteral(expected) => {
-                assert_eq!(
-                    canonical.bool_value(),
-                    Some(*expected),
-                    "bool payload mismatch at token {index}"
-                );
+            TokenTag::BOOL_LITERAL => {
+                assert_eq!(token.bool_value(), Some(true));
+                saw_bool = true;
             }
             _ => {}
         }
     }
 
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(&token.kind, TokenKind::NumericLiteral(token) if token.sign == NumericLiteralSign::Negative)),
-        "the fixture must contain a signed numeric literal"
-    );
-    let normalized: Vec<String> = file_tokens
-        .tokens
-        .iter()
-        .filter_map(|token| match &token.kind {
-            TokenKind::NumericLiteral(token) => {
-                Some(string_table.resolve(token.normalized_text).to_owned())
-            }
-            _ => None,
-        })
-        .collect();
-    assert!(
-        normalized.iter().any(|text| text == "1000"),
-        "the fixture must contain a separator literal, found {normalized:?}"
-    );
-    assert!(
-        normalized.iter().any(|text| text == "1.0e-10"),
-        "the fixture must contain an exponent literal, found {normalized:?}"
-    );
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(&token.kind, TokenKind::Path(_))),
-        "the fixture must contain an authored path"
-    );
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(&token.kind, TokenKind::StringSliceLiteral(_))),
-        "the fixture must contain a quoted string literal"
-    );
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(&token.kind, TokenKind::RawStringLiteral(_))),
-        "the fixture must contain a raw string literal"
-    );
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(&token.kind, TokenKind::CharLiteral(_))),
-        "the fixture must contain a char literal"
-    );
-    assert!(
-        file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(&token.kind, TokenKind::BoolLiteral(_))),
-        "the fixture must contain a bool literal"
-    );
+    assert!(saw_negative_numeric, "the fixture must contain a signed numeric literal");
+    assert!(saw_separator_numeric, "the fixture must contain a separator literal");
+    assert!(saw_exponent_numeric, "the fixture must contain an exponent literal");
+    assert!(saw_path, "the fixture must contain an authored path");
+    assert!(saw_quoted_string, "the fixture must contain a quoted string literal");
+    assert!(saw_raw_string, "the fixture must contain a raw string literal");
+    assert!(saw_char, "the fixture must contain a char literal");
+    assert!(saw_bool, "the fixture must contain a bool literal");
 }
 
 /// Token-count exhaustion stays on the typed user diagnostic lane without huge allocation.
@@ -3131,29 +2801,23 @@ fn token_count_exhaustion_reports_a_typed_user_capacity_diagnostic() {
     }
 }
 
-/// A malformed trusted kind/handle combination stays on the infrastructure invariant lane.
+/// A malformed trusted compact payload stays on the infrastructure invariant lane.
 ///
-/// WHAT: pushes `TokenKind::Path(PathSyntaxId::NONE)` — the reachable kind/handle combination
-/// that `TokenShape::from_token_kind_with_numeric_id` rejects — and asserts the builder returns
-/// `SourceTokenBuildError::Invariant`, not the capacity lane.
+/// WHAT: pushes the absent path handle through the canonical source-token builder and asserts
+///       `SourceTokenBuildError::Invariant`, not the capacity lane.
 /// WHY: capacity exhaustion is user-controlled and diagnosed; a trusted record that cannot pack
-/// is a compiler invariant violation and must never surface as a user diagnostic.
+///      is a compiler invariant violation and must never surface as a user diagnostic.
 #[test]
 fn malformed_trusted_record_reports_the_invariant_lane() {
-    use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
-
     let source = SourceId::COMPILATION_ROOT;
-    let malformed = TokenKind::Path(PathSyntaxId::NONE);
-    assert!(
-        TokenShape::from_token_kind_with_numeric_id(
-            &malformed,
-            crate::compiler_frontend::numeric_text::store::NumericLiteralId::NONE,
-        )
-        .is_none(),
-        "the absent path handle must not pack"
-    );
+    let malformed = PathSyntaxId::NONE;
     let mut builder = SourceTokensBuilder::with_capacity(source, 1);
-    match builder.push(&malformed, LocalSpan::source_start()) {
+    match builder.push_payload(
+        TokenTag::PATH,
+        0,
+        malformed.raw(),
+        LocalSpan::source_start(),
+    ) {
         Err(SourceTokenBuildError::Invariant(_)) => {}
         Err(SourceTokenBuildError::Capacity) => {
             panic!("malformed trusted record must not report the capacity lane")

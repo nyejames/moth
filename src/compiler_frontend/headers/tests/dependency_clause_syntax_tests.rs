@@ -4,18 +4,17 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidDependencyClauseReason, PathKind,
 };
-use crate::compiler_frontend::numeric_text::store::NumericLiteralStore;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenKind, TokenTag, TokenizerEntryMode,
+    SourceTokens, TestSourceTokensBuilder, TokenTag, TokenizerEntryMode,
 };
 
-fn tokenize_source(source: &str) -> (FileTokens, StringTable, ExtendedSpanBuilder) {
+fn tokenize_source(source: &str) -> (LexedSource, StringTable, ExtendedSpanBuilder) {
     tokenize_named_source_with_id(source, "test.moth", SourceId::COMPILATION_ROOT)
 }
 
@@ -23,7 +22,7 @@ fn tokenize_named_source_with_id(
     source: &str,
     file_name: &str,
     source_id: SourceId,
-) -> (FileTokens, StringTable, ExtendedSpanBuilder) {
+) -> (LexedSource, StringTable, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
@@ -44,29 +43,13 @@ fn tokenize_named_source_with_id(
     (tokens, string_table, span_builder)
 }
 
-fn path_token_index(tokens: &FileTokens) -> usize {
+fn path_token_index(tokens: &LexedSource) -> usize {
     tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens")
+        .tokens
         .shapes()
         .iter()
         .position(|shape| shape.tag() == TokenTag::PATH)
         .expect("expected dependency path")
-}
-
-fn canonical_from_tokens(
-    source: SourceId,
-    tokens: Vec<Token>,
-    path_syntax: PathSyntaxTable,
-) -> SourceTokens {
-    let mut numeric_literals = NumericLiteralStore::with_source(source);
-    for token in &tokens {
-        if let TokenKind::NumericLiteral(literal) = &token.kind {
-            numeric_literals.push(literal.clone());
-        }
-    }
-    SourceTokens::try_from_tokens(source, tokens, numeric_literals, path_syntax)
-        .expect("canonical dependency fixture should satisfy source-token invariants")
 }
 
 fn expect_infrastructure_error(error: DependencyClauseParseError, case: &str) {
@@ -82,23 +65,21 @@ fn expect_infrastructure_error(error: DependencyClauseParseError, case: &str) {
 fn parse_clause(source: &str) -> (ScannedDependencyClause, StringTable) {
     let (tokens, string_table, _span_builder) = tokenize_source(source);
     let path_index = path_token_index(&tokens);
-    let canonical = tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens");
-    let (clause, _) =
-        parse_dependency_clause_at_source(canonical, path_index, &tokens.path_syntax, tokens.file_id)
-            .expect("clause should parse");
+    let (clause, _) = parse_dependency_clause_at_source(
+        &tokens.tokens,
+        path_index,
+        &tokens.path_syntax,
+        tokens.file_id,
+    )
+    .expect("clause should parse");
     (clause, string_table)
 }
 
 fn clause_diagnostic(source: &str) -> CompilerDiagnostic {
     let (tokens, _, _span_builder) = tokenize_source(source);
     let path_index = path_token_index(&tokens);
-    let canonical = tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens");
     match parse_dependency_clause_at_source(
-        canonical,
+        &tokens.tokens,
         path_index,
         &tokens.path_syntax,
         tokens.file_id,
@@ -111,6 +92,7 @@ fn clause_diagnostic(source: &str) -> CompilerDiagnostic {
         }
     }
 }
+
 
 fn clause_error(source: &str) -> InvalidDependencyClauseReason {
     let error = clause_diagnostic(source);
@@ -190,9 +172,7 @@ fn reports_missing_comma_at_the_unexpected_selection_after_continuation() {
         }
     ));
     let (tokens, mut strings, _) = tokenize_source(source);
-    let canonical = tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens");
+    let canonical = tokens.tokens.as_ref();
     let tan_id = strings.intern("tan");
     let tan_index = canonical
         .shapes()
@@ -244,16 +224,12 @@ fn rejects_namespace_alias_followed_by_selections_and_delimiters() {
 fn corrupted_path_lookup_is_infrastructure_error() {
     let (tokens, _, _span_builder) = tokenize_source("@core/math sin\n");
     let path_index = path_token_index(&tokens);
-    let canonical = tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens");
+    let canonical = tokens.tokens.as_ref();
     let mut none_owner = canonical.clone();
     none_owner.corrupt_payload_for_test(path_index, TokenTag::PATH);
 
     let (two_path_tokens, _, _span_builder) = tokenize_source("@core/math\n@other/path\n");
-    let two_path_canonical = two_path_tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens");
+    let two_path_canonical = two_path_tokens.tokens.as_ref();
     let second_path_index = two_path_canonical
         .shapes()
         .iter()
@@ -284,13 +260,38 @@ fn corrupted_path_lookup_is_infrastructure_error() {
     mismatch_table
         .try_push_for_source(path_root, tokens.file_id, mismatch_span)
         .expect("mismatch path row should fit");
-    let mut span_mismatch_tokens = tokens.tokens.clone();
-    span_mismatch_tokens[path_index].span = mismatch_span;
-    let mismatch_owner =
-        canonical_from_tokens(tokens.file_id, span_mismatch_tokens, mismatch_table);
+    let mut mismatch_tokens =
+        TestSourceTokensBuilder::with_path_syntax(tokens.file_id, mismatch_table);
+    for index in 0..path_index {
+        mismatch_tokens
+            .push_static(canonical.shapes()[index].tag(), canonical.spans()[index])
+            .expect("static fixture token should fit");
+    }
+    mismatch_tokens
+        .push_path(TokenTag::PATH, path_id, mismatch_span)
+        .expect("path fixture token should fit");
+    for index in path_index + 1..canonical.len() {
+        let shape = canonical.shapes()[index];
+        if shape.tag() == TokenTag::SYMBOL {
+            mismatch_tokens
+                .push_symbol(
+                    TokenTag::SYMBOL,
+                    shape.string_id().expect("symbol payload"),
+                    canonical.spans()[index],
+                )
+                .expect("symbol fixture token should fit");
+        } else {
+            mismatch_tokens
+                .push_static(shape.tag(), canonical.spans()[index])
+                .expect("static fixture token should fit");
+        }
+    }
+    let mismatch_owner = mismatch_tokens
+        .finish()
+        .expect("mismatch source token fixture should finish");
 
     let cases: [(&str, &SourceTokens, &PathSyntaxTable, usize); 5] = [
-        ("none_handle", &none_owner, &tokens.path_syntax, path_index),
+        ("none_handle", &none_owner, tokens.path_syntax.as_ref(), path_index),
         (
             "out_of_range_non_none",
             two_path_canonical,
@@ -301,13 +302,13 @@ fn corrupted_path_lookup_is_infrastructure_error() {
         (
             "different_non_empty_table",
             canonical,
-            &other_file.path_syntax,
+            other_file.path_syntax.as_ref(),
             path_index,
         ),
         (
             "span_mismatch",
             &mismatch_owner,
-            &tokens.path_syntax,
+            tokens.path_syntax.as_ref(),
             path_index,
         ),
     ];
@@ -340,9 +341,7 @@ fn assert_continuation_entered_statement(label: &str, source: &str, name: &str) 
     }
 
     let (tokens, mut strings, _) = tokenize_source(source);
-    let canonical = tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens");
+    let canonical = tokens.tokens.as_ref();
     let name_id = strings.intern(name);
     let name_index = canonical
         .shapes()
@@ -448,11 +447,9 @@ fn clause_terminated_without_comma_is_valid_before_declaration() {
 fn canonical_view_agrees_with_bounded_range_scan() {
     let (tokens, _, _) = tokenize_source("@core/math sin, cos\n");
     let path_index = path_token_index(&tokens);
-    let table = &tokens.path_syntax;
+    let table = tokens.path_syntax.as_ref();
     let source = tokens.file_id;
-    let canonical = tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens");
+    let canonical = tokens.tokens.as_ref();
     let full_range = canonical.full_range().expect("test source range should fit");
     let bounded = crate::compiler_frontend::utilities::token_scan::TokenFactView::from_source_range(
         canonical,
@@ -488,9 +485,7 @@ fn canonical_view_agrees_with_bounded_range_scan() {
 fn canonical_dependency_scan_rejects_foreign_caller_source() {
     let (tokens, _, _) = tokenize_source("@core/math sin\n");
     let path_index = path_token_index(&tokens);
-    let canonical = tokens
-        .source_tokens()
-        .expect("lexer output owns canonical source tokens");
+    let canonical = tokens.tokens.as_ref();
     let path_span = canonical.spans()[path_index];
     let mut unowned_table = PathSyntaxTable::new();
     unowned_table

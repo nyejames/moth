@@ -21,18 +21,13 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
         &mut span_builder,
         &mut path_fork,
     );
-    let wrapper_source_path = wrapper_file_tokens.src_path;
-    let canonical_owner = wrapper_file_tokens
-        .canonical_source_tokens_arc()
+    let wrapper_source_path = wrapper_file_tokens.source_path;
+    let canonical_owner = wrapper_file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut wrapper_tokens = AstCursor::from_source_tokens_for_handoff(
-        &canonical_owner,
-        wrapper_file_tokens.canonical_os_path.clone(),
-        canonical_range,
-    )
+    let mut wrapper_tokens = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
     .expect("test token stream must expose an AST cursor");
     let context = new_constant_context(wrapper_source_path, &path_fork);
     let wrapper = Template::new(
@@ -55,18 +50,13 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
-        &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
-        canonical_range,
-    )
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
     .expect("test token stream must expose an AST cursor");
     let context = new_constant_context(source_path, &path_fork);
 
@@ -102,18 +92,13 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
-        &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
-        canonical_range,
-    )
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
     .expect("test token stream must expose an AST cursor");
     let context = new_constant_context(source_path, &path_fork);
 
@@ -173,18 +158,13 @@ fn children_directive_accepts_const_string_reference() {
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
-        &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
-        canonical_range,
-    )
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
     .expect("test token stream must expose an AST cursor");
     let context = constant_template_context(&source_path, &declarations, &path_fork);
 
@@ -257,18 +237,13 @@ fn children_directive_rejects_runtime_values() {
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
-        &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
-        canonical_range,
-    )
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
     .expect("test token stream must expose an AST cursor");
     let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
 
@@ -380,18 +355,13 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
-        &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
-        canonical_range,
-    )
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
     .expect("test token stream must expose an AST cursor");
     let context = new_constant_context(source_path, &path_fork);
 

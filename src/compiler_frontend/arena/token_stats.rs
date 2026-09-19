@@ -1,6 +1,6 @@
 //! Cheap per-file token classification for arena capacity estimates.
 //!
-//! WHAT: counts simple token-kind categories while tokenization already produces tokens.
+//! WHAT: counts simple TokenTag categories while tokenization already produces tokens.
 //! WHY: these counts are policy-only seeds for capacity heuristics; they never affect
 //!      diagnostics, ordering, lowering, type identity, or emitted artifacts.
 
@@ -36,16 +36,15 @@ impl TokenStats {
     ///      capacity estimates. `TokenTag` (and its schema authority) is the single
     ///      classification source; no second hand-maintained operator table lives here.
     /// WHY: called once per token while source-token construction already packs shapes,
-    ///      avoiding both a separate full-token traversal and a parallel `TokenKind`
-    ///      classification pass.
+    ///      avoiding both a separate full-token traversal and a second classification pass.
     pub(crate) fn accumulate_shape(&mut self, shape: TokenShape) {
         self.accumulate_tag(shape.tag());
     }
 
     /// Update all category counters for one stable token tag.
     ///
-    /// WHAT: the tag-level classification behind every `TokenStats` entry point, so shape,
-    ///      tag, and legacy-kind inputs share one bucket decision.
+    /// WHAT: the tag-level classification behind every `TokenStats` entry point, so shape
+    ///      and tag inputs share one bucket decision.
     /// WHY: keeps the schema as the single classification authority for capacity seeds.
     pub(crate) fn accumulate_tag(&mut self, tag: TokenTag) {
         self.total_tokens += 1;

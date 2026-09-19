@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 #[test]
 fn missing_default_value_after_assign_points_at_member_boundary() {
@@ -125,9 +126,16 @@ fn authored_default_expression_survives_newline_and_multiline_continuation() {
     let signature = first_function_signature(&single_line_then_newline);
     assert!(
         signature.parameters.iter().any(|parameter| {
-            default_tokens(&single_line_then_newline, parameter.default_range)
-                .iter()
-                .any(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+            let mut cursor = default_tokens(&single_line_then_newline, parameter.default_range);
+            while let Some(token) = cursor.advance() {
+                if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                    return true;
+                }
+                if token.is_eof() {
+                    break;
+                }
+            }
+            false
         }),
         "a default that begins before a newline should be captured"
     );
@@ -138,11 +146,17 @@ fn authored_default_expression_survives_newline_and_multiline_continuation() {
     let multiline_signature = first_function_signature(&multiline);
     assert!(
         multiline_signature.parameters.iter().any(|parameter| {
-            default_tokens(&multiline, parameter.default_range)
-                .iter()
-                .filter(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-                .count()
-                == 2
+            let mut cursor = default_tokens(&multiline, parameter.default_range);
+            let mut literal_count = 0;
+            while let Some(token) = cursor.advance() {
+                if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                    literal_count += 1;
+                }
+                if token.is_eof() {
+                    break;
+                }
+            }
+            literal_count == 2
         }),
         "an operator-continued multiline default should fold both string literals"
     );

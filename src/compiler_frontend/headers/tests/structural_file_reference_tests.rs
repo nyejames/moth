@@ -26,7 +26,7 @@ fn prepare_source(
         .try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         interned_path,
         TokenizerEntryMode::SourceFile,
@@ -37,17 +37,10 @@ fn prepare_source(
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let handoff = file_tokens
-        .into_canonical_lexer_handoff()
-        .expect("lexer output should provide the canonical preparation handoff");
-    let owner = SourceTokenOwner::new(
-        handoff.tokens,
-        handoff.logical_path,
-        handoff.canonical_os_path,
-    );
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
     let output = prepare_file_from_tokens(
         owner,
-        handoff.path_syntax,
+        lexed.path_syntax,
         file_path,
         &HeaderParseOptions::default(),
         &mut string_table,

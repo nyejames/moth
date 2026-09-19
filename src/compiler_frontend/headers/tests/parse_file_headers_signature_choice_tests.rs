@@ -1,5 +1,9 @@
 use super::*;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::{
+    TestSourceTokensBuilder, TokenIndex, TokenTag,
+};
+
 
 #[test]
 fn function_signature_reports_missing_arrow_before_return_type() {
@@ -179,38 +183,48 @@ fn duplicate_top_level_function_names_error_during_header_parsing() {
 #[test]
 fn duplicate_header_detection_ignores_qualified_match_arms() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_file = path_fork
-        .try_intern_portable_path("src/@page.moth", &mut string_table)
-        .expect("test path fits");
     let status = string_table.intern("Status");
     let ready = string_table.intern("Ready");
     let write = string_table.intern("write");
     let span = LocalSpan::source_start();
 
-    let mut token_stream = FileTokens::new(
-        source_file,
-        SourceId::COMPILATION_ROOT,
-        vec![
-            Token::new(TokenKind::Symbol(status), span),
-            Token::new(TokenKind::DoubleColon, span),
-            Token::new(TokenKind::Symbol(ready), span),
-            Token::new(TokenKind::FatArrow, span),
-            Token::new(TokenKind::Symbol(write), span),
-            Token::new(TokenKind::Eof, span),
-        ],
-    );
-    token_stream.index = 1;
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    builder
+        .push_symbol(TokenTag::SYMBOL, status, span)
+        .expect("status symbol fixture should build");
+    builder
+        .push_static(TokenTag::DOUBLE_COLON, span)
+        .expect("double-colon fixture token should build");
+    builder
+        .push_symbol(TokenTag::SYMBOL, ready, span)
+        .expect("ready symbol fixture should build");
+    builder
+        .push_static(TokenTag::FAT_ARROW, span)
+        .expect("fat-arrow fixture token should build");
+    builder
+        .push_symbol(TokenTag::SYMBOL, write, span)
+        .expect("write symbol fixture should build");
+    builder
+        .push_static(TokenTag::EOF, span)
+        .expect("EOF fixture token should build");
+    let owner = builder
+        .finish()
+        .expect("canonical source-token fixture should build");
+    let range = owner
+        .full_range()
+        .expect("canonical source-token fixture should expose a full range");
+    let mut cursor = AstCursor::from_source_tokens(&owner, None, range)
+        .expect("canonical source-token fixture should expose an AST cursor");
+    cursor
+        .set_position(1)
+        .expect("qualified match-arm cursor position should fit");
+    assert_eq!(cursor.current_tag(), TokenTag::DOUBLE_COLON);
 
     let current_index =
-        crate::compiler_frontend::tokenizer::tokens::TokenIndex::try_from_index(token_stream.index)
-            .expect("test cursor index should fit");
-    let canonical = token_stream
-        .source_tokens()
-        .expect("test stream owns canonical source tokens");
+        TokenIndex::try_from_index(cursor.position()).expect("test cursor index should fit");
     assert!(
         !super::super::super::top_level_classifier::starts_duplicate_top_level_header_declaration_at_source(
-            canonical,
+            &owner,
             current_index,
         ),
         "qualified match arms in the start body are not choice declarations"

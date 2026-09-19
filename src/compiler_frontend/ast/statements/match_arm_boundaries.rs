@@ -97,48 +97,6 @@ fn find_top_level_match_arm_fat_arrow(
     None
 }
 
-fn find_top_level_match_arm_fat_arrow_indexed(
-    token_stream: &AstCursor,
-    start_index: usize,
-) -> Option<usize> {
-    let mut nesting_depth = NestingDepth::default();
-    let mut guard_started = false;
-    let mut guard_expression_started = false;
-
-    let mut index = start_index;
-    while index < token_stream.length() {
-        let tag = token_stream.token_ref_at(index)?.tag();
-        match tag {
-            TokenTag::END | TokenTag::EOF => break,
-            TokenTag::NEWLINE => {
-                if nesting_depth.is_top_level() && guard_started && !guard_expression_started {
-                    index += 1;
-                    continue;
-                }
-                break;
-            }
-            TokenTag::FAT_ARROW if nesting_depth.is_top_level() => {
-                if !guard_started || guard_expression_started {
-                    return Some(index);
-                }
-                break;
-            }
-            TokenTag::IF if nesting_depth.is_top_level() && !guard_started => {
-                guard_started = true;
-            }
-            _ => {
-                if guard_started && nesting_depth.is_top_level() {
-                    guard_expression_started = true;
-                }
-                nesting_depth.step_tag(tag);
-            }
-        }
-        index += 1;
-    }
-
-    None
-}
-
 /// Check whether the current token starts a line-initial match arm header.
 ///
 /// Returns `Some(candidate)` when:
@@ -205,27 +163,6 @@ fn find_top_level_token_on_line(
             _ => nesting_depth.step_tag(walk.current_tag()),
         }
         walk.advance();
-    }
-    None
-}
-
-fn find_top_level_token_on_line_indexed(
-    token_stream: &AstCursor,
-    start_index: usize,
-    matches_target: impl Fn(TokenTag) -> bool,
-) -> Option<usize> {
-    let mut nesting_depth = NestingDepth::default();
-    let mut index = start_index;
-    while index < token_stream.length() {
-        let tag = token_stream.token_ref_at(index)?.tag();
-        match tag {
-            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => break,
-            _ if nesting_depth.is_top_level() && matches_target(tag) => {
-                return Some(index);
-            }
-            _ => nesting_depth.step_tag(tag),
-        }
-        index += 1;
     }
     None
 }

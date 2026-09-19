@@ -16,22 +16,21 @@ fn markdown_formatter_output_text_uses_authored_tir_spans() {
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
+    let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path.to_owned(), &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let canonical_owner = file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
     let mut token_stream = AstCursor::from_source_tokens(
         &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
+        None,
         canonical_range,
     )
     .expect("test token stream must expose an AST cursor");
     token_stream
-        .set_position(file_tokens.index)
+        .set_position(file_tokens.opener_index)
         .expect("test token stream position must remain in canonical range");
 
     let template = Template::new(
@@ -147,22 +146,21 @@ fn markdown_formatter_produces_formatted_tir_output() {
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
+    let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path.to_owned(), &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let canonical_owner = file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
     let mut token_stream = AstCursor::from_source_tokens(
         &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
+        None,
         canonical_range,
     )
     .expect("test token stream must expose an AST cursor");
     token_stream
-        .set_position(file_tokens.index)
+        .set_position(file_tokens.opener_index)
         .expect("test token stream position must remain in canonical range");
 
     let template = Template::new(

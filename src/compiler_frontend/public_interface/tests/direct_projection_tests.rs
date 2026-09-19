@@ -59,7 +59,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenRange};
+use crate::compiler_frontend::tokenizer::tokens::TestSourceTokensBuilder;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -609,12 +609,12 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         generic_parameter_list_id: list_id,
         signature: FunctionSignature::default(),
         body_tokens: Some({
-            let shell = FileTokens::new(method_fn_path, SourceId::COMPILATION_ROOT, vec![]);
-            let body = shell
-                .canonical_source_tokens_arc()
-                .expect("test fixture must use a canonical source owner");
-            let range = TokenRange::from_raw(SourceId::COMPILATION_ROOT, 0, 0)
-                .expect("empty body range ordering should be valid");
+            let body = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT)
+                .finish()
+                .expect("canonical empty source fixture should finish");
+            let range = body
+                .full_range()
+                .expect("empty canonical source should have a checked full range");
             GenericFunctionBody::source(body, range, None, method_fn_path, None)
                 .expect("empty generic body should retain its checked range")
         }),

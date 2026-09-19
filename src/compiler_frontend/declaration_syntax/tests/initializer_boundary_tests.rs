@@ -18,25 +18,23 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 
 /// Returns a stable label without exposing literal payload details.
-fn label(kind: &TokenKind) -> &'static str {
-    match kind {
-        TokenKind::If => "If",
-        TokenKind::Then => "Then",
-        TokenKind::Else => "Else",
-        TokenKind::Newline => "Newline",
-        TokenKind::Eof => "Eof",
-        TokenKind::End => "End",
-        TokenKind::Comma => "Comma",
-        TokenKind::Add => "Add",
-        TokenKind::BoolLiteral(_) => "BoolLiteral",
-        TokenKind::NumericLiteral(_) => "NumericLiteral",
-        other => {
-            panic!("unexpected initializer token kind in boundary test: {other:?}")
-        }
+fn label(tag: TokenTag) -> &'static str {
+    match tag {
+        TokenTag::IF => "If",
+        TokenTag::THEN => "Then",
+        TokenTag::ELSE => "Else",
+        TokenTag::NEWLINE => "Newline",
+        TokenTag::EOF => "Eof",
+        TokenTag::END => "End",
+        TokenTag::COMMA => "Comma",
+        TokenTag::ADD => "Add",
+        TokenTag::BOOL_LITERAL => "BoolLiteral",
+        TokenTag::NUMERIC_LITERAL => "NumericLiteral",
+        other => panic!("unexpected initializer token tag in boundary test: {other:?}"),
     }
 }
 
@@ -49,7 +47,7 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
         .expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = tokenize(
+    let token_stream = tokenize(
         source,
         source_path,
         TokenizerEntryMode::SourceFile,
@@ -61,13 +59,19 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
     )
     .expect("tokenization should succeed");
     let name = string_table.intern("value");
-    token_stream.index = 2; // skip ModuleStart and the declaration name, land on `=`
-    let mut declaration_cursor = DeclarationCursor::new(
-        token_stream
-            .canonical_cursor_from_current()
-            .expect("tokenized test stream must expose canonical tokens"),
-    )
-    .expect("tokenized test stream must expose canonical tokens");
+    let full_range = token_stream
+        .tokens
+        .full_range()
+        .expect("tokenized test stream must expose a checked range");
+    let mut canonical_cursor = token_stream
+        .tokens
+        .cursor(full_range)
+        .expect("tokenized test stream must expose canonical tokens");
+    canonical_cursor
+        .set_position(TokenIndex::try_from_raw(2).expect("fixture index should fit"))
+        .expect("tokenized test stream must seek to the initializer");
+    let mut declaration_cursor = DeclarationCursor::new(canonical_cursor)
+        .expect("tokenized test stream must expose canonical tokens");
     let declaration_syntax = parse_declaration_syntax(
         &mut declaration_cursor,
         name,
@@ -78,14 +82,16 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
     let initializer_range = declaration_syntax
         .initializer_range
         .expect("test declaration should retain initializer range");
-    token_stream
-        .materialize_token_range(initializer_range)
-        .expect("initializer range should materialize")
-        .iter()
-        .map(|token| label(&token.kind))
-        .collect()
+    let mut initializer_cursor = token_stream
+        .tokens
+        .cursor(initializer_range)
+        .expect("initializer range should resolve through canonical tokens");
+    let mut labels = Vec::new();
+    while let Some(token) = initializer_cursor.advance() {
+        labels.push(label(token.tag()));
+    }
+    labels
 }
-
 #[test]
 fn retains_eof_boundary_after_trailing_then() {
     let kinds = parse_shell("value = if true then");
@@ -256,7 +262,7 @@ fn non_control_flow_initializer_is_unchanged() {
 fn tokenize_for_declaration(
     source: &str,
     span_builder: &mut ExtendedSpanBuilder,
-) -> (StringTable, FileTokens, StringId, Option<usize>) {
+) -> (StringTable, LexedSource, StringId, Option<usize>) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
@@ -276,10 +282,11 @@ fn tokenize_for_declaration(
     .expect("tokenization should succeed");
 
     let name = string_table.intern("value");
-    let assign_index = token_stream
-        .tokens
-        .iter()
-        .position(|token| token.kind == TokenKind::Assign);
+    let assign_index = (0..token_stream.tokens.len()).find_map(|index| {
+        let index = TokenIndex::try_from_index(index)?;
+        let token = token_stream.tokens.token(index).ok()?;
+        (token.tag() == TokenTag::ASSIGN).then_some(index.index())
+    });
 
     (string_table, token_stream, name, assign_index)
 }
@@ -288,15 +295,20 @@ fn tokenize_for_declaration(
 /// declaration name so callers can assert the structured payload facts.
 fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (mut string_table, mut token_stream, name, _) =
+    let (mut string_table, token_stream, name, _) =
         tokenize_for_declaration(source, &mut span_builder);
-    token_stream.index = 2; // skip ModuleStart and the declaration name
-
-    let mut declaration_cursor = DeclarationCursor::new(
-        token_stream
-            .canonical_cursor_from_current()
-            .expect("tokenized test stream must expose canonical tokens"),
-    )
+    let full_range = token_stream
+        .tokens
+        .full_range()
+        .expect("tokenized test stream must expose a checked range");
+    let mut canonical_cursor = token_stream
+        .tokens
+        .cursor(full_range)
+        .expect("tokenized test stream must expose canonical tokens");
+    canonical_cursor
+        .set_position(TokenIndex::try_from_raw(2).expect("fixture index should fit"))
+        .expect("tokenized test stream must seek to the declaration initializer");
+    let mut declaration_cursor = DeclarationCursor::new(canonical_cursor)
     .expect("tokenized test stream must expose canonical tokens");
     let failure = parse_declaration_syntax(
         &mut declaration_cursor,
@@ -324,28 +336,33 @@ fn boundary_span_after_assign(source: &str) -> SourceSpan {
     let assign_index = assign_index.expect("source must contain an authored '='");
     SourceSpan::new(
         token_stream.file_id,
-        token_stream.tokens[assign_index + 1].span,
+        token_stream
+            .tokens
+            .token(
+                TokenIndex::try_from_index(assign_index + 1)
+                    .expect("boundary index should fit the canonical domain"),
+            )
+            .expect("source must contain the boundary token")
+            .span(),
     )
 }
-
 /// Span of the first top-level boundary token (newline/end/EOF/comma) starting after
-/// the declaration name. Used for the no-`=` path, which never sees an authored `=`.
 fn first_boundary_span_after_name(source: &str) -> SourceSpan {
     let mut span_builder = ExtendedSpanBuilder::new();
     let (_string_table, token_stream, _name, _) =
         tokenize_for_declaration(source, &mut span_builder);
-    let token = token_stream
-        .tokens
-        .iter()
-        .skip(2)
-        .find(|token| {
+    let token = (2..token_stream.tokens.len())
+        .find_map(|index| {
+            let index = TokenIndex::try_from_index(index)?;
+            let token = token_stream.tokens.token(index).ok()?;
             matches!(
-                token.kind,
-                TokenKind::Newline | TokenKind::End | TokenKind::Eof | TokenKind::Comma
+                token.tag(),
+                TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF | TokenTag::COMMA
             )
+            .then_some(token)
         })
         .expect("source must contain a declaration boundary");
-    SourceSpan::new(token_stream.file_id, token.span)
+    SourceSpan::new(token_stream.file_id, token.span())
 }
 
 /// Asserts the diagnostic is the authored-`=` rejection, names the declaration, and

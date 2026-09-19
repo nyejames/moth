@@ -1,60 +1,69 @@
 //! Shared top-level statement-start classification tests.
 
 use super::*;
-use crate::compiler_frontend::numeric_text::store::NumericLiteralStore;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, Token, TokenIndex, TokenKind,
+    SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::TokenFactView;
+use std::sync::Arc;
 
-fn canonical(tokens: Vec<Token>) -> SourceTokens {
-    SourceTokens::try_from_tokens(
-        SourceId::COMPILATION_ROOT,
-        tokens,
-        NumericLiteralStore::with_source(SourceId::COMPILATION_ROOT),
-        PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT),
-    )
-    .expect("canonical classifier fixture should satisfy source-token invariants")
+fn canonical_static(tags: Vec<TokenTag>) -> Arc<SourceTokens> {
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    for tag in tags {
+        builder
+            .push_static(tag, LocalSpan::source_start())
+            .expect("static classifier fixture should build");
+    }
+    builder
+        .finish()
+        .expect("canonical classifier fixture should satisfy source-token invariants")
 }
 
-fn classify_after(tokens: Vec<TokenKind>) -> SymbolStatementStart {
-    let span = LocalSpan::source_start();
-    let owner = canonical(
-        tokens
-            .into_iter()
-            .map(|kind| Token::new(kind, span))
-            .collect(),
-    );
+fn classify_after(tags: Vec<TokenTag>) -> SymbolStatementStart {
+    let owner = canonical_static(tags);
     classify_symbol_statement_start_at_source(&owner, 0)
+}
+
+fn qualified_match_arm_owner(ready: StringId) -> Arc<SourceTokens> {
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    let span = LocalSpan::source_start();
+    builder
+        .push_static(TokenTag::DOUBLE_COLON, span)
+        .expect("static classifier fixture should build");
+    builder
+        .push_symbol(TokenTag::SYMBOL, ready, span)
+        .expect("symbol classifier fixture should build");
+    builder
+        .push_static(TokenTag::FAT_ARROW, span)
+        .expect("static classifier fixture should build");
+    builder
+        .push_static(TokenTag::EOF, span)
+        .expect("static classifier fixture should build");
+    builder
+        .finish()
+        .expect("canonical classifier fixture should satisfy source-token invariants")
 }
 
 #[test]
 fn runtime_binding_is_a_statement_but_not_a_header_declaration() {
-    let classification = classify_after(vec![TokenKind::Assign]);
+    let classification = classify_after(vec![TokenTag::ASSIGN]);
     assert!(classification.starts_statement_after_dependency_selection());
     assert!(!classification.starts_header_declaration());
 }
 
 #[test]
 fn function_and_compile_time_bindings_are_header_declarations() {
-    assert!(classify_after(vec![TokenKind::TypeParameterBracket]).starts_header_declaration());
-    assert!(classify_after(vec![TokenKind::Hash]).starts_header_declaration());
+    assert!(classify_after(vec![TokenTag::TYPE_PARAMETER_BRACKET]).starts_header_declaration());
+    assert!(classify_after(vec![TokenTag::HASH]).starts_header_declaration());
 }
 
 #[test]
 fn qualified_match_arm_is_not_a_choice_declaration() {
     let mut string_table = StringTable::new();
     let ready = string_table.intern("Ready");
-    let span = LocalSpan::source_start();
-    let owner = canonical(vec![
-        Token::new(TokenKind::DoubleColon, span),
-        Token::new(TokenKind::Symbol(ready), span),
-        Token::new(TokenKind::FatArrow, span),
-        Token::new(TokenKind::Eof, span),
-    ]);
+    let owner = qualified_match_arm_owner(ready);
     let classification = classify_symbol_statement_start_at_source(&owner, 0);
     assert_eq!(classification, SymbolStatementStart::Other);
     assert!(!classification.starts_header_declaration());
@@ -71,13 +80,7 @@ fn qualified_match_arm_is_not_a_choice_declaration() {
 fn classifier_views_agree_without_whole_source_projection() {
     let mut string_table = StringTable::new();
     let ready = string_table.intern("Ready");
-    let span = LocalSpan::source_start();
-    let owner = canonical(vec![
-        Token::new(TokenKind::DoubleColon, span),
-        Token::new(TokenKind::Symbol(ready), span),
-        Token::new(TokenKind::FatArrow, span),
-        Token::new(TokenKind::Eof, span),
-    ]);
+    let owner = qualified_match_arm_owner(ready);
     let expected = classify_symbol_statement_start_at_source(&owner, 0);
     let source_view = TokenFactView::from_source(&owner);
     assert_eq!(
@@ -95,4 +98,3 @@ fn classifier_views_agree_without_whole_source_projection() {
     );
     assert!(ranged_view.get(ranged_view.len()).is_none());
 }
-

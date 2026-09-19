@@ -65,7 +65,7 @@ use crate::compiler_frontend::symbols::path_interner::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenIndex, TokenKind, TokenRange,
+    SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag,
 };
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -82,7 +82,7 @@ fn token_span() -> LocalSpan {
 fn sample_tokens(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> (Vec<Token>, PathSyntaxTable, PathSyntaxId) {
+) -> (Arc<SourceTokens>, PathSyntaxId) {
     let numeric = NumericLiteralToken::new(
         NumericLiteralSign::Negative,
         string_table.intern("-12.5"),
@@ -93,7 +93,7 @@ fn sample_tokens(
         0,
         NumericExponentSign::None,
     );
-    let mut path_syntax = PathSyntaxTable::new();
+    let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
     let path_id = path_syntax.push(
         path_fork
             .try_intern_components(&[
@@ -103,83 +103,83 @@ fn sample_tokens(
             .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, token_span()),
     );
-    let tokens = vec![
-        Token::new(
-            TokenKind::Symbol(string_table.intern("hello")),
+    let mut builder =
+        TestSourceTokensBuilder::with_path_syntax(SourceId::COMPILATION_ROOT, path_syntax);
+    builder
+        .push_symbol(TokenTag::SYMBOL, string_table.intern("hello"), token_span())
+        .expect("symbol fixture token should be valid");
+    builder
+        .push_symbol(
+            TokenTag::STYLE_DIRECTIVE,
+            string_table.intern("md"),
             token_span(),
-        ),
-        Token::new(
-            TokenKind::StyleDirective(string_table.intern("md")),
+        )
+        .expect("style directive fixture token should be valid");
+    builder
+        .push_symbol(
+            TokenTag::STRING_SLICE_LITERAL,
+            string_table.intern("slice text"),
             token_span(),
-        ),
-        Token::new(
-            TokenKind::StringSliceLiteral(string_table.intern("slice text")),
+        )
+        .expect("string fixture token should be valid");
+    builder
+        .push_symbol(
+            TokenTag::RAW_STRING_LITERAL,
+            string_table.intern("raw text"),
             token_span(),
-        ),
-        Token::new(
-            TokenKind::RawStringLiteral(string_table.intern("raw text")),
+        )
+        .expect("raw string fixture token should be valid");
+    builder
+        .push_char(TokenTag::CHAR_LITERAL, 'x', token_span())
+        .expect("char fixture token should be valid");
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, token_span())
+        .expect("boolean fixture token should be valid");
+    builder
+        .push_numeric(numeric, token_span())
+        .expect("numeric fixture token should be valid");
+    builder
+        .push_path(TokenTag::PATH, path_id, token_span())
+        .expect("path fixture token should be valid");
+    builder
+        .push_symbol(
+            TokenTag::SYMBOL,
+            string_table.intern("import"),
             token_span(),
-        ),
-        Token::new(TokenKind::CharLiteral('x'), token_span()),
-        Token::new(TokenKind::BoolLiteral(true), token_span()),
-        Token::new(TokenKind::NumericLiteral(numeric), token_span()),
-        Token::new(TokenKind::Path(path_id), token_span()),
-        Token::new(
-            TokenKind::Symbol(string_table.intern("import")),
-            token_span(),
-        ),
-        Token::new(TokenKind::ChannelReceive, token_span()),
-    ];
-    (tokens, path_syntax, path_id)
+        )
+        .expect("import fixture token should be valid");
+    builder
+        .push_static(TokenTag::CHANNEL_RECEIVE, token_span())
+        .expect("channel fixture token should be valid");
+    (
+        builder.finish().expect("canonical token fixture should finish"),
+        path_id,
+    )
 }
 
-
-fn body_view(original: &FileTokens, declaration_path: PathId) -> GenericFunctionBody {
-    // Test fixtures are often still in the mutable preparing state. Model the production
-    // post-publication handoff explicitly: retain the canonical `SourceTokens` allocation
-    // directly (as `function_signatures.rs` does via `canonical_source_tokens_arc`) rather
-    // than a `FileTokens` shell.
-    let frozen = FileTokens::new_frozen(
-        original.src_path,
-        original.file_id,
-        original.canonical_os_path.clone(),
-        original.tokens.clone(),
-        original
-            .path_syntax_table()
-            .expect("test fixture should expose its path table")
-            .clone(),
-    );
-    let owner = frozen
-        .canonical_source_tokens_arc()
-        .expect("test fixture must use a canonical source owner");
-    let source_tokens: &SourceTokens = owner.as_ref();
-    let end = TokenIndex::try_from_index(frozen.tokens.len()).expect("test token range fits");
-    let range = TokenRange::try_new_for(
-        source_tokens,
-        TokenIndex::try_from_index(0).expect("test token range fits"),
-        end,
-    )
-    .expect("test token range must be in bounds");
-    GenericFunctionBody::source(
-        owner,
-        range,
-        None,
-        declaration_path,
-        frozen.canonical_os_path.clone(),
-    )
-    .expect("test generic body should retain its checked source range")
+fn body_view(original: &Arc<SourceTokens>, declaration_path: PathId) -> GenericFunctionBody {
+    let range = original
+        .full_range()
+        .expect("test token range must be in bounds");
+    GenericFunctionBody::source(Arc::clone(original), range, None, declaration_path, None)
+        .expect("test generic body should retain its checked source range")
 }
 fn capture_test_body(
-    original: &FileTokens,
+    original: &Arc<SourceTokens>,
     source_file: &PathId,
     path_fork: &PathInternerFork,
     source_table: &StringTable,
 ) -> StableBodySyntax {
-    let source_file_id = original.file_id;
+    let source_file_id = original.source();
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
-    for (path_syntax, _) in original.path_syntax.iter() {
-        resolved_references.push(ResolvedFileReference {
+    for (path_syntax, _) in original
+        .path_syntax_table()
+        .expect("test fixture should expose its path table")
+        .iter()
+    {
+        resolved_references
+            .push(ResolvedFileReference {
                 source_file: source_file_id,
                 path_syntax,
                 class: PreparedFileReferenceClass::ResourceFile,
@@ -202,7 +202,7 @@ fn capture_test_body(
             "test body has no content value resolver",
         ))
     };
-    let body = body_view(original, original.src_path);
+    let body = body_view(original, *source_file);
     let donor_identity = SharedDonorIdentity::freeze(source_table);
     StableBodySyntax::capture(
         &body,
@@ -215,6 +215,18 @@ fn capture_test_body(
     )
     .expect("test body path rows should be resolved before capture")
 }
+fn canonical_tokens_with_path_syntax(
+    source: SourceId,
+    path_syntax: PathSyntaxTable,
+    fill: impl FnOnce(&mut TestSourceTokensBuilder),
+) -> Arc<SourceTokens> {
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    fill(&mut builder);
+    builder
+        .finish()
+        .expect("canonical token fixture should finish")
+}
+
 /// Build a materialisation fork that retains the complete source path domain.
 ///
 /// Frozen bodies keep build-wide `PathId`s directly, so an independent generated fork must inherit
@@ -231,7 +243,7 @@ fn generated_materialisation_domain(
 }
 
 fn direct_content_body_fixture() -> (
-    FileTokens,
+    Arc<SourceTokens>,
     PathId,
     PathInternerFork,
     StringTable,
@@ -256,15 +268,18 @@ fn direct_content_body_fixture() -> (
         .expect("content fixture body source identity should be registered")
         .id;
     let path_span = LocalSpan::source_start();
-    let mut path_syntax = PathSyntaxTable::new();
+    let mut path_syntax = PathSyntaxTable::with_source(body_file_id);
     let path_id = path_syntax.push(
         path_fork
             .try_intern_portable_path("@private.mtf", &mut string_table)
             .expect("test path fits"),
         SourceSpan::new(body_file_id, path_span),
     );
-    let tokens = vec![Token::new(TokenKind::Path(path_id), path_span)];
-    let body = FileTokens::new_with_identity(source_file, body_file_id, None, tokens, path_syntax);
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(body_file_id, path_syntax);
+    builder
+        .push_path(TokenTag::PATH, path_id, path_span)
+        .expect("content path fixture token should be valid");
+    let body = builder.finish().expect("canonical content fixture should finish");
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
@@ -453,18 +468,10 @@ fn non_string_content_fold_fails_loudly_during_capture() {
 fn frozen_body_preserves_donor_range_and_path_spelling() {
     let mut source_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (tokens, path_syntax, _) = sample_tokens(&mut source_table, &mut path_fork);
-    let original = FileTokens::new_with_identity(
-        path_fork
-            .try_intern_portable_path("src/@mod.moth", &mut source_table)
-            .expect("test path fits"),
-        SourceId::COMPILATION_ROOT,
-        None,
-        tokens.clone(),
-        path_syntax.clone(),
-    );
-
-    let source_file = original.src_path;
+    let (original, _) = sample_tokens(&mut source_table, &mut path_fork);
+    let source_file = path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut source_table)
+        .expect("test path fits");
     let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
     let (mut generated_path_fork, mut generated_table) =
         generated_materialisation_domain(&path_fork, &source_table);
@@ -529,20 +536,13 @@ fn frozen_body_preserves_donor_range_and_path_spelling() {
 fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
     let mut source_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (tokens, path_syntax, _) = sample_tokens(&mut source_table, &mut path_fork);
+    let (original, _) = sample_tokens(&mut source_table, &mut path_fork);
     let source_file = path_fork
         .try_intern_portable_path("src/@mod.moth", &mut source_table)
         .expect("test path fits");
     let declaration_path = path_fork
         .try_intern_child(source_file, source_table.intern("generic_fn"))
         .expect("test declaration path fits");
-    let original = FileTokens::new_with_identity(
-        declaration_path,
-        SourceId::COMPILATION_ROOT,
-        None,
-        tokens,
-        path_syntax,
-    );
 
     let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
     let (mut path_fork, mut generated_table) =
@@ -590,7 +590,7 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
 fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let mut source_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut path_syntax = PathSyntaxTable::new();
+    let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
     let base_span = LocalSpan::source_start();
 
     // The body references donor row 2 before donor row 0. Donor row 1 is deliberately
@@ -623,16 +623,17 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let source_file = path_fork
         .try_intern_portable_path("src/@mod.moth", &mut source_table)
         .expect("test path fits");
-    let original = FileTokens::new_with_identity(
-        source_file,
-        SourceId::COMPILATION_ROOT,
-        None,
-        vec![
-            Token::new(TokenKind::Path(second_donor_path), base_span),
-            Token::new(TokenKind::Path(first_donor_path), base_span),
-        ],
-        path_syntax.clone(),
-    );
+    let mut builder =
+        TestSourceTokensBuilder::with_path_syntax(SourceId::COMPILATION_ROOT, path_syntax);
+    builder
+        .push_path(TokenTag::PATH, second_donor_path, base_span)
+        .expect("second path fixture token should be valid");
+    builder
+        .push_path(TokenTag::PATH, first_donor_path, base_span)
+        .expect("first path fixture token should be valid");
+    let original = builder
+        .finish()
+        .expect("canonical path fixture should finish");
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     for (path_syntax, owner_relative_path) in [
@@ -681,12 +682,10 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
         .iter()
         .map(|reference| reference.path_syntax)
         .collect::<Vec<_>>();
-    let captured_token_ids = original
-        .tokens
-        .iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::Path(path_id) => Some(path_id),
-            _ => None,
+    let captured_token_ids = (0..original.len())
+        .filter_map(|index| {
+            let index = TokenIndex::try_from_index(index)?;
+            original.token(index).ok()?.path_syntax_id()
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -777,7 +776,7 @@ fn repeated_spellings_share_one_frozen_string_entry() {
     let mut source_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let symbol_id = source_table.intern("hello");
-    let mut path_syntax = PathSyntaxTable::new();
+    let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
     let path_span = token_span();
     let path_id = path_syntax.push(
         path_fork
@@ -785,22 +784,24 @@ fn repeated_spellings_share_one_frozen_string_entry() {
             .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, path_span),
     );
-    let tokens = vec![
-        Token::new(TokenKind::Symbol(symbol_id), path_span),
-        Token::new(TokenKind::Symbol(symbol_id), path_span),
-        Token::new(TokenKind::Path(path_id), path_span),
-    ];
-    let original = FileTokens::new_with_identity(
-        path_fork
-            .try_intern_portable_path("src/@mod.moth", &mut source_table)
-            .expect("test path fits"),
+    let original = canonical_tokens_with_path_syntax(
         SourceId::COMPILATION_ROOT,
-        None,
-        tokens,
         path_syntax,
+        |builder| {
+            builder
+                .push_symbol(TokenTag::SYMBOL, symbol_id, path_span)
+                .expect("first symbol fixture token should be valid");
+            builder
+                .push_symbol(TokenTag::SYMBOL, symbol_id, path_span)
+                .expect("second symbol fixture token should be valid");
+            builder
+                .push_path(TokenTag::PATH, path_id, path_span)
+                .expect("path fixture token should be valid");
+        },
     );
-
-    let source_file = original.src_path;
+    let source_file = path_fork
+        .try_intern_portable_path("src/@mod.moth", &mut source_table)
+        .expect("test path fits");
     let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
     assert_eq!(
         frozen.resolved_file_references.len(),
@@ -908,19 +909,18 @@ fn a_materialised_body_with_only_a_path_identity_is_rejected() {
     let source = SourceId::COMPILATION_ROOT;
     let source_file = PathId::ROOT;
     let path_fork = PathInternerFork::empty();
-    let frozen = FileTokens::new_frozen(
-        source_file,
+    let owner = canonical_tokens_with_path_syntax(
         source,
-        None,
-        vec![Token::new(TokenKind::Eof, token_span())],
-        PathSyntaxTable::new(),
+        PathSyntaxTable::with_source(source),
+        |builder| {
+            builder
+                .push_static(TokenTag::EOF, token_span())
+                .expect("EOF fixture token should be valid");
+        },
     );
-    let owner = frozen
-        .canonical_source_tokens_arc()
-        .expect("test fixture must use a canonical source owner");
     let error = match GenericFunctionBody::materialised(
-        owner,
-        frozen.canonical_os_path.clone(),
+        Arc::clone(&owner),
+        None,
         TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
         None,
         source_file,
@@ -950,17 +950,16 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
     let path_fork = PathInternerFork::empty();
     let mut donor_string_table = StringTable::new();
     let donor_symbol = donor_string_table.intern("donor");
-    let frozen = FileTokens::new_frozen(
-        source_file,
+    let owner = canonical_tokens_with_path_syntax(
         source,
-        None,
-        vec![Token::new(TokenKind::Symbol(donor_symbol), token_span())],
-        PathSyntaxTable::new(),
+        PathSyntaxTable::with_source(source),
+        |builder| {
+            builder
+                .push_symbol(TokenTag::SYMBOL, donor_symbol, token_span())
+                .expect("symbol fixture token should be valid");
+        },
     );
-    let owner = frozen
-        .canonical_source_tokens_arc()
-        .expect("test fixture must use a canonical source owner");
-    let end = TokenIndex::try_from_index(frozen.tokens.len()).expect("test token range fits");
+    let end = TokenIndex::try_from_index(owner.len()).expect("test token range fits");
     let range = TokenRange::try_new_for(
         owner.as_ref(),
         TokenIndex::try_from_index(0).expect("test token range fits"),
@@ -969,7 +968,7 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
     .expect("test token range must be in bounds");
     let body = GenericFunctionBody::materialised(
         owner,
-        frozen.canonical_os_path.clone(),
+        None,
         range,
         None,
         source_file,
@@ -1049,20 +1048,16 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
     );
     let donor_authored_text = donor_numeric.source_text;
     let donor_normalized_text = donor_numeric.normalized_text;
-    let donor_file = FileTokens::new_frozen(
-        source_file,
+    let owner = canonical_tokens_with_path_syntax(
         source,
-        None,
-        vec![Token::new(
-            TokenKind::NumericLiteral(donor_numeric),
-            token_span(),
-        )],
-        PathSyntaxTable::new(),
+        PathSyntaxTable::with_source(source),
+        |builder| {
+            builder
+                .push_numeric(donor_numeric, token_span())
+                .expect("numeric fixture token should be valid");
+        },
     );
-    let owner = donor_file
-        .canonical_source_tokens_arc()
-        .expect("test fixture must use a canonical source owner");
-    let end = TokenIndex::try_from_index(donor_file.tokens.len()).expect("test token range fits");
+    let end = TokenIndex::try_from_index(owner.len()).expect("test token range fits");
     let range = TokenRange::try_new_for(
         owner.as_ref(),
         TokenIndex::try_from_index(0).expect("test token range fits"),
@@ -1071,7 +1066,7 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
     .expect("test token range must be in bounds");
     let body = GenericFunctionBody::materialised(
         owner,
-        donor_file.canonical_os_path.clone(),
+        None,
         range,
         None,
         source_file,
@@ -1184,43 +1179,45 @@ fn a_segmented_donor_body_borrows_its_source_sequence() {
         0,
         NumericExponentSign::None,
     );
-    let donor_tokens = vec![
-        Token::new(
-            TokenKind::Symbol(donor_strings.intern("alpha")),
+    let mut builder =
+        TestSourceTokensBuilder::with_path_syntax(source, PathSyntaxTable::with_source(source));
+    builder
+        .push_symbol(
+            TokenTag::SYMBOL,
+            donor_strings.intern("alpha"),
             span_at(0, &mut spans),
-        ),
-        Token::new(
-            TokenKind::NumericLiteral(skipped_numeric),
-            span_at(8, &mut spans),
-        ),
-        Token::new(
-            TokenKind::Symbol(donor_strings.intern("beta")),
+        )
+        .expect("alpha fixture token should be valid");
+    builder
+        .push_numeric(skipped_numeric, span_at(8, &mut spans))
+        .expect("skipped numeric token should be valid");
+    builder
+        .push_symbol(
+            TokenTag::SYMBOL,
+            donor_strings.intern("beta"),
             span_at(16, &mut spans),
-        ),
-        Token::new(
-            TokenKind::NumericLiteral(kept_numeric),
-            span_at(24, &mut spans),
-        ),
-        Token::new(TokenKind::Eof, span_at(32, &mut spans)),
-    ];
-    let mut donor_file = FileTokens::new_with_identity(
-        PathId::ROOT,
-        source,
-        None,
-        donor_tokens,
-        PathSyntaxTable::new(),
-    );
+        )
+        .expect("beta fixture token should be valid");
+    builder
+        .push_numeric(kept_numeric, span_at(24, &mut spans))
+        .expect("kept numeric token should be valid");
+    builder
+        .push_static(TokenTag::EOF, span_at(32, &mut spans))
+        .expect("EOF fixture token should be valid");
+    let mut donor_owner = builder
+        .finish_unfrozen()
+        .expect("canonical sequence fixture should finish");
     let segments = [
         TokenRange::from_raw(source, 0, 1).expect("fixture segment should be ordered"),
         TokenRange::from_raw(source, 2, 5).expect("fixture segment should be ordered"),
     ];
-    let sequence = donor_file
+    let owner = Arc::get_mut(&mut donor_owner)
+        .expect("canonical sequence owner should be uniquely owned");
+    let sequence = owner
         .try_register_token_sequence(&segments)
         .expect("ordered adjacent segments should register");
-    donor_file.freeze_path_syntax_for_test();
-    let donor_owner = donor_file
-        .canonical_source_tokens_arc()
-        .expect("test fixture must use a canonical source owner");
+    owner.freeze_numeric_literals();
+    let donor_owner = donor_owner;
     let body = GenericFunctionBody::materialised(
         Arc::clone(&donor_owner),
         None,
@@ -1326,19 +1323,14 @@ fn donor_path_handles_render_through_borrowed_origin() {
         .try_intern_portable_path("provider/CONST", &mut donor_strings)
         .expect("donor paths fit the checked table");
     let donor_path_table = Arc::new(donor_builder.freeze());
-    let mut path_syntax = PathSyntaxTable::new();
+    let mut path_syntax = PathSyntaxTable::with_source(source);
     let path_handle = path_syntax.push(donor_root, SourceSpan::new(source, token_span()));
-    let donor_file = FileTokens::new_frozen(
-        PathId::ROOT,
-        source,
-        None,
-        vec![Token::new(TokenKind::Path(path_handle), token_span())],
-        path_syntax,
-    );
-    let owner = donor_file
-        .canonical_source_tokens_arc()
-        .expect("test fixture must use a canonical source owner");
-    let end = TokenIndex::try_from_index(donor_file.tokens.len()).expect("test token range fits");
+    let owner = canonical_tokens_with_path_syntax(source, path_syntax, |builder| {
+        builder
+            .push_path(TokenTag::PATH, path_handle, token_span())
+            .expect("path fixture token should be valid");
+    });
+    let end = TokenIndex::try_from_index(owner.len()).expect("test token range fits");
     let range = TokenRange::try_new_for(
         owner.as_ref(),
         TokenIndex::try_from_index(0).expect("test token range fits"),
@@ -1347,7 +1339,7 @@ fn donor_path_handles_render_through_borrowed_origin() {
     .expect("test token range must be in bounds");
     let body = GenericFunctionBody::materialised(
         owner,
-        donor_file.canonical_os_path.clone(),
+        None,
         range,
         None,
         PathId::ROOT,
@@ -1484,8 +1476,10 @@ fn retained_template(
         generic_parameter_list_id: GenericParameterListId(0),
         signature: FunctionSignature::default(),
         body_tokens: has_body.then(|| {
-            let file = FileTokens::new(path, SourceId::COMPILATION_ROOT, Vec::new());
-            body_view(&file, path)
+            let owner = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT)
+                .finish()
+                .expect("canonical empty source fixture should finish");
+            body_view(&owner, path)
         }),
         declaration_span: None,
     }
@@ -1655,48 +1649,110 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
             body_sequence.is_none(),
             "the authored source fixture body is contiguous"
         );
-        let body_src_path = body.declaration_path();
-        let body_os_path = body.canonical_os_path().cloned();
         let body_file_id = body_owner.source();
-        let mut tokens = body_owner
-            .materialize_range(body_range)
-            .expect("the source body should materialise for this fixture");
-        let placeholder_span = tokens
-            .iter()
-            .find_map(|token| match token.kind {
-                TokenKind::StringSliceLiteral(id) if body_table.resolve(id) == "placeholder" => {
-                    Some(token.span)
-                }
-                _ => None,
+        let placeholder_span = (body_range.start().index()..body_range.end().index())
+            .find_map(|index| {
+                let token_index = TokenIndex::try_from_index(index)?;
+                let token = body_owner.token(token_index).ok()?;
+                (token.tag() == TokenTag::STRING_SLICE_LITERAL)
+                    .then(|| {
+                        token
+                            .string_id()
+                            .filter(|id| body_table.resolve(*id) == "placeholder")
+                            .map(|_| token.span())
+                    })
+                    .flatten()
             })
             .expect("the placeholder body literal should be present");
-        let mut path_syntax = PathSyntaxTable::new();
+        let mut path_syntax = PathSyntaxTable::with_source(body_file_id);
         let path_id = path_syntax.push(
             path_fork
                 .try_intern_components(&[assets_component, logo_component])
                 .expect("test path fits"),
             SourceSpan::new(body_file_id, placeholder_span),
         );
-        let mut replaced = false;
-        for token in &mut tokens {
-            if let TokenKind::StringSliceLiteral(id) = token.kind
-                && body_table.resolve(id) == "placeholder"
-            {
-                token.kind = TokenKind::Path(path_id);
-                replaced = true;
-                break;
+        let mut builder =
+            TestSourceTokensBuilder::with_path_syntax(body_file_id, path_syntax);
+        for index in body_range.start().index()..body_range.end().index() {
+            let token_index = TokenIndex::try_from_index(index)
+                .expect("source body token index should fit");
+            let token = body_owner
+                .token(token_index)
+                .expect("source body token should remain readable");
+            let span = token.span();
+            match token.tag() {
+                TokenTag::SYMBOL
+                | TokenTag::STYLE_DIRECTIVE
+                | TokenTag::STRING_SLICE_LITERAL
+                | TokenTag::RAW_STRING_LITERAL => {
+                    let string_id = token
+                        .string_id()
+                        .expect("string-shaped source token should carry its payload");
+                    if token.tag() == TokenTag::STRING_SLICE_LITERAL
+                        && body_table.resolve(string_id) == "placeholder"
+                    {
+                        builder
+                            .push_path(TokenTag::PATH, path_id, span)
+                            .expect("replacement path token should be valid");
+                    } else {
+                        builder
+                            .push_symbol(token.tag(), string_id, span)
+                            .expect("string source token should be valid");
+                    }
+                }
+                TokenTag::NUMERIC_LITERAL => {
+                    builder
+                        .push_numeric(
+                            token
+                                .numeric_literal()
+                                .expect("numeric source token should validate")
+                                .expect("numeric source token should carry its payload")
+                                .clone(),
+                            span,
+                        )
+                        .expect("numeric source token should be valid");
+                }
+                TokenTag::CHAR_LITERAL => {
+                    builder
+                        .push_char(
+                            TokenTag::CHAR_LITERAL,
+                            token.char_value().expect("char source token should validate"),
+                            span,
+                        )
+                        .expect("char source token should be valid");
+                }
+                TokenTag::BOOL_LITERAL => {
+                    builder
+                        .push_bool(
+                            TokenTag::BOOL_LITERAL,
+                            token.bool_value().expect("bool source token should validate"),
+                            span,
+                        )
+                        .expect("bool source token should be valid");
+                }
+                TokenTag::PATH => {
+                    builder
+                        .push_path(
+                            TokenTag::PATH,
+                            token
+                                .path_syntax_id()
+                                .expect("path source token should carry its handle"),
+                            span,
+                        )
+                        .expect("path source token should be valid");
+                }
+                tag => {
+                    builder
+                        .push_static(tag, span)
+                        .expect("static source token should be valid");
+                }
             }
         }
-        assert!(replaced, "the placeholder body literal should be present");
-        let body = FileTokens::new_with_identity(
-            body_src_path,
-            body_file_id,
-            body_os_path,
-            tokens,
-            path_syntax,
-        );
+        let body_owner = builder
+            .finish()
+            .expect("canonical resource body fixture should finish");
         let body_source_file = body_file_id;
-        template.body_tokens = Some(body_view(&body, declaration_path));
+        template.body_tokens = Some(body_view(&body_owner, declaration_path));
         (body_source_file, path_id)
     };
     let mut resolved_references = ResolvedFileReferenceTable::new();
@@ -1908,20 +1964,21 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             .try_intern_portable_path("@body.moth", &mut source_table)
             .expect("test path fits");
         let path_span = token_span();
-        let mut path_syntax = PathSyntaxTable::new();
+        let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
         let path_id = path_syntax.push(
             path_fork
                 .try_intern_portable_path("@resource.bin", &mut source_table)
                 .expect("test path fits"),
             SourceSpan::new(SourceId::COMPILATION_ROOT, path_span),
         );
-        let body = FileTokens::new_with_identity(
-            source_file,
-            SourceId::COMPILATION_ROOT,
-            None,
-            vec![Token::new(TokenKind::Path(path_id), path_span)],
-            path_syntax,
-        );
+        let mut body_builder =
+            TestSourceTokensBuilder::with_path_syntax(SourceId::COMPILATION_ROOT, path_syntax);
+        body_builder
+            .push_path(TokenTag::PATH, path_id, path_span)
+            .expect("collision fixture path token should be valid");
+        let body = body_builder
+            .finish()
+            .expect("collision fixture source tokens should finish");
         let mut resolved_references = ResolvedFileReferenceTable::new();
         resolved_references
             .push(ResolvedFileReference {
@@ -2528,10 +2585,9 @@ fn frozen_generic_rejects_duplicate_path_handle() {
 
 #[test]
 fn generic_body_rejects_foreign_source_range() {
-    let shell = FileTokens::new(PathId::ROOT, SourceId::COMPILATION_ROOT, Vec::new());
-    let owner = shell
-        .canonical_source_tokens_arc()
-        .expect("test fixture must use a canonical source owner");
+    let owner = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT)
+        .finish()
+        .expect("empty canonical source owner should finish");
     let foreign_range =
         TokenRange::from_raw(SourceId::from_index(7), 0, 0).expect("range ordering is valid");
     let error = GenericFunctionBody::source(owner, foreign_range, None, PathId::ROOT, None)
@@ -2718,20 +2774,17 @@ fn materialised_body_declaration_cursor_translates_colliding_symbol_payloads() {
     let mut donor_strings = StringTable::new();
     let donor_current = donor_strings.intern("donor current");
     let donor_token_at = donor_strings.intern("donor token-at");
-    let donor_file = FileTokens::new_frozen(
-        source_file,
-        source,
-        None,
-        vec![
-            Token::new(TokenKind::Symbol(donor_current), token_span()),
-            Token::new(TokenKind::Symbol(donor_token_at), token_span()),
-        ],
-        PathSyntaxTable::new(),
-    );
-    let owner = donor_file
-        .canonical_source_tokens_arc()
-        .expect("test fixture must use a canonical source owner");
-    let end = TokenIndex::try_from_index(donor_file.tokens.len()).expect("test range should fit");
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_symbol(TokenTag::SYMBOL, donor_current, token_span())
+        .expect("donor current token should be valid");
+    builder
+        .push_symbol(TokenTag::SYMBOL, donor_token_at, token_span())
+        .expect("donor token-at token should be valid");
+    let owner = builder
+        .finish()
+        .expect("canonical symbol fixture should finish");
+    let end = TokenIndex::try_from_index(owner.len()).expect("test range should fit");
     let range = TokenRange::try_new_for(
         owner.as_ref(),
         TokenIndex::try_from_index(0).expect("test range should fit"),
@@ -2740,7 +2793,7 @@ fn materialised_body_declaration_cursor_translates_colliding_symbol_payloads() {
     .expect("test range should be in bounds");
     let body = GenericFunctionBody::materialised(
         owner,
-        donor_file.canonical_os_path.clone(),
+        None,
         range,
         None,
         source_file,

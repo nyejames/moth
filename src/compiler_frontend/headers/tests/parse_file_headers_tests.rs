@@ -9,7 +9,7 @@ use super::*;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind,
-    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticToken, InvalidChoiceVariantReason,
+    DiagnosticLabelMessage, DiagnosticPayload, InvalidChoiceVariantReason,
     InvalidConfigReason, InvalidDeclarationReason, InvalidDependencyClauseReason,
     InvalidFunctionSignatureReason, InvalidSignatureMemberReason, InvalidThisUsageReason,
     InvalidTypeAnnotationReason, ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
@@ -42,9 +42,9 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenKind, TokenizerEntryMode,
+    TokenCursor, TokenRange, TokenizerEntryMode,
 };
 use crate::compiler_frontend::traits::syntax::ConformanceTargetKind;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -111,18 +111,17 @@ struct HeaderTestPrepareContext<'a> {
     style_directives: &'a StyleDirectiveRegistry,
 }
 
-fn canonical_handoff(
-    file_tokens: FileTokens,
+fn owner_from_lexed_source(
+    lexed: LexedSource,
 ) -> (SourceTokenOwner, Arc<crate::compiler_frontend::paths::path_syntax::PathSyntaxTable>) {
-    let handoff = file_tokens
-        .into_canonical_lexer_handoff()
-        .expect("lexer output should provide the canonical preparation handoff");
-    let owner = SourceTokenOwner::new(
-        handoff.tokens,
-        handoff.logical_path,
-        handoff.canonical_os_path,
-    );
-    (owner, handoff.path_syntax)
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    (owner, lexed.path_syntax)
+}
+
+fn canonical_handoff(
+    lexed: LexedSource,
+) -> (SourceTokenOwner, Arc<crate::compiler_frontend::paths::path_syntax::PathSyntaxTable>) {
+    owner_from_lexed_source(lexed)
 }
 
 /// Prepare one self-contained fixture whose output is not reused across a path-table boundary.
@@ -168,7 +167,7 @@ pub(crate) fn prepare_single_file_with_fork(
     )
     .expect("tokenization should succeed");
 
-    let (owner, path_syntax) = canonical_handoff(file_tokens);
+    let (owner, path_syntax) = owner_from_lexed_source(file_tokens);
     let output = prepare_file_from_tokens(
         owner,
         path_syntax,
@@ -213,7 +212,7 @@ fn prepare_test_source_file(
     )
     .map_err(FileFrontendPrepareFailure::from_tokenization)?;
 
-    let (owner, path_syntax) = canonical_handoff(file_tokens);
+    let (owner, path_syntax) = owner_from_lexed_source(file_tokens);
     prepare_file_from_tokens(
         owner,
         path_syntax,
@@ -247,7 +246,7 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let (owner, _path_syntax) = canonical_handoff(file_tokens);
+    let (owner, _path_syntax) = owner_from_lexed_source(file_tokens);
     let invalid_path_syntax = Arc::new(PathSyntaxTable::new());
 
     match prepare_file_from_tokens(
@@ -330,8 +329,8 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
         &mut other_span_builder,
     )
     .expect("other file should tokenize");
-    let (owner, _file_path_syntax) = canonical_handoff(file_tokens);
-    let (_other_owner, other_path_syntax) = canonical_handoff(other_tokens);
+    let (owner, _file_path_syntax) = owner_from_lexed_source(file_tokens);
+    let (_other_owner, other_path_syntax) = owner_from_lexed_source(other_tokens);
     // The source owner keeps its own identity; only the preparing path table is another file's.
     expect_prepare_infrastructure(
         match prepare_file_from_tokens(
@@ -537,7 +536,7 @@ fn parse_single_file_headers_with_entry(
     )
     .expect("tokenization should succeed");
 
-    let (owner, path_syntax) = canonical_handoff(file_tokens);
+    let (owner, path_syntax) = owner_from_lexed_source(file_tokens);
     let prepare_result = prepare_file_from_tokens(
         owner,
         path_syntax,
@@ -632,34 +631,41 @@ fn non_start_header_names(headers: &BoundModuleHeaders, string_table: &StringTab
     names
 }
 
-/// Return the retained body tokens for a header from its prepared source owner.
+/// Return a borrowed canonical cursor for a header's retained body syntax.
 ///
-/// Segmented start syntax is materialized only for this test assertion through the canonical
-/// source owner; production headers retain the checked sequence ID instead of a token vector.
-fn header_body_tokens(headers: &BoundModuleHeaders, header: &Header) -> Vec<Token> {
+/// Segmented start syntax is traversed through the canonical source owner; production headers
+/// retain only the checked sequence ID instead of a token vector.
+fn header_body_tokens<'a>(headers: &'a BoundModuleHeaders, header: &Header) -> TokenCursor<'a> {
     let source = headers
         .source_token_owners
         .get(&header.tokens.source())
         .expect("header body range has no prepared source token owner");
-    let source = source.tokens_ref();
     if let Some(sequence) = header.token_sequence {
-        return source
-            .materialize_token_sequence(sequence)
-            .expect("header sequence should resolve through its source owner");
+        return TokenCursor::from_sequence(
+            source
+                .tokens_ref()
+                .token_sequence(sequence)
+                .expect("header sequence should resolve through its source owner"),
+        )
+        .expect("header sequence cursor should be valid");
     }
     source
-        .materialize_range(header.tokens)
+        .tokens_ref()
+        .cursor(header.tokens)
         .expect("header range should resolve through its source owner")
 }
-fn default_tokens(headers: &BoundModuleHeaders, range: Option<TokenRange>) -> Vec<Token> {
+fn default_tokens<'a>(
+    headers: &'a BoundModuleHeaders,
+    range: Option<TokenRange>,
+) -> TokenCursor<'a> {
     let range = range.expect("expected a retained default-expression range");
     headers
         .source_token_owners
         .get(&range.source())
         .expect("default range has no prepared source owner")
         .tokens_ref()
-        .materialize_range(range)
-        .expect("default range should materialize")
+        .cursor(range)
+        .expect("default range should resolve")
 }
 
 fn symbol_tokens_in_header_body(
@@ -667,13 +673,16 @@ fn symbol_tokens_in_header_body(
     header: &Header,
     string_table: &StringTable,
 ) -> Vec<String> {
-    header_body_tokens(headers, header)
-        .iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::Symbol(symbol) => Some(string_table.resolve(symbol).to_owned()),
-            _ => None,
-        })
-        .collect()
+    let mut cursor = header_body_tokens(headers, header);
+    let mut symbols = Vec::new();
+    while let Some(token) = cursor.advance() {
+        if token.tag() == crate::compiler_frontend::tokenizer::tokens::TokenTag::SYMBOL
+            && let Some(symbol) = token.string_id()
+        {
+            symbols.push(string_table.resolve(symbol).to_owned());
+        }
+    }
+    symbols
 }
 
 #[test]

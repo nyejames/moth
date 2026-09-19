@@ -29,14 +29,12 @@ use crate::compiler_frontend::compiler_messages::{ModuleDiagnostics, PremergeDia
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
     SourceId, SourceKind, SourceRegistrationIndex, SourceSpan,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -1568,11 +1566,9 @@ fn remap_string_ids_updates_payloads_labels_and_tokens() {
     let primary_span = Some(exact_span(source, 4, 3, &mut span_builder));
     let first_span = exact_span(source, 10, 2, &mut span_builder);
 
-    let mut path_syntax = PathSyntaxTable::new();
-    let path_id = path_syntax.push(import_path, first_span);
     let expected_token = CompilerDiagnostic::expected_token_from_projections(
-        DiagnosticToken::from(TokenKind::Symbol(name)),
-        Some(DiagnosticToken::from(TokenKind::Path(path_id))),
+        DiagnosticToken::from_string_tag(TokenTag::SYMBOL, name),
+        Some(DiagnosticToken::from_static_tag(TokenTag::PATH)),
         primary_span,
     );
     let duplicate = CompilerDiagnostic::duplicate_declaration(name, Some(first_span), primary_span);
@@ -3627,11 +3623,11 @@ fn token_diagnostics_render_source_spelling_not_token_debug_names() {
 
     let expected = CompilerDiagnostic::expected_token_from_tags(
         TokenTag::OPEN_PARENTHESIS,
-        Some(DiagnosticToken::from(TokenKind::Symbol(name))),
+        Some(DiagnosticToken::from_string_tag(TokenTag::SYMBOL, name)),
         span,
     );
     let unexpected = CompilerDiagnostic::unexpected_token_from_tag(
-        DiagnosticToken::from(TokenKind::OpenCurly),
+        DiagnosticToken::from_static_tag(TokenTag::OPEN_CURLY),
         span,
     );
 

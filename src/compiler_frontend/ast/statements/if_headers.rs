@@ -222,9 +222,9 @@ fn classify_if_header_from_position(token_stream: &mut AstCursor) -> IfHeaderCla
             }
         }
 
-        // A malformed payload also reports `Eof`, and `Eof` is stable under
-        // `advance`, so break on it at any depth: an unclosed delimiter before
-        // the end of the stream must terminate the scan.
+        // This scan reads `TokenTag` values directly from the canonical cursor and stops on
+        // the explicit `TokenTag::EOF` boundary at any depth. Payload validity is checked
+        // separately by typed accessors and invariant validation.
         if token_stream.current_tag() == TokenTag::EOF {
             break;
         }
@@ -300,9 +300,9 @@ fn classify_single_predicate_after_pattern(
             };
         }
 
-        // A malformed payload also reports `Eof`, and `Eof` is stable under
-        // `advance`, so break on it: an unclosed delimiter before the end of the
-        // stream leaves the header an ordinary Bool.
+        // This scan reads `TokenTag` values directly from the canonical cursor and stops on
+        // the explicit `TokenTag::EOF` boundary. Payload validity is checked separately by
+        // typed accessors and invariant validation, not by structural classification.
         if token_stream.current_tag() == TokenTag::EOF {
             break;
         }
@@ -344,8 +344,9 @@ fn ordinary_bool_header(
 
 /// Index of the first non-newline token at or after `start_index`.
 ///
-/// Returns `None` at the end of the stream and on `Eof`, which is also how a
-/// malformed payload is reported.
+/// Returns `None` at the end of the stream or when the direct `TokenTag` scan sees
+/// `TokenTag::EOF`; payload validity is handled separately by typed accessors and
+/// invariant validation.
 fn next_meaningful_token_index(token_stream: &mut AstCursor, start_index: usize) -> Option<usize> {
     if token_stream.set_position(start_index).is_err() {
         return None;

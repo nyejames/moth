@@ -68,27 +68,26 @@ fn escape_html_preserves_runtime_head_references() {
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
+    let source_path = file_tokens.source_path;
     let context = runtime_template_context_with_style_directives(
         &source_path,
         &style_directives,
         &mut string_table,
         &mut path_fork,
     );
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let canonical_owner = file_tokens.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
     let mut token_stream = AstCursor::from_source_tokens(
         &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
+        None,
         canonical_range,
     )
     .expect("test token stream must expose an AST cursor");
     token_stream
-        .set_position(file_tokens.index)
+        .set_position(file_tokens.opener_index)
         .expect("test token stream position must remain in canonical range");
 
     let template = Template::new(

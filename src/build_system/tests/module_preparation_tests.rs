@@ -40,7 +40,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -220,25 +220,61 @@ fn source_path_for_header(headers: &PreparedHeaderSyntax, header: &Header) -> Pa
         .expect("every retained header should have a source-path owner")
 }
 
-fn token_slice_for_header(
-    headers: &PreparedHeaderSyntax,
+fn token_slice_for_header<'a>(
+    headers: &'a PreparedHeaderSyntax,
     header: &Header,
-) -> Vec<crate::compiler_frontend::tokenizer::tokens::Token> {
+) -> TokenCursor<'a> {
     let source = headers
         .source_token_owners
         .get(&header.tokens.source())
         .expect("every retained header should have a token owner");
-    let source = source.tokens_ref();
     if let Some(sequence) = header.token_sequence {
-        return source
-            .materialize_token_sequence(sequence)
-            .expect("header sequence should resolve through its source owner");
+        return TokenCursor::from_sequence(
+            source
+                .tokens_ref()
+                .token_sequence(sequence)
+                .expect("header sequence should resolve through its source owner"),
+        )
+        .expect("header sequence cursor should be valid");
     }
     source
-        .materialize_range(header.tokens)
+        .tokens_ref()
+        .cursor(header.tokens)
         .expect("header range should resolve through its source owner")
 }
+fn find_symbol_id(
+    mut cursor: TokenCursor<'_>,
+    string_table: &StringTable,
+    expected: &str,
+) -> Option<crate::compiler_frontend::symbols::string_interning::StringId> {
+    while let Some(token) = cursor.advance() {
+        if token.tag() == TokenTag::SYMBOL
+            && token
+                .string_id()
+                .is_some_and(|id| string_table.resolve(id) == expected)
+        {
+            return token.string_id();
+        }
+    }
+    None
+}
 
+fn find_symbol_span(
+    mut cursor: TokenCursor<'_>,
+    string_table: &StringTable,
+    expected: &str,
+) -> Option<SourceSpan> {
+    while let Some(token) = cursor.advance() {
+        if token.tag() == TokenTag::SYMBOL
+            && token
+                .string_id()
+                .is_some_and(|id| string_table.resolve(id) == expected)
+        {
+            return Some(token.source_span());
+        }
+    }
+    None
+}
 fn header_source_file_names(
     headers: &PreparedHeaderSyntax,
     string_table: &StringTable,
@@ -493,12 +529,11 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     );
 
     // Verify token symbols inside the const template also resolve.
-    let hello_token = token_slice_for_header(&headers, const_template_header.unwrap())
-        .iter()
-        .find_map(|t| match &t.kind {
-            TokenKind::Symbol(id) if frontend.string_table.resolve(*id) == "hello" => Some(*id),
-            _ => None,
-        });
+    let hello_token = find_symbol_id(
+        token_slice_for_header(&headers, const_template_header.unwrap()),
+        &frontend.string_table,
+        "hello",
+    );
     assert!(
         hello_token.is_some(),
         "hello symbol inside const template should resolve through module table"
@@ -662,16 +697,12 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         .prepared_header_syntax
         .headers
         .iter()
-        .flat_map(|header| {
-            token_slice_for_header(&prepared.semantic.prepared_header_syntax, header)
-        })
-        .find_map(|token| match token.kind {
-            TokenKind::Symbol(id)
-                if prepared.semantic.string_table.resolve(id) == parameter_name =>
-            {
-                Some(SourceSpan::new(source_id, token.span))
-            }
-            _ => None,
+        .find_map(|header| {
+            find_symbol_span(
+                token_slice_for_header(&prepared.semantic.prepared_header_syntax, header),
+                &prepared.semantic.string_table,
+                &parameter_name,
+            )
         })
         .expect("retained function body should contain its extended parameter-use span");
     assert_eq!(
@@ -1248,12 +1279,11 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     );
 
     // Verify token symbols inside the const template resolve.
-    let hello_token = token_slice_for_header(&headers, const_template_header.unwrap())
-        .iter()
-        .find_map(|t| match &t.kind {
-            TokenKind::Symbol(id) if frontend.string_table.resolve(*id) == "hello" => Some(*id),
-            _ => None,
-        });
+    let hello_token = find_symbol_id(
+        token_slice_for_header(&headers, const_template_header.unwrap()),
+        &frontend.string_table,
+        "hello",
+    );
     assert!(
         hello_token.is_some(),
         "hello symbol inside const template should resolve through module table"
@@ -1765,7 +1795,7 @@ fn parsed_prepared_output(
         .try_intern_filesystem_path(&source_path, string_table)
         .expect("test source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let tokens = tokenize(
+    let lexed = tokenize(
         source_code,
         source_identity,
         TokenizerEntryMode::SourceFile,
@@ -1776,16 +1806,8 @@ fn parsed_prepared_output(
         span_builder,
     )
     .expect("test source should tokenize");
-    let crate::compiler_frontend::tokenizer::tokens::CanonicalLexerHandoff {
-        tokens,
-        logical_path,
-        canonical_os_path,
-        path_syntax,
-        ..
-    } = tokens
-        .into_canonical_lexer_handoff()
-        .expect("test source should retain its canonical lexer handoff");
-    let owner = SourceTokenOwner::new(tokens, logical_path, canonical_os_path);
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let path_syntax = lexed.path_syntax;
 
     parse_file_headers_with_table(
         owner,

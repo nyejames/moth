@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 #[test]
 fn entry_runtime_fragment_count_is_zero_with_no_templates() {
@@ -96,26 +97,32 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
     );
     assert!(ranges[0].end() < ranges[1].start());
 
-    let body = header_body_tokens(&headers, start_header);
-    let symbols = body
-        .iter()
-        .filter_map(|token| match &token.kind {
-            TokenKind::Symbol(symbol) => Some(string_table.resolve(*symbol).to_owned()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let mut body = header_body_tokens(&headers, start_header);
+    let mut symbols = Vec::new();
+    let mut contains_answer = false;
+    let mut last_tag = None;
+    while let Some(token) = body.advance() {
+        let tag = token.tag();
+        last_tag = Some(tag);
+        if tag == TokenTag::SYMBOL
+            && let Some(symbol) = token.string_id()
+        {
+            let symbol = string_table.resolve(symbol);
+            contains_answer |= symbol == "answer";
+            symbols.push(symbol.to_owned());
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
     assert_eq!(symbols, ["before", "after"]);
     assert!(
-        !body.iter().any(|token| {
-            matches!(
-                &token.kind,
-                TokenKind::Symbol(symbol) if string_table.resolve(*symbol) == "answer"
-            )
-        }),
+        !contains_answer,
         "the constant declaration must not leak into the start body"
     );
-    assert!(
-        matches!(body.last().map(|token| &token.kind), Some(TokenKind::Eof)),
+    assert_eq!(
+        last_tag,
+        Some(TokenTag::EOF),
         "segmented start syntax must retain the source EOF sentinel"
     );
 }

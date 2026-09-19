@@ -27,7 +27,7 @@ use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -457,7 +457,7 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             .expect("the original source snapshot must load");
         let source = sources.retained_text(file_id).unwrap();
         let mut builder = ExtendedSpanBuilder::new();
-        let mut tokens = tokenize(
+        let lexed = tokenize(
             source,
             source_path,
             TokenizerEntryMode::SourceFile,
@@ -469,19 +469,31 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         )
         .expect("the source must tokenize");
         let name = strings.intern("value");
-        tokens.index = tokens
+        let declaration_position = (0..lexed.tokens.len())
+            .find_map(|index| {
+                let index = TokenIndex::try_from_index(index)?;
+                let token = lexed.tokens.token(index).ok()?;
+                (token.tag() == TokenTag::SYMBOL && token.string_id() == Some(name))
+                    .then_some(index.index() + 1)
+            })
+            .expect("the tokenized source must contain the declaration name");
+        let full_range = lexed
             .tokens
-            .iter()
-            .position(|token| token.kind == TokenKind::Symbol(name))
-            .unwrap()
-            + 1;
-        let mut declaration_cursor =
-            crate::compiler_frontend::declaration_syntax::DeclarationCursor::new(
-                tokens
-                    .canonical_cursor_from_current()
-                    .expect("the tokenized source must expose canonical tokens"),
-            )
+            .full_range()
+            .expect("the tokenized source must expose a checked full range");
+        let mut canonical_cursor = lexed
+            .tokens
+            .cursor(full_range)
             .expect("the tokenized source must expose canonical tokens");
+        canonical_cursor
+            .set_position(
+                TokenIndex::try_from_index(declaration_position)
+                    .expect("the declaration position must fit the canonical index domain"),
+            )
+            .expect("the canonical cursor must seek to the declaration position");
+        let mut declaration_cursor =
+            crate::compiler_frontend::declaration_syntax::DeclarationCursor::new(canonical_cursor)
+                .expect("the tokenized source must expose canonical tokens");
         let declaration =
             parse_declaration_syntax(&mut declaration_cursor, name, &mut strings, &mut builder)
                 .expect("the authored declaration must produce its shell");
@@ -507,7 +519,6 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             "the preceding long literal must use the original span table"
         );
 
-        tokens.freeze_path_syntax_for_test();
         let _context = ScopeContext::new_for_tests(
             ContextKind::Function,
             source_path,
@@ -521,18 +532,12 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         )
         .with_declaring_file_id(file_id);
 
-        let source_owner = tokens
-            .canonical_source_tokens_arc()
-            .expect("the tokenized source must expose a canonical source owner");
+        let source_owner = &lexed.tokens;
         let source_range = source_owner
             .full_range()
             .expect("the tokenized source must expose a checked full range");
-        let mut owner = AstCursor::from_source_tokens(
-            &source_owner,
-            tokens.canonical_os_path.clone(),
-            source_range,
-        )
-        .expect("the tokenized source must expose an AST cursor");
+        let mut owner = AstCursor::from_source_tokens(source_owner, None, source_range)
+            .expect("the tokenized source must expose an AST cursor");
         owner
             .set_position(declaration_position)
             .expect("the canonical cursor must seek to the declaration position");

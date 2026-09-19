@@ -1,12 +1,10 @@
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::numeric_text::store::NumericLiteralStore;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, Token, TokenCursor, TokenIndex, TokenKind, TokenRange, TokenTag,
+    SourceTokens, TestSourceTokensBuilder, TokenCursor, TokenIndex, TokenRange, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::{
     InitializerReference, OpenConstruct, TokenFactView, TokenScanFailure,
@@ -16,25 +14,36 @@ use crate::compiler_frontend::utilities::token_scan::{
 };
 use std::sync::Arc;
 
-fn token(kind: TokenKind) -> Token {
-    Token::new(kind, LocalSpan::source_start())
+enum FixturePart {
+    Static(TokenTag),
+    Symbol(crate::compiler_frontend::symbols::string_interning::StringId),
+    Numeric(NumericLiteralToken),
+    StringSlice(crate::compiler_frontend::symbols::string_interning::StringId),
 }
 
-fn source_tokens_from_kinds(source: SourceId, kinds: Vec<TokenKind>) -> SourceTokens {
-    let mut numeric_literals = NumericLiteralStore::with_source(source);
-    for kind in &kinds {
-        if let TokenKind::NumericLiteral(literal) = kind {
-            numeric_literals.push(literal.clone());
+fn source_tokens_from_parts(source: SourceId, parts: Vec<FixturePart>) -> Arc<SourceTokens> {
+    let mut builder = TestSourceTokensBuilder::new(source);
+    for part in parts {
+        match part {
+            FixturePart::Static(tag) => builder
+                .push_static(tag, LocalSpan::source_start())
+                .expect("static fixture token should build"),
+            FixturePart::Symbol(value) => builder
+                .push_symbol(TokenTag::SYMBOL, value, LocalSpan::source_start())
+                .expect("symbol fixture token should build"),
+            FixturePart::Numeric(literal) => builder
+                .push_numeric(literal, LocalSpan::source_start())
+                .expect("numeric fixture token should build"),
+            FixturePart::StringSlice(value) => builder
+                .push_symbol(
+                    TokenTag::STRING_SLICE_LITERAL,
+                    value,
+                    LocalSpan::source_start(),
+                )
+                .expect("string fixture token should build"),
         }
     }
-
-    SourceTokens::try_from_tokens(
-        source,
-        kinds.into_iter().map(token).collect(),
-        numeric_literals,
-        PathSyntaxTable::with_source(source),
-    )
-    .expect("canonical token fixture should satisfy source-token invariants")
+    builder.finish().expect("canonical fixture tokens should build")
 }
 
 fn full_cursor(owner: &SourceTokens) -> TokenCursor<'_> {
@@ -83,7 +92,7 @@ fn ast_cursor(owner: &Arc<SourceTokens>) -> AstCursor<'_> {
 
 #[test]
 fn canonical_range_view_rejects_foreign_source() {
-    let owner = source_tokens_from_kinds(SourceId::COMPILATION_ROOT, vec![TokenKind::Eof]);
+    let owner = source_tokens_from_parts(SourceId::COMPILATION_ROOT, vec![FixturePart::Static(TokenTag::EOF)]);
     let canonical = &owner;
     let foreign = TokenRange::new(
         SourceId::from_index(1),
@@ -103,7 +112,7 @@ fn canonical_range_view_rejects_foreign_source() {
 
 #[test]
 fn canonical_range_view_rejects_out_of_owner_range() {
-    let owner = source_tokens_from_kinds(SourceId::COMPILATION_ROOT, vec![TokenKind::Eof]);
+    let owner = source_tokens_from_parts(SourceId::COMPILATION_ROOT, vec![FixturePart::Static(TokenTag::EOF)]);
     let out_of_owner = TokenRange::new(
         owner.source(),
         TokenIndex::try_from_raw(0).expect("zero index is representable"),
@@ -122,49 +131,49 @@ fn top_level_comma_detection_ignores_nested_commas() {
     let source = SourceId::COMPILATION_ROOT;
     let mut string_table = StringTable::new();
 
-    let nested_only = Arc::new(source_tokens_from_kinds(
+    let nested_only = source_tokens_from_parts(
         source,
         vec![
-            TokenKind::OpenParenthesis,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
-            TokenKind::Comma,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("2", &mut string_table)),
-            TokenKind::CloseParenthesis,
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Numeric(NumericLiteralToken::test_new("2", &mut string_table)),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-    ));
+    );
     let nested_cursor = ast_cursor(&nested_only);
     assert!(!has_top_level_comma_before_statement_end(&nested_cursor));
 
-    let top_level = Arc::new(source_tokens_from_kinds(
+    let top_level = source_tokens_from_parts(
         source,
         vec![
-            TokenKind::Symbol(string_table.intern("a")),
-            TokenKind::Comma,
-            TokenKind::Symbol(string_table.intern("b")),
-            TokenKind::Assign,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("a")),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Symbol(string_table.intern("b")),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-    ));
+    );
     let top_level_cursor = ast_cursor(&top_level);
     assert!(has_top_level_comma_before_statement_end(&top_level_cursor));
 
-    let multiline = Arc::new(source_tokens_from_kinds(
+    let multiline = source_tokens_from_parts(
         source,
         vec![
-            TokenKind::Symbol(string_table.intern("a")),
-            TokenKind::Comma,
-            TokenKind::Newline,
-            TokenKind::Symbol(string_table.intern("b")),
-            TokenKind::Assign,
-            TokenKind::Symbol(string_table.intern("pair")),
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("a")),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(string_table.intern("b")),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Symbol(string_table.intern("pair")),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-    ));
+    );
     let multiline_cursor = ast_cursor(&multiline);
     assert!(has_top_level_comma_before_statement_end(&multiline_cursor));
 }
@@ -172,20 +181,20 @@ fn top_level_comma_detection_ignores_nested_commas() {
 #[test]
 fn canonical_comma_gate_respects_nested_call_depth() {
     let mut string_table = StringTable::new();
-    let owner = Arc::new(source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(string_table.intern("call")),
-            TokenKind::OpenParenthesis,
-            TokenKind::Symbol(string_table.intern("a")),
-            TokenKind::Comma,
-            TokenKind::Symbol(string_table.intern("b")),
-            TokenKind::CloseParenthesis,
-            TokenKind::Comma,
-            TokenKind::Symbol(string_table.intern("tail")),
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("call")),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Symbol(string_table.intern("a")),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Symbol(string_table.intern("b")),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Symbol(string_table.intern("tail")),
+            FixturePart::Static(TokenTag::EOF),
         ],
-    ));
+    );
     let cursor = ast_cursor(&owner);
     assert!(
         has_top_level_comma_before_statement_end(&cursor),
@@ -198,22 +207,22 @@ fn declaration_initializer_range_includes_terminal_catch_then_block() {
     let mut string_table = StringTable::new();
     let load_name = string_table.intern("load");
     let next_statement_name = string_table.intern("next_statement");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(load_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Then,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("0", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::End,
-            TokenKind::Newline,
-            TokenKind::Symbol(next_statement_name),
-            TokenKind::Eof,
+            FixturePart::Symbol(load_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::THEN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("0", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::END),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement_name),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -244,32 +253,32 @@ fn declaration_initializer_range_balances_nested_blocks_inside_catch() {
     let flag_name = string_table.intern("flag");
     let io_name = string_table.intern("io");
     let next_statement_name = string_table.intern("next_statement");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(load_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::If,
-            TokenKind::Symbol(flag_name),
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Symbol(io_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Newline,
-            TokenKind::End,
-            TokenKind::Newline,
-            TokenKind::Then,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("0", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::End,
-            TokenKind::Newline,
-            TokenKind::Symbol(next_statement_name),
-            TokenKind::Eof,
+            FixturePart::Symbol(load_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(flag_name),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(io_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::END),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::THEN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("0", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::END),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement_name),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -290,16 +299,16 @@ fn balanced_template_region_consumes_nested_templates_from_source() {
     let mut string_table = StringTable::new();
     let text_outer = string_table.intern("outer");
     let text_inner = string_table.intern("inner");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::TemplateHead,
-            TokenKind::StringSliceLiteral(text_outer),
-            TokenKind::TemplateHead,
-            TokenKind::StringSliceLiteral(text_inner),
-            TokenKind::TemplateClose,
-            TokenKind::TemplateClose,
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::StringSlice(text_outer),
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::StringSlice(text_inner),
+            FixturePart::Static(TokenTag::TEMPLATE_CLOSE),
+            FixturePart::Static(TokenTag::TEMPLATE_CLOSE),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -332,12 +341,12 @@ fn balanced_template_region_consumes_nested_templates_from_source() {
 #[test]
 fn balanced_template_region_errors_on_eof_before_close_from_source() {
     let mut string_table = StringTable::new();
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::TemplateHead,
-            TokenKind::StringSliceLiteral(string_table.intern("x")),
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::StringSlice(string_table.intern("x")),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -359,9 +368,9 @@ fn balanced_template_region_errors_on_eof_before_close_from_source() {
 fn collect_scanned_symbol_references_matches_initializer_behavior_for_bare_symbol() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("value");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
-        vec![TokenKind::Symbol(name), TokenKind::Newline, TokenKind::Eof],
+        vec![FixturePart::Symbol(name), FixturePart::Static(TokenTag::NEWLINE), FixturePart::Static(TokenTag::EOF)],
     );
     let references = collect_scanned_symbol_references(
         TokenFactView::from_source(&owner),
@@ -380,13 +389,13 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_dot_member
     let mut string_table = StringTable::new();
     let name = string_table.intern("config");
     let member = string_table.intern("setting");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(name),
-            TokenKind::Dot,
-            TokenKind::Symbol(member),
-            TokenKind::Newline,
+            FixturePart::Symbol(name),
+            FixturePart::Static(TokenTag::DOT),
+            FixturePart::Symbol(member),
+            FixturePart::Static(TokenTag::NEWLINE),
         ],
     );
     let references = collect_scanned_symbol_references(
@@ -407,12 +416,12 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_dot_member
 fn collect_scanned_symbol_references_matches_initializer_behavior_for_call() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("helper");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
+            FixturePart::Symbol(name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
         ],
     );
     let references = collect_scanned_symbol_references(
@@ -430,12 +439,12 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_call() {
 fn collect_scanned_symbol_references_matches_initializer_behavior_for_choice_namespace() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("Status");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(name),
-            TokenKind::DoubleColon,
-            TokenKind::Symbol(string_table.intern("Ready")),
+            FixturePart::Symbol(name),
+            FixturePart::Static(TokenTag::DOUBLE_COLON),
+            FixturePart::Symbol(string_table.intern("Ready")),
         ],
     );
     let references = collect_scanned_symbol_references(
@@ -475,12 +484,12 @@ fn eof_expected_delimiter(
 #[test]
 fn eof_in_template_reports_closing_bracket() {
     let mut string_table = StringTable::new();
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(string_table.intern("value")),
-            TokenKind::TemplateHead,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("value")),
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -496,12 +505,12 @@ fn eof_in_template_reports_closing_bracket() {
 #[test]
 fn eof_in_parenthesis_reports_closing_paren() {
     let mut string_table = StringTable::new();
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(string_table.intern("call")),
-            TokenKind::OpenParenthesis,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("call")),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -517,12 +526,12 @@ fn eof_in_parenthesis_reports_closing_paren() {
 #[test]
 fn eof_in_collection_reports_closing_brace() {
     let mut string_table = StringTable::new();
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(string_table.intern("data")),
-            TokenKind::OpenCurly,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("data")),
+            FixturePart::Static(TokenTag::OPEN_CURLY),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -539,16 +548,16 @@ fn eof_in_collection_reports_closing_brace() {
 fn eof_in_catch_block_reports_semicolon() {
     let mut string_table = StringTable::new();
     let load_name = string_table.intern("load");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(load_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Symbol(load_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -565,14 +574,14 @@ fn eof_in_catch_block_reports_semicolon() {
 fn eof_in_value_producing_if_reports_semicolon() {
     let mut string_table = StringTable::new();
     let condition_name = string_table.intern("ready");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::If,
-            TokenKind::Symbol(condition_name),
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(condition_name),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -588,18 +597,18 @@ fn eof_in_value_producing_if_reports_semicolon() {
 #[test]
 fn eof_in_nested_parenthesis_inside_catch_reports_innermost_paren() {
     let mut string_table = StringTable::new();
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(string_table.intern("load")),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Symbol(string_table.intern("arg")),
-            TokenKind::OpenParenthesis,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("load")),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(string_table.intern("arg")),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -615,9 +624,9 @@ fn eof_in_nested_parenthesis_inside_catch_reports_innermost_paren() {
 #[test]
 fn eof_in_parenthesis_inside_template_reports_innermost_paren() {
     let mut string_table = StringTable::new();
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
-        vec![TokenKind::TemplateHead, TokenKind::OpenParenthesis, TokenKind::Eof],
+        vec![FixturePart::Static(TokenTag::TEMPLATE_HEAD), FixturePart::Static(TokenTag::OPEN_PARENTHESIS), FixturePart::Static(TokenTag::EOF)],
     );
 
     let error = scan_initializer(&owner, &mut string_table)
@@ -631,9 +640,9 @@ fn eof_in_parenthesis_inside_template_reports_innermost_paren() {
 #[test]
 fn eof_in_template_inside_parenthesis_reports_innermost_template() {
     let mut string_table = StringTable::new();
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
-        vec![TokenKind::OpenParenthesis, TokenKind::TemplateHead, TokenKind::Eof],
+        vec![FixturePart::Static(TokenTag::OPEN_PARENTHESIS), FixturePart::Static(TokenTag::TEMPLATE_HEAD), FixturePart::Static(TokenTag::EOF)],
     );
 
     let error = scan_initializer(&owner, &mut string_table)
@@ -668,23 +677,23 @@ fn declaration_initializer_range_keeps_a_multiline_pipe_list_together() {
     let field_a = string_table.intern("a");
     let field_b = string_table.intern("b");
     let next_statement = string_table.intern("next");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::TypeParameterBracket,
-            TokenKind::Newline,
-            TokenKind::Symbol(field_a),
-            TokenKind::Assign,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::Symbol(field_b),
-            TokenKind::Assign,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("2", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::TypeParameterBracket,
-            TokenKind::Newline,
-            TokenKind::Symbol(next_statement),
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(field_a),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(field_b),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("2", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -702,22 +711,22 @@ fn declaration_initializer_range_keeps_a_malformed_multiline_pipe_list_together(
     let mut string_table = StringTable::new();
     let field_b = string_table.intern("b");
     let next_statement = string_table.intern("next");
-    let owner = source_tokens_from_kinds(
+    let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::TypeParameterBracket,
-            TokenKind::Newline,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
-            TokenKind::Comma,
-            TokenKind::Newline,
-            TokenKind::Symbol(field_b),
-            TokenKind::Assign,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("2", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::TypeParameterBracket,
-            TokenKind::Newline,
-            TokenKind::Symbol(next_statement),
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(field_b),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("2", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement),
+            FixturePart::Static(TokenTag::EOF),
         ],
     );
 
@@ -740,20 +749,22 @@ fn declaration_initializer_range_keeps_a_malformed_multiline_pipe_list_together(
 fn initializer_references_carry_the_scanned_token_span() {
     let source_id = SourceId::from_index(1);
     let mut string_table = StringTable::new();
-    let mut builder = ExtendedSpanBuilder::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let name = string_table.intern("other_const");
-    let span = LocalSpan::exact(4, 11, &mut builder).expect("reference bounds should encode");
-    let owner = SourceTokens::try_from_tokens(
-        source_id,
-        vec![
-            Token::new(TokenKind::Symbol(name), span),
-            Token::new(TokenKind::Newline, LocalSpan::source_start()),
-            Token::new(TokenKind::Eof, LocalSpan::source_start()),
-        ],
-        NumericLiteralStore::with_source(source_id),
-        PathSyntaxTable::with_source(source_id),
-    )
-    .expect("canonical span fixture should satisfy source-token invariants");
+    let span = LocalSpan::exact(4, 11, &mut span_builder).expect("reference bounds should encode");
+    let mut token_builder = TestSourceTokensBuilder::new(source_id);
+    token_builder
+        .push_symbol(TokenTag::SYMBOL, name, span)
+        .expect("symbol fixture token should build");
+    token_builder
+        .push_static(TokenTag::NEWLINE, LocalSpan::source_start())
+        .expect("newline fixture token should build");
+    token_builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF fixture token should build");
+    let owner = token_builder
+        .finish()
+        .expect("canonical span fixture should satisfy source-token invariants");
 
     let references =
         collect_scanned_symbol_references(TokenFactView::from_source(&owner), source_id);

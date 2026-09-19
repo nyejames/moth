@@ -22,7 +22,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 use std::path::Path;
 
 fn compile_project_source(
@@ -194,12 +194,27 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
         &mut reference_builder,
     )
     .expect("the config should tokenize before its later dialect rejection");
-    let literal_span = reference_tokens
-        .tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("the reference lexer should produce the long literal")
-        .span;
+    let literal_span = (0..reference_tokens.tokens.len())
+        .filter_map(|index| {
+            let token_index =
+                TokenIndex::try_from_index(index).expect("the reference token index should fit");
+            let token = reference_tokens
+                .tokens
+                .token(token_index)
+                .expect("the reference token index should resolve");
+            if token.tag() != TokenTag::STRING_SLICE_LITERAL {
+                return None;
+            }
+            assert_eq!(
+                token
+                    .string_spelling(&string_table)
+                    .expect("the string literal payload should resolve"),
+                Some(long_value.as_str())
+            );
+            Some(token.span())
+        })
+        .next()
+        .expect("the reference lexer should produce the long literal");
     drop(reference_tokens);
     drop(reference_builder);
 

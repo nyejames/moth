@@ -26,8 +26,8 @@ pub(super) enum HeaderFileItem {
 ///
 /// WHAT: maps one already-read top-level token to its header-parser action without
 ///       cloning cold payloads.
-/// WHY: the outer file walk classifies through canonical shapes/spans while downstream
-///      declaration parsers still receive the compatibility token entry points.
+/// WHY: the outer file walk classifies through canonical shapes/spans so downstream
+///      declaration parsers share one tag-based entry point.
 pub(super) fn classify_tagged_item(
     current_tag: TokenTag,
     current_symbol: Option<StringId>,
@@ -97,10 +97,9 @@ pub(super) fn classify_tagged_item(
 
 /// Classify one already-read token through short-lived source views.
 ///
-/// WHAT: tag-based entry point for the outer file walk; reads no legacy `Token`
-///       clone and retains no durable reference.
-/// WHY: branch classification must observe canonical shapes/spans while later
-///      declaration parsers still own the legacy compatibility vector.
+/// WHAT: tag-based entry point for the outer file walk; borrows the current
+///       source token without cloning cold payloads and retains no durable reference.
+/// WHY: branch classification observes canonical shapes/spans through `SourceTokens`.
 pub(super) fn classify_current_item_ref(
     current: TokenRef<'_>,
     follower: Option<TokenRef<'_>>,
@@ -136,8 +135,8 @@ pub(super) fn classify_export_block_item_ref(
 ///
 /// WHAT: reports whether the token before `current_index` is a file boundary
 ///       (`ModuleStart`/`Newline`/`End`) or absent at the start of the source.
-/// WHY: the outer walk keeps its source index in `FileTokens.index` while reading
-///      boundary facts from canonical shapes instead of the compatibility vector.
+/// WHY: the outer walk keeps its source-token index while reading boundary
+///      facts from canonical shapes/spans.
 pub(super) fn statement_boundary_at_source(canonical: &SourceTokens, current_index: usize) -> bool {
     let Some(previous) = current_index.checked_sub(1) else {
         return true;
@@ -206,10 +205,10 @@ pub(crate) fn classify_symbol_statement_start_at_source(
 
 /// Tag-based follower classification over short-lived indexed facts.
 ///
-/// WHAT: classifies the token after an already-read symbol without indexing durable
-///       `Token` slices, preserving match-arm/choice disambiguation and declaration kinds.
+/// WHAT: classifies the token after an already-read symbol over short-lived indexed
+///       facts, preserving match-arm/choice disambiguation and declaration kinds.
 /// WHY: indexed views read only the follower and its bounded lookahead instead of
-///      projecting one ephemeral window per query.
+///      retaining a second indexed copy per query.
 pub(crate) fn classify_symbol_statement_start_at_scanned(
     tokens: TokenFactView<'_>,
     follower_index: usize,
@@ -277,7 +276,7 @@ impl SymbolStatementStart {
 /// canonical source owner.
 ///
 /// WHAT: reuses the indexed tag classifier over a checked source-local follower index.
-/// WHY: duplicate-header lookahead must not project or clone the compatibility token vector.
+/// WHY: duplicate-header lookahead reads bounded `SourceTokens` facts without cloning.
 pub(super) fn starts_duplicate_top_level_header_declaration_at_source(
     tokens: &SourceTokens,
     follower_index: TokenIndex,

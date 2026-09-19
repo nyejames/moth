@@ -132,9 +132,9 @@ impl NumericLiteralToken {
 
     /// Build a test numeric token from a valid source snippet.
     ///
-    /// WHY: unit tests across the frontend need a concise way to construct
-    ///      `TokenKind::NumericLiteral` payloads without hand-assembling digit
-    ///      counts or re-parsing the source. For positive literals, `source_text`
+    /// WHY: unit tests across the frontend need a concise way to construct numeric
+    ///      literal payloads without hand-assembling digit counts or re-parsing
+    ///      the source. For positive literals, `source_text`
     ///      and `normalized_text` differ only when the source contains separators
     ///      or uppercase exponents.
     #[cfg(test)]

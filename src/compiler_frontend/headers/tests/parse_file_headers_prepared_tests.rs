@@ -1,34 +1,45 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenTag};
 
-fn prepared_header_body_tokens(prepared: &PreparedHeaderSyntax, header: &Header) -> Vec<Token> {
+fn prepared_header_body_range<'a>(
+    prepared: &'a PreparedHeaderSyntax,
+    header: &Header,
+) -> TokenCursor<'a> {
     let source = prepared
         .source_token_owners
         .get(&header.tokens.source())
-        .expect("header body range has no prepared source token owner");
-    let source = source.tokens_ref();
+        .expect("header body range has no prepared source token owner")
+        .tokens_ref();
     if let Some(sequence) = header.token_sequence {
         return source
-            .materialize_token_sequence(sequence)
-            .expect("header sequence should resolve through its source owner");
+            .token_sequence(sequence)
+            .expect("header sequence should resolve through its source owner")
+            .cursor()
+            .expect("header sequence cursor should be valid");
     }
     source
-        .materialize_range(header.tokens)
+        .cursor(header.tokens)
         .expect("header range should resolve through its source owner")
 }
 
-fn output_header_body_tokens(output: &FileFrontendPrepareOutput, header: &Header) -> Vec<Token> {
+fn output_header_body_range<'a>(
+    output: &'a FileFrontendPrepareOutput,
+    header: &Header,
+) -> TokenCursor<'a> {
     let source = output
         .source_token_stream
         .as_ref()
         .expect("prepared source retains its token owner");
     if let Some(sequence) = header.token_sequence {
         return source
-            .materialize_token_sequence(sequence)
-            .expect("header sequence should resolve through its source owner");
+            .token_sequence(sequence)
+            .expect("header sequence should resolve through its source owner")
+            .cursor()
+            .expect("header sequence cursor should be valid");
     }
     source
-        .materialize_range(header.tokens)
+        .cursor(header.tokens)
         .expect("header range should resolve through its source owner")
 }
 
@@ -81,13 +92,20 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
         .expect("a later source span should fit");
     let resolver = span_builder.resolver();
-    let literal = prepared
-        .headers
-        .iter()
-        .flat_map(|header| prepared_header_body_tokens(&prepared, header).into_iter())
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("the retained header must keep its long string literal");
-    let resolved = literal.span.resolve_with(resolver);
+    let literal_span = prepared.headers.iter().find_map(|header| {
+        let mut cursor = prepared_header_body_range(&prepared, header);
+        while let Some(token) = cursor.advance() {
+            if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                return Some(token.span());
+            }
+            if token.is_eof() {
+                break;
+            }
+        }
+        None
+    })
+    .expect("the retained header must keep its long string literal");
+    let resolved = literal_span.resolve_with(resolver);
 
     assert_eq!(
         source.get(resolved.start() as usize..resolved.end() as usize),
@@ -137,13 +155,19 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     )
     .expect("preparation should succeed")];
     let output = &outputs[0];
-    let literal_span = output
-        .headers
-        .iter()
-        .flat_map(|header| output_header_body_tokens(output, header).into_iter())
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("the function body should retain its long literal")
-        .span;
+    let literal_span = output.headers.iter().find_map(|header| {
+        let mut cursor = output_header_body_range(output, header);
+        while let Some(token) = cursor.advance() {
+            if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                return Some(token.span());
+            }
+            if token.is_eof() {
+                break;
+            }
+        }
+        None
+    })
+    .expect("the function body should retain its long literal");
 
     let diagnostics = match prepare_header_syntax(
         &mut outputs,
@@ -334,10 +358,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
             .expect("canonical source cursor should fit");
         loop {
             let token = cursor.advance().expect("source should contain a string literal");
-            if matches!(
-                token.to_token_kind().expect("canonical token should materialize"),
-                TokenKind::StringSliceLiteral(_)
-            ) {
+            if token.tag() == TokenTag::STRING_SLICE_LITERAL {
                 break token.span();
             }
             assert!(!token.is_eof(), "source should contain a string literal");

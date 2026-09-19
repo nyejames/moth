@@ -9,12 +9,58 @@ use std::sync::Arc;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
-use crate::compiler_frontend::numeric_text::store::NumericLiteralStore;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenIndex, TokenKind, TokenRange, TokenTag,
+    SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag,
 };
+
+fn build_bool_owner(
+    values: &[bool],
+    module_start: bool,
+    newline: bool,
+    eof: bool,
+) -> TestSourceTokensBuilder {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut builder = TestSourceTokensBuilder::new(source);
+    if module_start {
+        builder
+            .push_static(TokenTag::MODULE_START, LocalSpan::source_start())
+            .expect("module-start fixture token should build");
+    }
+    for &value in values {
+        builder
+            .push_bool(TokenTag::BOOL_LITERAL, value, LocalSpan::source_start())
+            .expect("boolean fixture token should build");
+    }
+    if newline {
+        builder
+            .push_static(TokenTag::NEWLINE, LocalSpan::source_start())
+            .expect("newline fixture token should build");
+    }
+    if eof {
+        builder
+            .push_static(TokenTag::EOF, LocalSpan::source_start())
+            .expect("EOF fixture token should build");
+    }
+    builder
+}
+
+fn bool_owner(values: &[bool], module_start: bool, newline: bool, eof: bool) -> Arc<SourceTokens> {
+    build_bool_owner(values, module_start, newline, eof)
+        .finish()
+        .expect("cursor fixture should satisfy canonical ownership checks")
+}
+
+fn unfrozen_bool_owner(
+    values: &[bool],
+    module_start: bool,
+    newline: bool,
+    eof: bool,
+) -> Arc<SourceTokens> {
+    build_bool_owner(values, module_start, newline, eof)
+        .finish_unfrozen()
+        .expect("cursor fixture should satisfy canonical ownership checks")
+}
 
 /// Assert a bounded cursor exposes a bool literal with the expected payload at `index`.
 fn assert_bounded_bool(cursor: &AstCursor, index: usize, expected: bool) {
@@ -53,20 +99,7 @@ fn assert_declaration_bool(cursor: &DeclarationCursor<'_>, index: usize, expecte
 #[test]
 fn bounded_canonical_reads_respect_range_and_offset_limits() {
     let source = SourceId::COMPILATION_ROOT;
-    let owner = Arc::new(
-        SourceTokens::try_from_tokens(
-            source,
-            vec![
-                Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
-                Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
-                Token::new(TokenKind::BoolLiteral(false), LocalSpan::source_start()),
-                Token::new(TokenKind::Eof, LocalSpan::source_start()),
-            ],
-            NumericLiteralStore::with_source(source),
-            PathSyntaxTable::with_source(source),
-        )
-        .expect("cursor fixture should satisfy canonical ownership checks"),
-    );
+    let owner = bool_owner(&[true, false], true, false, true);
     let range = TokenRange::from_raw(source, 1, 3).expect("fixture range should be ordered");
     let mut cursor =
         AstCursor::from_source_tokens(&owner, None, range).expect("bounded cursor should build");
@@ -112,20 +145,7 @@ fn bounded_canonical_reads_respect_range_and_offset_limits() {
 #[test]
 fn canonical_subcursor_window_bounds_contiguous_reads() {
     let source = SourceId::COMPILATION_ROOT;
-    let owner = Arc::new(
-        SourceTokens::try_from_tokens(
-            source,
-            vec![
-                Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
-                Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
-                Token::new(TokenKind::BoolLiteral(false), LocalSpan::source_start()),
-                Token::new(TokenKind::Eof, LocalSpan::source_start()),
-            ],
-            NumericLiteralStore::with_source(source),
-            PathSyntaxTable::with_source(source),
-        )
-        .expect("cursor fixture should satisfy canonical ownership checks"),
-    );
+    let owner = bool_owner(&[true, false], true, false, true);
     let mut parent =
         AstCursor::from_source_tokens(&owner, None, TokenRange::from_raw(source, 0, 4).unwrap())
             .expect("bounded cursor should build");
@@ -174,30 +194,19 @@ fn canonical_subcursor_window_bounds_contiguous_reads() {
 #[test]
 fn canonical_subcursor_window_skips_segmented_source_gaps() {
     let source = SourceId::COMPILATION_ROOT;
-    let mut owner = FileTokens::new(
-        crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-        source,
-        (0..5)
-            .map(|index| {
-                Token::new(
-                    TokenKind::BoolLiteral(index % 2 == 0),
-                    LocalSpan::source_start(),
-                )
-            })
-            .collect(),
-    );
+    let mut owner = unfrozen_bool_owner(&[true, false, true, false, true], false, false, false);
     let segments = [
         TokenRange::from_raw(source, 0, 1).unwrap(),
         TokenRange::from_raw(source, 3, 5).unwrap(),
     ];
-    let sequence = owner
+    let sequence = Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
         .try_register_token_sequence(&segments)
         .expect("segmented fixture should register");
-    owner.freeze_path_syntax_for_test();
-    let canonical = owner
-        .canonical_source_tokens_arc()
-        .expect("the segmented fixture owns its canonical source tokens");
-    let mut parent = AstCursor::from_source_sequence(&canonical, None, sequence)
+    Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
+        .freeze_numeric_literals();
+    let mut parent = AstCursor::from_source_sequence(&owner, None, sequence)
         .expect("segmented AST cursor should build");
 
     let restore = parent
@@ -239,30 +248,19 @@ fn canonical_subcursor_window_skips_segmented_source_gaps() {
 #[test]
 fn segmented_nested_cursor_translates_active_limit() {
     let source = SourceId::COMPILATION_ROOT;
-    let mut owner = FileTokens::new(
-        crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-        source,
-        (0..5)
-            .map(|index| {
-                Token::new(
-                    TokenKind::BoolLiteral(index % 2 == 0),
-                    LocalSpan::source_start(),
-                )
-            })
-            .collect(),
-    );
+    let mut owner = unfrozen_bool_owner(&[true, false, true, false, true], false, false, false);
     let segments = [
         TokenRange::from_raw(source, 0, 1).unwrap(),
         TokenRange::from_raw(source, 3, 5).unwrap(),
     ];
-    let sequence = owner
+    let sequence = Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
         .try_register_token_sequence(&segments)
         .expect("segmented fixture should register");
-    owner.freeze_path_syntax_for_test();
-    let canonical = owner
-        .canonical_source_tokens_arc()
-        .expect("the segmented fixture owns its canonical source tokens");
-    let mut cursor = AstCursor::from_source_sequence(&canonical, None, sequence)
+    Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
+        .freeze_numeric_literals();
+    let mut cursor = AstCursor::from_source_sequence(&owner, None, sequence)
         .expect("segmented AST cursor should build");
     cursor.advance();
     cursor
@@ -300,21 +298,7 @@ fn segmented_nested_cursor_translates_active_limit() {
 #[test]
 fn declaration_cursor_inherits_contiguous_parser_window() {
     let source = SourceId::COMPILATION_ROOT;
-    let owner = Arc::new(
-        SourceTokens::try_from_tokens(
-            source,
-            vec![
-                Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
-                Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
-                Token::new(TokenKind::BoolLiteral(false), LocalSpan::source_start()),
-                Token::new(TokenKind::Newline, LocalSpan::source_start()),
-                Token::new(TokenKind::Eof, LocalSpan::source_start()),
-            ],
-            NumericLiteralStore::with_source(source),
-            PathSyntaxTable::with_source(source),
-        )
-        .expect("cursor fixture should satisfy canonical ownership checks"),
-    );
+    let owner = bool_owner(&[true, false], true, true, true);
     let parent =
         AstCursor::from_source_tokens(&owner, None, TokenRange::from_raw(source, 0, 5).unwrap())
             .expect("bounded cursor should build");
@@ -377,30 +361,19 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
 #[test]
 fn declaration_cursor_inherits_segmented_parser_window() {
     let source = SourceId::COMPILATION_ROOT;
-    let mut owner = FileTokens::new(
-        crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-        source,
-        (0..5)
-            .map(|index| {
-                Token::new(
-                    TokenKind::BoolLiteral(index % 2 == 0),
-                    LocalSpan::source_start(),
-                )
-            })
-            .collect(),
-    );
+    let mut owner = unfrozen_bool_owner(&[true, false, true, false, true], false, false, false);
     let segments = [
         TokenRange::from_raw(source, 0, 1).unwrap(),
         TokenRange::from_raw(source, 3, 5).unwrap(),
     ];
-    let sequence = owner
+    let sequence = Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
         .try_register_token_sequence(&segments)
         .expect("segmented fixture should register");
-    owner.freeze_path_syntax_for_test();
-    let canonical = owner
-        .canonical_source_tokens_arc()
-        .expect("the segmented fixture owns its canonical source tokens");
-    let parent = AstCursor::from_source_sequence(&canonical, None, sequence)
+    Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
+        .freeze_numeric_literals();
+    let parent = AstCursor::from_source_sequence(&owner, None, sequence)
         .expect("segmented AST cursor should build");
     let child = parent
         .subcursor_window(1, 2)
@@ -427,20 +400,7 @@ fn declaration_cursor_inherits_segmented_parser_window() {
 #[test]
 fn declaration_cursor_respects_a_stricter_parent_limit() {
     let source = SourceId::COMPILATION_ROOT;
-    let owner = Arc::new(
-        SourceTokens::try_from_tokens(
-            source,
-            vec![
-                Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
-                Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
-                Token::new(TokenKind::BoolLiteral(false), LocalSpan::source_start()),
-                Token::new(TokenKind::Eof, LocalSpan::source_start()),
-            ],
-            NumericLiteralStore::with_source(source),
-            PathSyntaxTable::with_source(source),
-        )
-        .expect("cursor fixture should satisfy canonical ownership checks"),
-    );
+    let owner = bool_owner(&[true, false], true, false, true);
     let mut cursor =
         AstCursor::from_source_tokens(&owner, None, TokenRange::from_raw(source, 1, 4).unwrap())
             .expect("bounded cursor should build");

@@ -154,8 +154,9 @@ pub(crate) fn parse_loop_header_cursor(
 ) -> LoopHeaderResult<(ParsedLoopHeader, ScopeContext)> {
     let resume = token_stream.position();
     let limit = token_stream.length();
-    // A malformed payload surfaces as `Eof` through the cached kind, so the leading trim
-    // treats it as a non-newline header token.
+    // Direct `TokenTag` scans handle structural trimming on the canonical cursor.
+    // Payloads are validated explicitly through typed accessors and invariant checks
+    // rather than being inferred from the structural tag scan.
     while token_stream.position() < limit
         && !token_stream.is_at_end()
         && token_stream.current_tag() == TokenTag::NEWLINE
@@ -163,9 +164,9 @@ pub(crate) fn parse_loop_header_cursor(
         token_stream.advance();
     }
     let header_start = token_stream.position();
-    // The trailing trim records the end after the last non-newline token. `Eof` never
-    // advances, so the walk stops there; a malformed payload therefore ends the header at
-    // itself, and nothing after an unreadable token is parseable anyway.
+    // The trailing trim records the end after the last non-newline token. Direct
+    // `TokenTag` scanning treats `TokenTag::EOF` as a non-advancing structural
+    // boundary; payload validity is checked by typed accessors and invariant validation.
     let mut header_end = header_start;
     while token_stream.position() < limit && !token_stream.is_at_end() {
         let position = token_stream.position();

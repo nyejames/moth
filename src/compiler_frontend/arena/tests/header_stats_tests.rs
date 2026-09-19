@@ -80,7 +80,7 @@ fn multi_file_declarations_are_aggregated() {
             .try_intern_filesystem_path(path, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let handoff = tokenize(
+        let lexed = tokenize(
             source,
             interned_path,
             TokenizerEntryMode::SourceFile,
@@ -90,17 +90,11 @@ fn multi_file_declarations_are_aggregated() {
             source_id,
             &mut span_builder,
         )
-        .expect("source should tokenize")
-        .into_canonical_lexer_handoff()
-        .expect("source tokenization should produce a canonical lexer handoff");
-        let owner = SourceTokenOwner::new(
-            handoff.tokens,
-            handoff.logical_path,
-            handoff.canonical_os_path,
-        );
+        .expect("source should tokenize");
+        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
         prepare_file_from_tokens(
             owner,
-            handoff.path_syntax,
+            lexed.path_syntax,
             &entry_path,
             &HeaderParseOptions::default(),
             &mut string_table,

@@ -29,7 +29,7 @@ fn tokenize_source(source: &str) -> (TokenStats, StringTable) {
     )
     .expect("source should tokenize");
 
-    (file_tokens.token_stats, string_table)
+    (file_tokens.tokens.token_stats(), string_table)
 }
 
 #[test]

@@ -31,7 +31,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Resolve one `TokenKind::Path` through the value-position Stage 0 view.
+/// Resolve one path token through the value-position Stage 0 view.
 ///
 /// Resolution is driven by the immutable view supplied by semantic orchestration. It covers
 /// ordinary module rows and frozen persistent-generic rows, so this function never reopens source

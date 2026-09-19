@@ -56,7 +56,9 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{
+    TokenCursor, TokenRef, TokenTag, TokenizerEntryMode,
+};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -71,7 +73,7 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
         .expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
@@ -83,17 +85,10 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
         &mut span_builder,
     )
     .expect("Moth template body should tokenize");
-    let handoff = file_tokens
-        .into_canonical_lexer_handoff()
-        .expect("freshly tokenized Moth template should provide the canonical handoff");
-    let owner = SourceTokenOwner::new(
-        handoff.tokens,
-        handoff.logical_path,
-        handoff.canonical_os_path,
-    );
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
     let output = prepare_moth_template_file(
         owner,
-        handoff.path_syntax,
+        lexed.path_syntax,
         &mut string_table,
         &mut path_fork,
         &mut span_builder,
@@ -103,7 +98,7 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
 }
 
 #[test]
-fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
+fn canonical_source_keeps_preparing_path_table_separate_until_preparation() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
@@ -111,7 +106,7 @@ fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
         .expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = tokenize(
+    let lexed = tokenize(
         "# Heading",
         source_path,
         TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
@@ -123,18 +118,20 @@ fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
         &mut span_builder,
     )
     .expect("test Moth template should tokenize");
-    let _path_syntax = file_tokens
-        .take_preparing_path_syntax()
-        .expect("fresh token stream should own its preparing path table");
-
-    let error = file_tokens
-        .into_canonical_lexer_handoff()
-        .expect_err("a deferred source token stream must fail through CompilerError");
-
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
     assert!(
-        format!("{error:?}").contains("preparing path table"),
-        "error should retain the path-table lifecycle failure: {error:?}"
+        owner.tokens_ref().path_syntax_table().is_err(),
+        "lexer output keeps the preparing path table separate from immutable source tokens"
     );
+    let output = prepare_moth_template_file(
+        owner,
+        lexed.path_syntax,
+        &mut string_table,
+        &mut path_fork,
+        &mut span_builder,
+    )
+    .expect("preparation should publish the canonical source owner");
+    assert_eq!(output.file_id, SourceId::COMPILATION_ROOT);
 }
 
 #[test]
@@ -874,7 +871,7 @@ fn prepare_moth_source(
         .expect("test path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         TokenizerEntryMode::SourceFile,
@@ -885,18 +882,10 @@ fn prepare_moth_source(
         &mut span_builder,
     )
     .expect("Moth source should tokenize");
-
-    let handoff = file_tokens
-        .into_canonical_lexer_handoff()
-        .expect("Moth source should provide the canonical preparation handoff");
-    let owner = SourceTokenOwner::new(
-        handoff.tokens,
-        handoff.logical_path,
-        handoff.canonical_os_path,
-    );
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
     let output = prepare_file_from_tokens(
         owner,
-        handoff.path_syntax,
+        lexed.path_syntax,
         entry_file_path,
         &HeaderParseOptions::default(),
         string_table,
@@ -924,14 +913,49 @@ fn content_constant(
     declaration
 }
 
-fn retained_body_tokens(output: &FileFrontendPrepareOutput) -> Vec<Token> {
+fn retained_body_tokens<'a>(output: &'a FileFrontendPrepareOutput) -> TokenCursor<'a> {
     let header = content_header(output);
     output
         .source_token_stream
         .as_ref()
         .expect("Moth template should retain its canonical source owner")
-        .materialize_range(header.tokens)
-        .expect("retained body range should materialize")
+        .cursor(header.tokens)
+        .expect("retained body range should resolve")
+}
+
+fn first_body_token_with_tag<'a>(
+    output: &'a FileFrontendPrepareOutput,
+    tag: TokenTag,
+) -> Option<TokenRef<'a>> {
+    let mut cursor = retained_body_tokens(output);
+    while let Some(token) = cursor.advance() {
+        if token.tag() == tag {
+            return Some(token);
+        }
+    }
+    None
+}
+
+fn body_has_tag(output: &FileFrontendPrepareOutput, tag: TokenTag) -> bool {
+    first_body_token_with_tag(output, tag).is_some()
+}
+
+fn body_has_string(
+    output: &FileFrontendPrepareOutput,
+    string_table: &StringTable,
+    expected: &str,
+) -> bool {
+    let mut cursor = retained_body_tokens(output);
+    while let Some(token) = cursor.advance() {
+        if token.tag() == TokenTag::STRING_SLICE_LITERAL
+            && token
+                .string_id()
+                .is_some_and(|id| string_table.resolve(id) == expected)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Fold one module constant identified by its final path component.
@@ -1036,65 +1060,46 @@ fn moth_template_preparation_produces_private_content_constant() {
 fn simple_markdown_body_uses_original_body_token_span() {
     let source = "# Heading";
     let (output, string_table, span_builder) = prepare_directly(source);
-    let header = content_header(&output);
-    let source_owner = output
-        .source_token_stream
-        .as_ref()
-        .expect("Moth template should retain its canonical source owner");
-    let body_tokens = source_owner
-        .materialize_range(header.tokens)
-        .expect("retained body range should materialize");
-    let body_token = body_tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+    let body_token = first_body_token_with_tag(&output, TokenTag::STRING_SLICE_LITERAL)
         .expect("body text should be preserved as a string literal token");
-
     let body_range = body_token
-        .span
+        .span()
         .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert!(
         body_range.end() > body_range.start(),
         "body token should retain a resolved span"
     );
-    assert!(matches!(
-        &body_token.kind,
-        TokenKind::StringSliceLiteral(id) if string_table.resolve(*id) == "# Heading"
-    ));
+    assert_eq!(
+        body_token
+            .string_id()
+            .map(|id| string_table.resolve(id)),
+        Some("# Heading")
+    );
 }
 #[test]
 fn nested_templates_remain_structural_inside_retained_body_range() {
     let source = "before [:inner] after";
     let (output, _string_table, span_builder) = prepare_directly(source);
-    let header = content_header(&output);
-    let source_owner = output
-        .source_token_stream
-        .as_ref()
-        .expect("Moth template should retain its canonical source owner");
-    let body_tokens = source_owner
-        .materialize_range(header.tokens)
-        .expect("retained body range should materialize");
-    let template_heads = body_tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
-        .collect::<Vec<_>>();
-
-    assert_eq!(template_heads.len(), 1);
-    let nested_range = template_heads[0]
-        .span
-        .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    let mut cursor = retained_body_tokens(&output);
+    let mut template_head_count = 0;
+    let mut nested_span = None;
+    while let Some(token) = cursor.advance() {
+        if token.tag() == TokenTag::TEMPLATE_HEAD {
+            template_head_count += 1;
+            nested_span = Some(
+                token
+                    .span()
+                    .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT)),
+            );
+        }
+    }
+    assert_eq!(template_head_count, 1);
+    let nested_range = nested_span.expect("nested template opener should be present");
     assert!(
         nested_range.start() > 0,
         "nested template opener should keep its original body position"
     );
 }
-
-#[test]
-fn empty_moth_template_body_folds_to_empty_string() {
-    let (ast, string_table, path_fork) = ast_from_moth_template_source("");
-
-    assert_eq!(folded_content_value(&ast, &string_table, &path_fork), "");
-}
-
 #[test]
 fn simple_markdown_body_folds_like_markdown_template() {
     let (ast, string_table, path_fork) = ast_from_moth_template_source("# Heading");
@@ -1172,12 +1177,9 @@ fn empty_moth_template_body_retains_empty_body_range_and_directive_payload() {
 #[test]
 fn backslash_remains_body_text_inside_markdown_initializer() {
     let (output, string_table, _span_builder) = prepare_directly(r"before \n after");
-    let body_tokens = retained_body_tokens(&output);
-
-    assert!(body_tokens.iter().any(|token| matches!(
-        &token.kind,
-        TokenKind::StringSliceLiteral(id) if string_table.resolve(*id) == r"before \n after"
-    )));
+    assert!(
+        body_has_string(&output, &string_table, r"before \n after")
+    );
 }
 
 #[test]
@@ -1215,13 +1217,9 @@ fn unescaped_outer_close_diagnostic_flows_through_pipeline_preparation() {
 #[test]
 fn double_dash_remains_body_text() {
     let (output, string_table, _span_builder) = prepare_directly("alpha -- still text\nbeta");
-    let body_tokens = retained_body_tokens(&output);
-
-    assert!(body_tokens.iter().any(|token| matches!(
-        &token.kind,
-        TokenKind::StringSliceLiteral(id)
-            if string_table.resolve(*id) == "alpha -- still text\nbeta"
-    )));
+    assert!(
+        body_has_string(&output, &string_table, "alpha -- still text\nbeta")
+    );
 }
 
 #[test]
@@ -1229,14 +1227,16 @@ fn declaration_like_text_remains_markdown_body_text() {
     let (output, string_table, _span_builder) =
         prepare_directly("@docs/intro\ncontent #String = value");
     let declaration = content_constant(&output);
-    let body_tokens = retained_body_tokens(&output);
-
-    assert!(declaration.initializer_references.is_empty());
-    assert!(body_tokens.iter().any(|token| matches!(
-        &token.kind,
-        TokenKind::StringSliceLiteral(id)
-            if string_table.resolve(*id) == "@docs/intro\ncontent #String = value"
-    )));
+    assert!(
+        declaration.initializer_references.is_empty()
+    );
+    assert!(
+        body_has_string(
+            &output,
+            &string_table,
+            "@docs/intro\ncontent #String = value",
+        )
+    );
 }
 
 #[test]
@@ -1838,14 +1838,13 @@ fn moth_template_retains_body_range_and_normal_markdown_payload() {
     let (output, string_table, _span_builder) = prepare_directly("# Heading\n\nParagraph.");
     let header = content_header(&output);
     let declaration = content_constant(&output);
-    let body_tokens = retained_body_tokens(&output);
 
     assert!(
         declaration.initializer_range.is_none(),
         "Moth template declaration shell must not retain wrapper or body tokens"
     );
     assert!(
-        !body_tokens.is_empty(),
+        body_has_tag(&output, TokenTag::STRING_SLICE_LITERAL),
         "body range should contain the original markdown tokens"
     );
     let Some(SyntheticContentPayload::MothTemplate { markdown_directive }) =
@@ -1855,14 +1854,23 @@ fn moth_template_retains_body_range_and_normal_markdown_payload() {
     };
     assert_eq!(string_table.resolve(markdown_directive), "md");
     assert!(
-        !body_tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::TemplateClose)),
+        !body_has_tag(&output, TokenTag::TEMPLATE_CLOSE),
         "canonical body range must not include a fabricated wrapper close"
     );
     assert!(
         declaration.initializer_references.is_empty(),
         "pure markdown body should not introduce symbol references"
+    );
+}
+
+#[test]
+fn empty_moth_template_body_folds_to_empty_string() {
+    let (ast, string_table, path_fork) = ast_from_moth_template_source("");
+
+    assert_eq!(
+        folded_content_value(&ast, &string_table, &path_fork),
+        "",
+        "an empty Moth template body should fold to an empty string"
     );
 }
 

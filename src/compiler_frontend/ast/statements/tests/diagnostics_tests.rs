@@ -12,12 +12,12 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TokenKind, TokenTag, TokenizerEntryMode,
+    TokenIndex, TokenTag, TokenizerEntryMode,
 };
 
-fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
+fn tokenize_source(source: &str) -> (LexedSource, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
@@ -25,7 +25,7 @@ fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
         .expect("test path fits");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         TokenizerEntryMode::SourceFile,
@@ -37,32 +37,29 @@ fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
     )
     .expect("statement diagnostic fixture should tokenize");
 
-    (file_tokens, string_table)
+    (lexed, string_table)
 }
 
-fn token_position(tokens: &FileTokens, kind: TokenKind) -> usize {
-    tokens
-        .tokens
-        .iter()
-        .position(|token| token.kind == kind)
+fn token_position(tokens: &LexedSource, tag: TokenTag) -> usize {
+    (0..tokens.tokens.len())
+        .find_map(|index| {
+            let index = TokenIndex::try_from_index(index)?;
+            let token = tokens.tokens.token(index).ok()?;
+            (token.tag() == tag).then_some(index.index())
+        })
         .expect("statement diagnostic fixture should contain the requested token")
 }
+
 #[test]
 fn unexpected_statement_token_retains_exact_multibyte_span() {
     let (tokens, mut string_table) = tokenize_source("value = \"é\"\n,\n");
-    let token_position = token_position(&tokens, TokenKind::Comma);
-    let owner = tokens
-        .canonical_source_tokens_arc()
-        .expect("test token stream must expose canonical source tokens");
+    let token_position = token_position(&tokens, TokenTag::COMMA);
+    let owner = &tokens.tokens;
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut cursor = AstCursor::from_source_tokens(
-        &owner,
-        tokens.canonical_os_path.clone(),
-        range,
-    )
-    .expect("test token stream must expose an AST cursor");
+    let mut cursor = AstCursor::from_source_tokens(owner, None, range)
+        .expect("test token stream must expose an AST cursor");
     cursor
         .set_position(token_position)
         .expect("the canonical cursor must seek to the requested token");
@@ -81,19 +78,13 @@ fn unexpected_statement_token_retains_exact_multibyte_span() {
 #[test]
 fn unexpected_scope_close_retains_exact_multibyte_span() {
     let (tokens, _string_table) = tokenize_source("value = \"é\";\n");
-    let token_position = token_position(&tokens, TokenKind::End);
-    let owner = tokens
-        .canonical_source_tokens_arc()
-        .expect("test token stream must expose canonical source tokens");
+    let token_position = token_position(&tokens, TokenTag::END);
+    let owner = &tokens.tokens;
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut cursor = AstCursor::from_source_tokens(
-        &owner,
-        tokens.canonical_os_path.clone(),
-        range,
-    )
-    .expect("test token stream must expose an AST cursor");
+    let mut cursor = AstCursor::from_source_tokens(owner, None, range)
+        .expect("test token stream must expose an AST cursor");
     cursor
         .set_position(token_position)
         .expect("the canonical cursor must seek to the requested token");

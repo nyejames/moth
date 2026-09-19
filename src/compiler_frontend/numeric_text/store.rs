@@ -1,8 +1,7 @@
 //! Source-owned cold storage for numeric literal lexical records.
 //!
-//! The lexer may still expose a `NumericLiteralToken` through the transient `TokenKind` adapter
-//! while parser consumers migrate. `NumericLiteralStore` is the durable owner at the source
-//! boundary and uses checked one-based `u32` handles so `0` remains an absent marker.
+//! `NumericLiteralStore` is the durable numeric store owned by the source-token owner
+//! and uses checked one-based `u32` handles so `0` remains an absent marker.
 
 use super::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceId;
@@ -231,9 +230,8 @@ impl NumericLiteralStore {
 
     /// Infallible construction-time string remap. Panics on a frozen store.
     ///
-    /// Post-publication remap must go through the owning `FileTokens` boundary (which
-    /// rejects it) or the materialisation clone-remap-freeze path (which remaps an
-    /// explicit unfrozen clone via [`Self::clone_for_materialisation`]).
+    /// Post-publication remap is rejected; use the materialisation clone-remap-freeze
+    /// path (which remaps an explicit unfrozen clone) instead.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.try_remap_string_ids(&mut |id| {
             Ok::<StringId, std::convert::Infallible>(remap.get(id))
@@ -244,8 +242,8 @@ impl NumericLiteralStore {
     /// Fallible construction-time string remap. Panics on a frozen store.
     ///
     /// The generic error lane carries only the caller's mapping failure; a frozen-store
-    /// mutation is a lifecycle violation, so it panics like the owning `FileTokens`
-    /// post-freeze remap rather than surfacing as a caller error.
+    /// mutation is a lifecycle violation, so it panics at the source-token owner freeze
+    /// rather than surfacing as a caller error.
     pub fn try_remap_string_ids<E>(
         &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,

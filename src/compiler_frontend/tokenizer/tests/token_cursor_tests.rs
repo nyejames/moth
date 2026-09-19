@@ -5,21 +5,45 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::sync::Arc;
 
-fn static_tokens() -> SourceTokens {
+fn static_tokens() -> Arc<SourceTokens> {
     let source = SourceId::COMPILATION_ROOT;
-    SourceTokens::try_from_tokens(
-        source,
-        vec![
-            Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
-            Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
-            Token::new(TokenKind::Eof, LocalSpan::source_start()),
-        ],
-        NumericLiteralStore::with_source(source),
-        PathSyntaxTable::with_source(source),
-    )
-    .expect("static token fixture should satisfy the source-token invariants")
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_static(TokenTag::MODULE_START, LocalSpan::source_start())
+        .expect("static token fixture should build");
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, LocalSpan::source_start())
+        .expect("boolean token fixture should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF token fixture should build");
+    builder
+        .finish()
+        .expect("static token fixture should satisfy source-token invariants")
 }
+
+fn mutable_source_tokens() -> Arc<SourceTokens> {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_static(TokenTag::MODULE_START, LocalSpan::source_start())
+        .expect("module-start token fixture should build");
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, LocalSpan::source_start())
+        .expect("boolean token fixture should build");
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, false, LocalSpan::source_start())
+        .expect("boolean token fixture should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF token fixture should build");
+    builder
+        .finish_unfrozen()
+        .expect("mutable source-token fixture should build")
+}
+
 
 #[test]
 fn cursor_observes_half_open_boundaries_and_stable_eof() {
@@ -48,13 +72,12 @@ fn cursor_observes_half_open_boundaries_and_stable_eof() {
 
 #[test]
 fn contiguous_parser_reads_respect_a_nonzero_active_range() {
-    let tokens = mutable_file_tokens();
+    let tokens = static_tokens();
     let source = SourceId::COMPILATION_ROOT;
     let range = token_range(source, 1, 3);
-    let owner = tokens
-        .source_tokens()
-        .expect("file fixture should own canonical source tokens");
-    let cursor = owner.cursor(range).expect("bounded range should construct");
+    let cursor = tokens
+        .cursor(range)
+        .expect("bounded range should construct");
 
     assert_eq!(cursor.parser_position(), 1);
     assert_eq!(cursor.parser_length(), 3);
@@ -83,19 +106,6 @@ fn contiguous_parser_reads_respect_a_nonzero_active_range() {
     assert_eq!(at_end.parser_previous().unwrap().index().raw(), 1);
 }
 
-fn mutable_file_tokens() -> FileTokens {
-    let source = SourceId::COMPILATION_ROOT;
-    FileTokens::new(
-        PathId::ROOT,
-        source,
-        vec![
-            Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
-            Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
-            Token::new(TokenKind::BoolLiteral(false), LocalSpan::source_start()),
-            Token::new(TokenKind::Eof, LocalSpan::source_start()),
-        ],
-    )
-}
 
 fn token_range(source: SourceId, start: u32, end: u32) -> TokenRange {
     TokenRange::from_raw(source, start, end).expect("fixture token range should be ordered")
@@ -104,14 +114,16 @@ fn token_range(source: SourceId, start: u32, end: u32) -> TokenRange {
 #[test]
 fn segmented_cursor_matches_contiguous_and_respects_segment_boundaries() {
     let source = SourceId::COMPILATION_ROOT;
-    let mut file_tokens = mutable_file_tokens();
+    let mut owner = mutable_source_tokens();
     let segments = [token_range(source, 0, 2), token_range(source, 2, 4)];
-    let sequence = file_tokens
+    let sequence = Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
         .try_register_token_sequence(&segments)
         .expect("ordered adjacent ranges should register");
-    let owner = file_tokens
-        .source_tokens()
-        .expect("file fixture should own canonical source tokens");
+    Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
+        .freeze_numeric_literals();
+    let owner = owner.as_ref();
     let view = owner
         .token_sequence(sequence)
         .expect("registered sequence should resolve");
@@ -180,30 +192,39 @@ fn segmented_cursor_matches_contiguous_and_respects_segment_boundaries() {
 #[test]
 fn segmented_cursor_marks_only_the_first_token_after_a_source_gap() {
     let source = SourceId::COMPILATION_ROOT;
-    let mut file_tokens = FileTokens::new(
-        PathId::ROOT,
-        source,
-        vec![
-            Token::new(TokenKind::ModuleStart, LocalSpan::source_start()),
-            Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
-            Token::new(TokenKind::BoolLiteral(false), LocalSpan::source_start()),
-            Token::new(TokenKind::BoolLiteral(true), LocalSpan::source_start()),
-            Token::new(TokenKind::Eof, LocalSpan::source_start()),
-        ],
-    );
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_static(TokenTag::MODULE_START, LocalSpan::source_start())
+        .expect("module-start token fixture should build");
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, LocalSpan::source_start())
+        .expect("boolean token fixture should build");
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, false, LocalSpan::source_start())
+        .expect("boolean token fixture should build");
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, LocalSpan::source_start())
+        .expect("boolean token fixture should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF token fixture should build");
+    let mut owner = builder
+        .finish_unfrozen()
+        .expect("gapped fixture should build");
 
     let segments = [token_range(source, 0, 2), token_range(source, 3, 5)];
-    let sequence = file_tokens
+    let sequence = Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
         .try_register_token_sequence(&segments)
         .expect("gapped ranges should register");
-    let owner = file_tokens
-        .source_tokens()
-        .expect("file fixture should own canonical source tokens");
+    Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
+        .freeze_numeric_literals();
+    let owner = owner.as_ref();
     let view = owner
         .token_sequence(sequence)
         .expect("registered sequence should resolve");
     let mut cursor = view.cursor().expect("segmented cursor should construct");
-
     assert!(
         !cursor.is_at_segment_start(),
         "the first range has no preceding range"
@@ -231,20 +252,25 @@ fn segmented_cursor_marks_only_the_first_token_after_a_source_gap() {
 fn segmented_cursor_many_gaps_matches_flattened_reference() {
     let source = SourceId::COMPILATION_ROOT;
     let token_count = 129usize;
-    let mut file_tokens = FileTokens::new(
-        PathId::ROOT,
-        source,
-        (0..token_count)
-            .map(|index| {
-                let kind = if index + 1 == token_count {
-                    TokenKind::Eof
-                } else {
-                    TokenKind::BoolLiteral(index % 2 == 0)
-                };
-                Token::new(kind, LocalSpan::source_start())
-            })
-            .collect(),
-    );
+    let mut builder = TestSourceTokensBuilder::new(source);
+    for index in 0..token_count {
+        if index + 1 == token_count {
+            builder
+                .push_static(TokenTag::EOF, LocalSpan::source_start())
+                .expect("EOF token fixture should build");
+        } else {
+            builder
+                .push_bool(
+                    TokenTag::BOOL_LITERAL,
+                    index % 2 == 0,
+                    LocalSpan::source_start(),
+                )
+                .expect("boolean token fixture should build");
+        }
+    }
+    let mut owner = builder
+        .finish_unfrozen()
+        .expect("many-gap fixture should build");
     let mut segments = (0..64)
         .map(|segment| {
             let start = (segment * 2) as u32;
@@ -252,12 +278,14 @@ fn segmented_cursor_many_gaps_matches_flattened_reference() {
         })
         .collect::<Vec<_>>();
     segments.push(token_range(source, 128, 129));
-    let sequence = file_tokens
+    let sequence = Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
         .try_register_token_sequence(&segments)
         .expect("many ordered gapped ranges should register");
-    let owner = file_tokens
-        .source_tokens()
-        .expect("file fixture should own canonical source tokens");
+    Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
+        .freeze_numeric_literals();
+    let owner = owner.as_ref();
     let view = owner
         .token_sequence(sequence)
         .expect("registered sequence should resolve");
@@ -313,18 +341,20 @@ fn segmented_cursor_many_gaps_matches_flattened_reference() {
 #[test]
 fn segmented_cursor_skips_empty_ranges_and_reaches_eof() {
     let source = SourceId::COMPILATION_ROOT;
-    let mut file_tokens = mutable_file_tokens();
+    let mut owner = mutable_source_tokens();
     let segments = [
         token_range(source, 0, 1),
         token_range(source, 2, 2),
         token_range(source, 3, 4),
     ];
-    let sequence = file_tokens
+    let sequence = Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
         .try_register_token_sequence(&segments)
         .expect("ordered ranges with an empty middle segment should register");
-    let owner = file_tokens
-        .source_tokens()
-        .expect("file fixture should own canonical source tokens");
+    Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
+        .freeze_numeric_literals();
+    let owner = owner.as_ref();
     let view = owner
         .token_sequence(sequence)
         .expect("registered sequence should resolve");
@@ -367,12 +397,16 @@ fn segmented_cursor_skips_empty_ranges_and_reaches_eof() {
 #[test]
 fn segmented_cursor_exhaustion_and_nested_ranges_are_bounded() {
     let source = SourceId::COMPILATION_ROOT;
-    let mut file_tokens = mutable_file_tokens();
+    let mut owner = mutable_source_tokens();
     let segments = [token_range(source, 0, 2), token_range(source, 2, 3)];
-    let sequence = file_tokens
+    let sequence = Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
         .try_register_token_sequence(&segments)
         .expect("ordered ranges should register");
-    let owner = file_tokens.source_tokens().unwrap();
+    Arc::get_mut(&mut owner)
+        .expect("segmented fixture should remain uniquely owned")
+        .freeze_numeric_literals();
+    let owner = owner.as_ref();
     let view = owner.token_sequence(sequence).unwrap();
     let mut cursor = view.cursor().unwrap();
 
@@ -449,17 +483,6 @@ fn sequence_store_rejects_invalid_ranges_and_handles_without_panicking() {
     assert!(matches!(
         tokens.token_sequence(malformed),
         Err(TokenSequenceError::OutOfRange { .. })
-    ));
-    store.freeze();
-    let mut adapter = FileTokens::new_deferred_with_identity(
-        PathId::ROOT,
-        source,
-        None,
-        vec![Token::new(TokenKind::Eof, LocalSpan::source_start())],
-    );
-    assert!(matches!(
-        adapter.try_register_token_sequence(&[]),
-        Err(TokenSequenceError::NoCanonicalOwner)
     ));
 
     assert!(matches!(
@@ -552,175 +575,137 @@ fn token_ref_exposes_shape_span_and_borrowed_cold_rows() {
     let mut strings = StringTable::new();
     let numeric = NumericLiteralToken::test_new("1.5", &mut strings);
     let numeric_source_text = numeric.source_text;
-    let mut numeric_store = NumericLiteralStore::with_source(source);
-    numeric_store.push(numeric.clone());
 
     let path_id = PathId::ROOT;
     let mut path_syntax = PathSyntaxTable::with_source(source);
     let path_row = path_syntax
         .try_push_for_source(path_id, source, LocalSpan::source_start())
         .expect("path row should fit");
-    let tokens = SourceTokens::try_from_tokens(
-        source,
-        vec![
-            Token::new(
-                TokenKind::NumericLiteral(numeric),
-                LocalSpan::source_start(),
-            ),
-            Token::new(TokenKind::Path(path_row), LocalSpan::source_start()),
-        ],
-        numeric_store,
-        path_syntax,
-    )
-    .expect("cold-store fixture should satisfy ownership checks");
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    builder
+        .push_numeric(numeric, LocalSpan::source_start())
+        .expect("numeric token fixture should build");
+    builder
+        .push_path(TokenTag::PATH, path_row, LocalSpan::source_start())
+        .expect("path token fixture should build");
+    let tokens = builder
+        .finish()
+        .expect("cold-store fixture should satisfy source-token invariants");
 
     let numeric_ref = tokens.token(TokenIndex::try_from_raw(0).unwrap()).unwrap();
     assert_eq!(numeric_ref.shape().numeric_literal_id().unwrap().raw(), 1);
+    assert_eq!(numeric_ref.tag(), TokenTag::NUMERIC_LITERAL);
     assert_eq!(numeric_ref.span(), LocalSpan::source_start());
     assert_eq!(
         numeric_ref.numeric_literal().unwrap().unwrap().source_text,
         numeric_source_text
     );
     let path_ref = tokens.token(TokenIndex::try_from_raw(1).unwrap()).unwrap();
+    assert_eq!(path_ref.tag(), TokenTag::PATH);
     assert_eq!(path_ref.path_syntax().unwrap().unwrap().root, path_id);
 }
 
 #[test]
-fn deferred_publication_attaches_the_shared_path_table_to_both_token_owners() {
-    use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-
+fn canonical_publication_attaches_the_shared_path_table_to_source_tokens() {
     let source = SourceId::COMPILATION_ROOT;
-    let mut strings = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let src_path = path_fork
-        .try_intern_portable_path("deferred.moth", &mut strings)
-        .expect("test path fits");
     let mut path_syntax = PathSyntaxTable::with_source(source);
     let path_row = path_syntax
         .try_push_for_source(PathId::ROOT, source, LocalSpan::source_start())
         .expect("path row should fit");
-    let mut file_tokens = FileTokens::new_with_identity(
-        src_path,
-        source,
-        None,
-        vec![Token::new(
-            TokenKind::Path(path_row),
+    let mut builder = SourceTokensBuilder::with_capacity(source, 1);
+    builder
+        .push_payload(
+            TokenTag::PATH,
+            0,
+            path_row.raw(),
             LocalSpan::source_start(),
-        )],
-        path_syntax,
+        )
+        .expect("path token shape should build");
+    let mut tokens = Arc::new(
+        builder
+            .finish(NumericLiteralStore::with_source(source))
+            .expect("canonical path owner should build"),
     );
-    assert!(file_tokens.has_canonical_source_tokens());
+
     let path_index = TokenIndex::try_from_raw(0).unwrap();
     assert!(matches!(
-        file_tokens
-            .source_tokens()
-            .expect("canonical owner stays readable")
-            .token(path_index)
-            .unwrap()
-            .path_syntax(),
+        tokens.token(path_index).unwrap().path_syntax(),
         Err(TokenViewError::MissingPathTable)
     ));
 
-    let table = file_tokens
-        .take_preparing_path_syntax()
-        .expect("preparing stream should own its path table");
-    file_tokens.attach_preflighted_shared_path_syntax(table);
-    file_tokens.freeze_numeric_literals();
-    let resolved = file_tokens
-        .source_tokens()
-        .expect("canonical owner stays readable after publication")
+    path_syntax
+        .validate_file_owned_locations(source)
+        .expect("path table should remain source-owned");
+    path_syntax.freeze();
+    Arc::get_mut(&mut tokens)
+        .expect("canonical owner should remain uniquely owned")
+        .attach_shared_path_syntax(Arc::new(path_syntax));
+    let resolved = tokens
         .token(path_index)
         .unwrap()
         .path_syntax()
-        .expect("attached table should resolve")
+        .expect("published canonical path table should resolve")
         .expect("path token should carry a row");
     assert_eq!(resolved.root, PathId::ROOT);
 }
 
 #[test]
-fn ordinary_substream_exposes_no_second_canonical_owner() {
-    use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-
+fn canonical_owner_rebinds_without_duplicate_source_storage() {
     let source = SourceId::COMPILATION_ROOT;
     let mut strings = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let src_path = path_fork
-        .try_intern_portable_path("owner.moth", &mut strings)
-        .expect("test path fits");
-    let mut owner = FileTokens::new_with_identity(
-        src_path,
-        source,
-        None,
-        vec![Token::new(
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("7", &mut strings)),
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_numeric(
+            NumericLiteralToken::test_new("7", &mut strings),
             LocalSpan::source_start(),
-        )],
-        PathSyntaxTable::with_source(source),
-    );
-    assert!(owner.has_canonical_source_tokens());
-    assert!(owner.source_tokens().is_ok());
+        )
+        .expect("numeric token fixture should build");
+    let mut owner = builder
+        .finish()
+        .expect("canonical numeric fixture should publish");
 
-    let substream = FileTokens::new_substream(
-        &owner,
-        src_path,
-        source,
-        vec![Token::new(
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("7", &mut strings)),
-            LocalSpan::source_start(),
-        )],
+    let second_handle = owner.clone();
+    assert!(
+        Arc::get_mut(&mut owner).is_none(),
+        "a shared canonical owner must not expose a second mutable owner"
     );
-    assert!(!substream.has_canonical_source_tokens());
-    assert!(substream.source_tokens().is_err());
-    assert_eq!(substream.numeric_literal_store().len(), 1);
-    assert_eq!(
-        substream.numeric_literal_store().owner_source(),
-        Some(source)
-    );
-    assert!(substream.numeric_literal_id_at(0).is_some());
+    drop(second_handle);
 
     let rebound = SourceId::from_index(11);
-    owner.rebind_file_identity(src_path, rebound, None);
+    Arc::get_mut(&mut owner)
+        .expect("canonical owner should be uniquely mutable before rebinding")
+        .rebind_source_identity(rebound);
+    assert_eq!(owner.source(), rebound);
     assert_eq!(
-        owner
-            .source_tokens()
-            .expect("canonical owner stays readable")
-            .source(),
-        rebound
-    );
-    assert_eq!(
-        substream.numeric_literal_store().owner_source(),
-        Some(source)
+        owner.numeric_literal_store().owner_source(),
+        Some(rebound)
     );
 }
 
 #[test]
-fn deferred_adapter_retains_numeric_lifecycle_without_canonical_shapes() {
-    use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-
+fn canonical_numeric_publication_retains_its_checked_cold_row() {
     let source = SourceId::COMPILATION_ROOT;
     let mut strings = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let src_path = path_fork
-        .try_intern_portable_path("deferred-numeric.moth", &mut strings)
-        .expect("test path fits");
-    let deferred = FileTokens::new_deferred_with_identity(
-        src_path,
-        source,
-        None,
-        vec![Token::new(
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("9", &mut strings)),
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_numeric(
+            NumericLiteralToken::test_new("9", &mut strings),
             LocalSpan::source_start(),
-        )],
-    );
-    assert!(!deferred.has_canonical_source_tokens());
-    assert!(deferred.source_tokens().is_err());
-    let handle = deferred
-        .numeric_literal_id_at(0)
-        .expect("adapter numeric token must carry a handle");
-    deferred
+        )
+        .expect("numeric token fixture should build");
+    let owner = builder
+        .finish()
+        .expect("canonical numeric fixture should publish");
+    let token = owner.token(TokenIndex::try_from_raw(0).unwrap()).unwrap();
+    let handle = token
+        .shape()
+        .numeric_literal_id()
+        .expect("numeric token must carry a canonical handle");
+    owner
         .numeric_literal_store()
         .try_get_for_source(handle, source)
-        .expect("adapter numeric row must resolve before freeze");
+        .expect("canonical numeric row must resolve after publication");
+    assert!(token.numeric_literal().unwrap().is_some());
 }
 #[test]
 fn canonical_construction_rejects_unowned_cold_stores() {
@@ -731,23 +716,29 @@ fn canonical_construction_rejects_unowned_cold_stores() {
     let mut unbound_numeric = NumericLiteralStore::new();
     unbound_numeric.push(numeric.clone());
 
-    let unbound_result = SourceTokens::try_from_tokens(
-        source,
-        vec![Token::new(TokenKind::NumericLiteral(numeric), span)],
-        unbound_numeric,
-        PathSyntaxTable::with_source(source),
-    );
+    let mut canonical_builder = SourceTokensBuilder::with_capacity(source, 1);
+    let numeric_id = canonical_builder
+        .preflight_numeric()
+        .expect("numeric shape preflight should fit");
+    canonical_builder
+        .push_numeric(
+            TokenTag::NUMERIC_LITERAL,
+            numeric_kind_flags(numeric.kind),
+            numeric_id,
+            span,
+        )
+        .expect("numeric shape fixture should pack");
+    let unbound_result = canonical_builder.finish(unbound_numeric);
     assert!(
         unbound_result.is_err(),
         "non-empty numeric stores must carry their source identity"
     );
 
-    let foreign_path_result = SourceTokens::try_from_tokens(
+    let foreign_path_builder = TestSourceTokensBuilder::with_path_syntax(
         source,
-        vec![Token::new(TokenKind::Eof, span)],
-        NumericLiteralStore::with_source(source),
         PathSyntaxTable::with_source(SourceId::from_index(11)),
     );
+    let foreign_path_result = foreign_path_builder.finish();
     assert!(
         foreign_path_result.is_err(),
         "canonical path stores must match the source even without path tokens"

@@ -1,111 +1,72 @@
 use super::*;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralToken};
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use std::sync::Arc;
 
-fn all_token_kinds() -> Vec<TokenKind> {
-    vec![
-        TokenKind::ModuleStart,
-        TokenKind::Eof,
-        TokenKind::Export,
-        TokenKind::Hash,
-        TokenKind::Reactive,
-        TokenKind::Arrow,
-        TokenKind::Symbol(StringId::from_index(0)),
-        TokenKind::StyleDirective(StringId::from_index(0)),
-        TokenKind::StringSliceLiteral(StringId::from_index(0)),
-        TokenKind::Path(PathSyntaxId::NONE),
-        TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut Default::default())),
-        TokenKind::CharLiteral('x'),
-        TokenKind::RawStringLiteral(StringId::from_index(0)),
-        TokenKind::BoolLiteral(true),
-        TokenKind::OpenCurly,
-        TokenKind::CloseCurly,
-        TokenKind::TypeParameterBracket,
-        TokenKind::Newline,
-        TokenKind::End,
-        TokenKind::StartTemplateBody,
-        TokenKind::Comma,
-        TokenKind::Dot,
-        TokenKind::Colon,
-        TokenKind::DoubleColon,
-        TokenKind::Assign,
-        TokenKind::This,
-        TokenKind::Must,
-        TokenKind::TraitThis,
-        TokenKind::OpenParenthesis,
-        TokenKind::CloseParenthesis,
-        TokenKind::As,
-        TokenKind::Type,
-        TokenKind::Of,
-        TokenKind::Variadic,
-        TokenKind::Mutable,
-        TokenKind::DatatypeNone,
-        TokenKind::NoneLiteral,
-        TokenKind::DatatypeInt,
-        TokenKind::DatatypeFloat,
-        TokenKind::DatatypeBool,
-        TokenKind::DatatypeTrue,
-        TokenKind::DatatypeFalse,
-        TokenKind::DatatypeString,
-        TokenKind::DatatypeChar,
-        TokenKind::Bang,
-        TokenKind::QuestionMark,
-        TokenKind::Negative,
-        TokenKind::Exponent,
-        TokenKind::Multiply,
-        TokenKind::Divide,
-        TokenKind::Modulus,
-        TokenKind::IntDivide,
-        TokenKind::ExponentAssign,
-        TokenKind::MultiplyAssign,
-        TokenKind::DivideAssign,
-        TokenKind::ModulusAssign,
-        TokenKind::IntDivideAssign,
-        TokenKind::Add,
-        TokenKind::Subtract,
-        TokenKind::AddAssign,
-        TokenKind::SubtractAssign,
-        TokenKind::Not,
-        TokenKind::Is,
-        TokenKind::LessThan,
-        TokenKind::LessThanOrEqual,
-        TokenKind::GreaterThan,
-        TokenKind::GreaterThanOrEqual,
-        TokenKind::And,
-        TokenKind::Or,
-        TokenKind::If,
-        TokenKind::Else,
-        TokenKind::Return,
-        TokenKind::ReturnBang,
-        TokenKind::Catch,
-        TokenKind::Then,
-        TokenKind::Checked,
-        TokenKind::Async,
-        TokenKind::Cast,
-        TokenKind::CastBang,
-        TokenKind::Assert,
-        TokenKind::Loop,
-        TokenKind::By,
-        TokenKind::Break,
-        TokenKind::Continue,
-        TokenKind::ExclusiveRange,
-        TokenKind::Ampersand,
-        TokenKind::FatArrow,
-        TokenKind::Wildcard,
-        TokenKind::Copy,
-        TokenKind::TemplateClose,
-        TokenKind::TemplateHead,
-        TokenKind::ChannelSend,
-        TokenKind::ChannelReceive,
-        TokenKind::Yield,
-    ]
+fn canonical_tokens_for_all_tags() -> Arc<SourceTokens> {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut strings = StringTable::new();
+    let string_id = strings.intern("taxonomy fixture");
+    let mut path_syntax = PathSyntaxTable::with_source(source);
+    let path_id = path_syntax
+        .try_push_for_source(PathId::ROOT, source, LocalSpan::source_start())
+        .expect("path fixture row should fit");
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    let mut numeric = Some(NumericLiteralToken::test_new("1.5", &mut strings));
+
+    for tag in TokenTag::all() {
+        let result = match tag.descriptor().payload() {
+            TokenDescriptorPayload::Static => {
+                builder.push_static(*tag, LocalSpan::source_start())
+            }
+            TokenDescriptorPayload::Symbol
+            | TokenDescriptorPayload::StyleDirective
+            | TokenDescriptorPayload::StringLiteral
+            | TokenDescriptorPayload::RawStringLiteral => {
+                builder.push_symbol(*tag, string_id, LocalSpan::source_start())
+            }
+            TokenDescriptorPayload::Path => {
+                builder.push_path(*tag, path_id, LocalSpan::source_start())
+            }
+            TokenDescriptorPayload::NumericLiteral => builder.push_numeric(
+                numeric
+                    .take()
+                    .expect("taxonomy schema has one numeric payload tag"),
+                LocalSpan::source_start(),
+            ),
+            TokenDescriptorPayload::CharLiteral => {
+                builder.push_char(*tag, 'x', LocalSpan::source_start())
+            }
+            TokenDescriptorPayload::BoolLiteral => {
+                builder.push_bool(*tag, true, LocalSpan::source_start())
+            }
+        };
+        result.expect("canonical taxonomy token fixture should build");
+    }
+
+    builder
+        .finish()
+        .expect("canonical taxonomy token fixture should publish")
+}
+fn canonical_token_for_tag(tokens: &SourceTokens, tag: TokenTag) -> TokenRef<'_> {
+    let index = TokenTag::all()
+        .iter()
+        .position(|candidate| *candidate == tag)
+        .expect("canonical taxonomy tag should have a fixture index");
+    tokens
+        .token(TokenIndex::try_from_index(index).expect("taxonomy token index should fit"))
+        .expect("canonical taxonomy token should resolve")
 }
 
 #[test]
 fn schema_has_all_explicit_tags_once() {
     let tags = TokenTag::all();
     assert_eq!(tags.len(), 94);
+    let tokens = canonical_tokens_for_all_tags();
+
     for (index, tag) in tags.iter().enumerate() {
         assert_eq!(tag.raw(), (index + 1) as u16);
         let schema = tag.schema().expect("schema row");
@@ -113,6 +74,43 @@ fn schema_has_all_explicit_tags_once() {
         assert_eq!(schema.descriptor().text(), tag.descriptor().text());
         assert_eq!(schema.allowed_flags(), tag.allowed_flags());
         assert_eq!(TokenTag::from_raw(tag.raw()), Some(*tag));
+
+        let token = tokens
+            .token(TokenIndex::try_from_index(index).expect("taxonomy token index should fit"))
+            .expect("canonical taxonomy token should resolve");
+        assert_eq!(token.tag(), *tag);
+        assert_eq!(token.span(), LocalSpan::source_start());
+        token
+            .validate_payload()
+            .expect("canonical taxonomy payload should validate");
+        match tag.descriptor().payload() {
+            TokenDescriptorPayload::Static => {
+                assert_eq!(token.shape().flags(), 0);
+                assert_eq!(token.shape().data(), 0);
+            }
+            TokenDescriptorPayload::Symbol
+            | TokenDescriptorPayload::StyleDirective
+            | TokenDescriptorPayload::StringLiteral
+            | TokenDescriptorPayload::RawStringLiteral => {
+                assert_eq!(token.shape().flags(), 0);
+                assert_eq!(token.string_id(), Some(StringId::from_index(0)));
+            }
+            TokenDescriptorPayload::Path => {
+                assert_eq!(token.shape().flags(), 0);
+                assert!(token.path_syntax().unwrap().is_some());
+            }
+            TokenDescriptorPayload::NumericLiteral => {
+                assert_eq!(token.shape().flags(), 1);
+                assert!(token.numeric_literal().unwrap().is_some());
+                assert_eq!(token.shape().numeric_literal_id().unwrap().raw(), 1);
+            }
+            TokenDescriptorPayload::CharLiteral => {
+                assert_eq!(token.char_value(), Some('x'));
+            }
+            TokenDescriptorPayload::BoolLiteral => {
+                assert_eq!(token.bool_value(), Some(true));
+            }
+        }
     }
     assert_eq!(
         tags.iter()
@@ -121,11 +119,6 @@ fn schema_has_all_explicit_tags_once() {
             .count(),
         0
     );
-    let kinds = all_token_kinds();
-    assert_eq!(kinds.len(), tags.len());
-    for (index, kind) in kinds.iter().enumerate() {
-        assert_eq!(kind.token_tag().raw(), (index + 1) as u16);
-    }
     assert_eq!(
         TokenTag::from_raw_unchecked(95).descriptor().text(),
         "token"
@@ -154,25 +147,17 @@ fn unknown_tags_and_reserved_flags_are_rejected() {
 
 #[test]
 fn shape_payload_decoding_validates_packed_handles_and_scalars() {
-    let mut strings = StringTable::new();
-    let symbol = strings.intern("alpha");
-    let path_id = PathSyntaxId::try_from_raw(3).expect("checked path handle");
-    let numeric_id =
-        crate::compiler_frontend::numeric_text::store::NumericLiteralId::try_from_raw(2)
-            .expect("checked numeric handle");
-    let numeric_token = NumericLiteralToken::test_new("1.5", &mut strings);
+    let tokens = canonical_tokens_for_all_tags();
 
-    let symbol_shape =
-        TokenShape::from_token_kind(&TokenKind::Symbol(symbol)).expect("symbol shape should pack");
-    assert_eq!(symbol_shape.string_id(), Some(symbol));
+    let symbol_shape = canonical_token_for_tag(&tokens, TokenTag::SYMBOL).shape();
+    assert!(symbol_shape.string_id().is_some());
     assert_eq!(symbol_shape.path_syntax_id(), None);
     assert_eq!(symbol_shape.numeric_literal_id(), None);
     assert_eq!(symbol_shape.bool_value_checked(), None);
     assert_eq!(symbol_shape.char_value_checked(), None);
 
-    let path_shape =
-        TokenShape::from_token_kind(&TokenKind::Path(path_id)).expect("path shape should pack");
-    assert_eq!(path_shape.path_syntax_id(), Some(path_id));
+    let path_shape = canonical_token_for_tag(&tokens, TokenTag::PATH).shape();
+    assert!(path_shape.path_syntax_id().is_some());
     assert_eq!(path_shape.string_id(), None);
     assert_eq!(
         TokenShape::from_raw_parts(TokenTag::PATH.raw(), 0, 0),
@@ -180,16 +165,16 @@ fn shape_payload_decoding_validates_packed_handles_and_scalars() {
         "absent path marker must not decode"
     );
     assert_eq!(
-        TokenShape::from_raw_parts(TokenTag::PATH.raw(), 1, path_id.raw()),
+        TokenShape::from_raw_parts(TokenTag::PATH.raw(), 1, path_shape.data()),
         None,
         "path shapes carry no flags"
     );
-    let numeric_shape = TokenShape::from_token_kind_with_numeric_id(
-        &TokenKind::NumericLiteral(numeric_token.clone()),
-        numeric_id,
-    )
-    .expect("numeric shape should pack");
-    assert_eq!(numeric_shape.numeric_literal_id(), Some(numeric_id));
+
+    let numeric_shape = canonical_token_for_tag(&tokens, TokenTag::NUMERIC_LITERAL).shape();
+    let numeric_id = numeric_shape
+        .numeric_literal_id()
+        .expect("canonical numeric shape should carry a handle");
+    assert_eq!(numeric_id.raw(), 1);
     assert_eq!(
         numeric_shape.numeric_kind(),
         Some(NumericLiteralKind::DecimalPoint)
@@ -204,21 +189,8 @@ fn shape_payload_decoding_validates_packed_handles_and_scalars() {
         None,
         "numeric kind flags above two must not decode"
     );
-    assert_eq!(
-        TokenShape::from_token_kind_with_numeric_id(
-            &TokenKind::NumericLiteral(numeric_token.clone()),
-            crate::compiler_frontend::numeric_text::store::NumericLiteralId::NONE,
-        ),
-        None,
-        "absent numeric handle must not pack"
-    );
-    assert_eq!(
-        TokenShape::from_token_kind(&TokenKind::Path(PathSyntaxId::NONE)),
-        None,
-        "absent path handle must not pack"
-    );
-    let bool_shape =
-        TokenShape::from_token_kind(&TokenKind::BoolLiteral(true)).expect("bool shape should pack");
+
+    let bool_shape = canonical_token_for_tag(&tokens, TokenTag::BOOL_LITERAL).shape();
     assert_eq!(bool_shape.bool_value_checked(), Some(true));
     assert_eq!(
         TokenShape::from_raw_parts(TokenTag::BOOL_LITERAL.raw(), 0, 2),
@@ -226,8 +198,7 @@ fn shape_payload_decoding_validates_packed_handles_and_scalars() {
         "bool payloads are only 0 or 1"
     );
 
-    let char_shape =
-        TokenShape::from_token_kind(&TokenKind::CharLiteral('x')).expect("char shape should pack");
+    let char_shape = canonical_token_for_tag(&tokens, TokenTag::CHAR_LITERAL).shape();
     assert_eq!(char_shape.char_value_checked(), Some('x'));
     assert_eq!(
         TokenShape::from_raw_parts(TokenTag::CHAR_LITERAL.raw(), 0, 0xD800),
@@ -242,109 +213,105 @@ fn shape_payload_decoding_validates_packed_handles_and_scalars() {
 }
 #[test]
 fn schema_classifications_match_frontend_semantics() {
-    for kind in [
-        TokenKind::Assign,
-        TokenKind::AddAssign,
-        TokenKind::SubtractAssign,
-        TokenKind::MultiplyAssign,
-        TokenKind::DivideAssign,
-        TokenKind::ModulusAssign,
-        TokenKind::ExponentAssign,
-        TokenKind::IntDivideAssign,
+    for tag in [
+        TokenTag::ASSIGN,
+        TokenTag::ADD_ASSIGN,
+        TokenTag::SUBTRACT_ASSIGN,
+        TokenTag::MULTIPLY_ASSIGN,
+        TokenTag::DIVIDE_ASSIGN,
+        TokenTag::MODULUS_ASSIGN,
+        TokenTag::EXPONENT_ASSIGN,
+        TokenTag::INT_DIVIDE_ASSIGN,
     ] {
-        assert!(kind.is_assignment_operator());
-        assert!(kind.continues_expression());
+        assert!(tag.is_assignment_operator());
+        assert!(tag.continues_expression());
     }
-    assert!(!TokenKind::Exponent.continues_expression());
+    assert!(!TokenTag::EXPONENT.continues_expression());
     // The remaining newline-tolerant tokens keep the exact prior `continues_expression`
     // set; four dropped flags here already regressed multi-line expressions once.
-    for kind in [
-        TokenKind::Colon,
-        TokenKind::OpenParenthesis,
-        TokenKind::TypeParameterBracket,
-        TokenKind::Comma,
-        TokenKind::End,
-        TokenKind::Add,
-        TokenKind::Subtract,
-        TokenKind::Multiply,
-        TokenKind::Divide,
-        TokenKind::Modulus,
-        TokenKind::IntDivide,
-        TokenKind::Arrow,
-        TokenKind::Is,
-        TokenKind::LessThan,
-        TokenKind::LessThanOrEqual,
-        TokenKind::GreaterThan,
-        TokenKind::GreaterThanOrEqual,
+    for tag in [
+        TokenTag::COLON,
+        TokenTag::OPEN_PARENTHESIS,
+        TokenTag::TYPE_PARAMETER_BRACKET,
+        TokenTag::COMMA,
+        TokenTag::END,
+        TokenTag::ADD,
+        TokenTag::SUBTRACT,
+        TokenTag::MULTIPLY,
+        TokenTag::DIVIDE,
+        TokenTag::MODULUS,
+        TokenTag::INT_DIVIDE,
+        TokenTag::ARROW,
+        TokenTag::IS,
+        TokenTag::LESS_THAN,
+        TokenTag::LESS_THAN_OR_EQUAL,
+        TokenTag::GREATER_THAN,
+        TokenTag::GREATER_THAN_OR_EQUAL,
     ] {
-        assert!(kind.continues_expression());
+        assert!(tag.continues_expression());
     }
-    assert!(!TokenKind::Symbol(StringId::from_index(0)).continues_expression());
-    for kind in [
-        TokenKind::Symbol(StringId::from_index(0)),
-        TokenKind::This,
-        TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut Default::default())),
-        TokenKind::StringSliceLiteral(StringId::from_index(0)),
-        TokenKind::RawStringLiteral(StringId::from_index(0)),
-        TokenKind::CharLiteral('x'),
-        TokenKind::BoolLiteral(true),
-        TokenKind::NoneLiteral,
-        TokenKind::CloseParenthesis,
-        TokenKind::CloseCurly,
-        TokenKind::TemplateClose,
-        TokenKind::Bang,
-        TokenKind::QuestionMark,
+    assert!(!TokenTag::SYMBOL.continues_expression());
+    for tag in [
+        TokenTag::SYMBOL,
+        TokenTag::THIS,
+        TokenTag::NUMERIC_LITERAL,
+        TokenTag::STRING_SLICE_LITERAL,
+        TokenTag::RAW_STRING_LITERAL,
+        TokenTag::CHAR_LITERAL,
+        TokenTag::BOOL_LITERAL,
+        TokenTag::NONE_LITERAL,
+        TokenTag::CLOSE_PARENTHESIS,
+        TokenTag::CLOSE_CURLY,
+        TokenTag::TEMPLATE_CLOSE,
+        TokenTag::BANG,
+        TokenTag::QUESTION_MARK,
     ] {
-        assert!(kind.can_end_expression());
+        assert!(tag.can_end_expression());
     }
 
-    for kind in [
-        TokenKind::Path(PathSyntaxId::NONE),
-        TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut Default::default())),
-        TokenKind::StringSliceLiteral(StringId::from_index(0)),
-        TokenKind::BoolLiteral(true),
-        TokenKind::CharLiteral('x'),
-        TokenKind::NoneLiteral,
-        TokenKind::Symbol(StringId::from_index(0)),
-        TokenKind::This,
-        TokenKind::Mutable,
-        TokenKind::OpenParenthesis,
-        TokenKind::OpenCurly,
-        TokenKind::Copy,
+    for tag in [
+        TokenTag::PATH,
+        TokenTag::NUMERIC_LITERAL,
+        TokenTag::STRING_SLICE_LITERAL,
+        TokenTag::BOOL_LITERAL,
+        TokenTag::CHAR_LITERAL,
+        TokenTag::NONE_LITERAL,
+        TokenTag::SYMBOL,
+        TokenTag::THIS,
+        TokenTag::MUTABLE,
+        TokenTag::OPEN_PARENTHESIS,
+        TokenTag::OPEN_CURLY,
+        TokenTag::COPY,
     ] {
-        assert!(kind.token_tag().is_operand_start());
+        assert!(tag.is_operand_start());
     }
-    assert!(
-        !TokenKind::RawStringLiteral(StringId::from_index(0))
-            .token_tag()
-            .is_operand_start()
-    );
+    assert!(!TokenTag::RAW_STRING_LITERAL.is_operand_start());
 
-    assert!(TokenKind::ReturnBang.is_keyword());
-    assert!(TokenKind::CastBang.is_keyword());
-    assert!(TokenKind::Not.is_word_operator());
-    assert!(!TokenKind::Not.is_keyword());
-    assert!(TokenKind::NoneLiteral.is_literal());
-    assert!(TokenKind::DatatypeInt.is_builtin_type());
-    assert!(!TokenKind::DatatypeInt.is_literal());
-    assert!(TokenKind::OpenParenthesis.is_delimiter());
-    assert!(TokenKind::FatArrow.is_delimiter());
-    assert!(!TokenKind::Add.is_delimiter());
+    assert!(TokenTag::RETURN_BANG.is_keyword());
+    assert!(TokenTag::CAST_BANG.is_keyword());
+    assert!(TokenTag::NOT.is_word_operator());
+    assert!(!TokenTag::NOT.is_keyword());
+    assert!(TokenTag::NONE_LITERAL.is_literal());
+    assert!(TokenTag::DATATYPE_INT.is_builtin_type());
+    assert!(!TokenTag::DATATYPE_INT.is_literal());
+    assert!(TokenTag::OPEN_PARENTHESIS.is_delimiter());
+    assert!(TokenTag::FAT_ARROW.is_delimiter());
+    assert!(!TokenTag::ADD.is_delimiter());
 
-    assert_eq!(TokenKind::Negative.precedence(), Some(6));
-    assert_eq!(TokenKind::Not.precedence(), Some(6));
-    assert_eq!(TokenKind::ExclusiveRange.precedence(), Some(6));
-    assert_eq!(TokenKind::Exponent.precedence(), Some(5));
-    assert_eq!(TokenKind::Multiply.precedence(), Some(4));
-    assert_eq!(TokenKind::Add.precedence(), Some(3));
-    assert_eq!(TokenKind::Is.precedence(), Some(2));
-    assert_eq!(TokenKind::And.precedence(), Some(1));
-    assert_eq!(TokenKind::Or.precedence(), Some(0));
-    assert_eq!(TokenKind::Assign.precedence(), None);
+    assert_eq!(TokenTag::NEGATIVE.precedence(), Some(6));
+    assert_eq!(TokenTag::NOT.precedence(), Some(6));
+    assert_eq!(TokenTag::EXCLUSIVE_RANGE.precedence(), Some(6));
+    assert_eq!(TokenTag::EXPONENT.precedence(), Some(5));
+    assert_eq!(TokenTag::MULTIPLY.precedence(), Some(4));
+    assert_eq!(TokenTag::ADD.precedence(), Some(3));
+    assert_eq!(TokenTag::IS.precedence(), Some(2));
+    assert_eq!(TokenTag::AND.precedence(), Some(1));
+    assert_eq!(TokenTag::OR.precedence(), Some(0));
+    assert_eq!(TokenTag::ASSIGN.precedence(), None);
 }
 
 #[test]
-fn stats_classification_uses_schema_authority_with_legacy_parity() {
+fn stats_classification_uses_schema_authority() {
     use crate::compiler_frontend::arena::TokenStats;
 
     // Every tag funnels through the schema-owned stats facts, so representative and
@@ -356,105 +323,90 @@ fn stats_classification_uses_schema_authority_with_legacy_parity() {
 
         let mut from_shape = TokenStats::default();
         // `TokenShape::new` rejects packed payload handles, so only static tags round-trip
-        // here; payload tags assert through their tag path above plus the kind parity below.
+        // here; payload tags assert through their canonical token fixture above.
         if let Some(shape) = TokenShape::new(*tag, 0, 0) {
             from_shape.accumulate_shape(shape);
             assert_eq!(from_shape, from_tag);
         }
     }
 
-    // Legacy operator/literal sets keep their exact bucket semantics through tags.
-    for kind in [
-        TokenKind::Add,
-        TokenKind::Subtract,
-        TokenKind::Multiply,
-        TokenKind::Divide,
-        TokenKind::Modulus,
-        TokenKind::IntDivide,
-        TokenKind::Exponent,
-        TokenKind::Negative,
-        TokenKind::AddAssign,
-        TokenKind::SubtractAssign,
-        TokenKind::MultiplyAssign,
-        TokenKind::DivideAssign,
-        TokenKind::ModulusAssign,
-        TokenKind::ExponentAssign,
-        TokenKind::IntDivideAssign,
-        TokenKind::LessThan,
-        TokenKind::LessThanOrEqual,
-        TokenKind::GreaterThan,
-        TokenKind::GreaterThanOrEqual,
-        TokenKind::Is,
-        TokenKind::And,
-        TokenKind::Or,
-        TokenKind::Not,
-        TokenKind::Bang,
-        TokenKind::QuestionMark,
-        TokenKind::Copy,
-        TokenKind::ChannelSend,
-        TokenKind::ChannelReceive,
-        TokenKind::Ampersand,
-        TokenKind::Arrow,
-        TokenKind::FatArrow,
+    for tag in [
+        TokenTag::ADD,
+        TokenTag::SUBTRACT,
+        TokenTag::MULTIPLY,
+        TokenTag::DIVIDE,
+        TokenTag::MODULUS,
+        TokenTag::INT_DIVIDE,
+        TokenTag::EXPONENT,
+        TokenTag::NEGATIVE,
+        TokenTag::ADD_ASSIGN,
+        TokenTag::SUBTRACT_ASSIGN,
+        TokenTag::MULTIPLY_ASSIGN,
+        TokenTag::DIVIDE_ASSIGN,
+        TokenTag::MODULUS_ASSIGN,
+        TokenTag::EXPONENT_ASSIGN,
+        TokenTag::INT_DIVIDE_ASSIGN,
+        TokenTag::LESS_THAN,
+        TokenTag::LESS_THAN_OR_EQUAL,
+        TokenTag::GREATER_THAN,
+        TokenTag::GREATER_THAN_OR_EQUAL,
+        TokenTag::IS,
+        TokenTag::AND,
+        TokenTag::OR,
+        TokenTag::NOT,
+        TokenTag::BANG,
+        TokenTag::QUESTION_MARK,
+        TokenTag::COPY,
+        TokenTag::CHANNEL_SEND,
+        TokenTag::CHANNEL_RECEIVE,
+        TokenTag::AMPERSAND,
+        TokenTag::ARROW,
+        TokenTag::FAT_ARROW,
     ] {
-        assert!(
-            kind.token_tag().is_stats_operator(),
-            "{kind:?} stays an operator"
-        );
+        assert!(tag.is_stats_operator(), "{tag:?} stays an operator");
         let mut stats = TokenStats::default();
-        stats.accumulate_tag(kind.token_tag());
-        assert_eq!(stats.operators, 1, "{kind:?} fills the operator bucket");
+        stats.accumulate_tag(tag);
+        assert_eq!(stats.operators, 1, "{tag:?} fills the operator bucket");
     }
 
-    for kind in [
-        TokenKind::StringSliceLiteral(StringId::from_index(0)),
-        TokenKind::RawStringLiteral(StringId::from_index(0)),
-        TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut Default::default())),
-        TokenKind::CharLiteral('x'),
-        TokenKind::BoolLiteral(true),
-        TokenKind::NoneLiteral,
+    for tag in [
+        TokenTag::STRING_SLICE_LITERAL,
+        TokenTag::RAW_STRING_LITERAL,
+        TokenTag::NUMERIC_LITERAL,
+        TokenTag::CHAR_LITERAL,
+        TokenTag::BOOL_LITERAL,
+        TokenTag::NONE_LITERAL,
     ] {
-        assert!(
-            kind.token_tag().is_stats_literal(),
-            "{kind:?} stays a literal"
-        );
+        assert!(tag.is_stats_literal(), "{tag:?} stays a literal");
     }
     // Raw strings stay literal-adjacent in the expression taxonomy only by exclusion from
-    // `is_operand_start`; the stats bucket keeps the legacy literal count.
-    assert!(
-        !TokenKind::RawStringLiteral(StringId::from_index(0))
-            .token_tag()
-            .is_operand_start()
-    );
+    // `is_operand_start`; the stats bucket keeps the literal count.
+    assert!(!TokenTag::RAW_STRING_LITERAL.is_operand_start());
     let mut raw_stats = TokenStats::default();
-    raw_stats.accumulate_tag(TokenKind::RawStringLiteral(StringId::from_index(0)).token_tag());
+    raw_stats.accumulate_tag(TokenTag::RAW_STRING_LITERAL);
     assert_eq!(raw_stats.literals, 1);
     // Delimiter-adjacent `FatArrow` counts as an operator (not a delimiter bucket), while the
     // collection delimiters keep their own bucket.
-    assert!(TokenKind::FatArrow.token_tag().is_stats_operator());
-    assert!(TokenKind::FatArrow.token_tag().is_delimiter());
-    for kind in [
-        TokenKind::OpenCurly,
-        TokenKind::CloseCurly,
-        TokenKind::Comma,
-    ] {
-        assert!(!kind.token_tag().is_stats_operator());
+    assert!(TokenTag::FAT_ARROW.is_stats_operator());
+    assert!(TokenTag::FAT_ARROW.is_delimiter());
+    for tag in [TokenTag::OPEN_CURLY, TokenTag::CLOSE_CURLY, TokenTag::COMMA] {
+        assert!(!tag.is_stats_operator());
         let mut stats = TokenStats::default();
-        stats.accumulate_tag(kind.token_tag());
+        stats.accumulate_tag(tag);
         assert_eq!(stats.map_or_collection_delimiters, 1);
     }
 
     // Keyword-adjacent operators (`copy`) and bang spellings keep their legacy buckets.
-    assert!(TokenKind::Copy.token_tag().is_keyword());
-    assert!(TokenKind::Copy.token_tag().is_stats_operator());
-    for kind in [TokenKind::Return, TokenKind::ReturnBang] {
+    assert!(TokenTag::COPY.is_keyword());
+    assert!(TokenTag::COPY.is_stats_operator());
+    for tag in [TokenTag::RETURN, TokenTag::RETURN_BANG] {
         let mut stats = TokenStats::default();
-        stats.accumulate_tag(kind.token_tag());
+        stats.accumulate_tag(tag);
         assert_eq!(stats.return_tokens, 1);
     }
-    for kind in [TokenKind::Cast, TokenKind::CastBang] {
+    for tag in [TokenTag::CAST, TokenTag::CAST_BANG] {
         let mut stats = TokenStats::default();
-        stats.accumulate_tag(kind.token_tag());
+        stats.accumulate_tag(tag);
         assert_eq!(stats.cast_tokens, 1);
     }
 }

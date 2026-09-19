@@ -1,7 +1,7 @@
 //! Token definitions and source-location primitives for the frontend tokenizer.
 //!
-//! WHAT: defines token kinds, token records, and the location metadata threaded through parsing.
-//! WHY: every frontend stage past lexing depends on one canonical token and location model.
+//! WHAT: defines token taxonomy, compact source shapes, and location metadata threaded through parsing.
+//! WHY: every frontend stage past lexing depends on one canonical source-token model.
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
@@ -18,17 +18,12 @@ use crate::compiler_frontend::paths::path_syntax::{
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
 };
-#[cfg(test)]
-use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
 };
 
-use crate::token_log;
 use std::iter::Peekable;
-use std::ops::Deref;
-use std::path::PathBuf;
 use std::str::Chars;
 use std::sync::Arc;
 
@@ -107,18 +102,6 @@ impl TemplateBodyMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Token {
-    pub kind: TokenKind,
-    pub span: LocalSpan,
-}
-
-impl Token {
-    /// Construct a token from its source-local exact span.
-    pub fn new(kind: TokenKind, span: LocalSpan) -> Self {
-        Self { kind, span }
-    }
-}
 /// A checked zero-based index into one source's token arrays.
 ///
 /// The packed representation is deliberately `u32`; conversion to `usize` happens only at the
@@ -616,8 +599,6 @@ pub(crate) struct SourceTokensBuilder {
     spans: Vec<LocalSpan>,
     token_stats: TokenStats,
     staged_numeric: usize,
-    #[cfg(test)]
-    numeric_literal_ids: Vec<Option<NumericLiteralId>>,
 }
 
 impl SourceTokensBuilder {
@@ -628,8 +609,6 @@ impl SourceTokensBuilder {
             spans: Vec::with_capacity(capacity),
             token_stats: TokenStats::default(),
             staged_numeric: 0,
-            #[cfg(test)]
-            numeric_literal_ids: Vec::with_capacity(capacity),
         }
     }
 
@@ -702,39 +681,9 @@ impl SourceTokensBuilder {
         self.token_stats.accumulate_shape(shape);
         self.shapes.push(shape);
         self.spans.push(span);
-        #[cfg(test)]
-        self.numeric_literal_ids.push(shape.numeric_literal_id());
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn push(
-        &mut self,
-        kind: &TokenKind,
-        span: LocalSpan,
-    ) -> Result<(), SourceTokenBuildError> {
-        let numeric_id = if matches!(kind, TokenKind::NumericLiteral(_)) {
-            self.preflight_numeric()?
-        } else {
-            NumericLiteralId::NONE
-        };
-        let shape =
-            TokenShape::from_token_kind_with_numeric_id(kind, numeric_id).ok_or_else(|| {
-                SourceTokenBuildError::Invariant(CompilerError::compiler_error(format!(
-                    "trusted token at index {} has a malformed compact shape",
-                    self.shapes.len()
-                )))
-            })?;
-        self.push_packed(shape, span)?;
-        if numeric_id != NumericLiteralId::NONE {
-            self.staged_numeric += 1;
-        }
-        Ok(())
-    }
-    #[cfg(test)]
-    pub(crate) fn take_numeric_literal_ids(&mut self) -> Vec<Option<NumericLiteralId>> {
-        std::mem::take(&mut self.numeric_literal_ids)
-    }
 
     pub(crate) fn finish(
         self,
@@ -774,12 +723,158 @@ impl SourceTokensBuilder {
     }
 }
 
+/// Canonical source-token fixture builder for tests that need hand-authored syntax.
+///
+/// This helper writes the same compact shape/span arrays and source-owned cold stores as the
+/// lexer. It deliberately exposes typed payload methods instead of a compatibility token enum.
+#[cfg(test)]
+pub(crate) struct TestSourceTokensBuilder {
+    source: SourceId,
+    builder: SourceTokensBuilder,
+    numeric_literals: NumericLiteralStore,
+    path_syntax: PathSyntaxTable,
+}
+
+#[cfg(test)]
+impl TestSourceTokensBuilder {
+    pub(crate) fn new(source: SourceId) -> Self {
+        Self {
+            source,
+            builder: SourceTokensBuilder::with_capacity(source, 8),
+            numeric_literals: NumericLiteralStore::with_source(source),
+            path_syntax: PathSyntaxTable::with_source(source),
+        }
+    }
+
+    pub(crate) fn with_path_syntax(
+        source: SourceId,
+        path_syntax: PathSyntaxTable,
+    ) -> Self {
+        Self {
+            source,
+            builder: SourceTokensBuilder::with_capacity(source, 8),
+            numeric_literals: NumericLiteralStore::with_source(source),
+            path_syntax,
+        }
+    }
+
+    pub(crate) fn push_static(
+        &mut self,
+        tag: TokenTag,
+        span: LocalSpan,
+    ) -> Result<(), CompilerError> {
+        self.builder
+            .push_payload(tag, 0, 0, span)
+            .map_err(test_shape_error)
+    }
+
+    pub(crate) fn push_symbol(
+        &mut self,
+        tag: TokenTag,
+        value: StringId,
+        span: LocalSpan,
+    ) -> Result<(), CompilerError> {
+        self.builder
+            .push_payload(tag, 0, value.index(), span)
+            .map_err(test_shape_error)
+    }
+
+    pub(crate) fn push_path(
+        &mut self,
+        tag: TokenTag,
+        value: PathSyntaxId,
+        span: LocalSpan,
+    ) -> Result<(), CompilerError> {
+        self.builder
+            .push_payload(tag, 0, value.raw(), span)
+            .map_err(test_shape_error)
+    }
+
+    pub(crate) fn push_char(
+        &mut self,
+        tag: TokenTag,
+        value: char,
+        span: LocalSpan,
+    ) -> Result<(), CompilerError> {
+        self.builder
+            .push_payload(tag, 0, value as u32, span)
+            .map_err(test_shape_error)
+    }
+
+    pub(crate) fn push_bool(
+        &mut self,
+        tag: TokenTag,
+        value: bool,
+        span: LocalSpan,
+    ) -> Result<(), CompilerError> {
+        self.builder
+            .push_payload(tag, 0, u32::from(value), span)
+            .map_err(test_shape_error)
+    }
+
+    pub(crate) fn push_numeric(
+        &mut self,
+        literal: NumericLiteralToken,
+        span: LocalSpan,
+    ) -> Result<(), CompilerError> {
+        let numeric_id = self
+            .builder
+            .preflight_numeric()
+            .map_err(test_shape_error)?;
+        let kind = literal.kind;
+        self.numeric_literals
+            .try_push(literal)
+            .map_err(|error| CompilerError::compiler_error(format!(
+                "test numeric literal insertion failed: {error:?}"
+            )))?;
+        self.builder
+            .push_numeric(
+                TokenTag::NUMERIC_LITERAL,
+                numeric_kind_flags(kind),
+                numeric_id,
+                span,
+            )
+            .map_err(test_shape_error)
+    }
+
+    pub(crate) fn finish(self) -> Result<Arc<SourceTokens>, CompilerError> {
+        let mut source_tokens = self.finish_unfrozen()?;
+        Arc::get_mut(&mut source_tokens)
+            .expect("test source token owner should be unique before freeze")
+            .freeze_numeric_literals();
+        Ok(source_tokens)
+    }
+
+    /// Finish the canonical fixture owner while leaving its sequence store mutable.
+    ///
+    /// Segmented fixtures register their checked ranges before publishing the final frozen
+    /// owner. Callers must freeze numeric and sequence storage after registration.
+    pub(crate) fn finish_unfrozen(self) -> Result<Arc<SourceTokens>, CompilerError> {
+        self.path_syntax
+            .validate_file_owned_locations(self.source)?;
+        let mut source_tokens = self.builder.finish(self.numeric_literals)?;
+        let mut path_syntax = self.path_syntax;
+        path_syntax.freeze();
+        source_tokens.attach_shared_path_syntax(Arc::new(path_syntax));
+        Ok(Arc::new(source_tokens))
+    }
+}
+
+#[cfg(test)]
+fn test_shape_error(error: SourceTokenBuildError) -> CompilerError {
+    match error {
+        SourceTokenBuildError::Capacity => {
+            CompilerError::compiler_error("test source token fixture exceeded its capacity")
+        }
+        SourceTokenBuildError::Invariant(error) => error,
+    }
+}
+
 /// The immutable source-owned shape/span arrays and their typed cold stores.
 ///
-/// `TokenKind` remains in [`FileTokens`] only as a private compatibility adapter for parsers that
-/// still consume legacy token values. This owner is the canonical representation used by cursor
-/// consumers: shapes and spans are frozen dense SoA arrays, while numeric and path rows stay
-/// source-local.
+/// The canonical owner stores frozen dense shape/span arrays and source-local numeric, path,
+/// and segmented-sequence rows. Cursors and typed references read this owner without
+/// materialising a second token representation.
 #[derive(Clone, Debug)]
 pub struct SourceTokens {
     source: SourceId,
@@ -788,53 +883,13 @@ pub struct SourceTokens {
     numeric_literals: NumericLiteralStore,
     /// A path table is attached once its preparation owner reaches the immutable boundary.
     ///
-    /// Direct source-store construction installs it immediately. The compatibility `FileTokens`
-    /// adapter leaves this absent while its preparing path table is mutable, then shares the
-    /// frozen allocation without copying rows.
+    /// Direct source-store construction installs the shared immutable table without copying rows.
     path_syntax: Option<Arc<PathSyntaxTable>>,
     sequence_store: TokenSequenceStore,
     token_stats: TokenStats,
 }
 
 impl SourceTokens {
-    /// Build an immutable source store directly from a legacy token vector.
-    ///
-    /// Test-only construction adapter; only compact shapes/spans survive in the returned owner.
-    /// Numeric handles are consumed positionally from the caller-supplied store in token order,
-    /// mirroring the lexer emit boundary; path rows are validated before packing.
-    #[cfg(test)]
-    pub fn try_from_tokens(
-        source: SourceId,
-        tokens: Vec<Token>,
-        numeric_literals: NumericLiteralStore,
-        path_syntax: PathSyntaxTable,
-    ) -> Result<Self, CompilerError> {
-        path_syntax.validate_file_owned_locations(source)?;
-        path_syntax.validate_file_tokens(&tokens, source, "source token owner")?;
-        let mut builder = SourceTokensBuilder::with_capacity(source, tokens.len());
-        for token in &tokens {
-            builder
-                .push(&token.kind, token.span)
-                .map_err(|error| match error {
-                    SourceTokenBuildError::Capacity => CompilerError::compiler_error(
-                        "test token vector exceeds its checked u32 index domain",
-                    ),
-                    SourceTokenBuildError::Invariant(error) => error,
-                })?;
-        }
-        let mut owner = builder.finish(numeric_literals)?;
-        // The table moves into the canonical owner so the freeze below is the sole strong
-        // reference; cloning the handle here would silently skip that freeze.
-        owner.attach_shared_path_syntax(Arc::new(path_syntax));
-        owner.numeric_literals.freeze();
-        owner.sequence_store.freeze();
-        if let Some(table) = owner.path_syntax.as_mut()
-            && let Some(table) = Arc::get_mut(table)
-        {
-            table.freeze();
-        }
-        Ok(owner)
-    }
 
     /// Return this store's source identity.
     pub const fn source(&self) -> SourceId {
@@ -954,67 +1009,6 @@ impl SourceTokens {
         TokenCursor::new(self, range)
     }
 
-
-    /// Materialize one checked contiguous range directly from this canonical owner.
-    ///
-    /// Test fixtures still inspect a range as `Token` values. Production parsers walk
-    /// the canonical owner instead of rebuilding a vector.
-    #[cfg(test)]
-    pub(crate) fn materialize_range(&self, range: TokenRange) -> Result<Vec<Token>, CompilerError> {
-        let mut cursor = self.cursor(range).map_err(|error| {
-            CompilerError::compiler_error(format!("token range materialization failed: {error:?}"))
-        })?;
-        let mut tokens = Vec::with_capacity(range.len() as usize);
-        while let Some(token_ref) = cursor.advance() {
-            let is_eof = token_ref.is_eof();
-            let kind = token_ref.to_token_kind().map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "canonical token payload could not be materialized: {error:?}"
-                ))
-            })?;
-            tokens.push(Token::new(kind, token_ref.span()));
-            if is_eof {
-                break;
-            }
-        }
-        Ok(tokens)
-    }
-
-    /// Materialize one checked segmented sequence directly from this canonical owner.
-    ///
-    /// The returned vector is transient parser compatibility data; the sequence store
-    /// remains owned here.
-    #[cfg(test)]
-    pub(crate) fn materialize_token_sequence(
-        &self,
-        id: TokenSequenceId,
-    ) -> Result<Vec<Token>, CompilerError> {
-        let view = self.token_sequence(id).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "token sequence view construction failed: {error:?}"
-            ))
-        })?;
-        let cursor = view.cursor().map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "token sequence cursor construction failed: {error:?}"
-            ))
-        })?;
-        let mut tokens = Vec::with_capacity(view.len());
-        let mut cursor = cursor;
-        while let Some(token_ref) = cursor.advance() {
-            let is_eof = token_ref.is_eof();
-            let kind = token_ref.to_token_kind().map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "canonical token payload could not be materialized: {error:?}"
-                ))
-            })?;
-            tokens.push(Token::new(kind, token_ref.span()));
-            if is_eof {
-                break;
-            }
-        }
-        Ok(tokens)
-    }
 
     /// Register one checked segmented token sequence in this source owner.
     pub fn try_register_token_sequence(
@@ -1160,16 +1154,13 @@ impl<'a> TokenRef<'a> {
     }
 
     /// Stable tag for this token without cloning cold payloads.
-    ///
-    /// 3F1 header classification reads this instead of `TokenKind` matches.
     pub(crate) fn tag(self) -> TokenTag {
         self.shape().tag()
     }
 
     /// Dense path handle for this token, if it carries one.
     ///
-    /// Header-stage callers resolve the row through the `FilePathSyntax` lifecycle
-    /// table while the canonical store is still `Preparing`/`Deferred`.
+    /// Header-stage callers resolve the row through the canonical owner's path table.
     pub(crate) fn path_syntax_id(self) -> Option<PathSyntaxId> {
         self.shape().path_syntax_id()
     }
@@ -1185,138 +1176,44 @@ impl<'a> TokenRef<'a> {
     pub fn is_eof(self) -> bool {
         self.shape().tag() == TokenTag::EOF
     }
-    /// Materialize this short-lived canonical view at an explicit compatibility boundary.
-    ///
-    /// Declaration and signature parsers inspect the stable tag and typed payloads directly, but
-    /// their diagnostics still carry the legacy `TokenKind` payload shape. This conversion is
-    /// deliberately local and fallible: malformed compact payloads stay infrastructure failures
-    /// instead of becoming fabricated source tokens.
-    pub(crate) fn to_token_kind(self) -> Result<TokenKind, TokenViewError> {
-        let tag = self.tag();
-        let kind = match tag {
-            TokenTag::MODULE_START => TokenKind::ModuleStart,
-            TokenTag::EOF => TokenKind::Eof,
-            TokenTag::EXPORT => TokenKind::Export,
-            TokenTag::HASH => TokenKind::Hash,
-            TokenTag::REACTIVE => TokenKind::Reactive,
-            TokenTag::ARROW => TokenKind::Arrow,
-            TokenTag::SYMBOL => TokenKind::Symbol(
-                self.string_id()
-                    .ok_or(TokenViewError::MalformedNumericHandle)?,
-            ),
-            TokenTag::STYLE_DIRECTIVE => TokenKind::StyleDirective(
-                self.string_id()
-                    .ok_or(TokenViewError::MalformedNumericHandle)?,
-            ),
-            TokenTag::STRING_SLICE_LITERAL => TokenKind::StringSliceLiteral(
-                self.string_id()
-                    .ok_or(TokenViewError::MalformedNumericHandle)?,
-            ),
-            TokenTag::PATH => TokenKind::Path(
-                self.path_syntax_id()
-                    .ok_or(TokenViewError::MalformedPathHandle)?,
-            ),
-            TokenTag::NUMERIC_LITERAL => TokenKind::NumericLiteral(
-                self.numeric_literal()?
-                    .ok_or(TokenViewError::MalformedNumericHandle)?
-                    .clone(),
-            ),
-            TokenTag::CHAR_LITERAL => TokenKind::CharLiteral(
-                self.char_value()
-                    .ok_or(TokenViewError::MalformedNumericHandle)?,
-            ),
-            TokenTag::RAW_STRING_LITERAL => TokenKind::RawStringLiteral(
-                self.string_id()
-                    .ok_or(TokenViewError::MalformedNumericHandle)?,
-            ),
-            TokenTag::BOOL_LITERAL => TokenKind::BoolLiteral(
-                self.bool_value()
-                    .ok_or(TokenViewError::MalformedNumericHandle)?,
-            ),
-            TokenTag::OPEN_CURLY => TokenKind::OpenCurly,
-            TokenTag::CLOSE_CURLY => TokenKind::CloseCurly,
-            TokenTag::TYPE_PARAMETER_BRACKET => TokenKind::TypeParameterBracket,
-            TokenTag::NEWLINE => TokenKind::Newline,
-            TokenTag::END => TokenKind::End,
-            TokenTag::START_TEMPLATE_BODY => TokenKind::StartTemplateBody,
-            TokenTag::COMMA => TokenKind::Comma,
-            TokenTag::DOT => TokenKind::Dot,
-            TokenTag::COLON => TokenKind::Colon,
-            TokenTag::DOUBLE_COLON => TokenKind::DoubleColon,
-            TokenTag::ASSIGN => TokenKind::Assign,
-            TokenTag::THIS => TokenKind::This,
-            TokenTag::MUST => TokenKind::Must,
-            TokenTag::TRAIT_THIS => TokenKind::TraitThis,
-            TokenTag::OPEN_PARENTHESIS => TokenKind::OpenParenthesis,
-            TokenTag::CLOSE_PARENTHESIS => TokenKind::CloseParenthesis,
-            TokenTag::AS => TokenKind::As,
-            TokenTag::TYPE => TokenKind::Type,
-            TokenTag::OF => TokenKind::Of,
-            TokenTag::VARIADIC => TokenKind::Variadic,
-            TokenTag::MUTABLE => TokenKind::Mutable,
-            TokenTag::DATATYPE_NONE => TokenKind::DatatypeNone,
-            TokenTag::NONE_LITERAL => TokenKind::NoneLiteral,
-            TokenTag::DATATYPE_INT => TokenKind::DatatypeInt,
-            TokenTag::DATATYPE_FLOAT => TokenKind::DatatypeFloat,
-            TokenTag::DATATYPE_BOOL => TokenKind::DatatypeBool,
-            TokenTag::DATATYPE_TRUE => TokenKind::DatatypeTrue,
-            TokenTag::DATATYPE_FALSE => TokenKind::DatatypeFalse,
-            TokenTag::DATATYPE_STRING => TokenKind::DatatypeString,
-            TokenTag::DATATYPE_CHAR => TokenKind::DatatypeChar,
-            TokenTag::BANG => TokenKind::Bang,
-            TokenTag::QUESTION_MARK => TokenKind::QuestionMark,
-            TokenTag::NEGATIVE => TokenKind::Negative,
-            TokenTag::EXPONENT => TokenKind::Exponent,
-            TokenTag::MULTIPLY => TokenKind::Multiply,
-            TokenTag::DIVIDE => TokenKind::Divide,
-            TokenTag::MODULUS => TokenKind::Modulus,
-            TokenTag::INT_DIVIDE => TokenKind::IntDivide,
-            TokenTag::EXPONENT_ASSIGN => TokenKind::ExponentAssign,
-            TokenTag::MULTIPLY_ASSIGN => TokenKind::MultiplyAssign,
-            TokenTag::DIVIDE_ASSIGN => TokenKind::DivideAssign,
-            TokenTag::MODULUS_ASSIGN => TokenKind::ModulusAssign,
-            TokenTag::INT_DIVIDE_ASSIGN => TokenKind::IntDivideAssign,
-            TokenTag::ADD => TokenKind::Add,
-            TokenTag::SUBTRACT => TokenKind::Subtract,
-            TokenTag::ADD_ASSIGN => TokenKind::AddAssign,
-            TokenTag::SUBTRACT_ASSIGN => TokenKind::SubtractAssign,
-            TokenTag::NOT => TokenKind::Not,
-            TokenTag::IS => TokenKind::Is,
-            TokenTag::LESS_THAN => TokenKind::LessThan,
-            TokenTag::LESS_THAN_OR_EQUAL => TokenKind::LessThanOrEqual,
-            TokenTag::GREATER_THAN => TokenKind::GreaterThan,
-            TokenTag::GREATER_THAN_OR_EQUAL => TokenKind::GreaterThanOrEqual,
-            TokenTag::AND => TokenKind::And,
-            TokenTag::OR => TokenKind::Or,
-            TokenTag::IF => TokenKind::If,
-            TokenTag::ELSE => TokenKind::Else,
-            TokenTag::RETURN => TokenKind::Return,
-            TokenTag::RETURN_BANG => TokenKind::ReturnBang,
-            TokenTag::CATCH => TokenKind::Catch,
-            TokenTag::THEN => TokenKind::Then,
-            TokenTag::CHECKED => TokenKind::Checked,
-            TokenTag::ASYNC => TokenKind::Async,
-            TokenTag::CAST => TokenKind::Cast,
-            TokenTag::CAST_BANG => TokenKind::CastBang,
-            TokenTag::ASSERT => TokenKind::Assert,
-            TokenTag::LOOP => TokenKind::Loop,
-            TokenTag::BY => TokenKind::By,
-            TokenTag::BREAK => TokenKind::Break,
-            TokenTag::CONTINUE => TokenKind::Continue,
-            TokenTag::EXCLUSIVE_RANGE => TokenKind::ExclusiveRange,
-            TokenTag::AMPERSAND => TokenKind::Ampersand,
-            TokenTag::FAT_ARROW => TokenKind::FatArrow,
-            TokenTag::WILDCARD => TokenKind::Wildcard,
-            TokenTag::COPY => TokenKind::Copy,
-            TokenTag::TEMPLATE_CLOSE => TokenKind::TemplateClose,
-            TokenTag::TEMPLATE_HEAD => TokenKind::TemplateHead,
-            TokenTag::CHANNEL_SEND => TokenKind::ChannelSend,
-            TokenTag::CHANNEL_RECEIVE => TokenKind::ChannelReceive,
-            TokenTag::YIELD => TokenKind::Yield,
-            _ => return Err(TokenViewError::MalformedNumericHandle),
-        };
-        Ok(kind)
+    /// Validate the payload referenced by this canonical shape without materialising a legacy
+    /// token value. Payload failures stay on the infrastructure lane for parser scanners that
+    /// otherwise need only the stable tag.
+    pub(crate) fn validate_payload(self) -> Result<(), TokenViewError> {
+        match self.shape().tag().descriptor().payload() {
+            TokenDescriptorPayload::Static => {
+                if self.shape().flags() == 0 && self.shape().data() == 0 {
+                    Ok(())
+                } else {
+                    Err(TokenViewError::MalformedNumericHandle)
+                }
+            }
+            TokenDescriptorPayload::Path => self
+                .path_syntax()?
+                .map(|_| ())
+                .ok_or(TokenViewError::MalformedPathHandle),
+            TokenDescriptorPayload::NumericLiteral => self
+                .numeric_literal()?
+                .map(|_| ())
+                .ok_or(TokenViewError::MalformedNumericHandle),
+            TokenDescriptorPayload::BoolLiteral => self
+                .bool_value()
+                .map(|_| ())
+                .ok_or(TokenViewError::MalformedNumericHandle),
+            TokenDescriptorPayload::CharLiteral => self
+                .char_value()
+                .map(|_| ())
+                .ok_or(TokenViewError::MalformedNumericHandle),
+            TokenDescriptorPayload::Symbol
+            | TokenDescriptorPayload::StyleDirective
+            | TokenDescriptorPayload::StringLiteral
+            | TokenDescriptorPayload::RawStringLiteral => self
+                .string_id()
+                .map(|_| ())
+                .ok_or(TokenViewError::MalformedStringHandle),
+        }
     }
+
 }
 
 /// A short-lived cursor over one validated contiguous or segmented token view.
@@ -1474,38 +1371,6 @@ impl<'a> TokenCursor<'a> {
     ) -> Result<Self, TokenRangeError> {
         Self::new(tokens, TokenRange::try_new_for(tokens, start, end)?)
     }
-    /// Construct a contiguous cursor at a checked position inside `range`.
-    ///
-    /// The position is canonical (source-local), rather than an adapter-relative index. This is
-    /// the transient handoff used when a bounded compatibility parser resumes from its current
-    /// legacy-vector position.
-    fn from_range_position(
-        tokens: &'a SourceTokens,
-        range: TokenRange,
-        position: TokenIndex,
-    ) -> Result<Self, TokenRangeError> {
-        tokens.validate_range(range)?;
-        if position < range.start || position > range.end {
-            return Err(TokenRangeError::OutOfBounds {
-                start: position.raw(),
-                end: position.raw(),
-                len: range.end.index(),
-            });
-        }
-        Ok(Self {
-            tokens,
-            bounds: TokenCursorBounds::Contiguous(range),
-            segment_index: 0,
-            next: position,
-            logical_position: 0,
-            logical_length: 0,
-            segment_start_position: 0,
-            previous_segment_index: None,
-            next_segment_index: None,
-            window_start: range.start.index(),
-            window_end: range.end.index(),
-        })
-    }
 
     /// Construct a segmented cursor at a checked compatibility-stream position.
     ///
@@ -1602,17 +1467,6 @@ impl<'a> TokenCursor<'a> {
         self.next
     }
 
-    /// Return the number of materialised tokens consumed by this cursor.
-    ///
-    /// Contiguous positions are canonical indexes and therefore require the caller's range
-    /// metadata to subtract its start. Segmented positions count sequence entries and intentionally
-    /// skip source gaps.
-    fn compatibility_position(self) -> Result<usize, TokenSequenceError> {
-        match self.bounds {
-            TokenCursorBounds::Contiguous(_) => Ok(self.next.index()),
-            TokenCursorBounds::Segmented(_) => Ok(self.logical_position),
-        }
-    }
     fn next_non_empty_segment(ranges: &[TokenSequenceRange], start: usize) -> Option<usize> {
         ranges
             .iter()
@@ -1815,29 +1669,6 @@ impl<'a> TokenCursor<'a> {
         }
     }
 
-    /// Return the position of the cursor within its active compatibility view.
-    ///
-    /// Contiguous ranges use offsets from their range start; segmented sequences count logical
-    /// tokens across all prior ranges. This is the bridge for transient parser adapters whose
-    /// payload IDs may be remapped while spans remain canonical.
-    pub(crate) fn compatibility_position_from_start(self) -> Result<usize, CompilerError> {
-        match self.bounds {
-            TokenCursorBounds::Contiguous(range) => self
-                .next
-                .index()
-                .checked_sub(range.start().index())
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "canonical cursor position precedes its active range start",
-                    )
-                }),
-            TokenCursorBounds::Segmented(_) => self.compatibility_position().map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "segmented cursor compatibility position was invalid: {error:?}"
-                ))
-            }),
-        }
-    }
     /// Whether the next token starts a later segmented range with omitted source bytes.
     ///
     /// Contiguous cursors always return `false`. Adjacent ranges are still one logical token
@@ -2089,1034 +1920,6 @@ impl<'a> TokenCursor<'a> {
     }
 }
 
-/// The path-table lifecycle for one token stream.
-///
-/// WHAT: a tokenized source keeps the only mutable table owner while header syntax is being
-///       prepared. Header substreams defer their table reference until the prepared-file owner
-///       has completed its one string remap and source-identity rebind, then share the frozen
-///       immutable table.
-/// WHY: an `Arc` is used only after the construction owner has finished mutating the table. This
-///      prevents ordinary substreams from copying rows while also preventing copy-on-write or
-///      mutable shared path tables during final preparation.
-#[derive(Clone, Debug)]
-pub enum FilePathSyntax {
-    Preparing(Arc<PathSyntaxTable>),
-    Deferred,
-    /// Frozen shared table used by test freeze helpers. Production freeze attaches the table
-    /// to `SourceTokens` instead.
-    #[cfg(test)]
-    Shared(Arc<PathSyntaxTable>),
-}
-
-impl FilePathSyntax {
-    fn preparing(table: PathSyntaxTable) -> Self {
-        Self::Preparing(Arc::new(table))
-    }
-
-    #[cfg(test)]
-    fn shared(mut table: PathSyntaxTable) -> Self {
-        table.freeze();
-        Self::Shared(Arc::new(table))
-    }
-
-    #[cfg(test)]
-    fn permanent_substream(&self) -> Self {
-        match self {
-            // Header syntax does not inspect retained body tokens while parsing the file. Keep
-            // the body deferred so the prepared-file owner remains the sole mutable table owner.
-            Self::Preparing(_) | Self::Deferred => Self::Deferred,
-            Self::Shared(table) => Self::Shared(Arc::clone(table)),
-        }
-    }
-
-    fn table(&self) -> Result<&PathSyntaxTable, CompilerError> {
-        match self {
-            Self::Preparing(table) => Ok(table),
-            #[cfg(test)]
-            Self::Shared(table) => Ok(table),
-            Self::Deferred => Err(CompilerError::compiler_error(
-                "retained token stream was read before its prepared-file path table froze",
-            )),
-        }
-    }
-
-    fn preparing_table_mut(&mut self) -> Result<&mut PathSyntaxTable, CompilerError> {
-        let Self::Preparing(table) = self else {
-            return Err(CompilerError::compiler_error(
-                "path-table mutation was requested after the file preparation owner froze",
-            ));
-        };
-
-        Arc::get_mut(table).ok_or_else(|| {
-            CompilerError::compiler_error(
-                "path-table mutation was requested while a temporary parser still held a shared view",
-            )
-        })
-    }
-
-    fn take_preparing_table(&mut self) -> Result<Arc<PathSyntaxTable>, CompilerError> {
-        let state = std::mem::replace(self, Self::Deferred);
-        match state {
-            Self::Preparing(table) => Ok(table),
-            Self::Deferred => Err(CompilerError::compiler_error(
-                "prepared-file output attempted to take a path table from a deferred stream",
-            )),
-            #[cfg(test)]
-            Self::Shared(_) => Err(CompilerError::compiler_error(
-                "prepared-file output attempted to take an already-frozen path table",
-            )),
-        }
-    }
-
-    /// Attach after a whole-file preflight has proven this stream is deferred.
-    ///
-    /// This intentionally has no fallible branch. `FileFrontendPrepareOutput` first checks every
-    /// retained header, then changes the file owner to frozen and attaches all parser adapters in
-    /// one non-failing commit section. Adding an `Arc` clone never copies table rows or enables COW.
-    #[cfg(test)]
-    fn attach_preflighted_shared(&mut self, table: Arc<PathSyntaxTable>) {
-        debug_assert!(matches!(self, Self::Deferred));
-        *self = Self::Shared(table);
-    }
-}
-
-impl Deref for FilePathSyntax {
-    type Target = PathSyntaxTable;
-
-    fn deref(&self) -> &Self::Target {
-        // Every production consumer runs after the prepared-file freeze boundary. Reaching this
-        // point while deferred is therefore an internal lifecycle violation, while public
-        // validation APIs use `FileTokens::path_syntax_table` and return `CompilerError` instead.
-        self.table()
-            .expect("path syntax must be attached before a retained token stream is consumed")
-    }
-}
-
-/// Explicit canonical-vs-adapter token ownership for one `FileTokens` stream.
-///
-/// WHAT: the top-level lexer output owns the sole canonical `SourceTokens` SoA
-///       (shapes/spans plus numeric/path cold stores) for its `SourceId` at construction.
-///       Remaining parser adapters are unbounded compatibility vectors with a numeric
-///       side-store lane and path lifecycle shell, and no canonical owner.
-/// WHY: two `FileTokens` owners for the same `SourceId` make source-qualified ranges ambiguous.
-/// Unbounded expression adapters therefore retain no owner. Generic bodies borrow donor ranges
-/// directly and carry payload provenance separately, so no transient `SourceTokens` is needed.
-#[derive(Clone, Debug)]
-enum FileTokenOwner {
-    /// Sole canonical SoA owner for its source construction.
-    Canonical(Arc<SourceTokens>),
-    /// Unbounded compatibility parser adapter without owned shape/span arrays.
-    Adapter {
-        numeric_literals: NumericLiteralStore,
-    },
-}
-
-impl FileTokenOwner {
-    #[cfg(test)]
-    fn numeric_literal_store(&self) -> &NumericLiteralStore {
-        match self {
-            Self::Canonical(owner) => owner.numeric_literal_store(),
-            Self::Adapter {
-                numeric_literals, ..
-            } => numeric_literals,
-        }
-    }
-
-    #[cfg(test)]
-    fn remap_owner_string_ids(&mut self, remap: &StringIdRemap) {
-        match self {
-            Self::Canonical(owner) => Arc::get_mut(owner)
-                .expect("canonical source owner must be uniquely mutable before adapter handoff")
-                .remap_string_ids(remap),
-            Self::Adapter {
-                numeric_literals, ..
-            } => numeric_literals.remap_string_ids(remap),
-        }
-    }
-
-    fn rebind_owner_identity(&mut self, source: SourceId) {
-        match self {
-            Self::Canonical(owner) => Arc::get_mut(owner)
-                .expect("canonical source owner must be uniquely mutable before adapter handoff")
-                .rebind_source_identity(source),
-            Self::Adapter {
-                numeric_literals, ..
-            } => numeric_literals.rebind_source_identity(source),
-        }
-    }
-
-    #[cfg(test)]
-    fn freeze_owner_numeric_literals(&mut self) {
-        match self {
-            Self::Canonical(owner) => Arc::get_mut(owner)
-                .expect("canonical source owner must be uniquely mutable before adapter handoff")
-                .freeze_numeric_literals(),
-            Self::Adapter {
-                numeric_literals, ..
-            } => numeric_literals.freeze(),
-        }
-    }
-
-    #[cfg(test)]
-    fn attach_owner_shared_path_syntax(&mut self, table: Arc<PathSyntaxTable>) {
-        match self {
-            Self::Canonical(owner) => Arc::get_mut(owner)
-                .expect("canonical source owner must be uniquely mutable before adapter handoff")
-                .attach_shared_path_syntax(table),
-            // Adapters share the lifecycle shell handle only; they own no SoA table slot.
-            Self::Adapter { .. } => {}
-        }
-    }
-
-    fn as_canonical(&self) -> Result<&SourceTokens, CompilerError> {
-        match self {
-            Self::Canonical(owner) => Ok(owner.as_ref()),
-            Self::Adapter { .. } => Err(CompilerError::compiler_error(
-                "parser adapter stream owns no canonical source-token store",
-            )),
-        }
-    }
-
-    #[cfg(test)]
-    fn canonical_arc(&self) -> Result<Arc<SourceTokens>, CompilerError> {
-        match self {
-            Self::Canonical(owner) => Ok(Arc::clone(owner)),
-            Self::Adapter { .. } => Err(CompilerError::compiler_error(
-                "token adapter has no canonical source-token provenance",
-            )),
-        }
-    }
-
-    #[cfg(test)]
-    fn as_canonical_mut(&mut self) -> Result<&mut SourceTokens, CompilerError> {
-        match self {
-            Self::Canonical(owner) => Arc::get_mut(owner).ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "canonical source token owner is shared during a mutable lifecycle transition",
-                )
-            }),
-            Self::Adapter { .. } => Err(CompilerError::compiler_error(
-                "parser adapter stream owns no canonical source-token store",
-            )),
-        }
-    }
-    #[cfg(test)]
-    const fn is_canonical(&self) -> bool {
-        matches!(self, Self::Canonical(_))
-    }
-}
-
-/// Logical file identity shared by parser-adapter constructors.
-///
-/// WHAT: groups the source path, source identity, and canonical OS path that every adapter
-/// construction needs together.
-/// WHY: keeping them together keeps `with_adapter_path_syntax_and_numeric_store` under the
-/// argument-count lint without changing validation or metadata.
-struct AdapterIdentity {
-    src_path: PathId,
-    file_id: SourceId,
-    canonical_os_path: Option<PathBuf>,
-}
-
-#[derive(Clone, Debug)]
-pub struct FileTokens {
-    /// Canonical owner exactly when this stream constructed its source; otherwise an adapter that
-    /// may retain checked range/sequence provenance and an `Arc` to that canonical source. The
-    /// parser compatibility vector remains on this shell, while retained headers keep only source
-    /// ranges or sequence IDs.
-    token_owner: FileTokenOwner,
-    /// Transitional parser compatibility vector. This is materialized only at explicit AST
-    /// expression/parser handoff boundaries; retained declaration/signature shells keep ranges.
-    pub tokens: Vec<Token>,
-    /// File-owned authored path trees referenced by `TokenKind::Path` handles.
-    ///
-    /// This lifecycle adapter remains mutable while header preparation remaps and rebinds the
-    /// source. Frozen source-token consumers receive the same allocation through `SourceTokens`.
-    pub path_syntax: FilePathSyntax,
-    /// Numeric side-store handle for each token position, when that token is numeric.
-    ///
-    /// The records themselves live in the canonical `SourceTokens` owner or, for adapters,
-    /// in the adapter numeric store; this positional lane is retained only for compatibility with
-    /// generic parser capture code.
-    #[cfg(test)]
-    pub(crate) numeric_literal_ids: Vec<Option<NumericLiteralId>>,
-    /// Complete logical identity of the owning source file in the active path table.
-    pub src_path: PathId,
-    /// Required owning source identity for every token stream, including materialised generics.
-    pub file_id: SourceId,
-    /// Canonical filesystem source path for IO/path-resolution-only logic.
-    ///
-    /// This is adapter metadata, not part of immutable source token storage. The preparation
-    /// output remains the long-lived filesystem identity owner.
-    pub canonical_os_path: Option<PathBuf>,
-    pub(crate) token_stats: TokenStats,
-    pub index: usize,
-    pub length: usize,
-}
-/// Consuming lexer handoff for the canonical source owner and its preparing path table.
-///
-/// WHAT: bundles the sole canonical `SourceTokens` allocation for a `SourceId` with the logical
-///       `PathId`, source identity, canonical OS path, and the still-mutable preparing
-///       `PathSyntaxTable` allocation from one lexer-produced `FileTokens` stream.
-/// WHY: the preparation boundary needs every canonical identity in one move so it can construct
-///      a `SourceTokenOwner` without cloning the canonical `Arc` or retaining a `FileTokens`
-///      shell. The path table stays a separate allocation until the prepared-output freeze.
-#[cfg(test)]
-#[derive(Debug)]
-pub(crate) struct CanonicalLexerHandoff {
-    pub(crate) tokens: Arc<SourceTokens>,
-    pub(crate) logical_path: PathId,
-    pub(crate) file_id: SourceId,
-    pub(crate) canonical_os_path: Option<PathBuf>,
-    pub(crate) path_syntax: Arc<PathSyntaxTable>,
-}
-
-impl FileTokens {
-    #[cfg(test)]
-    pub fn new(src_path: PathId, file_id: SourceId, tokens: Vec<Token>) -> FileTokens {
-        Self::new_with_identity(src_path, file_id, None, tokens, PathSyntaxTable::new())
-    }
-
-    /// Construct the sole mutable path/numeric-store owner for a newly tokenized source file.
-    #[cfg(test)]
-    pub fn new_with_identity(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-        tokens: Vec<Token>,
-        path_syntax: PathSyntaxTable,
-    ) -> FileTokens {
-        Self::with_canonical_path_syntax(
-            src_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            FilePathSyntax::preparing(path_syntax),
-        )
-    }
-
-    /// Source-boundary constructor for lexer output whose canonical owner was packed during lexing.
-    ///
-    /// The canonical owner already carries shapes, spans, stats and the staged numeric rows; the
-    /// preparing path table stays on the lifecycle shell until `freeze_path_syntax` attaches the
-    /// frozen allocation to the canonical owner. The test-only numeric lane is the builder's
-    /// positional lane taken before `finish`, never a re-derived second pass.
-    #[cfg(test)]
-    pub(crate) fn from_lexed_source(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-        tokens: Vec<Token>,
-        source_tokens: SourceTokens,
-        #[cfg(test)] numeric_literal_ids: Vec<Option<NumericLiteralId>>,
-        path_syntax: PathSyntaxTable,
-    ) -> FileTokens {
-        debug_assert!(
-            source_tokens.path_syntax.is_none(),
-            "lexer-packed canonical owner must not carry a path table before publication"
-        );
-        debug_assert_eq!(
-            source_tokens.len(),
-            tokens.len(),
-            "lexer-packed shapes must align with compatibility tokens"
-        );
-        #[cfg(test)]
-        debug_assert_eq!(
-            numeric_literal_ids.len(),
-            tokens.len(),
-            "lexer-packed numeric lane must align with compatibility tokens"
-        );
-        let token_stats = source_tokens.token_stats();
-        FileTokens {
-            length: tokens.len(),
-            token_owner: FileTokenOwner::Canonical(Arc::new(source_tokens)),
-            path_syntax: FilePathSyntax::preparing(path_syntax),
-            #[cfg(test)]
-            numeric_literal_ids,
-            src_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            token_stats,
-            index: 0,
-        }
-    }
-    /// Construct a stream from an already-frozen table owned by a generated persistent artefact.
-    #[cfg(test)]
-    pub(crate) fn new_frozen(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-        tokens: Vec<Token>,
-        path_syntax: PathSyntaxTable,
-    ) -> FileTokens {
-        let mut stream = Self::with_canonical_path_syntax(
-            src_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            FilePathSyntax::shared(path_syntax),
-        );
-        stream.freeze_numeric_literals();
-        stream
-    }
-
-    /// Construct a retained token stream that will receive its table from the completed
-    /// prepared-file owner.
-    pub fn new_deferred_with_identity(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-        tokens: Vec<Token>,
-    ) -> FileTokens {
-        Self::with_adapter_path_syntax(
-            src_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            FilePathSyntax::Deferred,
-        )
-    }
-
-    #[cfg(test)]
-    fn with_canonical_path_syntax(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-        tokens: Vec<Token>,
-        path_syntax: FilePathSyntax,
-    ) -> FileTokens {
-        let (numeric_literals, _) = numeric_store_from_tokens(file_id, &tokens);
-        let mut builder = SourceTokensBuilder::with_capacity(file_id, tokens.len());
-        for token in &tokens {
-            builder
-                .push(&token.kind, token.span)
-                .expect("test token adapter must produce valid source-token shapes");
-        }
-        let numeric_literal_ids = builder.take_numeric_literal_ids();
-        debug_assert_eq!(
-            numeric_literal_ids.len(),
-            tokens.len(),
-            "numeric side-store handles must align with token positions"
-        );
-        let mut source_tokens = builder
-            .finish(numeric_literals)
-            .expect("test token adapter must produce valid source-token shapes");
-        // An already-shared table is immutable, so the canonical owner carries that same
-        // allocation immediately, and its identity and handle spans are checked first so a
-        // malformed fixture cannot enter an immutable owner. A preparing table stays on the
-        // lifecycle shell until publication attaches it.
-        if let FilePathSyntax::Shared(table) = &path_syntax {
-            table
-                .validate_file_owned_locations(file_id)
-                .expect("frozen source token path table must match its source identity");
-            table
-                .validate_file_tokens(&tokens, file_id, "frozen source token owner")
-                .expect("frozen source token path handles must match its shared table");
-            source_tokens.attach_shared_path_syntax(Arc::clone(table));
-        }
-        // The canonical owner counted from its packed shapes during construction, so the
-        // shell shares that exact snapshot instead of re-running a default-then-rewrite pass.
-        let token_stats = source_tokens.token_stats();
-        FileTokens {
-            length: tokens.len(),
-            token_owner: FileTokenOwner::Canonical(Arc::new(source_tokens)),
-            path_syntax,
-            #[cfg(test)]
-            numeric_literal_ids,
-            src_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            token_stats,
-            index: 0,
-        }
-    }
-
-    fn with_adapter_path_syntax(
-        src_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-        tokens: Vec<Token>,
-        path_syntax: FilePathSyntax,
-    ) -> FileTokens {
-        let (numeric_literals, numeric_literal_ids) = numeric_store_from_tokens(file_id, &tokens);
-        Self::with_adapter_path_syntax_and_numeric_store(
-            AdapterIdentity {
-                src_path,
-                file_id,
-                canonical_os_path,
-            },
-            tokens,
-            path_syntax,
-            numeric_literals,
-            numeric_literal_ids,
-        )
-    }
-
-    fn with_adapter_path_syntax_and_numeric_store(
-        identity: AdapterIdentity,
-        tokens: Vec<Token>,
-        path_syntax: FilePathSyntax,
-        numeric_literals: NumericLiteralStore,
-        numeric_literal_ids: Vec<Option<NumericLiteralId>>,
-    ) -> FileTokens {
-        let AdapterIdentity {
-            src_path,
-            file_id,
-            canonical_os_path,
-        } = identity;
-        debug_assert_eq!(
-            tokens.len(),
-            numeric_literal_ids.len(),
-            "numeric side-store handles must align with token positions"
-        );
-        validate_adapter_numeric_lane(file_id, &tokens, &numeric_literals, &numeric_literal_ids);
-        #[cfg(test)]
-        if let FilePathSyntax::Shared(table) = &path_syntax {
-            table
-                .validate_file_owned_locations(file_id)
-                .expect("parser adapter path table must match its source identity");
-            table
-                .validate_file_tokens(&tokens, file_id, "parser adapter stream")
-                .expect("parser adapter path handles must match its shared table");
-        }
-        #[cfg(not(test))]
-        drop(numeric_literal_ids);
-        FileTokens {
-            length: tokens.len(),
-            token_owner: FileTokenOwner::Adapter { numeric_literals },
-            path_syntax,
-            #[cfg(test)]
-            numeric_literal_ids,
-            src_path,
-            file_id,
-            canonical_os_path,
-            tokens,
-            token_stats: TokenStats::default(),
-            index: 0,
-        }
-    }
-
-    /// Build a test-only parser adapter over a copied token vector.
-    ///
-    /// Test fixtures use this to model streams without canonical provenance. The adapter
-    /// derives its path-table attachment from the source but owns no canonical
-    /// `SourceTokens`; it keeps only the parser `Token` vector, numeric side store and
-    /// lifecycle shell for its bounded lifetime.
-    #[cfg(test)]
-    pub fn new_substream(
-        source: &FileTokens,
-        src_path: PathId,
-        file_id: SourceId,
-        tokens: Vec<Token>,
-    ) -> FileTokens {
-        Self::with_adapter_path_syntax(
-            src_path,
-            file_id,
-            source.canonical_os_path.clone(),
-            tokens,
-            source.path_syntax.permanent_substream(),
-        )
-    }
-
-    /// Move this source stream into the prepared-source owner.
-    ///
-    /// The replacement is an empty adapter used only to leave the caller's mutable slot in a
-    /// valid state. The moved stream retains the one canonical `SourceTokens` owner.
-    pub(crate) fn take_for_prepared_source(&mut self) -> FileTokens {
-        let replacement = Self::new_deferred_with_identity(
-            self.src_path,
-            self.file_id,
-            self.canonical_os_path.clone(),
-            Vec::new(),
-        );
-        std::mem::replace(self, replacement)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn try_register_token_sequence(
-        &mut self,
-        ranges: &[TokenRange],
-    ) -> Result<TokenSequenceId, TokenSequenceError> {
-        self.token_owner
-            .as_canonical_mut()
-            .map_err(|_| TokenSequenceError::NoCanonicalOwner)?
-            .try_register_token_sequence(ranges)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn register_token_sequence(
-        &mut self,
-        ranges: &[TokenRange],
-    ) -> Result<TokenSequenceId, CompilerError> {
-        self.try_register_token_sequence(ranges).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "source token sequence registration failed: {error:?}"
-            ))
-        })
-    }
-
-    /// Borrow the canonical source store this stream owns outright.
-    ///
-    /// Ordinary parser/header adapters own no `SourceTokens`; their honest boundary is this
-    /// error rather than a duplicate source-qualified owner.
-    pub fn source_tokens(&self) -> Result<&SourceTokens, CompilerError> {
-        self.token_owner.as_canonical()
-    }
-    #[cfg(test)]
-    pub(crate) fn canonical_source_tokens_arc(&self) -> Result<Arc<SourceTokens>, CompilerError> {
-        self.token_owner.canonical_arc()
-    }
-    /// Move the sole canonical owner and its preparing path table out of a lexer stream.
-    ///
-    /// WHAT: destructures this `FileTokens` so no shell remains, moving the canonical
-    ///       `Arc<SourceTokens>` allocation, logical `PathId`, `SourceId`, canonical OS path,
-    ///       and the preparing `Arc<PathSyntaxTable>` into one handoff value. No token, span,
-    ///       or numeric array is cloned and no second store is allocated.
-    /// WHY: the preparation boundary constructs a `SourceTokenOwner` from lexer output without
-    ///      cloning the canonical `Arc` or retaining a `FileTokens` shell, while the path table
-    ///      stays a separate allocation until the prepared-output freeze. Adapter streams and
-    ///      already-shared or deferred path state are rejected with `CompilerError` to preserve
-    ///      the one-canonical-owner lifecycle invariant.
-    #[cfg(test)]
-    pub(crate) fn into_canonical_lexer_handoff(self) -> Result<CanonicalLexerHandoff, CompilerError> {
-        let FileTokens {
-            token_owner,
-            path_syntax,
-            src_path,
-            file_id,
-            canonical_os_path,
-            ..
-        } = self;
-        let FileTokenOwner::Canonical(tokens) = token_owner else {
-            return Err(CompilerError::compiler_error(
-                "token adapter has no canonical source-token provenance",
-            ));
-        };
-        let FilePathSyntax::Preparing(path_syntax) = path_syntax else {
-            return Err(CompilerError::compiler_error(
-                "canonical lexer handoff requires a preparing path table before the prepared-output freeze",
-            ));
-        };
-        if tokens.source() != file_id {
-            return Err(CompilerError::compiler_error(
-                "canonical source token owner does not match its file stream identity",
-            ));
-        }
-        Ok(CanonicalLexerHandoff {
-            tokens,
-            logical_path: src_path,
-            file_id,
-            canonical_os_path,
-            path_syntax,
-        })
-    }
-    /// Create a checked canonical cursor at this stream's compatibility-vector position.
-    ///
-    /// Canonical streams use their full source range. Unbounded compatibility vectors
-    /// deliberately return an error instead of fabricating a source owner.
-    pub fn canonical_cursor_from_current(&self) -> Result<TokenCursor<'_>, CompilerError> {
-        if self.length != self.tokens.len() || self.index > self.length {
-            return Err(CompilerError::compiler_error(
-                "token adapter compatibility position is outside its vector bounds",
-            ));
-        }
-        match &self.token_owner {
-            FileTokenOwner::Canonical(source_tokens) => {
-                if source_tokens.source() != self.file_id {
-                    return Err(CompilerError::compiler_error(
-                        "canonical source token owner does not match its file stream identity",
-                    ));
-                }
-                let range = source_tokens.full_range().map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "canonical source token range could not be constructed: {error:?}"
-                    ))
-                })?;
-                let position = TokenIndex::try_from_index(self.index).ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "canonical compatibility position exceeded its checked index domain",
-                    )
-                })?;
-                TokenCursor::from_range_position(source_tokens, range, position).map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "canonical cursor handoff position was out of bounds: {error:?}"
-                    ))
-                })
-            }
-            FileTokenOwner::Adapter { .. } => Err(CompilerError::compiler_error(
-                "token adapter has no canonical source-token provenance",
-            )),
-        }
-    }
-
-    /// Compute the legacy compatibility index after a transient canonical parser handoff.
-    ///
-    /// The cursor must have been created for this exact owner and range/sequence metadata. A
-    /// foreign or differently bounded cursor is rejected rather than silently producing an
-    /// index for an unrelated source position.
-    pub fn compatibility_index_for_cursor(
-        &self,
-        cursor: TokenCursor<'_>,
-    ) -> Result<usize, CompilerError> {
-        if self.length != self.tokens.len() {
-            return Err(CompilerError::compiler_error(
-                "token adapter compatibility vector length is inconsistent",
-            ));
-        }
-        let next_index = match &self.token_owner {
-            FileTokenOwner::Canonical(source_tokens) => {
-                if !std::ptr::eq(cursor.tokens, source_tokens.as_ref())
-                    || cursor.tokens.source() != self.file_id
-                {
-                    return Err(CompilerError::compiler_error(
-                        "canonical cursor belongs to a different source-token owner",
-                    ));
-                }
-                let range = source_tokens.full_range().map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "canonical source token range could not be constructed: {error:?}"
-                    ))
-                })?;
-                if !matches!(cursor.bounds, TokenCursorBounds::Contiguous(actual) if actual == range)
-                {
-                    return Err(CompilerError::compiler_error(
-                        "canonical cursor bounds do not match the owning file stream",
-                    ));
-                }
-                cursor.position().index()
-            }
-            FileTokenOwner::Adapter { .. } => {
-                return Err(CompilerError::compiler_error(
-                    "token adapter has no canonical source-token provenance",
-                ));
-            }
-        };
-        if next_index > self.length {
-            return Err(CompilerError::compiler_error(
-                "canonical cursor consumed beyond its compatibility adapter",
-            ));
-        }
-        Ok(next_index)
-    }
-
-    pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
-        self.path_syntax.table()
-    }
-
-    /// Materialize one checked token range from the canonical source arrays.
-    ///
-    /// Unbounded compatibility adapters have no canonical range provenance.
-    #[cfg(test)]
-    pub(crate) fn materialize_token_range(
-        &self,
-        range: TokenRange,
-    ) -> Result<Vec<Token>, CompilerError> {
-        match &self.token_owner {
-            FileTokenOwner::Canonical(_) => self.materialize_canonical_token_range(range),
-            FileTokenOwner::Adapter { .. } => Err(CompilerError::compiler_error(
-                "unbounded token adapter has no canonical range provenance",
-            )),
-        }
-    }
-
-    #[cfg(test)]
-    fn materialize_canonical_token_range(
-        &self,
-        range: TokenRange,
-    ) -> Result<Vec<Token>, CompilerError> {
-        let canonical = self.source_tokens()?;
-        if canonical.source() != self.file_id {
-            return Err(CompilerError::compiler_error(
-                "canonical source token owner does not match its file stream identity",
-            ));
-        }
-        let cursor = canonical.cursor(range).map_err(|error| {
-            CompilerError::compiler_error(format!("token range materialization failed: {error:?}"))
-        })?;
-        self.materialize_cursor(cursor)
-    }
-
-    #[cfg(test)]
-    fn materialize_cursor(&self, mut cursor: TokenCursor<'_>) -> Result<Vec<Token>, CompilerError> {
-        let mut tokens = Vec::with_capacity(cursor.range().len() as usize);
-        while let Some(token_ref) = cursor.advance() {
-            let is_eof = token_ref.is_eof();
-            let kind = token_ref.to_token_kind().map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "canonical token payload could not be materialized: {error:?}"
-                ))
-            })?;
-            tokens.push(Token::new(kind, token_ref.span()));
-            if is_eof {
-                break;
-            }
-        }
-        Ok(tokens)
-    }
-
-    /// Whether this stream is the sole canonical `SourceTokens` owner for its construction.
-    #[cfg(test)]
-    pub(crate) const fn has_canonical_source_tokens(&self) -> bool {
-        self.token_owner.is_canonical()
-    }
-
-    /// Return the numeric cold store for this stream.
-    ///
-    /// Canonical owners expose the SoA cold store; adapters expose their numeric side store with
-    /// the same source/handle lifecycle.
-    #[cfg(test)]
-    pub(crate) fn numeric_literal_store(&self) -> &NumericLiteralStore {
-        self.token_owner.numeric_literal_store()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn numeric_literal_id_at(&self, token_index: usize) -> Option<NumericLiteralId> {
-        self.numeric_literal_ids.get(token_index).copied().flatten()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn take_preparing_path_syntax(
-        &mut self,
-    ) -> Result<Arc<PathSyntaxTable>, CompilerError> {
-        self.path_syntax.take_preparing_table()
-    }
-
-    /// Commit a table attachment after the whole-file preflight passed for every header.
-    ///
-    /// Canonical owners also receive the same frozen allocation in their `SourceTokens` slot so
-    /// cursor path views resolve after ordinary publication. Adapters share only the lifecycle
-    /// shell handle because they own no SoA table slot.
-    #[cfg(test)]
-    pub(crate) fn attach_preflighted_shared_path_syntax(
-        &mut self,
-        path_syntax: Arc<PathSyntaxTable>,
-    ) {
-        self.token_owner
-            .attach_owner_shared_path_syntax(Arc::clone(&path_syntax));
-        self.path_syntax.attach_preflighted_shared(path_syntax);
-    }
-
-    /// Freeze the numeric store at publication.
-    ///
-    /// The caller must complete all construction-time string remaps first. The canonical owner
-    /// finishes frozen through its checked owner boundary and never calls this on an already-frozen
-    /// store.
-    #[cfg(test)]
-    pub(crate) fn freeze_numeric_literals(&mut self) {
-        self.token_owner.freeze_owner_numeric_literals();
-    }
-
-    /// Freeze a standalone token stream used by an AST-focused unit test.
-    ///
-    /// Production preparation moves the mutable table into `FileFrontendPrepareOutput`, validates
-    /// the complete file, and attaches the resulting immutable table to retained headers. These
-    /// direct parser tests have no retained header output, but they still model the AST's
-    /// post-freeze input contract rather than letting parser substreams read a mutable table.
-    #[cfg(test)]
-    pub(crate) fn freeze_path_syntax_for_test(&mut self) {
-        let path_syntax = std::mem::replace(&mut self.path_syntax, FilePathSyntax::Deferred);
-        self.path_syntax = match path_syntax {
-            FilePathSyntax::Preparing(mut path_syntax)
-            | FilePathSyntax::Shared(mut path_syntax) => {
-                Arc::get_mut(&mut path_syntax)
-                    .expect("test path table unexpectedly had another owner")
-                    .freeze();
-                self.token_owner
-                    .attach_owner_shared_path_syntax(Arc::clone(&path_syntax));
-                FilePathSyntax::Shared(path_syntax)
-            }
-            FilePathSyntax::Deferred => {
-                panic!("test token stream did not retain a file-owned path table to freeze")
-            }
-        };
-        self.freeze_numeric_literals();
-    }
-
-    pub fn current_token_kind(&self) -> &TokenKind {
-        &self.tokens[self.index].kind
-    }
-
-    #[cfg(test)]
-    pub fn current_token(&self) -> Token {
-        self.tokens[self.index].clone()
-    }
-    /// Return the exact global span of the current token.
-    pub fn current_span(&self) -> SourceSpan {
-        SourceSpan::new(self.file_id, self.tokens[self.index].span)
-    }
-
-    pub fn advance(&mut self) {
-        if self.index >= self.tokens.len() {
-            token_log!(Red "Compiler tried to advance past token stream bounds");
-            return;
-        }
-
-        match &self.current_token_kind() {
-            // Can't advance past End of File
-            &TokenKind::Eof => {
-                // Show a warning for compiler_frontend development purposes
-                token_log!(Red "Compiler tried to advance past EOF");
-            }
-
-            _ => {
-                self.index += 1;
-            }
-        }
-    }
-
-    pub fn skip_newlines(&mut self) {
-        while self.index + 1 < self.length
-            && matches!(self.current_token_kind(), TokenKind::Newline)
-        {
-            self.index += 1;
-        }
-    }
-
-    #[cfg(test)]
-    /// Remap a token stream while it still owns its mutable path table.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        if self.numeric_literal_store().is_frozen() {
-            panic!("numeric literal remapping was requested after the source publication freeze");
-        }
-        self.token_owner.remap_owner_string_ids(remap);
-        self.remap_token_payload_string_ids(remap);
-    }
-
-    #[cfg(test)]
-    /// Remap this stream's complete-path identity after its path fork merges.
-    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
-        self.src_path = remap.get(self.src_path);
-    }
-
-    #[cfg(test)]
-    fn remap_token_payload_string_ids(&mut self, remap: &StringIdRemap) {
-        for token in &mut self.tokens {
-            token.remap_string_ids(remap);
-        }
-    }
-    #[cfg(test)]
-    /// Remap a token stream while it still owns its mutable path table.
-    pub(crate) fn remap_preparing_string_ids(
-        &mut self,
-        remap: &StringIdRemap,
-    ) -> Result<(), CompilerError> {
-        // Validate the mutable lifecycle before changing any token payload. The second access is
-        self.path_syntax.preparing_table_mut()?;
-        if self.numeric_literal_store().is_frozen() {
-            return Err(CompilerError::compiler_error(
-                "numeric literal remapping was requested after the source publication freeze",
-            ));
-        }
-        self.token_owner.remap_owner_string_ids(remap);
-        self.remap_token_payload_string_ids(remap);
-        Ok(())
-    }
-
-    #[cfg(test)]
-    /// Remap a preparing stream's file identity and its mutable path table.
-    pub(crate) fn remap_preparing_path_ids(
-        &mut self,
-        remap: &PathIdRemap,
-    ) -> Result<(), CompilerError> {
-        self.path_syntax.preparing_table_mut()?;
-        self.src_path = remap.get(self.src_path);
-        self.path_syntax
-            .preparing_table_mut()?
-            .remap_path_ids(remap);
-        Ok(())
-    }
-
-    /// Rebind this token stream to a new module source identity.
-    ///
-    /// Source-local token spans remain unchanged. Only the owning `SourceId` and path-table rows
-    /// are restamped, so every global path span continues to name the same byte range.
-    #[cfg(test)]
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-    ) -> Result<(), CompilerError> {
-        self.path_syntax.preparing_table_mut()?;
-        self.src_path = logical_path;
-        self.rebind_file_identity(self.src_path, file_id, canonical_os_path);
-        self.path_syntax
-            .preparing_table_mut()?
-            .rebind_source_identity(file_id);
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub fn rebind_file_identity(
-        &mut self,
-        _logical_path: PathId,
-        file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
-    ) {
-        self.file_id = file_id;
-        self.canonical_os_path = canonical_os_path;
-        self.token_owner.rebind_owner_identity(file_id);
-    }
-}
-
-fn numeric_store_from_tokens(
-    source: SourceId,
-    tokens: &[Token],
-) -> (NumericLiteralStore, Vec<Option<NumericLiteralId>>) {
-    let mut store = NumericLiteralStore::with_source(source);
-    let mut ids = Vec::with_capacity(tokens.len());
-    for token in tokens {
-        let id = match &token.kind {
-            TokenKind::NumericLiteral(literal) => Some(
-                store
-                    .try_push_for_source(source, literal.clone())
-                    .expect("test/retained numeric literal row must fit its checked handle domain"),
-            ),
-            _ => None,
-        };
-        ids.push(id);
-    }
-    (store, ids)
-}
-/// Validate one adapter numeric lane without building a second canonical owner.
-///
-/// Adapters reuse the ordinary numeric handle/source checks so parser streams keep working,
-/// but they never allocate `SourceTokens` shapes, spans or cold-store SoA arrays.
-fn validate_adapter_numeric_lane(
-    source: SourceId,
-    tokens: &[Token],
-    numeric_literals: &NumericLiteralStore,
-    numeric_literal_ids: &[Option<NumericLiteralId>],
-) {
-    debug_assert_eq!(
-        tokens.len(),
-        numeric_literal_ids.len(),
-        "parser adapter numeric handles must align with token positions"
-    );
-    if numeric_literals.owner_source().is_none() && !numeric_literals.is_empty() {
-        panic!("parser adapter numeric store has records but no source identity");
-    }
-    for (index, token) in tokens.iter().enumerate() {
-        let numeric_id = numeric_literal_ids[index];
-        let is_numeric = matches!(token.kind, TokenKind::NumericLiteral(_));
-        match (is_numeric, numeric_id) {
-            (true, Some(id)) => {
-                numeric_literals
-                    .try_get_for_source(id, source)
-                    .expect("parser adapter numeric handle must address its numeric side store");
-            }
-            (true, None) => panic!(
-                "parser adapter numeric token at index {index} is missing its side-store handle"
-            ),
-            (false, Some(_)) => {
-                panic!("parser adapter non-numeric token at index {index} carries a numeric handle")
-            }
-            (false, None) => {}
-        }
-    }
-}
 
 pub struct TokenStream<'a> {
     pub file_id: SourceId,
@@ -3389,14 +2192,6 @@ impl<'a> TokenStream<'a> {
         )
     }
 
-    /// Legacy token construction retained only for tokenizer fixtures until their migration.
-    #[cfg(test)]
-    pub fn new_token(&mut self, kind: TokenKind) -> Result<Token, SpanCapacityError> {
-        let span = self.current_local_span()?;
-        self.start_byte_offset = self.byte_offset;
-        Ok(Token::new(kind, span))
-    }
-
     /// Anchor the token's byte range at the character already consumed.
     ///
     /// WHY: the lexer reads a token's first character before it can classify the token, and it
@@ -3557,12 +2352,12 @@ impl TokenDescriptor {
 
 /// Stable compact taxonomy shared by tokenizer shapes and diagnostic projections.
 ///
-/// Every value is explicit in the schema invocation below. It is deliberately independent of
-/// `TokenKind` declaration order so adding or reordering source variants cannot change retained
-/// diagnostic data.
+/// Every value is explicit in the schema invocation below. It is independent of declaration
+/// order so adding or reordering source variants cannot change retained diagnostic data.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TokenTag(u16);
+
 /// Fixed source-token shape: one stable tag, reserved/semantic flags and one compact payload.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -3571,7 +2366,6 @@ pub struct TokenShape {
     pub(crate) flags: u16,
     pub(crate) data: u32,
 }
-
 const _: () = assert!(std::mem::size_of::<TokenShape>() == 8);
 
 const TOKEN_CLASS_ASSIGNMENT: u16 = 1 << 0;
@@ -3833,198 +2627,20 @@ macro_rules! token_schema {
             }
         }
 
-        impl TokenKind {
-            /// Return the stable taxonomy tag for this token, independent of enum ordinals.
-            pub(crate) fn token_tag(&self) -> TokenTag {
-                match self {
-                    $($pattern => TokenTag::$tag_name,)+
-                }
-            }
-        }
     };
 }
 
 const TOKEN_NUMERIC_FLAGS: u16 = 0b11;
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum TokenKind {
-    // For Compiler
-    ModuleStart, // Contains module name space
-    Eof,         // End of the file
-
-    /// Module-root API marker for the strict `export:` block; exposes declarations or re-exports
-    /// through the module's public export surface. Not a general visibility keyword.
-    Export,
-
-    // #
-    Hash,
-
-    // Reactive declaration/parameter access marker in ordinary code.
-    Reactive,
-
-    /// Function Signatures
-    Arrow,
-
-    /// Variable name
-    Symbol(StringId),
-    // `$md`, `$fresh`, and builder-registered directives inside template heads.
-    StyleDirective(StringId),
-
-    // Values
-    StringSliceLiteral(StringId),
-    Path(PathSyntaxId), // Compile time path resolution; dense handle into FileTokens.path_syntax
-    NumericLiteral(NumericLiteralToken),
-    CharLiteral(char),
-    RawStringLiteral(StringId),
-    BoolLiteral(bool),
-
-    // Collections
-    OpenCurly,  // {
-    CloseCurly, // }
-
-    TypeParameterBracket, // |
-
-    // Structure of Syntax
-    Newline,
-    End,
-    StartTemplateBody,
-
-    // Basic Grammar
-    Comma,
-    Dot,
-    Colon,       // :
-    DoubleColon, // ::
-    Assign,      // =
-
-    // Reserved receiver / trait syntax
-    // `this` is reserved for explicit method receiver parameters.
-    // `This` is the trait-local receiver placeholder and remains reserved elsewhere.
-    This,
-    Must,
-    TraitThis,
-
-    // Scope
-    OpenParenthesis,  // (
-    CloseParenthesis, // )
-
-    As,
-    Type,
-    Of,
-
-    // Can modify types to become variadic parameters.
-    // So any number of values can be passed in
-    Variadic, // ..
-
-    // Type Declarations
-    Mutable,
-
-    // Datatypes
-    DatatypeNone,
-    NoneLiteral,
-    DatatypeInt,
-    DatatypeFloat,
-    DatatypeBool,
-    DatatypeTrue,
-    DatatypeFalse,
-    DatatypeString,
-    DatatypeChar,
-
-    /// For Errors
-    Bang,
-    /// For Options
-    QuestionMark,
-
-    // Mathematical Operators
-    Negative,
-
-    Exponent,
-    Multiply,
-    Divide,
-    Modulus,
-    IntDivide,
-
-    ExponentAssign,
-    MultiplyAssign,
-    DivideAssign,
-    ModulusAssign,
-    IntDivideAssign,
-
-    Add,
-    Subtract,
-    AddAssign,
-    SubtractAssign,
-
-    // Logical Operators in order of precedence
-    Not,
-    Is,
-    LessThan,
-    LessThanOrEqual,
-    GreaterThan,
-    GreaterThanOrEqual,
-
-    And,
-    Or,
-
-    // Control Flow
-    /// If statements and match statements
-    If,
-    Else,
-    Return,
-    /// Attached error-return statement keyword: `return!`.
-    ReturnBang,
-    Catch,
-    Then,
-    Checked,
-    Async,
-
-    // Explicit builtin cast keyword.
-    Cast,
-    /// Attached fallible-cast propagation keyword: `cast!`.
-    CastBang,
-
-    /// Assertion statement intrinsic.
-    ///
-    /// WHAT: `assert(condition)` and `assert(condition, "message")` are language-owned
-    ///       statement surfaces for runtime invariant checking.
-    /// WHY: tokenizing it separately keeps the language-owned statement out of the
-    ///      ordinary symbol path, so it cannot be shadowed by user declarations.
-    Assert,
-
-    // Loops
-    Loop,
-    By,
-    Break,
-    Continue,
-    ExclusiveRange, // to
-
-    // Range inclusivity marker
-    Ampersand, // &
-
-    // Pattern matching
-    FatArrow, // =>
-    Wildcard, // _
-
-    // Memory Management
-    Copy,
-
-    // Templates
-    TemplateClose,
-    TemplateHead,
-
-    // Channels
-    ChannelSend,    // >>
-    ChannelReceive, // <<
-    Yield,
-}
 token_schema! {
-    (TokenKind::ModuleStart, MODULE_START, 1, "module start", Static, 0, 0, None),
-    (TokenKind::Eof, EOF, 2, "end of file", Static, 0, TOKEN_CLASS_DELIMITER, None),
-    (TokenKind::Export, EXPORT, 3, "`export`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Hash, HASH, 4, "`#`", Static, 0, 0, None),
-    (TokenKind::Reactive, REACTIVE, 5, "`$`", Static, 0, 0, None),
-    (TokenKind::Arrow, ARROW, 6, "`->`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, None),
+    (ModuleStart, MODULE_START, 1, "module start", Static, 0, 0, None),
+    (Eof, EOF, 2, "end of file", Static, 0, TOKEN_CLASS_DELIMITER, None),
+    (Export, EXPORT, 3, "`export`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Hash, HASH, 4, "`#`", Static, 0, 0, None),
+    (Reactive, REACTIVE, 5, "`$`", Static, 0, 0, None),
+    (Arrow, ARROW, 6, "`->`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, None),
     (
-        TokenKind::Symbol(_),
+        Symbol(_),
         SYMBOL,
         7,
         "name",
@@ -4034,7 +2650,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::StyleDirective(_),
+        StyleDirective(_),
         STYLE_DIRECTIVE,
         8,
         "style directive",
@@ -4044,7 +2660,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::StringSliceLiteral(_),
+        StringSliceLiteral(_),
         STRING_SLICE_LITERAL,
         9,
         "string literal",
@@ -4053,9 +2669,9 @@ token_schema! {
         TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
         None
     ),
-    (TokenKind::Path(_), PATH, 10, "path", Path, 0, TOKEN_CLASS_OPERAND_START, None),
+    (Path(_), PATH, 10, "path", Path, 0, TOKEN_CLASS_OPERAND_START, None),
     (
-        TokenKind::NumericLiteral(_),
+        NumericLiteral(_),
         NUMERIC_LITERAL,
         11,
         "numeric literal",
@@ -4065,7 +2681,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::CharLiteral(_),
+        CharLiteral(_),
         CHAR_LITERAL,
         12,
         "character literal",
@@ -4075,7 +2691,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::RawStringLiteral(_),
+        RawStringLiteral(_),
         RAW_STRING_LITERAL,
         13,
         "raw string literal",
@@ -4085,7 +2701,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::BoolLiteral(_),
+        BoolLiteral(_),
         BOOL_LITERAL,
         14,
         "boolean literal",
@@ -4095,7 +2711,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::OpenCurly,
+        OpenCurly,
         OPEN_CURLY,
         15,
         "`{`",
@@ -4105,7 +2721,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::CloseCurly,
+        CloseCurly,
         CLOSE_CURLY,
         16,
         "`}`",
@@ -4115,7 +2731,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::TypeParameterBracket,
+        TypeParameterBracket,
         TYPE_PARAMETER_BRACKET,
         17,
         "`|`",
@@ -4125,7 +2741,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::Newline,
+        Newline,
         NEWLINE,
         18,
         "newline",
@@ -4135,7 +2751,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::End,
+        End,
         END,
         19,
         "`;`",
@@ -4145,7 +2761,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::StartTemplateBody,
+        StartTemplateBody,
         START_TEMPLATE_BODY,
         20,
         "`:`",
@@ -4155,7 +2771,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::Comma,
+        Comma,
         COMMA,
         21,
         "`,`",
@@ -4164,9 +2780,9 @@ token_schema! {
         TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION,
         None
     ),
-    (TokenKind::Dot, DOT, 22, "`.`", Static, 0, TOKEN_CLASS_DELIMITER, None),
+    (Dot, DOT, 22, "`.`", Static, 0, TOKEN_CLASS_DELIMITER, None),
     (
-        TokenKind::Colon,
+        Colon,
         COLON,
         23,
         "`:`",
@@ -4176,7 +2792,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DoubleColon,
+        DoubleColon,
         DOUBLE_COLON,
         24,
         "`::`",
@@ -4186,7 +2802,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::Assign,
+        Assign,
         ASSIGN,
         25,
         "`=`",
@@ -4196,7 +2812,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::This,
+        This,
         THIS,
         26,
         "`this`",
@@ -4205,9 +2821,9 @@ token_schema! {
         TOKEN_CLASS_KEYWORD | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
         None
     ),
-    (TokenKind::Must, MUST, 27, "`must`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Must, MUST, 27, "`must`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (
-        TokenKind::TraitThis,
+        TraitThis,
         TRAIT_THIS,
         28,
         "`This`",
@@ -4217,7 +2833,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::OpenParenthesis,
+        OpenParenthesis,
         OPEN_PARENTHESIS,
         29,
         "`(`",
@@ -4227,7 +2843,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::CloseParenthesis,
+        CloseParenthesis,
         CLOSE_PARENTHESIS,
         30,
         "`)`",
@@ -4236,11 +2852,11 @@ token_schema! {
         TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CAN_END_EXPRESSION,
         None
     ),
-    (TokenKind::As, AS, 31, "`as`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Type, TYPE, 32, "`type`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Of, OF, 33, "`of`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (As, AS, 31, "`as`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Type, TYPE, 32, "`type`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Of, OF, 33, "`of`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (
-        TokenKind::Variadic,
+        Variadic,
         VARIADIC,
         34,
         "`..`",
@@ -4250,7 +2866,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::Mutable,
+        Mutable,
         MUTABLE,
         35,
         "`~`",
@@ -4260,7 +2876,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DatatypeNone,
+        DatatypeNone,
         DATATYPE_NONE,
         36,
         "`None` type",
@@ -4270,7 +2886,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::NoneLiteral,
+        NoneLiteral,
         NONE_LITERAL,
         37,
         "`none`",
@@ -4280,7 +2896,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DatatypeInt,
+        DatatypeInt,
         DATATYPE_INT,
         38,
         "`Int`",
@@ -4290,7 +2906,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DatatypeFloat,
+        DatatypeFloat,
         DATATYPE_FLOAT,
         39,
         "`Float`",
@@ -4300,7 +2916,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DatatypeBool,
+        DatatypeBool,
         DATATYPE_BOOL,
         40,
         "`Bool`",
@@ -4310,7 +2926,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DatatypeTrue,
+        DatatypeTrue,
         DATATYPE_TRUE,
         41,
         "`True`",
@@ -4320,7 +2936,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DatatypeFalse,
+        DatatypeFalse,
         DATATYPE_FALSE,
         42,
         "`False`",
@@ -4330,7 +2946,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DatatypeString,
+        DatatypeString,
         DATATYPE_STRING,
         43,
         "`String`",
@@ -4340,7 +2956,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DatatypeChar,
+        DatatypeChar,
         DATATYPE_CHAR,
         44,
         "`Char`",
@@ -4350,7 +2966,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::Bang,
+        Bang,
         BANG,
         45,
         "`!`",
@@ -4360,7 +2976,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::QuestionMark,
+        QuestionMark,
         QUESTION_MARK,
         46,
         "`?`",
@@ -4369,14 +2985,14 @@ token_schema! {
         TOKEN_CLASS_CAN_END_EXPRESSION,
         None
     ),
-    (TokenKind::Negative, NEGATIVE, 47, "unary `-`", Static, 0, 0, Some(6)),
-    (TokenKind::Exponent, EXPONENT, 48, "`^`", Static, 0, 0, Some(5)),
-    (TokenKind::Multiply, MULTIPLY, 49, "`*`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (TokenKind::Divide, DIVIDE, 50, "`/`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (TokenKind::Modulus, MODULUS, 51, "`%`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (TokenKind::IntDivide, INT_DIVIDE, 52, "`//`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (Negative, NEGATIVE, 47, "unary `-`", Static, 0, 0, Some(6)),
+    (Exponent, EXPONENT, 48, "`^`", Static, 0, 0, Some(5)),
+    (Multiply, MULTIPLY, 49, "`*`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (Divide, DIVIDE, 50, "`/`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (Modulus, MODULUS, 51, "`%`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (IntDivide, INT_DIVIDE, 52, "`//`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
     (
-        TokenKind::ExponentAssign,
+        ExponentAssign,
         EXPONENT_ASSIGN,
         53,
         "`^=`",
@@ -4386,7 +3002,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::MultiplyAssign,
+        MultiplyAssign,
         MULTIPLY_ASSIGN,
         54,
         "`*=`",
@@ -4396,7 +3012,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::DivideAssign,
+        DivideAssign,
         DIVIDE_ASSIGN,
         55,
         "`/=`",
@@ -4406,7 +3022,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::ModulusAssign,
+        ModulusAssign,
         MODULUS_ASSIGN,
         56,
         "`%=`",
@@ -4416,7 +3032,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::IntDivideAssign,
+        IntDivideAssign,
         INT_DIVIDE_ASSIGN,
         57,
         "`//=`",
@@ -4426,7 +3042,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::Add,
+        Add,
         ADD,
         58,
         "`+`",
@@ -4436,7 +3052,7 @@ token_schema! {
         Some(3)
     ),
     (
-        TokenKind::Subtract,
+        Subtract,
         SUBTRACT,
         59,
         "`-`",
@@ -4446,7 +3062,7 @@ token_schema! {
         Some(3)
     ),
     (
-        TokenKind::AddAssign,
+        AddAssign,
         ADD_ASSIGN,
         60,
         "`+=`",
@@ -4456,7 +3072,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::SubtractAssign,
+        SubtractAssign,
         SUBTRACT_ASSIGN,
         61,
         "`-=`",
@@ -4466,7 +3082,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::Not,
+        Not,
         NOT,
         62,
         "`not`",
@@ -4476,7 +3092,7 @@ token_schema! {
         Some(6)
     ),
     (
-        TokenKind::Is,
+        Is,
         IS,
         63,
         "`is`",
@@ -4486,7 +3102,7 @@ token_schema! {
         Some(2)
     ),
     (
-        TokenKind::LessThan,
+        LessThan,
         LESS_THAN,
         64,
         "`<`",
@@ -4496,7 +3112,7 @@ token_schema! {
         Some(2)
     ),
     (
-        TokenKind::LessThanOrEqual,
+        LessThanOrEqual,
         LESS_THAN_OR_EQUAL,
         65,
         "`<=`",
@@ -4506,7 +3122,7 @@ token_schema! {
         Some(2)
     ),
     (
-        TokenKind::GreaterThan,
+        GreaterThan,
         GREATER_THAN,
         66,
         "`>`",
@@ -4516,7 +3132,7 @@ token_schema! {
         Some(2)
     ),
     (
-        TokenKind::GreaterThanOrEqual,
+        GreaterThanOrEqual,
         GREATER_THAN_OR_EQUAL,
         67,
         "`>=`",
@@ -4526,7 +3142,7 @@ token_schema! {
         Some(2)
     ),
     (
-        TokenKind::And,
+        And,
         AND,
         68,
         "`and`",
@@ -4535,12 +3151,12 @@ token_schema! {
         TOKEN_CLASS_WORD_OPERATOR,
         Some(1)
     ),
-    (TokenKind::Or, OR, 69, "`or`", Static, 0, TOKEN_CLASS_WORD_OPERATOR, Some(0)),
-    (TokenKind::If, IF, 70, "`if`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Else, ELSE, 71, "`else`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Return, RETURN, 72, "`return`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Or, OR, 69, "`or`", Static, 0, TOKEN_CLASS_WORD_OPERATOR, Some(0)),
+    (If, IF, 70, "`if`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Else, ELSE, 71, "`else`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Return, RETURN, 72, "`return`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (
-        TokenKind::ReturnBang,
+        ReturnBang,
         RETURN_BANG,
         73,
         "`return!`",
@@ -4549,13 +3165,13 @@ token_schema! {
         TOKEN_CLASS_KEYWORD,
         None
     ),
-    (TokenKind::Catch, CATCH, 74, "`catch`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Then, THEN, 75, "`then`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Checked, CHECKED, 76, "`checked`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Async, ASYNC, 77, "`async`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Cast, CAST, 78, "`cast`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Catch, CATCH, 74, "`catch`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Then, THEN, 75, "`then`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Checked, CHECKED, 76, "`checked`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Async, ASYNC, 77, "`async`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Cast, CAST, 78, "`cast`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (
-        TokenKind::CastBang,
+        CastBang,
         CAST_BANG,
         79,
         "`cast!`",
@@ -4564,12 +3180,12 @@ token_schema! {
         TOKEN_CLASS_KEYWORD,
         None
     ),
-    (TokenKind::Assert, ASSERT, 80, "`assert`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Loop, LOOP, 81, "`loop`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::By, BY, 82, "`by`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (TokenKind::Break, BREAK, 83, "`break`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Assert, ASSERT, 80, "`assert`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Loop, LOOP, 81, "`loop`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (By, BY, 82, "`by`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Break, BREAK, 83, "`break`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (
-        TokenKind::Continue,
+        Continue,
         CONTINUE,
         84,
         "`continue`",
@@ -4579,7 +3195,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::ExclusiveRange,
+        ExclusiveRange,
         EXCLUSIVE_RANGE,
         85,
         "`to`",
@@ -4588,9 +3204,9 @@ token_schema! {
         TOKEN_CLASS_KEYWORD,
         Some(6)
     ),
-    (TokenKind::Ampersand, AMPERSAND, 86, "`&`", Static, 0, 0, None),
+    (Ampersand, AMPERSAND, 86, "`&`", Static, 0, 0, None),
     (
-        TokenKind::FatArrow,
+        FatArrow,
         FAT_ARROW,
         87,
         "`=>`",
@@ -4599,9 +3215,9 @@ token_schema! {
         TOKEN_CLASS_DELIMITER,
         None
     ),
-    (TokenKind::Wildcard, WILDCARD, 88, "`_`", Static, 0, 0, None),
+    (Wildcard, WILDCARD, 88, "`_`", Static, 0, 0, None),
     (
-        TokenKind::Copy,
+        Copy,
         COPY,
         89,
         "`copy`",
@@ -4611,7 +3227,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::TemplateClose,
+        TemplateClose,
         TEMPLATE_CLOSE,
         90,
         "`]`",
@@ -4621,7 +3237,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::TemplateHead,
+        TemplateHead,
         TEMPLATE_HEAD,
         91,
         "`[`",
@@ -4631,7 +3247,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::ChannelSend,
+        ChannelSend,
         CHANNEL_SEND,
         92,
         "`>>`",
@@ -4641,7 +3257,7 @@ token_schema! {
         None
     ),
     (
-        TokenKind::ChannelReceive,
+        ChannelReceive,
         CHANNEL_RECEIVE,
         93,
         "`<<`",
@@ -4650,7 +3266,7 @@ token_schema! {
         0,
         None
     ),
-    (TokenKind::Yield, YIELD, 94, "`yield`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (Yield, YIELD, 94, "`yield`", Static, 0, TOKEN_CLASS_KEYWORD, None),
 }
 
 impl TokenShape {
@@ -4694,35 +3310,6 @@ impl TokenShape {
         }
     }
 
-    /// Build the compact shape for a transient `TokenKind` adapter.
-    #[cfg(test)]
-    pub(crate) fn from_token_kind(kind: &TokenKind) -> Option<Self> {
-        Self::from_token_kind_with_numeric_id(kind, NumericLiteralId::NONE)
-    }
-
-    /// Build a shape while supplying the source-owned numeric side-store handle.
-    ///
-    /// Absent path and numeric handles are malformed payloads and return `None`, so
-    /// round-trip validation holds through `from_raw_parts` and the typed accessors.
-    #[cfg(test)]
-    pub(crate) fn from_token_kind_with_numeric_id(
-        kind: &TokenKind,
-        numeric_id: NumericLiteralId,
-    ) -> Option<Self> {
-        let tag = kind.token_tag();
-        let (flags, data) = match kind {
-            TokenKind::Symbol(value)
-            | TokenKind::StyleDirective(value)
-            | TokenKind::StringSliceLiteral(value)
-            | TokenKind::RawStringLiteral(value) => (0, value.index()),
-            TokenKind::Path(value) => (0, value.raw()),
-            TokenKind::NumericLiteral(value) => (numeric_kind_flags(value.kind), numeric_id.raw()),
-            TokenKind::CharLiteral(value) => (0, *value as u32),
-            TokenKind::BoolLiteral(value) => (0, u32::from(*value)),
-            _ => (0, 0),
-        };
-        Self::from_raw_parts(tag.raw(), flags, data)
-    }
 
     pub(crate) fn numeric_kind(self) -> Option<NumericLiteralKind> {
         if self.tag != TokenTag::NUMERIC_LITERAL || self.flags > 2 {
@@ -4813,183 +3400,7 @@ pub(crate) const fn numeric_kind_flags(kind: NumericLiteralKind) -> u16 {
     }
 }
 
-impl Token {
-    #[cfg(test)]
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.kind.remap_string_ids(remap);
-    }
-}
 
-impl TokenKind {
-    #[cfg(test)]
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.try_remap_string_ids(&mut |id| {
-            Ok::<StringId, std::convert::Infallible>(remap.get(id))
-        })
-        .expect("token string-ID remapping is infallible");
-    }
-
-    /// Remap every interned string payload through one exhaustive, in-place, fallible walker.
-    ///
-    /// WHAT: the single canonical `TokenKind` string-ID traversal for ordinary remaps, frozen
-    ///       body capture and frozen body materialisation.
-    /// WHY: every payload-bearing variant is listed explicitly here and mutated in place.
-    ///       Adding a new `TokenKind` variant produces one compile error at this owner instead
-    ///       of silently retaining a donor `StringId` through a catch-all arm.
-    pub fn try_remap_string_ids<E>(
-        &mut self,
-        map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-    ) -> Result<(), E> {
-        match self {
-            TokenKind::Symbol(value) => *value = map(*value)?,
-            TokenKind::StyleDirective(value) => *value = map(*value)?,
-            TokenKind::StringSliceLiteral(value) => *value = map(*value)?,
-            TokenKind::RawStringLiteral(value) => *value = map(*value)?,
-            TokenKind::NumericLiteral(value) => value.try_remap_string_ids(map)?,
-            TokenKind::Path(_) => {}
-            TokenKind::CharLiteral(_)
-            | TokenKind::BoolLiteral(_)
-            | TokenKind::ModuleStart
-            | TokenKind::Eof
-            | TokenKind::Export
-            | TokenKind::Hash
-            | TokenKind::Reactive
-            | TokenKind::Arrow
-            | TokenKind::OpenCurly
-            | TokenKind::CloseCurly
-            | TokenKind::TypeParameterBracket
-            | TokenKind::Newline
-            | TokenKind::End
-            | TokenKind::StartTemplateBody
-            | TokenKind::Comma
-            | TokenKind::Dot
-            | TokenKind::Colon
-            | TokenKind::DoubleColon
-            | TokenKind::Assign
-            | TokenKind::This
-            | TokenKind::Must
-            | TokenKind::TraitThis
-            | TokenKind::OpenParenthesis
-            | TokenKind::CloseParenthesis
-            | TokenKind::As
-            | TokenKind::Type
-            | TokenKind::Of
-            | TokenKind::Variadic
-            | TokenKind::Mutable
-            | TokenKind::DatatypeNone
-            | TokenKind::NoneLiteral
-            | TokenKind::DatatypeInt
-            | TokenKind::DatatypeFloat
-            | TokenKind::DatatypeBool
-            | TokenKind::DatatypeTrue
-            | TokenKind::DatatypeFalse
-            | TokenKind::DatatypeString
-            | TokenKind::DatatypeChar
-            | TokenKind::Bang
-            | TokenKind::QuestionMark
-            | TokenKind::Negative
-            | TokenKind::Exponent
-            | TokenKind::Multiply
-            | TokenKind::Divide
-            | TokenKind::Modulus
-            | TokenKind::IntDivide
-            | TokenKind::ExponentAssign
-            | TokenKind::MultiplyAssign
-            | TokenKind::DivideAssign
-            | TokenKind::ModulusAssign
-            | TokenKind::IntDivideAssign
-            | TokenKind::Add
-            | TokenKind::Subtract
-            | TokenKind::AddAssign
-            | TokenKind::SubtractAssign
-            | TokenKind::Not
-            | TokenKind::Is
-            | TokenKind::LessThan
-            | TokenKind::LessThanOrEqual
-            | TokenKind::GreaterThan
-            | TokenKind::GreaterThanOrEqual
-            | TokenKind::And
-            | TokenKind::Or
-            | TokenKind::If
-            | TokenKind::Else
-            | TokenKind::Return
-            | TokenKind::ReturnBang
-            | TokenKind::Catch
-            | TokenKind::Then
-            | TokenKind::Checked
-            | TokenKind::Async
-            | TokenKind::Cast
-            | TokenKind::CastBang
-            | TokenKind::Assert
-            | TokenKind::Loop
-            | TokenKind::By
-            | TokenKind::Break
-            | TokenKind::Continue
-            | TokenKind::ExclusiveRange
-            | TokenKind::Ampersand
-            | TokenKind::FatArrow
-            | TokenKind::Wildcard
-            | TokenKind::Copy
-            | TokenKind::TemplateClose
-            | TokenKind::TemplateHead
-            | TokenKind::ChannelSend
-            | TokenKind::ChannelReceive
-            | TokenKind::Yield => {}
-        }
-        Ok(())
-    }
-
-    /// Returns true when this token is a supported assignment operator in statement/write position.
-    pub fn is_assignment_operator(&self) -> bool {
-        self.token_tag().is_assignment_operator()
-    }
-
-    /// Returns true when this token allows a following newline to remain in the same expression.
-    pub fn continues_expression(&self) -> bool {
-        self.token_tag().continues_expression()
-    }
-
-    /// Returns true when this token can be the left operand of a following symbolic operator.
-    pub fn can_end_expression(&self) -> bool {
-        self.token_tag().can_end_expression()
-    }
-
-    #[cfg(test)]
-    /// Returns true for source words classified as ordinary language keywords.
-    pub(crate) fn is_keyword(&self) -> bool {
-        self.token_tag().is_keyword()
-    }
-
-    #[cfg(test)]
-    /// Returns true for word operators (`not`, `is`, `and`, and `or`).
-    pub(crate) fn is_word_operator(&self) -> bool {
-        self.token_tag().is_word_operator()
-    }
-
-    #[cfg(test)]
-    /// Returns true for value literal tokens, excluding builtin type spellings.
-    pub(crate) fn is_literal(&self) -> bool {
-        self.token_tag().is_literal()
-    }
-
-    #[cfg(test)]
-    /// Returns true for builtin type spellings such as `Int` and `String`.
-    pub(crate) fn is_builtin_type(&self) -> bool {
-        self.token_tag().is_builtin_type()
-    }
-
-    #[cfg(test)]
-    /// Returns true for punctuation and structural syntax delimiters.
-    pub(crate) fn is_delimiter(&self) -> bool {
-        self.token_tag().is_delimiter()
-    }
-
-    #[cfg(test)]
-    /// Return the AST-compatible precedence for operator tokens.
-    pub(crate) fn precedence(&self) -> Option<u8> {
-        self.token_tag().precedence()
-    }
-}
 
 #[cfg(test)]
 #[path = "tests/tokens_remap_tests.rs"]

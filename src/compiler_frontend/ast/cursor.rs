@@ -480,6 +480,22 @@ impl<'a> AstCursor<'a> {
             .unwrap_or(TokenTag::EOF)
     }
 
+    /// Validate the current trusted shape before a tag-only scanner turns it into syntax.
+    ///
+    /// Tag classification remains allocation-free; this explicit boundary is used only by
+    /// scanners whose fallback diagnosis would otherwise hide a malformed payload.
+    pub(crate) fn validate_current_payload(&self) -> Result<(), CompilerError> {
+        if let Some(token) = self.current() {
+            token.validate_payload().map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "canonical token payload invariant failed at index {}: {error:?}",
+                    token.index().raw()
+                ))
+            })?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn peek_next_tag(&self) -> Option<TokenTag> {
         self.peek_next_ref().map(|token| token.tag())
     }

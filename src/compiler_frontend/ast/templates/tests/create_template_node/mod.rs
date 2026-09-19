@@ -17,35 +17,66 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarati
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terminal, terse,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan};
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TemplateBodyMode, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::lexer::{LexedSource, TokenizeFailure, tokenize};
+use crate::compiler_frontend::tokenizer::tokens::{
+    SourceTokens, TemplateBodyMode, TestSourceTokensBuilder, TokenIndex, TokenTag,
+    TokenizerEntryMode,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+struct TemplateSourceFixture {
+    source_owner: SourceTokenOwner,
+    source_path: PathId,
+    opener_index: usize,
+}
+
+impl TemplateSourceFixture {
+    fn canonical_owner(&self) -> Option<Arc<SourceTokens>> {
+        Some(Arc::clone(self.source_owner.tokens()))
+    }
+}
+
+fn publish_template_source(mut lexed: LexedSource) -> TemplateSourceFixture {
+    let opener_index = (0..lexed.tokens.len())
+        .find_map(|index| {
+            let index = TokenIndex::try_from_index(index)?;
+            let token = lexed.tokens.token(index).ok()?;
+            (token.tag() == TokenTag::TEMPLATE_HEAD).then_some(index.index())
+        })
+        .expect("expected a template opener");
+
+    // Template AST parsing is downstream of the prepared-file freeze boundary. Publish the
+    // immutable path table on the sole canonical source owner instead of building a compatibility
+    // token stream for the parser fixture.
+    Arc::get_mut(&mut lexed.path_syntax)
+        .expect("test lexer path table should be uniquely owned before publication")
+        .freeze();
+    Arc::get_mut(&mut lexed.tokens)
+        .expect("test canonical token owner should be uniquely owned before publication")
+        .attach_shared_path_syntax(Arc::clone(&lexed.path_syntax));
+    let source_path = lexed.logical_path;
+    let source_owner = SourceTokenOwner::new(lexed.tokens, source_path, None);
+
+    TemplateSourceFixture {
+        source_owner,
+        source_path,
+        opener_index,
+    }
+}
 
 fn html_project_test_style_directives() -> StyleDirectiveRegistry {
     StyleDirectiveRegistry::merged(&html_project_style_directives())
         .expect("html project style directives should merge with core directives")
-}
-
-fn token(kind: TokenKind, _line: i32) -> Token {
-    Token::new(kind, LocalSpan::source_start())
-}
-
-fn numeric_token(value: &str, line: i32, string_table: &mut StringTable) -> Token {
-    token(
-        TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table)),
-        line,
-    )
 }
 
 fn template_tokens_from_source(
@@ -53,7 +84,7 @@ fn template_tokens_from_source(
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
-) -> FileTokens {
+) -> TemplateSourceFixture {
     let style_directives = frontend_test_style_directives();
     template_tokens_from_source_with_style_directives(
         source,
@@ -70,14 +101,13 @@ fn template_tokens_from_source_with_style_directives(
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
-) -> FileTokens {
-    let scope = path_fork
-        .try_intern_portable_path("main.moth/#const_template0", string_table)
-        .expect("test path fits");
-    let mut tokens = tokenize(
+) -> TemplateSourceFixture {
+    let lexed = tokenize(
         source,
-        scope,
-        crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
+        path_fork
+            .try_intern_portable_path("main.moth/#const_template0", string_table)
+            .expect("test path fits"),
+        TokenizerEntryMode::SourceFile,
         style_directives,
         string_table,
         path_fork,
@@ -85,19 +115,7 @@ fn template_tokens_from_source_with_style_directives(
         span_builder,
     )
     .expect("tokenization should succeed");
-
-    tokens.index = tokens
-        .tokens
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::TemplateHead))
-        .expect("expected a template opener");
-
-    // Template AST parsing is downstream of the prepared-file freeze boundary. Preserve that
-    // production lifecycle in direct parser tests so nested expression substreams share the
-    // immutable table instead of a mutable tokenizer-owned one.
-    tokens.freeze_path_syntax_for_test();
-
-    tokens
+    publish_template_source(lexed)
 }
 
 fn template_tokens_from_source_with_directives(
@@ -106,25 +124,18 @@ fn template_tokens_from_source_with_directives(
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
-) -> FileTokens {
+) -> TemplateSourceFixture {
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
-    let mut tokens = template_tokens_from_source_with_style_directives(
+    template_tokens_from_source_with_style_directives(
         source,
         &registry,
         string_table,
         span_builder,
         path_fork,
-    );
-
-    tokens.index = tokens
-        .tokens
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::TemplateHead))
-        .expect("expected a template opener");
-
-    tokens
+    )
 }
+
 
 fn with_test_path_context(
     context: ScopeContext,
@@ -333,30 +344,30 @@ fn folded_template_output_with_style_directives(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(
+    let fixture = template_tokens_from_source_with_style_directives(
         source,
         style_directives,
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
+    let source_path = fixture.source_path;
     let context =
         new_constant_context_with_style_directives(source_path, style_directives, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let canonical_owner = fixture
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
     let mut token_stream = AstCursor::from_source_tokens(
         &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
+        None,
         canonical_range,
     )
     .expect("test token stream must expose an AST cursor");
     token_stream
-        .set_position(file_tokens.index)
+        .set_position(fixture.opener_index)
         .expect("test token stream position must remain in canonical range");
     let template = Template::new(
         &mut token_stream,
@@ -387,17 +398,17 @@ fn template_parse_rendered_error_with_style_directives(
     let scope = path_fork
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
-    let mut file_tokens = match tokenize(
+    let fixture = match tokenize(
         source,
         scope,
-        crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
+        TokenizerEntryMode::SourceFile,
         style_directives,
         &mut string_table,
         &mut path_fork,
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
         &mut span_builder,
     ) {
-        Ok(tokens) => tokens,
+        Ok(lexed) => publish_template_source(lexed),
         Err(TokenizeFailure::Diagnosed(diagnostic)) => {
             return render_test_diagnostic(&diagnostic, &string_table);
         }
@@ -405,29 +416,23 @@ fn template_parse_rendered_error_with_style_directives(
             panic!("template fixture tokenization encountered infrastructure failure: {error:?}")
         }
     };
-    file_tokens.index = file_tokens
-        .tokens
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::TemplateHead))
-        .expect("expected a template opener");
-    file_tokens.freeze_path_syntax_for_test();
-    let source_path = file_tokens.src_path;
+    let source_path = fixture.source_path;
+
     let context =
         new_constant_context_with_style_directives(source_path, style_directives, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let canonical_owner = fixture.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
     let mut token_stream = AstCursor::from_source_tokens(
         &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
+        None,
         canonical_range,
     )
     .expect("test token stream must expose an AST cursor");
     token_stream
-        .set_position(file_tokens.index)
+        .set_position(fixture.opener_index)
         .expect("test token stream position must remain in canonical range");
     let error = Template::new(
         &mut token_stream,
@@ -490,14 +495,14 @@ fn template_warnings_with_style_directives(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(
+    let fixture = template_tokens_from_source_with_style_directives(
         source,
         style_directives,
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
     );
-    let source_path = file_tokens.src_path;
+    let source_path = fixture.source_path;
     let context = if runtime_context {
         runtime_template_context_with_style_directives(
             &source_path,
@@ -508,20 +513,19 @@ fn template_warnings_with_style_directives(
     } else {
         new_constant_context_with_style_directives(source_path, style_directives, &path_fork)
     };
-    let canonical_owner = file_tokens
-        .canonical_source_tokens_arc()
+    let canonical_owner = fixture.canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
     let mut token_stream = AstCursor::from_source_tokens(
         &canonical_owner,
-        file_tokens.canonical_os_path.clone(),
+        None,
         canonical_range,
     )
     .expect("test token stream must expose an AST cursor");
     token_stream
-        .set_position(file_tokens.index)
+        .set_position(fixture.opener_index)
         .expect("test token stream position must remain in canonical range");
     let _ = Template::new(
         &mut token_stream,

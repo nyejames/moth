@@ -11,8 +11,8 @@ use super::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::lexer::{LexedSource, TokenizeResult, tokenize};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 use std::path::{Path, PathBuf};
 
 /// One focused-test source context with an explicit identity and one live span owner.
@@ -66,19 +66,16 @@ impl TestSourceContext {
     /// Tokenize `source` through the real lexer with this context's identity, path, string
     /// table and live span builder.
     ///
-    /// WHY: focused header/parser tests need the canonical `FileTokens` owner without
-    /// rebuilding identical path-intern and lexer scaffolding per fixture. The caller keeps
-    /// owning `path_fork` (so downstream preparation reuses the issuing table) while this
-    /// context keeps owning its string table and span builder; only the returned stream is
-    /// moved out. Path handling keeps the exact filesystem interning of the existing
-    /// fixtures, and lexer failures keep their `TokenizeFailure` lanes for the caller to map.
+    /// The returned `LexedSource` owns the canonical token arrays and the preparing path table;
+    /// focused tests should pass those allocations to the same source-owner boundary as
+    /// production rather than recreating a compatibility token stream.
     pub(crate) fn tokenize(
         &mut self,
         source: &str,
         path_fork: &mut PathInternerFork,
         style_directives: &StyleDirectiveRegistry,
         entry_mode: TokenizerEntryMode,
-    ) -> TokenizeResult<FileTokens> {
+    ) -> TokenizeResult<LexedSource> {
         let source_id = self.source_id;
         let Self {
             path,
@@ -161,7 +158,7 @@ mod tests {
         let mut path_fork = PathInternerFork::empty();
         let style_directives = StyleDirectiveRegistry::built_ins();
 
-        let file_tokens = context
+        let lexed = context
             .tokenize(
                 source,
                 &mut path_fork,
@@ -170,30 +167,20 @@ mod tests {
             )
             .expect("source should tokenize");
 
-        assert_eq!(file_tokens.file_id, source_id);
+        assert_eq!(lexed.file_id, source_id);
         assert_eq!(context.source_id(), source_id);
-        assert_eq!(
-            file_tokens
-                .source_tokens()
-                .expect("freshly tokenized stream owns its canonical source")
-                .source(),
-            source_id
-        );
+        assert_eq!(lexed.tokens.source(), source_id);
         assert!(
-            path_fork.try_depth(file_tokens.src_path).is_some(),
+            path_fork.try_depth(lexed.logical_path).is_some(),
             "the interned path must come from the caller-owned fork"
         );
-        let first_span = file_tokens
-            .tokens
-            .iter()
-            .find(|token| {
-                matches!(
-                    token.kind,
-                    crate::compiler_frontend::tokenizer::tokens::TokenKind::Symbol(_)
-                )
+        let first_span = (0..lexed.tokens.len())
+            .find_map(|index| {
+                let index = TokenIndex::try_from_index(index)?;
+                let token = lexed.tokens.token(index).ok()?;
+                (token.tag() == TokenTag::SYMBOL).then_some(token.span())
             })
-            .expect("source should tokenize a symbol")
-            .span;
+            .expect("source should tokenize a symbol");
         let range = first_span.resolve_with(context.span_resolver());
         assert_eq!(
             source.get(range.start() as usize..range.end() as usize),

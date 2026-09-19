@@ -28,7 +28,7 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn slot_template(store: &mut TemplateIrStore) -> Template {
@@ -105,35 +105,23 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
     // A non-EOF token after the dot is the immediate missing-member boundary. The diagnostic
     // must point at that offending token, not the authored dot or the receiver start. This
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork
-        .try_intern_portable_path("test.moth", &mut string_table)
-        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
     let offending_span =
         LocalSpan::exact(12, 1, &mut span_builder).expect("offending token span should fit");
 
-    let mut tokens = FileTokens::new(
-        scope,
-        SourceId::COMPILATION_ROOT,
-        vec![
-            Token::new(TokenKind::Comma, offending_span),
-            Token::new(TokenKind::Eof, LocalSpan::source_start()),
-        ],
-    );
-    tokens.freeze_path_syntax_for_test();
-    let owner = tokens
-        .canonical_source_tokens_arc()
-        .expect("test token stream must retain its canonical source owner");
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    builder
+        .push_static(TokenTag::COMMA, offending_span)
+        .expect("offending token fixture should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF fixture token should build");
+    let owner = builder.finish().expect("canonical fixture tokens should build");
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let stream = AstCursor::from_source_tokens(
-        &owner,
-        tokens.canonical_os_path.clone(),
-        range,
-    )
-    .expect("test token stream must expose an AST cursor");
+    let stream = AstCursor::from_source_tokens(&owner, None, range)
+        .expect("test token stream must expose an AST cursor");
     let mut string_table = string_table;
     let error = super::parse_member_name_typed(&stream, &mut string_table)
         .expect_err("a non-name token after '.' must be rejected as a missing member name");

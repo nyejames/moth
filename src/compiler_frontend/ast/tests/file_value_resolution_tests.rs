@@ -383,7 +383,7 @@ fn compile_fixture(
             .try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let handoff = tokenize(
+        let lexed = tokenize(
             source,
             interned_path,
             TokenizerEntryMode::SourceFile,
@@ -393,15 +393,9 @@ fn compile_fixture(
             file_id_for(path),
             &mut span_builder,
         )
-        .expect("Moth tokenization should succeed")
-        .into_canonical_lexer_handoff()
-        .expect("Moth tokenization should produce a canonical lexer handoff");
-        let owner = SourceTokenOwner::new(
-            handoff.tokens,
-            handoff.logical_path,
-            handoff.canonical_os_path,
-        );
-        let path_syntax = handoff.path_syntax;
+        .expect("Moth tokenization should succeed");
+        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+        let path_syntax = lexed.path_syntax;
         let output = prepare_file_from_tokens(
             owner,
             path_syntax,
@@ -426,7 +420,7 @@ fn compile_fixture(
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let handoff = tokenize(
+        let lexed = tokenize(
             source,
             interned_path,
             entry_mode,
@@ -436,15 +430,9 @@ fn compile_fixture(
             file_id_for(path),
             &mut span_builder,
         )
-        .expect("Moth template tokenization should succeed")
-        .into_canonical_lexer_handoff()
-        .expect("Moth template tokenization should produce a canonical lexer handoff");
-        let owner = SourceTokenOwner::new(
-            handoff.tokens,
-            handoff.logical_path,
-            handoff.canonical_os_path,
-        );
-        let path_syntax = handoff.path_syntax;
+        .expect("Moth template tokenization should succeed");
+        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+        let path_syntax = lexed.path_syntax;
 
         let mut output = prepare_moth_template_file(
             owner,
@@ -669,7 +657,7 @@ fn resolve_file_value_fixture(
         .expect("fixture source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let handoff = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         TokenizerEntryMode::SourceFile,
@@ -679,17 +667,12 @@ fn resolve_file_value_fixture(
         source_file,
         &mut span_builder,
     )
-    .expect("file-value fixture should tokenize")
-    .into_canonical_lexer_handoff()
-    .expect("file-value tokenization should produce a canonical lexer handoff");
-    let owner = SourceTokenOwner::new(
-        handoff.tokens,
-        handoff.logical_path,
-        handoff.canonical_os_path,
-    );
+    .expect("file-value fixture should tokenize");
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let path_syntax = lexed.path_syntax;
     let mut prepared_output = prepare_file_from_tokens(
         owner,
-        handoff.path_syntax,
+        path_syntax,
         &source_path_buf,
         &HeaderParseOptions::default(),
         &mut string_table,

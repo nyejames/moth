@@ -13,7 +13,7 @@ use super::ModuleMaterialisationContext;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::TestSourceTokensBuilder;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
@@ -21,14 +21,11 @@ impl ModuleMaterialisationContext {
     /// Build a test-only context with one artefact per identity and no real body payload.
     pub(crate) fn from_identities_for_test(identities: Vec<GeneratedDeclarationIdentity>) -> Self {
         let frozen_identity_handle = FrozenIdentityHandle::new();
-        let empty_shell = FileTokens::new(
-            PathId::ROOT,
+        let empty_source_owner = TestSourceTokensBuilder::new(
             crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
-            Vec::new(),
-        );
-        let empty_source_owner = empty_shell
-            .canonical_source_tokens_arc()
-            .expect("test fixture must use a canonical source owner");
+        )
+        .finish()
+        .expect("canonical empty source fixture should finish");
         let empty_token_range = empty_source_owner
             .full_range()
             .expect("empty canonical source should have a checked full range");

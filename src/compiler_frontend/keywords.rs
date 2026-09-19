@@ -6,8 +6,6 @@
 //! WHY: keyword policy is user-visible and must not drift between the tokenizer,
 //! dependency alias validation, reserved-name diagnostics and code highlighting.
 
-#[cfg(test)]
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Keywords that may not be shadowed by identifiers after case folding and
@@ -125,51 +123,6 @@ pub(crate) fn keyword_token_tag(text: &str) -> Option<TokenTag> {
     classify_source_word(text).map(|classified| classified.token_tag)
 }
 
-/// Legacy token-kind projection retained only for keyword fixtures during migration.
-#[cfg(test)]
-pub(crate) fn keyword_token_kind(text: &str) -> Option<TokenKind> {
-    match text {
-        "export" => Some(TokenKind::Export),
-        "type" => Some(TokenKind::Type),
-        "of" => Some(TokenKind::Of),
-        "as" => Some(TokenKind::As),
-        "copy" => Some(TokenKind::Copy),
-        "if" => Some(TokenKind::If),
-        "return" => Some(TokenKind::Return),
-        "catch" => Some(TokenKind::Catch),
-        "then" => Some(TokenKind::Then),
-        "else" => Some(TokenKind::Else),
-        "checked" => Some(TokenKind::Checked),
-        "cast" => Some(TokenKind::Cast),
-        "break" => Some(TokenKind::Break),
-        "continue" => Some(TokenKind::Continue),
-        "must" => Some(TokenKind::Must),
-        "this" => Some(TokenKind::This),
-        "This" => Some(TokenKind::TraitThis),
-        "assert" => Some(TokenKind::Assert),
-        "async" => Some(TokenKind::Async),
-        "yield" => Some(TokenKind::Yield),
-        "loop" => Some(TokenKind::Loop),
-        "to" => Some(TokenKind::ExclusiveRange),
-        "by" => Some(TokenKind::By),
-        "is" => Some(TokenKind::Is),
-        "not" => Some(TokenKind::Not),
-        "and" => Some(TokenKind::And),
-        "or" => Some(TokenKind::Or),
-        "true" => Some(TokenKind::BoolLiteral(true)),
-        "false" => Some(TokenKind::BoolLiteral(false)),
-        "none" => Some(TokenKind::NoneLiteral),
-        "Int" => Some(TokenKind::DatatypeInt),
-        "Float" => Some(TokenKind::DatatypeFloat),
-        "Bool" => Some(TokenKind::DatatypeBool),
-        "String" => Some(TokenKind::DatatypeString),
-        "Char" => Some(TokenKind::DatatypeChar),
-        "None" => Some(TokenKind::DatatypeNone),
-        "True" => Some(TokenKind::DatatypeTrue),
-        "False" => Some(TokenKind::DatatypeFalse),
-        _ => None,
-    }
-}
 
 /// Returns the stable taxonomy tag for a keyword form requiring an attached `!`.
 pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
@@ -180,20 +133,11 @@ pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
     }
 }
 
-/// Legacy compound-token projection retained only for keyword fixtures.
-#[cfg(test)]
-pub(crate) fn attached_bang_keyword_token_kind(text: &str) -> Option<TokenKind> {
-    match text {
-        "return" => Some(TokenKind::ReturnBang),
-        "cast" => Some(TokenKind::CastBang),
-        _ => None,
-    }
-}
 
-/// True when `text` is an exact keyword spelling that lexes to a dedicated token.
+/// True when `text` is an exact source word with a dedicated tokenizer tag.
 #[cfg(test)]
 pub(crate) fn is_keyword(text: &str) -> bool {
-    keyword_token_kind(text).is_some()
+    classify_source_word(text).is_some()
 }
 
 /// True when a character can appear after the first character of an identifier.

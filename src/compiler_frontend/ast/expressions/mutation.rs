@@ -96,7 +96,7 @@ fn validate_assignment_value_type(
 ///       `Operator` variant and a human-readable label used in diagnostics.
 /// WHY: compound assignments are desugared into `target = target op rhs`;
 ///      the stable `TokenTag` taxonomy is the canonical operator authority, so
-///      the cursor classifies without cloning a transient `TokenKind`.
+///      the cursor classifies the operator tag directly.
 fn compound_assignment_operator_for_tag(tag: TokenTag) -> Option<(Operator, &'static str)> {
     match tag {
         TokenTag::ADD_ASSIGN => Some((Operator::Add, "Compound assignment '+='")),

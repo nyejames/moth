@@ -6,15 +6,76 @@
 use super::*;
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::RangeEndKind;
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidLoopHeaderReason, ReservedNameOwner, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
+use std::sync::Arc;
+
+#[test]
+fn malformed_loop_header_payload_stays_infrastructure_error_while_scanning_for_colon() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, LocalSpan::source_start())
+        .expect("valid loop-header fixture token should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("valid loop-header fixture token should build");
+    let mut owner = builder
+        .finish()
+        .expect("valid loop-header fixture should build a canonical source owner");
+    Arc::get_mut(&mut owner)
+        .expect("the test owner should remain uniquely owned")
+        .corrupt_payload_for_test(0, TokenTag::NUMERIC_LITERAL);
+    let range = owner
+        .full_range()
+        .expect("the canonical test owner should expose a full range");
+    let mut token_stream = AstCursor::from_source_tokens(&owner, None, range)
+        .expect("the malformed canonical owner should still construct a cursor");
+
+    let error = super::find_loop_header_colon_index(&mut token_stream)
+        .expect_err("a malformed trusted payload must not become MissingColon");
+
+    assert!(matches!(error, ExpressionParseError::Infrastructure(_)));
+}
+
+#[test]
+fn malformed_loop_header_payload_stays_infrastructure_error_while_checking_empty_window() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, LocalSpan::source_start())
+        .expect("valid loop-header fixture token should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("valid loop-header fixture token should build");
+    let mut owner = builder
+        .finish()
+        .expect("valid loop-header fixture should build a canonical source owner");
+    Arc::get_mut(&mut owner)
+        .expect("the test owner should remain uniquely owned")
+        .corrupt_payload_for_test(0, TokenTag::NUMERIC_LITERAL);
+    let range = owner
+        .full_range()
+        .expect("the canonical test owner should expose a full range");
+    let mut window = AstCursor::from_source_tokens(&owner, None, range)
+        .expect("the malformed canonical owner should still construct a cursor");
+
+    let error = super::is_empty_header_window(&mut window)
+        .expect_err("a malformed trusted payload must not become EmptyHeader");
+
+    assert!(matches!(error, ExpressionParseError::Infrastructure(_)));
+}
 
 fn loop_fixture_source(loop_body_source: &str) -> String {
     let indented_body = loop_body_source

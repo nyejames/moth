@@ -382,7 +382,7 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         .try_intern_filesystem_path(&path, &mut strings)
         .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let tokens = tokenize(
+    let lexed = tokenize(
         source,
         scope,
         TokenizerEntryMode::SourceFile,
@@ -393,17 +393,10 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         &mut spans,
     )
     .expect("signature tokens");
-    let handoff = tokens
-        .into_canonical_lexer_handoff()
-        .expect("signature tokenization should produce a canonical lexer handoff");
-    let owner = SourceTokenOwner::new(
-        handoff.tokens,
-        handoff.logical_path,
-        handoff.canonical_os_path,
-    );
+    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
     let prepared = parse_file_headers_with_table(
         owner,
-        handoff.path_syntax,
+        lexed.path_syntax,
         &path,
         &HeaderParseOptions::default(),
         &mut strings,
