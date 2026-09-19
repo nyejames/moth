@@ -20,9 +20,9 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::collection_builtin::parse_collection_builtin_member_typed;
@@ -38,10 +38,11 @@ use super::{MemberStepContext, PostfixChainAccess, ReceiverAccessMode};
 /// base token without retaining a borrowed view.
 fn previous_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
     token_stream.previous_span().or_else(|| {
-        token_stream
-            .position()
-            .checked_sub(1)
-            .and_then(|previous| token_stream.span_at(previous))
+        token_stream.position().checked_sub(1).and_then(|previous| {
+            token_stream
+                .token_ref_at(previous)
+                .map(|token| token.source_span())
+        })
     })
 }
 
@@ -49,17 +50,13 @@ fn current_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
     Some(token_stream.current_span())
 }
 
-fn next_token_kind(token_stream: &AstCursor<'_>) -> Option<TokenKind> {
-    token_stream
-        .token_kind_at(token_stream.position().saturating_add(1))
-        .or_else(|| token_stream.peek_next_token().cloned())
+fn next_token_tag(token_stream: &AstCursor<'_>) -> Option<TokenTag> {
+    token_stream.token_ref_at_offset(1).map(|token| token.tag())
 }
-/// Narrow tag boundary: classifies the already-cloned lookahead kind without re-reading
+/// Narrow tag boundary: classifies the already-read lookahead tag without re-reading
 /// the cursor, preserving the exact single-lookahead semantics.
-fn next_token_is_assignment_operator(next_token: &Option<TokenKind>) -> bool {
-    next_token
-        .as_ref()
-        .is_some_and(|kind| kind.token_tag().is_assignment_operator())
+fn next_token_is_assignment_operator(next_token: Option<TokenTag>) -> bool {
+    next_token.is_some_and(TokenTag::is_assignment_operator)
 }
 
 /// Builds the expression payload for a declaration reference without choosing an AST node shape.
@@ -223,7 +220,7 @@ fn parse_postfix_chain_typed(
     //  Walk postfix member-access chain
     // ----------------------------
     while token_stream.position() < token_stream.length()
-        && token_stream.current_token_kind() == &TokenKind::Dot
+        && token_stream.current_tag() == TokenTag::DOT
     {
         token_stream.advance();
 
@@ -233,7 +230,7 @@ fn parse_postfix_chain_typed(
         // Non-EOF missing-member boundaries keep their offending-token span through
         // `parse_member_name_typed` below.
         if token_stream.position() >= token_stream.length()
-            || matches!(token_stream.current_token_kind(), TokenKind::Eof)
+            || token_stream.current_tag() == TokenTag::EOF
         {
             let dot_span = previous_token_span(token_stream);
             return Err(CompilerDiagnostic::invalid_field_access(
@@ -246,7 +243,7 @@ fn parse_postfix_chain_typed(
             .into());
         }
 
-        let member_name = parse_member_name_typed(token_stream, string_table)?;
+        let member_name = parse_member_name_typed(token_stream, &mut *string_table)?;
         let receiver_type_id = receiver_node_type_id(&receiver_node)?;
         let member_span = current_token_span(token_stream);
         let member_context = MemberStepContext {
@@ -307,15 +304,14 @@ fn parse_postfix_chain_typed(
 
         // No handler matched. Preserve the user-facing distinction between
         // deferred choice payload access, opaque externals, and ordinary
-        // missing members while routing all cases through one typed diagnostic.
-        let next_token = next_token_kind(token_stream);
+        let next_token = next_token_tag(token_stream);
         let reason = if type_interner
             .environment()
             .variants_for(receiver_type_id)
             .is_some()
-            && next_token != Some(TokenKind::OpenParenthesis)
+            && next_token != Some(TokenTag::OPEN_PARENTHESIS)
         {
-            if next_token_is_assignment_operator(&next_token) {
+            if next_token_is_assignment_operator(next_token) {
                 InvalidFieldAccessReason::ChoicePayloadMutation
             } else {
                 InvalidFieldAccessReason::ChoicePayloadDeferred

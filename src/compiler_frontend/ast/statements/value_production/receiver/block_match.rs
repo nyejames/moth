@@ -30,7 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input for the block single-predicate body parser after `if` has been consumed.
 pub(super) struct BlockSinglePredicateParseInput<'a, 'b, 'tokens> {
@@ -78,7 +78,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
     token_stream.skip_newlines();
 
     if header.body_delimiter != IfHeaderDelimiter::Colon
-        || token_stream.current_token_kind() != &TokenKind::Colon
+        || token_stream.current_tag() != TokenTag::COLON
     {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedColonAfterCondition,

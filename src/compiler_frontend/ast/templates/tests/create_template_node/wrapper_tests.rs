@@ -41,8 +41,21 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
     let source_path = file_tokens.src_path;
     let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(shared_store);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.index)
+        .expect("test token stream position must remain in canonical range");
 
     let template = Template::new(
         &mut token_stream,
@@ -95,8 +108,21 @@ fn docs_style_table_and_data_declarations(
     let header_row_path = header_row_file_tokens.src_path;
     let header_row_context = new_constant_context(header_row_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let mut header_row_stream = AstCursor::from_file_tokens(&mut header_row_file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = header_row_file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut header_row_stream = AstCursor::from_source_tokens(
+        &canonical_owner,
+        header_row_file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    header_row_stream
+        .set_position(header_row_file_tokens.index)
+        .expect("test token stream position must remain in canonical range");
     let header_row = Template::new(
         &mut header_row_stream,
         header_row_path,
@@ -116,8 +142,21 @@ fn docs_style_table_and_data_declarations(
     let table_path = table_file_tokens.src_path;
     let table_context = new_constant_context(table_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let mut table_stream = AstCursor::from_file_tokens(&mut table_file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = table_file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut table_stream = AstCursor::from_source_tokens(
+        &canonical_owner,
+        table_file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    table_stream
+        .set_position(table_file_tokens.index)
+        .expect("test token stream position must remain in canonical range");
     let table = Template::new(
         &mut table_stream,
         table_path,
@@ -137,8 +176,21 @@ fn docs_style_table_and_data_declarations(
     let data_path = data_file_tokens.src_path;
     let data_context = new_constant_context(data_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let mut data_stream = AstCursor::from_file_tokens(&mut data_file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = data_file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut data_stream = AstCursor::from_source_tokens(
+        &canonical_owner,
+        data_file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    data_stream
+        .set_position(data_file_tokens.index)
+        .expect("test token stream position must remain in canonical range");
     let data = Template::new(
         &mut data_stream,
         data_path,
@@ -190,8 +242,21 @@ fn child_wrapper_composition_marks_template_tir_reference_composed() {
     );
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path.to_owned(), &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.index)
+        .expect("test token stream position must remain in canonical range");
 
     let template = Template::new(
         &mut token_stream,

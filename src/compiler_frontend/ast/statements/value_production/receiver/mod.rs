@@ -32,7 +32,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -120,7 +120,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
-    if token_stream.current_token_kind() != &TokenKind::If {
+    if token_stream.current_tag() != TokenTag::IF {
         return None;
     }
 
@@ -130,17 +130,22 @@ pub fn try_parse_value_block_at_receiver_with_target(
 
     let classification = classify_if_header(token_stream);
 
-    if let Some(reason) = single_predicate::unsupported_optional_single_predicate_reason(
+    match single_predicate::unsupported_optional_single_predicate_reason(
         token_stream,
         context,
         type_interner.environment(),
+        string_table,
         classification,
     ) {
-        return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
-            reason,
-            Some(token_stream.current_span()),
-        )
-        .into()));
+        Ok(Some(reason)) => {
+            return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
+                reason,
+                Some(token_stream.current_span()),
+            )
+            .into()));
+        }
+        Ok(None) => {}
+        Err(error) => return Some(Err(error.into())),
     }
 
     match classification.shape {
@@ -266,11 +271,11 @@ fn parse_bool_value_if_after_condition(
         string_table,
         path_fork,
     });
-    let condition = create_expression_until(input, &[TokenKind::Then, TokenKind::Colon])?;
+    let condition = create_expression_until(input, &[TokenTag::THEN, TokenTag::COLON])?;
 
     ensure_if_statement_condition(&condition, type_interner.environment())?;
 
-    if token_stream.current_token_kind() == &TokenKind::Then {
+    if token_stream.current_tag() == TokenTag::THEN {
         if !same_logical_line(token_stream, header_index, token_stream.position()) {
             return Err(CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::InlineValueIfMultiline,
@@ -291,7 +296,7 @@ fn parse_bool_value_if_after_condition(
         });
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Colon {
+    if token_stream.current_tag() == TokenTag::COLON {
         return block_if::parse_block_value_if(ValueIfParseInput {
             token_stream,
             context,

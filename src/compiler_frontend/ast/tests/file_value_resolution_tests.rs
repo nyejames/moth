@@ -53,7 +53,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
@@ -662,16 +662,20 @@ fn resolve_file_value_fixture(
     )
     .expect("file-value fixture should tokenize");
     token_stream.freeze_path_syntax_for_test();
-    let path_token_index = token_stream
-        .tokens
+    let canonical_owner = token_stream
+        .canonical_source_tokens_arc()
+        .expect("file-value fixture should expose canonical source tokens");
+    let path_token_index = canonical_owner
+        .shapes()
         .iter()
-        .position(|token| matches!(token.kind, TokenKind::Path(_)))
+        .position(|shape| shape.tag() == TokenTag::PATH)
         .expect("file-value fixture should contain a path token");
     token_stream.index = path_token_index;
-    let path_syntax = match token_stream.tokens[path_token_index].kind {
-        TokenKind::Path(path_syntax) => path_syntax,
-        _ => unreachable!("path token index was selected above"),
-    };
+    let path_syntax = canonical_owner
+        .shapes()
+        .get(path_token_index)
+        .and_then(|shape| shape.path_syntax_id())
+        .expect("file-value fixture path token should carry a syntax handle");
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
@@ -710,8 +714,18 @@ fn resolve_file_value_fixture(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-    let cursor = AstCursor::from_file_tokens(&mut token_stream)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("file-value fixture should expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(
+        &canonical_owner,
+        token_stream.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("file-value fixture should expose an AST cursor");
+    cursor
+        .set_position(token_stream.index)
+        .expect("file-value fixture path position must remain in canonical range");
     let expression = resolve_file_value(
         path_syntax,
         &cursor,

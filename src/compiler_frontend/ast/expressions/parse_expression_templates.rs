@@ -21,7 +21,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 // WHAT: parses a template literal and optionally folds it to a string slice expression.
@@ -173,7 +173,7 @@ pub(super) fn parse_template_expression(
 
 // Consume a trailing `)` when requested and one is present.
 fn maybe_consume_closing_parenthesis(token_stream: &mut AstCursor, should_consume: bool) {
-    if should_consume && token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
+    if should_consume && token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
         token_stream.advance();
     }
 }

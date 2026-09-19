@@ -12,8 +12,9 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 
 /// Selects how a direct `[else]` marker is interpreted in the current body.
 #[derive(Clone, Copy)]
@@ -154,7 +155,7 @@ pub(super) fn classify_direct_else_marker(
 fn classify_else_marker_after_bracket(token_stream: &mut AstCursor) -> Option<DirectElseMarker> {
     token_stream.advance();
     token_stream.skip_newlines();
-    if token_stream.is_at_end() || *token_stream.current_token_kind() != TokenKind::Else {
+    if token_stream.is_at_end() || token_stream.current_tag() != TokenTag::ELSE {
         return None;
     }
     let span = Some(token_stream.current_span());
@@ -163,9 +164,9 @@ fn classify_else_marker_after_bracket(token_stream: &mut AstCursor) -> Option<Di
     if token_stream.is_at_end() {
         return Some(DirectElseMarker::Malformed { span });
     }
-    match token_stream.current_token_kind() {
-        TokenKind::If => {}
-        TokenKind::TemplateClose => {
+    match token_stream.current_tag() {
+        TokenTag::IF => {}
+        TokenTag::TEMPLATE_CLOSE => {
             return Some(DirectElseMarker::Sentinel {
                 close_index: token_stream.position(),
                 span,
@@ -178,27 +179,21 @@ fn classify_else_marker_after_bracket(token_stream: &mut AstCursor) -> Option<Di
 
     let mut nested_templates = 0usize;
     while !token_stream.is_at_end() {
-        // A malformed payload has no `TokenKind`; the indexed scan stopped there.
-        if token_stream
-            .current()
-            .is_some_and(|current| current.to_token_kind().is_err())
-        {
-            break;
-        }
-        match token_stream.current_token_kind() {
-            TokenKind::TemplateHead => nested_templates += 1,
-            TokenKind::TemplateClose if nested_templates == 0 => {
+        let tag = token_stream.current_tag();
+        match tag {
+            TokenTag::TEMPLATE_HEAD => nested_templates += 1,
+            TokenTag::TEMPLATE_CLOSE if nested_templates == 0 => {
                 return Some(DirectElseMarker::ElseIf {
                     if_index,
                     close_index: token_stream.position(),
                     span,
                 });
             }
-            TokenKind::TemplateClose => nested_templates = nested_templates.saturating_sub(1),
-            TokenKind::StartTemplateBody | TokenKind::Colon if nested_templates == 0 => {
+            TokenTag::TEMPLATE_CLOSE => nested_templates = nested_templates.saturating_sub(1),
+            TokenTag::START_TEMPLATE_BODY | TokenTag::COLON if nested_templates == 0 => {
                 return Some(DirectElseMarker::MalformedElseIf { span });
             }
-            TokenKind::Eof => return Some(DirectElseMarker::MalformedElseIf { span }),
+            TokenTag::EOF => return Some(DirectElseMarker::MalformedElseIf { span }),
             _ => {}
         }
         token_stream.advance();
@@ -211,8 +206,8 @@ pub(super) fn handle_direct_else_marker(
     else_marker: DirectElseMarker,
     policy: ElseSentinelPolicy,
     mut target: BodySentinelTarget<'_>,
-    string_table: &StringTable,
-) -> Result<TemplateBodyBoundary, CompilerDiagnostic> {
+    string_table: &mut StringTable,
+) -> Result<TemplateBodyBoundary, TemplateError> {
     if target.suppress_child_templates()
         && matches!(
             policy,
@@ -223,7 +218,8 @@ pub(super) fn handle_direct_else_marker(
         return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateElseInLiteralBody,
             *span,
-        ));
+        )
+        .into());
     }
 
     let (close_index, span) = match else_marker {
@@ -247,13 +243,15 @@ pub(super) fn handle_direct_else_marker(
             return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MalformedTemplateElseIf,
                 span,
-            ));
+            )
+            .into());
         }
         DirectElseMarker::Malformed { span } => {
             return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MalformedTemplateElse,
                 span,
-            ));
+            )
+            .into());
         }
     };
 
@@ -265,7 +263,9 @@ pub(super) fn handle_direct_else_marker(
                 string_table,
                 InvalidTemplateStructureReason::InlineTemplateElse,
             )
-            .map_err(|diagnostic| with_direct_else_marker_span(diagnostic, span))?;
+            .map_err(|error| {
+                error.map_diagnostic(|diagnostic| with_direct_else_marker_span(diagnostic, span))
+            })?;
             target.trim_trailing_whitespace(string_table);
             token_stream
                 .set_position(close_index)
@@ -276,15 +276,18 @@ pub(super) fn handle_direct_else_marker(
         ElseSentinelPolicy::Orphan => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::OrphanTemplateElse,
             span,
-        )),
+        )
+        .into()),
         ElseSentinelPolicy::Duplicate => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::DuplicateTemplateElse,
             span,
-        )),
+        )
+        .into()),
         ElseSentinelPolicy::LoopBody => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateElseInLoopBody,
             span,
-        )),
+        )
+        .into()),
     }
 }
 
@@ -295,8 +298,8 @@ pub(super) fn handle_direct_else_if_marker(
     span: Option<SourceSpan>,
     policy: ElseSentinelPolicy,
     mut target: BodySentinelTarget<'_>,
-    string_table: &StringTable,
-) -> Result<TemplateBodyBoundary, CompilerDiagnostic> {
+    string_table: &mut StringTable,
+) -> Result<TemplateBodyBoundary, TemplateError> {
     if target.suppress_child_templates()
         && matches!(
             policy,
@@ -306,7 +309,8 @@ pub(super) fn handle_direct_else_if_marker(
         return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateElseIfInLiteralBody,
             span,
-        ));
+        )
+        .into());
     }
 
     match policy {
@@ -317,7 +321,9 @@ pub(super) fn handle_direct_else_if_marker(
                 string_table,
                 InvalidTemplateStructureReason::InlineTemplateElse,
             )
-            .map_err(|diagnostic| adjust_else_if_inline_diagnostic(diagnostic, span))?;
+            .map_err(|error| {
+                error.map_diagnostic(|diagnostic| adjust_else_if_inline_diagnostic(diagnostic, span))
+            })?;
             target.trim_trailing_whitespace(string_table);
 
             Ok(TemplateBodyBoundary::ElseIf {
@@ -330,17 +336,20 @@ pub(super) fn handle_direct_else_if_marker(
         ElseSentinelPolicy::Orphan => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::OrphanTemplateElseIf,
             span,
-        )),
+        )
+        .into()),
 
         ElseSentinelPolicy::Duplicate => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateElseIfAfterElse,
             span,
-        )),
+        )
+        .into()),
 
         ElseSentinelPolicy::LoopBody => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateElseIfInLoopBody,
             span,
-        )),
+        )
+        .into()),
     }
 }
 
@@ -378,16 +387,16 @@ fn classify_loop_control_marker_after_bracket(
     if token_stream.is_at_end() {
         return None;
     }
-    let breaks = match token_stream.current_token_kind() {
-        TokenKind::Break => true,
-        TokenKind::Continue => false,
+    let breaks = match token_stream.current_tag() {
+        TokenTag::BREAK => true,
+        TokenTag::CONTINUE => false,
         _ => return None,
     };
     let span = Some(token_stream.current_span());
     token_stream.advance();
     token_stream.skip_newlines();
     let close_index = (!token_stream.is_at_end()
-        && *token_stream.current_token_kind() == TokenKind::TemplateClose)
+        && token_stream.current_tag() == TokenTag::TEMPLATE_CLOSE)
         .then(|| token_stream.position());
     if breaks {
         Some(DirectLoopControlMarker::Break { close_index, span })
@@ -451,11 +460,40 @@ pub(super) fn orphan_loop_control_diagnostic(
     }
 }
 
+fn token_tag_at(token_stream: &AstCursor, index: usize) -> Option<TokenTag> {
+    token_stream.token_ref_at(index).map(|token| token.tag())
+}
+
+fn token_string_id_at(
+    token_stream: &AstCursor,
+    index: usize,
+    string_table: &mut StringTable,
+) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+    let Some(token) = token_stream.token_ref_at(index) else {
+        return Ok(None);
+    };
+    if !matches!(
+        token.tag(),
+        TokenTag::STRING_SLICE_LITERAL
+            | TokenTag::RAW_STRING_LITERAL
+            | TokenTag::SYMBOL
+            | TokenTag::STYLE_DIRECTIVE
+    ) {
+        return Ok(None);
+    }
+    if token.string_id().is_none() {
+        return Err(crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+            "canonical string-shaped token is missing its payload",
+        ));
+    }
+    token_stream.token_string_id_at_in(index, string_table)
+}
+
 pub(super) fn ensure_loop_control_boundary_before_sentinel(
     token_stream: &AstCursor,
     marker: &DirectLoopControlMarker,
-    string_table: &StringTable,
-) -> Result<(), CompilerDiagnostic> {
+    string_table: &mut StringTable,
+) -> Result<(), TemplateError> {
     ensure_body_boundary_before_sentinel(
         token_stream,
         loop_control_marker_source_span(marker),
@@ -467,30 +505,38 @@ pub(super) fn ensure_loop_control_boundary_before_sentinel(
 pub(super) fn ensure_loop_control_boundary_after_sentinel(
     token_stream: &AstCursor,
     marker: &DirectLoopControlMarker,
-    string_table: &StringTable,
-) -> Result<(), CompilerDiagnostic> {
+    string_table: &mut StringTable,
+) -> Result<(), TemplateError> {
     if token_stream.position() >= token_stream.length() {
         return Ok(());
     }
 
-    let Some(next_kind) = token_stream.token_kind_at(token_stream.position()) else {
+    let next_index = token_stream.position();
+    let Some(next_tag) = token_tag_at(token_stream, next_index) else {
         return Ok(());
     };
-    match next_kind {
-        TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text)
-            if first_line_has_meaningful_text(string_table.resolve(text)) =>
-        {
-            Err(inline_sentinel_diagnostic(
-                loop_control_marker_source_span(marker),
-                inline_loop_control_reason(marker),
-            ))
+    match next_tag {
+        TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL => {
+            let Some(text_id) =
+                token_string_id_at(token_stream, next_index, string_table)?
+            else {
+                return Ok(());
+            };
+            if first_line_has_meaningful_text(string_table.resolve(text_id)) {
+                Err(inline_sentinel_diagnostic(
+                    loop_control_marker_source_span(marker),
+                    inline_loop_control_reason(marker),
+                )
+                .into())
+            } else {
+                Ok(())
+            }
         }
-
-        TokenKind::TemplateHead => Err(inline_sentinel_diagnostic(
+        TokenTag::TEMPLATE_HEAD => Err(inline_sentinel_diagnostic(
             loop_control_marker_source_span(marker),
             inline_loop_control_reason(marker),
-        )),
-
+        )
+        .into()),
         _ => Ok(()),
     }
 }
@@ -508,30 +554,38 @@ fn inline_loop_control_reason(marker: &DirectLoopControlMarker) -> InvalidTempla
 pub(super) fn ensure_else_boundary_after_sentinel(
     token_stream: &AstCursor,
     sentinel_span: Option<SourceSpan>,
-    string_table: &StringTable,
-) -> Result<(), CompilerDiagnostic> {
+    string_table: &mut StringTable,
+) -> Result<(), TemplateError> {
     if token_stream.position() >= token_stream.length() {
         return Ok(());
     }
 
-    let Some(next_kind) = token_stream.token_kind_at(token_stream.position()) else {
+    let next_index = token_stream.position();
+    let Some(next_tag) = token_tag_at(token_stream, next_index) else {
         return Ok(());
     };
-    match next_kind {
-        TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text)
-            if first_line_has_meaningful_text(string_table.resolve(text)) =>
-        {
-            Err(with_direct_else_marker_span(
-                inline_else_diagnostic(sentinel_span),
-                sentinel_span,
-            ))
+    match next_tag {
+        TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL => {
+            let Some(text_id) =
+                token_string_id_at(token_stream, next_index, string_table)?
+            else {
+                return Ok(());
+            };
+            if first_line_has_meaningful_text(string_table.resolve(text_id)) {
+                Err(with_direct_else_marker_span(
+                    inline_else_diagnostic(sentinel_span),
+                    sentinel_span,
+                )
+                .into())
+            } else {
+                Ok(())
+            }
         }
-
-        TokenKind::TemplateHead => Err(with_direct_else_marker_span(
+        TokenTag::TEMPLATE_HEAD => Err(with_direct_else_marker_span(
             inline_else_diagnostic(sentinel_span),
             sentinel_span,
-        )),
-
+        )
+        .into()),
         _ => Ok(()),
     }
 }
@@ -539,27 +593,29 @@ pub(super) fn ensure_else_boundary_after_sentinel(
 fn ensure_body_boundary_before_sentinel(
     token_stream: &AstCursor,
     sentinel_span: Option<SourceSpan>,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     inline_reason: InvalidTemplateStructureReason,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), TemplateError> {
     let Some(previous_index) = token_stream.position().checked_sub(1) else {
         return Ok(());
     };
-    let Some(previous_kind) = token_stream.token_kind_at(previous_index) else {
+    let Some(previous_tag) = token_tag_at(token_stream, previous_index) else {
         return Ok(());
     };
-    match previous_kind {
-        TokenKind::Newline => Ok(()),
-
-        TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text) => {
-            if last_line_has_meaningful_text(string_table.resolve(text)) {
-                return Err(inline_sentinel_diagnostic(sentinel_span, inline_reason));
+    match previous_tag {
+        TokenTag::NEWLINE => Ok(()),
+        TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL => {
+            let Some(text_id) =
+                token_string_id_at(token_stream, previous_index, string_table)?
+            else {
+                return Ok(());
+            };
+            if last_line_has_meaningful_text(string_table.resolve(text_id)) {
+                return Err(inline_sentinel_diagnostic(sentinel_span, inline_reason).into());
             }
-
             Ok(())
         }
-
-        _ => Err(inline_sentinel_diagnostic(sentinel_span, inline_reason)),
+        _ => Err(inline_sentinel_diagnostic(sentinel_span, inline_reason).into()),
     }
 }
 

@@ -293,6 +293,20 @@ fn rejects_range_loop_with_bare_dual_bindings() {
     ));
 }
 
+#[test]
+fn rejects_string_literal_as_range_binding() {
+    let payload = parse_loop_fixture_diagnostic(
+        "loop 0 to 10 |\"item\"|:\n    io.line([: [\"value\"]])\n;",
+    );
+
+    assert!(matches!(
+        payload,
+        DiagnosticPayload::InvalidLoopHeader {
+            reason: InvalidLoopHeaderReason::BindingMustBeSymbol,
+        }
+    ));
+}
+
 // --------------------------
 //  Loops without bindings
 // --------------------------

@@ -33,7 +33,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // --------------------------
 //  Accessed-symbol statement helper
@@ -205,8 +205,7 @@ pub(crate) fn parse_symbol_statement(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    // Payload extraction stays on the token kind: only the symbol id needs the wide value.
-    let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
+    let Some(symbol_id) = token_stream.current_string_id_in(string_table)? else {
         return Err(CompilerDiagnostic::expected_symbol_statement(Some(
             token_stream.current_span(),
         ))

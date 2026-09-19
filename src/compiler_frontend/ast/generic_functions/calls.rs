@@ -49,7 +49,7 @@ use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment:
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use rustc_hash::FxHashMap;
 
 /// Input bundle for generic call inference.
@@ -312,15 +312,15 @@ fn finish_generic_function_call(
 
     let Some(error_return_type_id) = error_return_type_id else {
         if matches!(
-            token_stream.current_token_kind(),
-            TokenKind::Bang | TokenKind::Catch
+            token_stream.current_tag(),
+            TokenTag::BANG | TokenTag::CATCH
         ) {
             let operand_is_optional = call_success_is_optional(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
             );
             return Err(CompilerDiagnostic::invalid_fallible_handling(
-                non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
+                non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
                 Some(token_stream.current_span()),
             )
             .into());
@@ -329,10 +329,10 @@ fn finish_generic_function_call(
         return Ok(call.into_plain_expression(type_interner.environment_mut_for_derived_types()));
     };
 
-    if token_stream.current_token_kind() == &TokenKind::Bang
-        || token_stream.current_token_kind() == &TokenKind::Catch
-        || (matches!(token_stream.current_token_kind(), TokenKind::Symbol(_))
-            && token_stream.peek_next_token() == Some(&TokenKind::Bang))
+    if token_stream.current_tag() == TokenTag::BANG
+        || token_stream.current_tag() == TokenTag::CATCH
+        || (token_stream.current_tag() == TokenTag::SYMBOL
+            && token_stream.peek_next_tag() == Some(TokenTag::BANG))
     {
         return parse_fallible_handling_suffix_for_call_expression(
             token_stream,

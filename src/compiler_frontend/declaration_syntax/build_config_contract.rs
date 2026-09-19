@@ -6,6 +6,7 @@
 //! its parser here lets source contracts and anonymous const-record fields use one grammar owner.
 
 use super::{DeclarationCursor, cursor_current_span};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuildInputType, PrimitiveBuildInputType, PrimitiveBuildValue,
 };
@@ -22,7 +23,7 @@ use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, TokenCursor, TokenIndex, TokenKind, TokenTag,
+    SourceTokens, TokenCursor, TokenIndex, TokenRef, TokenTag,
 };
 /// Syntax metadata retained for a declaration carrying `#Config of T`.
 ///
@@ -113,112 +114,160 @@ pub(crate) fn parsed_type_span(parsed: &ParsedTypeRef) -> Option<SourceSpan> {
     }
 }
 
-/// Normalize one top-level source declaration's qualifier and literal initializer.
+/// Canonical source-token entry point for config literal normalization.
 ///
-/// This deliberately consumes only retained tokens. In particular it does not construct an AST
-/// expression, consult a scope, or invoke template/constant evaluation. A declaration without an
-/// initializer is a required shell; `none` is accepted only for an optional contract.
-pub(crate) fn normalize_source_build_config_contract(
+/// Each payload is read through its checked `TokenRef` accessor so malformed trusted records stay
+/// in the infrastructure lane rather than being reported as user syntax.
+pub(crate) fn normalize_source_build_config_contract_from_token(
     name: StringId,
     name_span: SourceSpan,
     qualifier: &BuildConfigQualifierSyntax,
-    initializer: Option<(TokenKind, SourceSpan)>,
+    token: Option<TokenRef<'_>>,
     string_table: &mut StringTable,
-) -> Result<SourceBuildConfigContract, CompilerDiagnostic> {
+) -> Result<SourceBuildConfigContract, HeaderParseFailure> {
     let name_text = string_table.resolve(name).to_owned();
     let input_name = BuildInputName::new(&name_text).map_err(|_| {
-        CompilerDiagnostic::invalid_config_reason(
+        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_config_reason(
             Some(name),
             InvalidConfigReason::ConfigContractNameInvalid,
             Some(name_span),
-        )
+        ))
     })?;
     let value_type = build_input_type_from_parsed(&qualifier.type_annotation).ok_or_else(|| {
-        CompilerDiagnostic::invalid_config_reason(
+        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_config_reason(
             Some(name),
             InvalidConfigReason::ConfigQualifierUnsupportedType,
             parsed_type_span(&qualifier.type_annotation),
-        )
+        ))
     })?;
 
-    let (required, default) = match initializer {
+    let (required, default) = match token {
         None => (!value_type.is_optional(), None),
-        Some((kind, span)) => match &kind {
-            TokenKind::NoneLiteral => {
-                if !value_type.is_optional() {
-                    return Err(source_default_type_mismatch(
+        Some(token) => {
+            let span = Some(token.source_span());
+            match token.tag() {
+                TokenTag::NONE_LITERAL => {
+                    if !value_type.is_optional() {
+                        return Err(HeaderParseFailure::Diagnostic(source_default_type_mismatch(
+                            name,
+                            value_type,
+                            "None",
+                            span,
+                            string_table,
+                        )));
+                    }
+                    (false, None)
+                }
+                TokenTag::STRING_SLICE_LITERAL => {
+                    let spelling = token
+                        .string_spelling(string_table)
+                        .map_err(|error| {
+                            HeaderParseFailure::Infrastructure(
+                                CompilerDiagnostic::token_view_invariant_error(
+                                    error,
+                                    "source config string payload",
+                                ),
+                            )
+                        })?
+                        .ok_or_else(|| {
+                            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                                "source config string token is missing its payload",
+                            ))
+                        })?;
+                    validate_source_default_primitive(
                         name,
                         value_type,
-                        "None",
-                        Some(span),
+                        PrimitiveBuildValue::String(spelling.to_owned()),
+                        span,
                         string_table,
-                    ));
-                }
-                (false, None)
-            }
-            TokenKind::StringSliceLiteral(value) => {
-                let value = PrimitiveBuildValue::String(string_table.resolve(*value).to_owned());
-                validate_source_default_primitive(
-                    name,
-                    value_type,
-                    value,
-                    Some(span),
-                    string_table,
-                )?
-            }
-            TokenKind::BoolLiteral(value) => validate_source_default_primitive(
-                name,
-                value_type,
-                PrimitiveBuildValue::Bool(*value),
-                Some(span),
-                string_table,
-            )?,
-            TokenKind::CharLiteral(value) => validate_source_default_primitive(
-                name,
-                value_type,
-                PrimitiveBuildValue::Char(*value),
-                Some(span),
-                string_table,
-            )?,
-            TokenKind::NumericLiteral(value) => {
-                let materialized = match value.kind {
-                    crate::compiler_frontend::numeric_text::token::NumericLiteralKind::WholeNumber => {
-                        materialize_i32(value, string_table).map(PrimitiveBuildValue::Int)
-                    }
-                    crate::compiler_frontend::numeric_text::token::NumericLiteralKind::DecimalPoint
-                    | crate::compiler_frontend::numeric_text::token::NumericLiteralKind::Exponent => {
-                        materialize_f64(value, string_table).and_then(|number| {
-                            PrimitiveBuildValue::float(number).map_err(|_| {
-                                NumberLiteralErrorReason::NonFiniteFloat
-                            })
-                        })
-                    }
-                };
-                let materialized = materialized.map_err(|reason| {
-                    CompilerDiagnostic::invalid_number_literal(
-                        value.source_text,
-                        reason,
-                        Some(span),
                     )
-                })?;
-                validate_source_default_primitive(
-                    name,
-                    value_type,
-                    materialized,
-                    Some(span),
-                    string_table,
-                )?
+                    .map_err(HeaderParseFailure::Diagnostic)?
+                }
+                TokenTag::BOOL_LITERAL => {
+                    let value = token.bool_value().ok_or_else(|| {
+                        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                            "source config bool token has a malformed payload",
+                        ))
+                    })?;
+                    validate_source_default_primitive(
+                        name,
+                        value_type,
+                        PrimitiveBuildValue::Bool(value),
+                        span,
+                        string_table,
+                    )
+                    .map_err(HeaderParseFailure::Diagnostic)?
+                }
+                TokenTag::CHAR_LITERAL => {
+                    let value = token.char_value().ok_or_else(|| {
+                        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                            "source config char token has a malformed payload",
+                        ))
+                    })?;
+                    validate_source_default_primitive(
+                        name,
+                        value_type,
+                        PrimitiveBuildValue::Char(value),
+                        span,
+                        string_table,
+                    )
+                    .map_err(HeaderParseFailure::Diagnostic)?
+                }
+                TokenTag::NUMERIC_LITERAL => {
+                    let numeric = token
+                        .numeric_literal()
+                        .map_err(|error| {
+                            HeaderParseFailure::Infrastructure(
+                                CompilerDiagnostic::token_view_invariant_error(
+                                    error,
+                                    "source config numeric payload",
+                                ),
+                            )
+                        })?
+                        .ok_or_else(|| {
+                            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                                "source config numeric token is missing its payload",
+                            ))
+                        })?;
+                    let materialized = match numeric.kind {
+                        crate::compiler_frontend::numeric_text::token::NumericLiteralKind::WholeNumber => {
+                            materialize_i32(numeric, string_table).map(PrimitiveBuildValue::Int)
+                        }
+                        crate::compiler_frontend::numeric_text::token::NumericLiteralKind::DecimalPoint
+                        | crate::compiler_frontend::numeric_text::token::NumericLiteralKind::Exponent => {
+                            materialize_f64(numeric, string_table).and_then(|number| {
+                                PrimitiveBuildValue::float(number)
+                                    .map_err(|_| NumberLiteralErrorReason::NonFiniteFloat)
+                            })
+                        }
+                    };
+                    let materialized = materialized.map_err(|reason| {
+                        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
+                            numeric.source_text,
+                            reason,
+                            span,
+                        ))
+                    })?;
+                    validate_source_default_primitive(
+                        name,
+                        value_type,
+                        materialized,
+                        span,
+                        string_table,
+                    )
+                    .map_err(HeaderParseFailure::Diagnostic)?
+                }
+                _ => {
+                    return Err(HeaderParseFailure::Diagnostic(source_default_type_mismatch(
+                        name,
+                        value_type,
+                        "non-primitive",
+                        span,
+                        string_table,
+                    )));
+                }
             }
-            _ => {
-                return Err(source_default_type_mismatch(
-                    name,
-                    value_type,
-                    "non-primitive",
-                    Some(span),
-                    string_table,
-                ));
-            }
-        },
+        }
     };
 
     Ok(SourceBuildConfigContract {
@@ -228,6 +277,41 @@ pub(crate) fn normalize_source_build_config_contract(
         default,
         span: qualifier.qualifier_span.unwrap_or(name_span),
     })
+}
+
+/// Reject a source `#Config` initializer that contains more than one token.
+///
+/// The source contract stores only one already-materialized primitive. A longer initializer is
+/// therefore a diagnosed non-primitive default rather than a truncated first-token value.
+pub(crate) fn normalize_source_build_config_contract_non_primitive(
+    name: StringId,
+    name_span: SourceSpan,
+    qualifier: &BuildConfigQualifierSyntax,
+    span: SourceSpan,
+    string_table: &mut StringTable,
+) -> Result<SourceBuildConfigContract, HeaderParseFailure> {
+    let name_text = string_table.resolve(name).to_owned();
+    BuildInputName::new(&name_text).map_err(|_| {
+        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_config_reason(
+            Some(name),
+            InvalidConfigReason::ConfigContractNameInvalid,
+            Some(name_span),
+        ))
+    })?;
+    let value_type = build_input_type_from_parsed(&qualifier.type_annotation).ok_or_else(|| {
+        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_config_reason(
+            Some(name),
+            InvalidConfigReason::ConfigQualifierUnsupportedType,
+            parsed_type_span(&qualifier.type_annotation),
+        ))
+    })?;
+    Err(HeaderParseFailure::Diagnostic(source_default_type_mismatch(
+        name,
+        value_type,
+        "non-primitive",
+        Some(span),
+        string_table,
+    )))
 }
 
 fn validate_source_default_primitive(
@@ -372,12 +456,14 @@ pub(crate) fn starts_build_config_qualifier_at_source(
 /// Return whether a canonical cursor begins the compiler-owned `#Config` spelling.
 pub(crate) fn starts_build_config_qualifier_at_cursor(
     cursor: &DeclarationCursor<'_>,
-    string_table: &StringTable,
-) -> bool {
-    cursor.current_tag() == TokenTag::HASH
-        && cursor
-            .peek_next_string_id()
-            .is_some_and(|name| string_table.resolve(name) == "Config")
+    string_table: &mut StringTable,
+) -> Result<bool, crate::compiler_frontend::compiler_errors::CompilerError> {
+    if cursor.current_tag() != TokenTag::HASH {
+        return Ok(false);
+    }
+    Ok(cursor
+        .peek_next_string_id_in(string_table)?
+        .is_some_and(|name| string_table.resolve(name) == "Config"))
 }
 
 /// Parse the exact structural `#Config of T` qualifier.
@@ -394,34 +480,55 @@ pub(crate) fn parse_build_config_qualifier(
         token_stream.advance();
     }
 
-    match token_stream.current_tag() {
-        TokenTag::SYMBOL
-            if token_stream
-                .current_string_id()
-                .is_some_and(|name| string_table.resolve(name) == "Config") =>
-        {
-            token_stream.advance();
-        }
-        _ => {
-            let expected = DiagnosticToken::from(TokenKind::Symbol(string_table.intern("Config")));
-            let found = match token_stream.canonical_cursor().current() {
-                Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-                None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
-            };
-            return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::expected_token_from_projections(
-                    expected,
-                    found,
-                    token_stream.current_span(),
-                ),
-            ));
-        }
+    let is_config_symbol = if token_stream.current_tag() == TokenTag::SYMBOL {
+        token_stream
+            .current_string_id_in(string_table)
+            .map_err(HeaderParseFailure::Infrastructure)?
+            .is_some_and(|name| string_table.resolve(name) == "Config")
+    } else {
+        false
+    };
+    if is_config_symbol {
+        token_stream.advance();
+    } else {
+        let expected = DiagnosticToken::from_string_tag(
+            TokenTag::SYMBOL,
+            string_table.intern("Config"),
+        );
+        let found = match token_stream.canonical_cursor().current() {
+            Some(found) => Some(
+                DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                    HeaderParseFailure::Infrastructure(
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "config qualifier diagnostic projection",
+                        ),
+                    )
+                })?,
+            ),
+            None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
+        };
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::expected_token_from_projections(
+                expected,
+                found,
+                token_stream.current_span(),
+            ),
+        ));
     }
-
     if token_stream.current_tag() != TokenTag::OF {
         let span = token_stream.current_span();
         let found = match token_stream.canonical_cursor().current() {
-            Some(found) => Some(DiagnosticToken::from_token_ref(found)),
+            Some(found) => Some(
+                DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                    HeaderParseFailure::Infrastructure(
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "config qualifier diagnostic projection",
+                        ),
+                    )
+                })?,
+            ),
             None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
         };
         return Err(HeaderParseFailure::Diagnostic(

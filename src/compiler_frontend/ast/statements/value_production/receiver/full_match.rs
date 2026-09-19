@@ -25,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Full value matches recurse into statement match bodies, so their result retains internal
 /// frozen-token-table failures for the expression parser boundary.
@@ -69,7 +69,7 @@ pub(super) fn parse_value_match_at_receiver(
         path_fork,
     )?;
 
-    if token_stream.current_token_kind() != &TokenKind::Is {
+    if token_stream.current_tag() != TokenTag::IS {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
             Some(token_stream.current_span()),

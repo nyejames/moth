@@ -44,7 +44,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::utilities::token_scan::TemplateBalance;
 
 /// Template-body parsing owns recursive template construction, so it carries the template error
@@ -54,6 +54,13 @@ type BodyParseResult<T> = Result<T, TemplateError>;
 // -------------------------
 //  Body Parser Entry
 // -------------------------
+
+/// How an outer template body ends when its donor stream has no physical close token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TemplateBodyEndPolicy {
+    RequireClose,
+    DonorExhaustionIsClose,
+}
 
 /// Parses the body section of a template, consuming tokens until the explicit
 /// closing delimiter. Nested child templates are recursively parsed.
@@ -76,7 +83,9 @@ pub(crate) fn parse_template_body(
         default_style,
         source_path,
         path_fork,
+        end_policy,
     } = input;
+    let outer_end_policy = end_policy;
 
     // Pre-intern common single-character literals used on every newline and
     // bracket token. These IDs are stable for the lifetime of the string table,
@@ -97,6 +106,7 @@ pub(crate) fn parse_template_body(
         default_style,
         source_path,
         path_fork,
+        end_policy: outer_end_policy,
     };
 
     match body_mode {
@@ -108,7 +118,7 @@ pub(crate) fn parse_template_body(
                 inherited_wrappers: InheritedChildWrapperPolicy::Apply,
             };
             parser
-                .parse_content(parse_input, construction_context)
+                .parse_content(parse_input, construction_context, parser.end_policy)
                 .map(|_| ())
         }
 
@@ -127,6 +137,7 @@ pub(crate) fn parse_template_body(
 /// WHAT: carries the mutable AST/body parser services used by every recursive
 pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
     pub(crate) context: &'a ScopeContext,
+    pub(crate) end_policy: TemplateBodyEndPolicy,
     pub(crate) type_interner: &'a mut AstTypeInterner<'types>,
     pub(crate) body_mode: TemplateBodyParseMode,
     pub(crate) direct_child_wrappers: &'a [TemplateWrapperReference],
@@ -215,19 +226,21 @@ struct TemplateBodyParser<'a, 'cursor, 'types> {
     default_style: Option<Style>,
     source_path: PathId,
     path_fork: &'a mut PathInternerFork,
+    end_policy: TemplateBodyEndPolicy,
 }
 
 impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
     /// Parses body tokens into parser TIR.
     ///
-    /// All body content — literal text, newlines, nested templates, and slot
-    /// definitions — is emitted exclusively into parser TIR through
-    /// `TemplateConstructionContext`. `$doc` suppresses nested template parsing,
-    /// so balanced brackets in documentation bodies remain literal text.
+    /// All body content — literal text, newlines, nested templates, and slots
+    /// is emitted exclusively into parser TIR through `TemplateConstructionContext`.
+    /// `$doc` suppresses nested template parsing, so balanced brackets in documentation bodies
+    /// remain literal text.
     fn parse_content(
         &mut self,
         input: BodyParseInput<'_, '_>,
         construction_context: &mut TemplateConstructionContext,
+        end_policy: TemplateBodyEndPolicy,
     ) -> BodyParseResult<TemplateBodyBoundary> {
         // The tokenizer only allows for strings, templates or slots inside the template body.
         let mut last_known_span = current_token_source_span(self.token_stream);
@@ -235,25 +248,27 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             add_ast_counter(AstCounter::TemplateBodyTokenVisits, 1);
             last_known_span = current_token_source_span(self.token_stream);
 
-            // Match by reference to avoid cloning the token kind on every iteration.
-            // Only the error fallback arm needs an owned clone for the diagnostic payload.
-            match self.token_stream.current_token_kind() {
-                TokenKind::Eof => {
+            match self.token_stream.current_tag() {
+                TokenTag::EOF
+                    if matches!(end_policy, TemplateBodyEndPolicy::DonorExhaustionIsClose) =>
+                {
+                    return Ok(TemplateBodyBoundary::TemplateClose);
+                }
+                TokenTag::EOF => {
                     return Err(CompilerDiagnostic::unexpected_end_of_file(
                         Some(self.close_bracket_id),
                         last_known_span,
                     )
                     .into());
                 }
-
-                TokenKind::TemplateClose => {
+                TokenTag::TEMPLATE_CLOSE => {
                     ast_log!("Breaking out of template body. Found a template close.");
                     // Consume the closing bracket so the caller resumes after the template body.
                     self.token_stream.advance();
                     return Ok(TemplateBodyBoundary::TemplateClose);
                 }
 
-                TokenKind::TemplateHead => {
+                TokenTag::TEMPLATE_HEAD => {
                     if let Some(else_marker) = classify_direct_else_marker(self.token_stream) {
                         let sentinel_target = body_sentinel_target(
                             construction_context,
@@ -287,7 +302,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                                 open_bracket_id: self.open_bracket_id,
                                 close_bracket_id: self.close_bracket_id,
                             },
-                        );
+                        )?;
                         continue;
                     }
 
@@ -295,24 +310,39 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                     continue;
                 }
 
-                TokenKind::RawStringLiteral(content) | TokenKind::StringSliceLiteral(content) => {
-                    let byte_len = self.string_table.resolve(*content).len();
+                TokenTag::RAW_STRING_LITERAL | TokenTag::STRING_SLICE_LITERAL => {
+                    let content = self
+                        .token_stream
+                        .current_string_id_in(self.string_table)?
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "template-body string token had no string payload",
+                            )
+                        })?;
+                    let byte_len = self.string_table.resolve(content).len();
                     #[cfg(feature = "detailed_timers")]
                     {
                         add_ast_counter(AstCounter::TemplateTextBytesParsed, byte_len);
                     }
-                    construction_context.record_text(*content, byte_len, last_known_span);
+                    construction_context.record_text(content, byte_len, last_known_span);
                 }
 
-                TokenKind::Newline => {
+                TokenTag::NEWLINE => {
                     add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                     construction_context.record_text(self.newline_id, 1, last_known_span);
                 }
 
-                found => {
+                _ => {
                     let found_token = match self.token_stream.current() {
-                        Some(found) => DiagnosticToken::from_token_ref(found),
-                        None => DiagnosticToken::from(found),
+                        Some(found) => DiagnosticToken::try_from_token_ref(found).map_err(
+                            |error| {
+                                CompilerDiagnostic::token_view_invariant_error(
+                                    error,
+                                    "template-body unexpected-token diagnostic",
+                                )
+                            },
+                        )?,
+                        None => DiagnosticToken::from_static_tag(self.token_stream.current_tag()),
                     };
                     let mut diagnostic =
                         CompilerDiagnostic::unexpected_token_from_tag(found_token, last_known_span);
@@ -324,11 +354,18 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             self.token_stream.advance();
         }
 
-        Err(CompilerDiagnostic::unexpected_end_of_file(
-            Some(self.close_bracket_id),
-            last_known_span,
-        )
-        .into())
+        if matches!(
+            end_policy,
+            TemplateBodyEndPolicy::DonorExhaustionIsClose
+        ) {
+            Ok(TemplateBodyBoundary::TemplateClose)
+        } else {
+            Err(CompilerDiagnostic::unexpected_end_of_file(
+                Some(self.close_bracket_id),
+                last_known_span,
+            )
+            .into())
+        }
     }
 
     /// Parses an `[if]` body and any `[else if]` / `[else]` followers into a
@@ -369,7 +406,11 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                 inherited_wrappers: InheritedChildWrapperPolicy::Skip,
             };
 
-            let boundary = self.parse_content(parse_input, &mut branch_construction_context)?;
+            let boundary = self.parse_content(
+                parse_input,
+                &mut branch_construction_context,
+                self.end_policy,
+            )?;
 
             // An `[else if]` sentinel ends on the same line as the previous branch's
             // closing bracket. Strip the leading whitespace that follows it so the
@@ -463,7 +504,11 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             control_context: control_context.with_else_policy(ElseSentinelPolicy::Duplicate),
             inherited_wrappers: InheritedChildWrapperPolicy::Skip,
         };
-        self.parse_content(parse_input, &mut else_construction_context)?;
+        self.parse_content(
+            parse_input,
+            &mut else_construction_context,
+            TemplateBodyEndPolicy::RequireClose,
+        )?;
 
         ensure_else_body_starts_on_new_boundary(
             &else_construction_context,
@@ -510,10 +555,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
         )?;
 
         if self.token_stream.position() != close_index
-            || !matches!(
-                self.token_stream.current_token_kind(),
-                TokenKind::TemplateClose
-            )
+            || self.token_stream.current_tag() != TokenTag::TEMPLATE_CLOSE
         {
             return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MalformedTemplateElseIf,
@@ -524,7 +566,9 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
 
         self.token_stream.advance();
         ensure_else_boundary_after_sentinel(self.token_stream, marker_span, self.string_table)
-            .map_err(|diagnostic| adjust_else_if_inline_diagnostic(diagnostic, marker_span))?;
+            .map_err(|error| {
+                error.map_diagnostic(|diagnostic| adjust_else_if_inline_diagnostic(diagnostic, marker_span))
+            })?;
 
         let (mut selector, branch_context) =
             branch_selector_and_context_from_parsed_if_header(parsed_header, base_context, self)?;
@@ -559,7 +603,11 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             inherited_wrappers: InheritedChildWrapperPolicy::Skip,
         };
 
-        self.parse_content(parse_input, &mut body_construction_context)?;
+        self.parse_content(
+            parse_input,
+            &mut body_construction_context,
+            TemplateBodyEndPolicy::RequireClose,
+        )?;
 
         let body_node_id = finalize_tir_body_builder(
             build_state.style.clone(),
@@ -840,17 +888,11 @@ fn next_meaningful_token_is_template_close(
         && token_stream.position() < end
         && !token_stream.is_at_end()
     {
-        if token_stream
-            .current()
-            .is_some_and(|current| current.to_token_kind().is_err())
-        {
+        let tag = token_stream.current_tag();
+        if tag == TokenTag::TEMPLATE_CLOSE {
             break;
         }
-        let kind = token_stream.current_token_kind();
-        if matches!(kind, TokenKind::TemplateClose) {
-            break;
-        }
-        if !matches!(kind, TokenKind::Newline) {
+        if tag != TokenTag::NEWLINE {
             closes = false;
             break;
         }
@@ -969,9 +1011,7 @@ fn consume_balanced_brackets_as_literal_text(
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
     text_ids: LiteralTemplateTextIds,
-) {
-    let source = token_stream.source_id();
-
+) -> BodyParseResult<()> {
     // Emit the opening bracket as literal text.
     add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
     let span = current_token_source_span(token_stream);
@@ -980,114 +1020,89 @@ fn consume_balanced_brackets_as_literal_text(
 
     let mut balance = TemplateBalance::with_opening_template();
     while balance.has_unclosed_templates() {
-        let token_kind = token_stream.current_token_kind().clone();
-        if matches!(token_kind, TokenKind::Eof) {
-            return;
+        let tag = token_stream.current_tag();
+        if tag == TokenTag::EOF {
+            return Ok(());
         }
-        let token = token_stream.current_token();
-        balance.step(&token_kind);
-        match &token_kind {
-            TokenKind::TemplateHead => {
+        let span = current_token_source_span(token_stream);
+        balance.step_tag(tag);
+        match tag {
+            TokenTag::TEMPLATE_HEAD => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
-                construction_context.record_text(
-                    text_ids.open_bracket_id,
-                    1,
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(text_ids.open_bracket_id, 1, span);
             }
 
-            TokenKind::TemplateClose => {
+            TokenTag::TEMPLATE_CLOSE => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
-                construction_context.record_text(
-                    text_ids.close_bracket_id,
-                    1,
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(text_ids.close_bracket_id, 1, span);
             }
 
-            TokenKind::RawStringLiteral(content) | TokenKind::StringSliceLiteral(content) => {
-                let byte_len = string_table.resolve(*content).len();
+            TokenTag::RAW_STRING_LITERAL | TokenTag::STRING_SLICE_LITERAL => {
+                let content = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "literal template body string token had no string payload",
+                        )
+                    })?;
+                let byte_len = string_table.resolve(content).len();
                 #[cfg(feature = "detailed_timers")]
                 {
                     add_ast_counter(AstCounter::TemplateTextBytesParsed, byte_len);
                 }
-                construction_context.record_text(
-                    *content,
-                    byte_len,
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(content, byte_len, span);
             }
 
-            TokenKind::Newline => {
+            TokenTag::NEWLINE => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
-                construction_context.record_text(
-                    text_ids.newline_id,
-                    1,
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(text_ids.newline_id, 1, span);
             }
 
-            TokenKind::Symbol(id) | TokenKind::StyleDirective(id) => {
-                let prefix = if matches!(token_kind, TokenKind::StyleDirective(_)) {
-                    "$"
-                } else {
-                    ""
-                };
-                let name = string_table.resolve(*id).to_owned();
+            TokenTag::SYMBOL | TokenTag::STYLE_DIRECTIVE => {
+                let id = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "literal template body symbol token had no string payload",
+                        )
+                    })?;
+                let prefix = (tag == TokenTag::STYLE_DIRECTIVE).then_some("$").unwrap_or("");
+                let name = string_table.resolve(id);
                 let literal = format!("{prefix}{name}");
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, literal.len());
                 let literal_id = string_table.intern(&literal);
-                construction_context.record_text(
-                    literal_id,
-                    literal.len(),
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(literal_id, literal.len(), span);
             }
 
-            TokenKind::StartTemplateBody | TokenKind::Colon => {
+            TokenTag::START_TEMPLATE_BODY | TokenTag::COLON => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 let colon_id = string_table.intern(":");
-                construction_context.record_text(
-                    colon_id,
-                    1,
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(colon_id, 1, span);
             }
 
-            TokenKind::Comma => {
+            TokenTag::COMMA => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 let comma_id = string_table.intern(",");
-                construction_context.record_text(
-                    comma_id,
-                    1,
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(comma_id, 1, span);
             }
 
-            TokenKind::OpenParenthesis => {
+            TokenTag::OPEN_PARENTHESIS => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 let paren_id = string_table.intern("(");
-                construction_context.record_text(
-                    paren_id,
-                    1,
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(paren_id, 1, span);
             }
 
-            TokenKind::CloseParenthesis => {
+            TokenTag::CLOSE_PARENTHESIS => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 let paren_id = string_table.intern(")");
-                construction_context.record_text(
-                    paren_id,
-                    1,
-                    Some(SourceSpan::new(source, token.span)),
-                );
+                construction_context.record_text(paren_id, 1, span);
             }
 
             _ => {}
         }
         token_stream.advance();
     }
+    Ok(())
 }
 
 // -------------------------

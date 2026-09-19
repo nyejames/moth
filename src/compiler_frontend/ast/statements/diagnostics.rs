@@ -89,7 +89,7 @@ pub(crate) fn unexpected_statement_token(
                 // Invariant: Must and TraitThis are always reserved trait keywords.
                 let found = match token_stream.current() {
                     Some(found) => DiagnosticToken::from_token_ref(found),
-                    None => DiagnosticToken::from(token_stream.current_token_kind()),
+                    None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
                 };
                 CompilerDiagnostic::unexpected_token_from_tag(found, span)
             }
@@ -98,7 +98,7 @@ pub(crate) fn unexpected_statement_token(
         _ => {
             let found = match token_stream.current() {
                 Some(found) => DiagnosticToken::from_token_ref(found),
-                None => DiagnosticToken::from(token_stream.current_token_kind()),
+                None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
             };
             CompilerDiagnostic::unexpected_token_from_tag(found, span)
         }

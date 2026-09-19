@@ -15,7 +15,6 @@ use crate::compiler_frontend::ast::statements::loop_headers::{
     ParsedLoopHeader, parse_loop_header_cursor,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -41,18 +40,10 @@ pub fn create_loop(
 
     let span = token_stream.previous_span();
     let scope = context.scope;
+    let start_index = token_stream.position();
     let colon_index = find_loop_header_colon_index(&mut *token_stream)?;
 
-    let start_index = token_stream.position();
-    // Canonical header window only; compatibility streams have no owner to window.
-    // Dense segmented coordinates stay window-bounded and canonical `SourceTokens`
-    // are never cloned into a new `FileTokens` vector here.
-    let Some(mut window) = token_stream.subcursor_window(start_index, colon_index)? else {
-        return Err(CompilerError::compiler_error(
-            "compatibility token stream cannot parse a loop header",
-        )
-        .into());
-    };
+    let mut window = token_stream.subcursor_window(start_index, colon_index)?;
     if is_empty_header_window(&mut window) {
         return Err(CompilerDiagnostic::invalid_loop_header(
             InvalidLoopHeaderReason::EmptyHeader,
@@ -108,13 +99,6 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
     let mut nesting_depth = NestingDepth::default();
     let mut outcome: Option<LoopResult<usize>> = None;
     while token_stream.position() < end && !token_stream.is_at_end() {
-        // A malformed payload has no `TokenKind`; stop and report MissingColon at the
-        // entry span, since no colon decision can be made past it.
-        if let Some(current) = token_stream.current()
-            && current.to_token_kind().is_err()
-        {
-            break;
-        }
         let tag = token_stream.current_tag();
         let token_span = token_stream.current_span();
         let is_top_level = nesting_depth.is_top_level();
@@ -133,7 +117,7 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
             break;
         }
 
-        nesting_depth.step(token_stream.current_token_kind());
+        nesting_depth.step_tag(tag);
         let before = token_stream.position();
         token_stream.advance();
         // Eof never advances, so a stalled step ends the search.
@@ -163,13 +147,6 @@ fn is_empty_header_window(window: &mut AstCursor) -> bool {
     let end = window.length();
     let mut empty = true;
     while window.position() < end && !window.is_at_end() {
-        // A malformed payload has no `TokenKind`; stop and leave the emptiness decision to the header parser.
-        if window
-            .current()
-            .is_some_and(|current| current.to_token_kind().is_err())
-        {
-            break;
-        }
         if window.current_tag() != TokenTag::NEWLINE {
             empty = false;
             break;

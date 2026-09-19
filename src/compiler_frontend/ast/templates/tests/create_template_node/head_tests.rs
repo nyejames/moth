@@ -7,7 +7,8 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, TemplateConstValueKind, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_body_parser::{
-    NestedTemplateParseOptions, TemplateBodyParseRequest, parse_template_body,
+    NestedTemplateParseOptions, TemplateBodyEndPolicy, TemplateBodyParseRequest,
+    parse_template_body,
 };
 use crate::compiler_frontend::ast::templates::template_body_sentinels::TemplateBodyControlContext;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
@@ -112,8 +113,18 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
         &style_directives,
     );
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let error = Template::new(
         &mut token_stream,
         source_path,
@@ -273,8 +284,18 @@ fn parse_template_error(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
 
     expect_template_diagnostic(
         Template::new(
@@ -297,8 +318,18 @@ fn parse_runtime_template(source: &str) -> (Template, ScopeContext, StringTable)
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
 
     let template = Template::new(
         &mut token_stream,
@@ -322,8 +353,18 @@ fn parse_control_flow_template_after_body_parse(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
 
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -356,6 +397,7 @@ fn parse_control_flow_template_after_body_parse(
         &mut construction_context,
         TemplateBodyParseRequest {
             context: &context,
+            end_policy: TemplateBodyEndPolicy::RequireClose,
             type_interner: &mut type_interner,
             body_mode: parsed_head.body_mode,
             direct_child_wrappers: &[],
@@ -396,8 +438,18 @@ fn parse_control_flow_template_after_composition(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -429,8 +481,18 @@ fn parse_control_flow_template_after_composition_error(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -461,8 +523,18 @@ fn parse_runtime_template_without_validation(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -492,6 +564,7 @@ fn parse_runtime_template_without_validation(
         &mut construction_context,
         TemplateBodyParseRequest {
             context: &context,
+            end_policy: TemplateBodyEndPolicy::RequireClose,
             type_interner: &mut type_interner,
             body_mode: parsed_head.body_mode,
             direct_child_wrappers: &[],
@@ -564,8 +637,18 @@ fn const_required_construction(source: &str) -> PreparedTemplateConstruction {
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     Template::new_const_required(
         &mut token_stream,
         source_path,
@@ -585,8 +668,18 @@ fn parse_const_required_template(source: &str) -> (Template, ScopeContext, Strin
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let template = Template::new_const_required(
         &mut token_stream,
         source_path,
@@ -611,8 +704,18 @@ fn parse_const_required_template_error(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
     let context = new_constant_context(source_path, &path_fork);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     expect_template_diagnostic(
         Template::new_const_required(
             &mut token_stream,

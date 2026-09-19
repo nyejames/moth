@@ -26,7 +26,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // --------------------------
 //  Helpers
@@ -82,7 +82,7 @@ pub(super) fn parse_map_builtin_member_typed(
 
     // Property-style `length` requires no parentheses.
     if builtin.is_property() {
-        if token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis) {
+        if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
             return Err(CompilerDiagnostic::invalid_builtin_call(
                 InvalidBuiltinCallReason::MapLengthIsProperty,
                 Some(member_name),
@@ -143,7 +143,7 @@ pub(super) fn parse_map_builtin_member_typed(
     }
 
     // All other map builtins require parentheses.
-    if token_stream.peek_next_token() != Some(&TokenKind::OpenParenthesis) {
+    if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
         return Err(CompilerDiagnostic::invalid_builtin_call(
             InvalidBuiltinCallReason::MissingParentheses,
             Some(member_name),

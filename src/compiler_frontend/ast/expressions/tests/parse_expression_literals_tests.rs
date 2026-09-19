@@ -149,8 +149,19 @@ fn parse_whole_number_token(
         Token::new(TokenKind::Eof, LocalSpan::source_start()),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut token_stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut expression = Vec::new();
     let mut next_number_negative = next_number_negative;
     let mut type_environment = TypeEnvironment::new();

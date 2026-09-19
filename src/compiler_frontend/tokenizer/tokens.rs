@@ -8,15 +8,15 @@ use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::numeric_text::store::{NumericLiteralId, NumericLiteralStore};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralToken};
-use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::paths::path_syntax::{PathSyntax, PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
 };
 #[cfg(test)]
 use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{
-    StringId, StringIdRemap, StringTable, StringTableResolver,
+    FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
 };
 
 use crate::token_log;
@@ -561,10 +561,21 @@ pub enum TokenViewError {
         index: u32,
         len: usize,
     },
-    #[cfg(test)]
+    MalformedStringHandle,
     MissingPathTable,
     MalformedNumericHandle,
     MalformedPathHandle,
+}
+
+/// Donor identity carried separately from a borrowed source-token view.
+///
+/// The canonical owner supplies source indexes, ranges, spans and cold-store handles. This
+/// optional context supplies the frozen string table that issued payload IDs when a requester
+/// parses a retained foreign body. Requester tables are passed to the `*_in` readers at the use
+/// site, so no translation state or second token store is retained here.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TokenPayloadOrigin<'a> {
+    pub(crate) strings: &'a FrozenStringTable,
 }
 
 /// Failures while packing one token into the canonical construction owner.
@@ -578,18 +589,6 @@ pub(crate) enum SourceTokenBuildError {
     Invariant(CompilerError),
 }
 
-/// Borrowed identity tables used while rebasing one window's payloads.
-///
-/// WHAT: names the tables that issued the donor payload IDs and the destination tables that
-/// must issue their replacements.
-/// WHY: payload identity is table-relative, so a window can only cross domains by spelling.
-/// The destination tables stay borrowed for the rebase and are never retained.
-pub(crate) struct PayloadRebaseContext<'a, S: StringTableResolver> {
-    pub(crate) source_path_table: Option<&'a PathTable>,
-    pub(crate) source_strings: &'a S,
-    pub(crate) destination_strings: &'a mut StringTable,
-    pub(crate) path_fork: Option<&'a mut PathInternerFork>,
-}
 
 /// Canonical construction owner for one source's token arrays.
 ///
@@ -653,36 +652,6 @@ impl SourceTokensBuilder {
         Ok(())
     }
 
-    /// Append one already-packed shape whose payload is in this builder's own domain.
-    ///
-    /// WHAT: takes a shape rebased or copied from another owner, checks that any numeric handle
-    /// it carries is exactly the dense handle this builder would assign next, and appends it.
-    /// WHY: a rebased body window copies donor shapes instead of repacking token values, so the
-    /// positional numeric lane must still be proven rather than assumed.
-    pub(crate) fn push_rebased_shape(
-        &mut self,
-        shape: TokenShape,
-        span: LocalSpan,
-    ) -> Result<(), SourceTokenBuildError> {
-        if let Some(numeric_id) = shape.numeric_literal_id() {
-            let expected = self.next_numeric_id()?;
-            if numeric_id != expected {
-                return Err(SourceTokenBuildError::Invariant(
-                    CompilerError::compiler_error(format!(
-                        "rebased numeric handle {} does not match its dense position {}",
-                        numeric_id.raw(),
-                        expected.raw()
-                    )),
-                ));
-            }
-        }
-        let has_numeric_id = shape.numeric_literal_id().is_some();
-        self.push_packed(shape, span)?;
-        if has_numeric_id {
-            self.staged_numeric += 1;
-        }
-        Ok(())
-    }
 
     fn next_numeric_id(&self) -> Result<NumericLiteralId, SourceTokenBuildError> {
         NumericLiteralId::try_from_index(self.staged_numeric).ok_or(SourceTokenBuildError::Capacity)
@@ -820,6 +789,11 @@ impl SourceTokens {
     pub fn shapes(&self) -> &[TokenShape] {
         &self.shapes
     }
+    #[cfg(test)]
+    pub(crate) fn corrupt_payload_for_test(&mut self, index: usize, tag: TokenTag) {
+        self.shapes[index] = TokenShape::new(tag, 0, 0)
+            .expect("the test corruption tag must accept zero flags");
+    }
 
     pub fn spans(&self) -> &[LocalSpan] {
         &self.spans
@@ -921,125 +895,6 @@ impl SourceTokens {
         TokenCursor::new(self, range)
     }
 
-    /// Copy one bounded window of this owner into a transient owner in another payload domain.
-    ///
-    /// WHAT: walks the window exactly as a body cursor walks it, copying each shape and span and
-    /// rebasing string, numeric and path payloads into the destination tables.
-    /// WHY: a body captured from a donor module is replayed by a requester whose payload IDs mean
-    /// something else. Rebasing into a canonical owner keeps the requester on the canonical
-    /// parser lane instead of a remapped token vector.
-    ///
-    /// The result keeps this owner's `SourceId` and every donor span, so spans, retained syntax
-    /// and diagnostics still point at the donor source. Only payload identifiers move. The
-    /// result is dense and contiguous even when the window was segmented, so its `full_range`
-    /// is the whole body.
-    pub(crate) fn rebased_window_owner<S: StringTableResolver>(
-        &self,
-        token_range: TokenRange,
-        token_sequence: Option<TokenSequenceId>,
-        rebase: PayloadRebaseContext<'_, S>,
-    ) -> Result<Self, CompilerError> {
-        let PayloadRebaseContext {
-            source_path_table,
-            source_strings,
-            destination_strings,
-            path_fork,
-        } = rebase;
-        let windows = match token_sequence {
-            Some(sequence) => self
-                .token_sequence(sequence)
-                .map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "rebased body sequence is outside its canonical source owner: {error:?}"
-                    ))
-                })?
-                .ranges()
-                .collect(),
-            None => {
-                self.validate_range(token_range).map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "rebased body range is outside its canonical source owner: {error:?}"
-                    ))
-                })?;
-                vec![token_range]
-            }
-        };
-        let length = windows
-            .iter()
-            .map(|range: &TokenRange| range.len() as usize)
-            .sum();
-        let mut builder = SourceTokensBuilder::with_capacity(self.source, length);
-        let mut numeric_literals = NumericLiteralStore::with_source(self.source);
-        for range in &windows {
-            for index in range.start.index()..range.end.index() {
-                let mut shape = self.shapes[index];
-                if let Some(string_id) = shape.string_id() {
-                    shape.data = destination_strings
-                        .intern(source_strings.resolve(string_id))
-                        .index();
-                } else if let Some(numeric_id) = shape.numeric_literal_id() {
-                    let mut record = self
-                        .numeric_literals
-                        .try_get(numeric_id)
-                        .map_err(|error| {
-                            CompilerError::compiler_error(format!(
-                                "rebased body numeric row is outside its donor store: {error:?}"
-                            ))
-                        })?
-                        .clone();
-                    record.try_remap_string_ids(&mut |id| {
-                        Ok::<_, CompilerError>(
-                            destination_strings.intern(source_strings.resolve(id)),
-                        )
-                    })?;
-                    shape.data = numeric_literals
-                        .try_push_for_source(self.source, record)
-                        .map_err(|error| {
-                            CompilerError::compiler_error(format!(
-                                "rebased body numeric row could not be staged: {error:?}"
-                            ))
-                        })?
-                        .raw();
-                }
-                builder
-                    .push_rebased_shape(shape, self.spans[index])
-                    .map_err(|error| match error {
-                        SourceTokenBuildError::Capacity => CompilerError::compiler_error(
-                            "rebased body window exceeds its checked u32 index domain",
-                        ),
-                        SourceTokenBuildError::Invariant(error) => error,
-                    })?;
-            }
-        }
-        let mut owner = builder.finish(numeric_literals)?;
-        // Path rows carry interned roots, so a retained donor table is rebased through the
-        // destination fork. Without one the donor rows already mean the same paths, and the
-        // requester shares the frozen allocation instead of copying it.
-        match source_path_table {
-            Some(source_path_table) => {
-                let path_fork = path_fork.ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "generic donor path rebasing requires a destination path fork",
-                    )
-                })?;
-                let mut destination_path_syntax = self.path_syntax_table()?.clone();
-                let path_remap = path_fork
-                    .remap_table_from_strings(source_path_table, source_strings, destination_strings)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "generic donor path table could not be rebased into the destination domain",
-                        )
-                    })?;
-                destination_path_syntax.remap_path_ids(&path_remap);
-                destination_path_syntax.freeze();
-                owner.attach_shared_path_syntax(Arc::new(destination_path_syntax));
-            }
-            None => owner.attach_shared_path_syntax(self.path_syntax_arc()?),
-        }
-        owner.numeric_literals.freeze();
-        owner.sequence_store.freeze();
-        Ok(owner)
-    }
 
     /// Materialize one checked contiguous range directly from this canonical owner.
     ///
@@ -1188,14 +1043,10 @@ impl<'a> TokenRef<'a> {
 
     /// Read one authored path row through the source-owned table without cloning it.
     ///
-    /// `Ok(None)` means this token carries no path payload. `MissingPathTable` means the
-    /// deferred publication table has not been attached yet; that lifecycle gap closes at the
-    /// ordinary `freeze_path_syntax` boundary.
-    #[cfg(test)]
-    pub fn path_syntax(
-        self,
-    ) -> Result<Option<&'a crate::compiler_frontend::paths::path_syntax::PathSyntax>, TokenViewError>
-    {
+    /// The returned row keeps the donor source span and semantic path identity. A requester that
+    /// needs a different path domain must translate that row at its use boundary; this view never
+    /// copies or rewrites the canonical owner.
+    pub(crate) fn path_syntax(self) -> Result<Option<&'a PathSyntax>, TokenViewError> {
         let Some(id) = self.shape().path_syntax_id() else {
             return Ok(None);
         };
@@ -1208,6 +1059,41 @@ impl<'a> TokenRef<'a> {
             .try_path_for_token(id, self.source_span())
             .map(Some)
             .map_err(|_| TokenViewError::MalformedPathHandle)
+    }
+
+    /// Resolve one string-shaped payload through the table that issued its handle.
+    pub(crate) fn string_spelling<S: StringTableResolver + ?Sized>(
+        self,
+        strings: &S,
+    ) -> Result<Option<&str>, TokenViewError> {
+        let Some(id) = self.string_id() else {
+            return Ok(None);
+        };
+        strings
+            .try_resolve(id)
+            .map(Some)
+            .ok_or(TokenViewError::MalformedStringHandle)
+    }
+
+    /// Re-intern one numeric payload only when a requester consumes it.
+    pub(crate) fn numeric_literal_in<S: StringTableResolver + ?Sized>(
+        self,
+        source_strings: &S,
+        destination_strings: &mut StringTable,
+    ) -> Result<Option<NumericLiteralToken>, TokenViewError> {
+        let Some(literal) = self.numeric_literal()? else {
+            return Ok(None);
+        };
+        let mut literal = literal.clone();
+        literal
+            .try_remap_string_ids(&mut |id| {
+                let spelling = source_strings
+                    .try_resolve(id)
+                    .ok_or(TokenViewError::MalformedStringHandle)?;
+                Ok(destination_strings.intern(spelling))
+            })
+            .map_err(|error| error)?;
+        Ok(Some(literal))
     }
 
     pub(crate) fn string_id(self) -> Option<StringId> {
@@ -2253,11 +2139,9 @@ impl Deref for FilePathSyntax {
 ///       (shapes/spans plus numeric/path cold stores) for its `SourceId` at construction.
 ///       Remaining parser adapters are unbounded compatibility vectors with a numeric
 ///       side-store lane and path lifecycle shell, and no canonical owner.
-/// WHY: two `FileTokens` owners for the same `SourceId` make source-qualified ranges
-///      ambiguous. Unbounded expression adapters therefore retain no owner. A transient
-///      rebased `SourceTokens` may share the donor `SourceId` during a generic parse; it
-///      never mixes ranges because it is dense and contiguous, and only its own
-///      full-range cursor is built from it.
+/// WHY: two `FileTokens` owners for the same `SourceId` make source-qualified ranges ambiguous.
+/// Unbounded expression adapters therefore retain no owner. Generic bodies borrow donor ranges
+/// directly and carry payload provenance separately, so no transient `SourceTokens` is needed.
 #[derive(Clone, Debug)]
 enum FileTokenOwner {
     /// Sole canonical SoA owner for its source construction.
@@ -2894,9 +2778,9 @@ impl FileTokens {
 
     /// Freeze the numeric store at publication.
     ///
-    /// The caller must complete all construction-time string remaps first. A rebased owner
-    /// finishes frozen through its own checked owner boundary and never calls this on an
-    /// already-frozen store.
+    /// The caller must complete all construction-time string remaps first. The canonical owner
+    /// finishes frozen through its checked owner boundary and never calls this on an already-frozen
+    /// store.
     #[cfg(test)]
     pub(crate) fn freeze_numeric_literals(&mut self) {
         self.token_owner.freeze_owner_numeric_literals();

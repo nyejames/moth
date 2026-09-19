@@ -14,8 +14,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenIndex, TokenKind, TokenRange, TokenRangeError, TokenRef,
-    TokenTag,
+    SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRangeError, TokenRef, TokenTag,
 };
 
 /// Failure lanes for declaration-initializer scanning.
@@ -148,9 +147,8 @@ pub(crate) fn collect_scanned_symbol_references(
 ///
 /// WHAT: carries the stable `TokenTag`, optional interned symbol payload and exact
 ///       source-local span for one token in a scan window.
-/// WHY: header cursor migration needs one scan implementation shared by borrowed
-///      `SourceTokens` views and legacy `Token` slices without duplicating scan bodies
-///      or retaining durable references.
+/// WHY: canonical source/token views share one scan implementation without retaining durable
+///      references.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ScannedToken {
     pub(crate) tag: TokenTag,
@@ -159,41 +157,8 @@ pub(crate) struct ScannedToken {
     pub(crate) span: crate::compiler_frontend::source::LocalSpan,
 }
 
-impl ScannedToken {
-    pub(crate) fn from_token(token: &Token) -> Self {
-        let tag = token.kind.token_tag();
-        let symbol = match token.kind {
-            TokenKind::Symbol(name) => Some(name),
-            _ => None,
-        };
-        let path_syntax_id = match token.kind {
-            TokenKind::Path(id) => Some(id),
-            _ => None,
-        };
-        Self {
-            tag,
-            symbol,
-            path_syntax_id,
-            span: token.span,
-        }
-    }
-}
-
-/// Indexed on-demand view over short-lived token facts.
-///
-/// WHAT: reads one `ScannedToken` per index from a legacy slice, a bounded live
-///       parser stream, or canonical `SourceTokens` shapes/spans without collecting the
-///       source or retaining durable references.
-/// WHY: dependency and classifier scans only touch their clause or line; per-query
-///      whole-source `Vec<ScannedToken>` projection pays O(N) allocation for O(1) facts.
-///      This view keeps slice-shaped `usize` offsets while callers migrate to the owner.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TokenFactView<'a> {
-    Slice(&'a [Token]),
-    Stream {
-        tokens: &'a [Token],
-        end: usize,
-    },
     Canonical {
         tokens: &'a SourceTokens,
         start: usize,
@@ -202,25 +167,6 @@ pub(crate) enum TokenFactView<'a> {
 }
 
 impl<'a> TokenFactView<'a> {
-    #[cfg(test)]
-    pub(crate) fn from_slice(tokens: &'a [Token]) -> Self {
-        Self::Slice(tokens)
-    }
-
-    /// Borrow one live parser stream without copying it.
-    ///
-    /// WHAT: exposes the stream's already-remapped compatibility vector through the same
-    /// indexed facts, so string/path remaps stay visible and no snapshot can go stale.
-    /// WHY: header streams remap payloads before publication; copying one clause window
-    ///      would freeze pre-remap identities the path table no longer recognises.
-    #[cfg(test)]
-    pub(crate) fn from_stream(stream: &'a FileTokens) -> Self {
-        Self::Stream {
-            tokens: &stream.tokens,
-            end: stream.length,
-        }
-    }
-
     pub(crate) fn from_source(tokens: &'a SourceTokens) -> Self {
         Self::Canonical {
             tokens,
@@ -252,81 +198,50 @@ impl<'a> TokenFactView<'a> {
     }
 
     /// Restrict this view to a checked local subrange without projecting token facts.
-    ///
-    /// Canonical callers use this for condition expressions inside a retained template range;
-    /// legacy callers retain their slice/stream identity while narrowing the same bounded window.
     pub(crate) fn subrange(self, start: usize, end: usize) -> Option<Self> {
         if start > end || end > self.len() {
             return None;
         }
-        match self {
-            Self::Slice(tokens) => tokens.get(start..end).map(Self::Slice),
-            Self::Stream {
-                tokens,
-                end: stream_end,
-            } => tokens.get(start..end).map(|tokens| Self::Stream {
-                tokens,
-                end: tokens.len().min(stream_end),
-            }),
-            Self::Canonical {
-                tokens,
-                start: base,
-                end: base_end,
-            } => {
-                let bounded_start = base.checked_add(start)?;
-                let bounded_end = base.checked_add(end)?;
-                (bounded_end <= base_end).then_some(Self::Canonical {
-                    tokens,
-                    start: bounded_start,
-                    end: bounded_end,
-                })
-            }
-        }
+        let Self::Canonical {
+            tokens,
+            start: base,
+            end: base_end,
+        } = self;
+        let bounded_start = base.checked_add(start)?;
+        let bounded_end = base.checked_add(end)?;
+        (bounded_end <= base_end).then_some(Self::Canonical {
+            tokens,
+            start: bounded_start,
+            end: bounded_end,
+        })
     }
 
     pub(crate) fn len(self) -> usize {
         match self {
-            Self::Slice(tokens) => tokens.len(),
-            Self::Stream { tokens, end } => tokens.len().min(end),
             Self::Canonical { start, end, .. } => end - start,
         }
     }
 
     pub(crate) fn get(self, index: usize) -> Option<ScannedToken> {
-        match self {
-            Self::Slice(tokens) => tokens.get(index).map(ScannedToken::from_token),
-            Self::Stream { tokens, end } => (index < end)
-                .then(|| tokens.get(index))
-                .flatten()
-                .map(ScannedToken::from_token),
-            Self::Canonical { tokens, start, end } => {
-                let absolute = start.checked_add(index)?;
-                if absolute >= end {
-                    return None;
-                }
-                let shape = tokens.shapes().get(absolute).copied()?;
-                let span = tokens.spans().get(absolute).copied()?;
-                let tag = shape.tag();
-                Some(ScannedToken {
-                    tag,
-                    symbol: if tag == TokenTag::SYMBOL {
-                        shape.string_id()
-                    } else {
-                        None
-                    },
-                    path_syntax_id: shape.path_syntax_id(),
-                    span,
-                })
-            }
+        let Self::Canonical { tokens, start, end } = self;
+        let absolute = start.checked_add(index)?;
+        if absolute >= end {
+            return None;
         }
+        let shape = tokens.shapes().get(absolute).copied()?;
+        let span = tokens.spans().get(absolute).copied()?;
+        let tag = shape.tag();
+        Some(ScannedToken {
+            tag,
+            symbol: if tag == TokenTag::SYMBOL {
+                shape.string_id()
+            } else {
+                None
+            },
+            path_syntax_id: shape.path_syntax_id(),
+            span,
+        })
     }
-}
-#[cfg(test)]
-pub(crate) fn collect_symbol_references(
-    tokens: &[Token],
-    source_id: SourceId,
-) -> Vec<InitializerReference> {
-    collect_scanned_symbol_references(TokenFactView::from_slice(tokens), source_id)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -355,10 +270,6 @@ impl NestingDepth {
         } else if tag == TokenTag::TEMPLATE_CLOSE {
             self.template = self.template.saturating_sub(1);
         }
-    }
-
-    pub(crate) fn step(&mut self, token_kind: &TokenKind) {
-        self.step_tag(token_kind.token_tag());
     }
 }
 
@@ -397,47 +308,11 @@ enum RecordPipeAction {
     Close,
     Ignore,
 }
-#[cfg(test)]
-fn classify_pipe_list(
-    tokens: &[Token],
-    pipe_index: usize,
-    pipe_list_depth: usize,
-    nesting_is_top_level: bool,
-    allow_value_first: bool,
-) -> RecordPipeAction {
-    record_pipe_action(
-        pipe_list_depth,
-        nesting_is_top_level,
-        pipe_opens_member_list(tokens, pipe_index, allow_value_first),
-    )
-}
-
-/// True when `|` at `pipe_index` opens a balanced `|...|` member list.
-///
-/// Empty lists (`| |`) and lists whose first member is a name, `this`, or a value
-/// literal stay pipe regions, including malformed first members. Catch bindings
-/// (`|err|`) and option captures (`|name|`) stay outside so `|` keeps continuing
-/// the surrounding expression.
-#[cfg(test)]
-fn pipe_opens_member_list(tokens: &[Token], pipe_index: usize, allow_value_first: bool) -> bool {
-    pipe_opens_member_list_with(
-        |cursor| {
-            tokens
-                .get(cursor)
-                .map(|token| PipeMemberFact::of_kind(&token.kind))
-        },
-        pipe_index,
-        allow_value_first,
-    )
-}
 
 /// Shared `|...|` member-list lookahead over an index-addressed token view.
 ///
-/// WHAT: single decision body for both the legacy slice scan and the live
-///       [`AstCursor`] scan; each caller supplies one lightweight fact probe.
-/// WHY: both lanes must preserve identical lookahead/newline boundaries without
-///      maintaining two copies of the match, and without cloning non-`Copy`
-///      token payloads only to classify their shape.
+/// Both canonical cursor callers supply one lightweight fact probe, keeping lookahead boundaries
+/// identical without cloning non-`Copy` token payloads.
 fn pipe_opens_member_list_with(
     fact_at: impl Fn(usize) -> Option<PipeMemberFact>,
     pipe_index: usize,
@@ -464,10 +339,8 @@ fn pipe_opens_member_list_with(
     }
 }
 
-/// Lightweight pipe-list member fact shared by both scan lanes.
-///
-/// Only the distinctions consumed by the shared lookahead are modeled, so both
-/// lanes avoid cloning full token payloads.
+/// Only the distinctions consumed by the shared lookahead are modeled, so canonical callers avoid
+/// cloning full token payloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PipeMemberFact {
     tag: TokenTag,
@@ -475,36 +348,40 @@ struct PipeMemberFact {
 }
 
 impl PipeMemberFact {
-    fn of_kind(kind: &TokenKind) -> Self {
+    fn of_ref(token: TokenRef<'_>) -> Self {
+        Self::of_tag(token.tag())
+    }
+
+    fn of_tag(tag: TokenTag) -> Self {
         Self {
-            tag: kind.token_tag(),
-            shape: PipeMemberShape::of_kind(kind),
+            tag,
+            shape: PipeMemberShape::of_tag(tag),
         }
     }
 }
 
 /// Narrow shape probe for pipe-list member classification.
 ///
-/// Only the distinctions consumed by the shared lookahead are modeled, so both
-/// lanes avoid cloning full token payloads.
+/// Only the distinctions consumed by the shared lookahead are modeled, so canonical callers avoid
+/// cloning full token payloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PipeMemberShape {
     Name,
     Value,
     Other,
 }
-
 impl PipeMemberShape {
-    fn of_kind(kind: &TokenKind) -> Self {
-        match kind {
-            TokenKind::Symbol(_) | TokenKind::This => Self::Name,
-            TokenKind::NumericLiteral(_)
-            | TokenKind::StringSliceLiteral(_)
-            | TokenKind::RawStringLiteral(_)
-            | TokenKind::CharLiteral(_)
-            | TokenKind::BoolLiteral(_)
-            | TokenKind::NoneLiteral
-            | TokenKind::Path(_) => Self::Value,
+
+    fn of_tag(tag: TokenTag) -> Self {
+        match tag {
+            TokenTag::SYMBOL | TokenTag::THIS => Self::Name,
+            TokenTag::NUMERIC_LITERAL
+            | TokenTag::STRING_SLICE_LITERAL
+            | TokenTag::RAW_STRING_LITERAL
+            | TokenTag::CHAR_LITERAL
+            | TokenTag::BOOL_LITERAL
+            | TokenTag::NONE_LITERAL
+            | TokenTag::PATH => Self::Value,
             _ => Self::Other,
         }
     }
@@ -512,8 +389,7 @@ impl PipeMemberShape {
 
 /// True when `|` at `pipe_offset` opens a balanced `|...|` member list on a live cursor.
 ///
-/// This reads through [`AstCursor::token_kind_at_offset`] so the multi-bind lookahead follows the
-/// logical parser view without touching the legacy token vector.
+/// This reads through [`AstCursor::token_ref_at_offset`] so the multi-bind lookahead follows the
 fn pipe_opens_member_list_at_cursor(
     token_stream: &AstCursor,
     pipe_offset: usize,
@@ -522,8 +398,8 @@ fn pipe_opens_member_list_at_cursor(
     pipe_opens_member_list_with(
         |offset| {
             token_stream
-                .token_kind_at_offset(offset)
-                .map(|kind| PipeMemberFact::of_kind(&kind))
+                .token_ref_at_offset(offset)
+                .map(PipeMemberFact::of_ref)
         },
         pipe_offset,
         allow_value_first,
@@ -611,10 +487,6 @@ impl ExpressionBoundaryDepth {
             self.curly = self.curly.saturating_sub(1);
         }
     }
-
-    pub(crate) fn step(&mut self, token_kind: &TokenKind) {
-        self.step_tag(token_kind.token_tag());
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -642,235 +514,12 @@ impl TemplateBalance {
             self.closed = self.closed.saturating_add(1);
         }
     }
-
-    pub(crate) fn step(&mut self, token_kind: &TokenKind) {
-        self.step_tag(token_kind.token_tag());
-    }
 }
 
-/// Two-lane result for declaration-initializer token scanning.
+/// Result type for declaration-initializer token scanning.
 ///
 /// Structured unexpected-EOF diagnostics stay in the diagnostic lane while impossible scanner
 /// states remain typed infrastructure failures for the declaration-shell boundary.
-pub(crate) type TokenScanResult<T> = Result<T, TokenScanFailure>;
-
-#[cfg(test)]
-pub(crate) fn collect_declaration_initializer_tokens(
-    token_stream: &mut FileTokens,
-    string_table: &mut StringTable,
-) -> TokenScanResult<Vec<Token>> {
-    let mut collected = Vec::new();
-    let mut depth = NestingDepth::default();
-    let mut catch_block_depth = 0usize;
-    let mut catch_header_pending = false;
-    let mut value_if_block_depth = 0usize;
-    let mut value_if_header_pending = false;
-    let mut inline_value_if_missing_else_depth = 0usize;
-    let mut initializer_closed_by_statement_block = false;
-    let mut open_constructs = Vec::new();
-    // A top-level `|...|` list owns newlines and commas until its closing pipe.
-    // Nested parentheses, collections and templates still own inner pipes.
-    let mut record_pipe_depth = 0usize;
-    let mut last_closed_record_pipe = false;
-    while token_stream.index < token_stream.length {
-        if initializer_closed_by_statement_block {
-            break;
-        }
-
-        let token_kind = token_stream.current_token_kind().clone();
-        let inside_record_region = record_pipe_depth > 0;
-        let at_top_level = depth.is_top_level()
-            && catch_block_depth == 0
-            && value_if_block_depth == 0
-            && !inside_record_region;
-
-        let continues_multiline_expression = if matches!(token_kind, TokenKind::Newline) {
-            let prev_continues = if last_closed_record_pipe {
-                // A closing record pipe ends the record value. Catch/receiver pipes still
-                // continue because `|` is a continues_expression token.
-                false
-            } else {
-                collected
-                    .last()
-                    .is_some_and(|token: &Token| token.kind.continues_expression())
-            };
-            let next_non_newline = token_stream
-                .tokens
-                .iter()
-                .skip(token_stream.index + 1)
-                .find(|token| token.kind != TokenKind::Newline)
-                .map(|token| &token.kind);
-            let next_continues = next_non_newline.is_some_and(TokenKind::continues_expression);
-            let continues_to_authored_else = inline_value_if_missing_else_depth > 0
-                && matches!(next_non_newline, Some(TokenKind::Else));
-
-            prev_continues || next_continues || continues_to_authored_else
-        } else {
-            false
-        };
-
-        if at_top_level
-            && matches!(
-                token_kind,
-                TokenKind::Comma | TokenKind::End | TokenKind::Eof
-            )
-        {
-            if inline_value_if_missing_else_depth > 0
-                || collected
-                    .last()
-                    .is_some_and(|token| token.kind == TokenKind::Else)
-            {
-                collected.push(token_stream.current_token());
-            }
-            break;
-        }
-
-        if at_top_level
-            && matches!(token_kind, TokenKind::Newline)
-            && !continues_multiline_expression
-        {
-            if inline_value_if_missing_else_depth > 0
-                || collected
-                    .last()
-                    .is_some_and(|token| token.kind == TokenKind::Else)
-            {
-                collected.push(token_stream.current_token());
-            }
-            break;
-        }
-
-        if matches!(token_kind, TokenKind::Eof) && (!at_top_level || inside_record_region) {
-            let expected_delimiter = match innermost_open_construct(&open_constructs) {
-                Some(open_construct) => {
-                    Some(string_table.get_or_intern(open_construct.expected_delimiter().to_owned()))
-                }
-                None => {
-                    // No construct is open but the scanner believes it is nested. This is an
-                    // internal scanner invariant, not a user-facing syntax error. Report it
-                    // through the infrastructure error lane instead of fabricating a delimiter.
-                    return Err(TokenScanFailure::Infrastructure(
-                        CompilerError::compiler_error(
-                            "declaration-initializer scanner reported a nested state with no open construct",
-                        ),
-                    ));
-                }
-            };
-            return Err(TokenScanFailure::Diagnostic(
-                CompilerDiagnostic::unexpected_end_of_file(
-                    expected_delimiter,
-                    Some(token_stream.current_span()),
-                ),
-            ));
-        }
-        // Declaration initializers can end with receiver-owned statement blocks such as
-        // `catch:` and value-producing `if ...:`. Their bodies belong to the initializer even
-        // though they are statement-shaped, so newline termination is suspended until the
-        // matching outer `;` is collected.
-        if depth.is_top_level() {
-            match token_kind {
-                TokenKind::Catch => catch_header_pending = true,
-                TokenKind::If if catch_block_depth == 0 => value_if_header_pending = true,
-                TokenKind::Colon if catch_header_pending => {
-                    catch_header_pending = false;
-                    catch_block_depth = catch_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::CatchBlock);
-                }
-                TokenKind::Colon if catch_block_depth > 0 => {
-                    catch_block_depth = catch_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::CatchBlock);
-                }
-                TokenKind::Colon if value_if_header_pending => {
-                    value_if_header_pending = false;
-                    value_if_block_depth = value_if_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::ValueIfBlock);
-                }
-                TokenKind::Colon if value_if_block_depth > 0 => {
-                    value_if_block_depth = value_if_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::ValueIfBlock);
-                }
-                TokenKind::Then if value_if_header_pending => {
-                    value_if_header_pending = false;
-                    inline_value_if_missing_else_depth =
-                        inline_value_if_missing_else_depth.saturating_add(1);
-                }
-                TokenKind::Else if inline_value_if_missing_else_depth > 0 => {
-                    inline_value_if_missing_else_depth =
-                        inline_value_if_missing_else_depth.saturating_sub(1);
-                }
-                TokenKind::End if catch_block_depth > 0 => {
-                    let closing_outer_catch_block = catch_block_depth == 1;
-                    catch_block_depth = catch_block_depth.saturating_sub(1);
-                    catch_header_pending = false;
-                    initializer_closed_by_statement_block = closing_outer_catch_block;
-                    close_statement_construct(&mut open_constructs);
-                }
-                TokenKind::End if value_if_block_depth > 0 => {
-                    let closing_outer_value_if_block = value_if_block_depth == 1;
-                    value_if_block_depth = value_if_block_depth.saturating_sub(1);
-                    value_if_header_pending = false;
-                    initializer_closed_by_statement_block = closing_outer_value_if_block;
-                    close_statement_construct(&mut open_constructs);
-                }
-                TokenKind::Then | TokenKind::Arrow | TokenKind::Newline | TokenKind::Eof => {
-                    catch_header_pending = false;
-                    value_if_header_pending = false;
-                }
-                _ => {}
-            }
-        }
-
-        match token_kind {
-            TokenKind::OpenParenthesis => open_constructs.push(OpenConstruct::Parenthesis),
-            TokenKind::CloseParenthesis => {
-                close_open_construct(&mut open_constructs, OpenConstruct::Parenthesis);
-            }
-            TokenKind::OpenCurly => open_constructs.push(OpenConstruct::CollectionOrMap),
-            TokenKind::CloseCurly => {
-                close_open_construct(&mut open_constructs, OpenConstruct::CollectionOrMap);
-            }
-            TokenKind::TemplateHead => open_constructs.push(OpenConstruct::Template),
-            TokenKind::TemplateClose => {
-                close_open_construct(&mut open_constructs, OpenConstruct::Template);
-            }
-            TokenKind::TypeParameterBracket => {
-                match classify_pipe_list(
-                    &token_stream.tokens,
-                    token_stream.index,
-                    record_pipe_depth,
-                    depth.is_top_level(),
-                    collected
-                        .iter()
-                        .all(|token| matches!(token.kind, TokenKind::Newline)),
-                ) {
-                    RecordPipeAction::Open => {
-                        open_constructs.push(OpenConstruct::PipeList);
-                        record_pipe_depth = record_pipe_depth.saturating_add(1);
-                        last_closed_record_pipe = false;
-                    }
-                    RecordPipeAction::Close => {
-                        close_open_construct(&mut open_constructs, OpenConstruct::PipeList);
-                        record_pipe_depth = record_pipe_depth.saturating_sub(1);
-                        last_closed_record_pipe = true;
-                    }
-                    RecordPipeAction::Ignore => last_closed_record_pipe = false,
-                }
-            }
-            _ => {}
-        }
-        if !matches!(
-            token_kind,
-            TokenKind::TypeParameterBracket | TokenKind::Newline
-        ) {
-            last_closed_record_pipe = false;
-        }
-        depth.step(&token_kind);
-
-        collected.push(token_stream.current_token());
-        token_stream.advance();
-    }
-
-    Ok(collected)
-}
 
 /// Scan one declaration initializer directly through a canonical cursor.
 ///
@@ -881,7 +530,7 @@ pub(crate) fn collect_declaration_initializer_tokens(
 pub(crate) fn collect_declaration_initializer_range(
     cursor: &mut crate::compiler_frontend::tokenizer::tokens::TokenCursor<'_>,
     string_table: &mut StringTable,
-) -> TokenScanResult<(TokenRange, Vec<InitializerReference>)> {
+) -> Result<(TokenRange, Vec<InitializerReference>), TokenScanFailure> {
     let source_id = cursor.range().source();
     let source_tokens = cursor.source_tokens();
     let start = cursor.position();
@@ -1170,10 +819,7 @@ fn classify_canonical_pipe(
             for _ in 0..offset {
                 lookahead.advance()?;
             }
-            lookahead
-                .peek()
-                .and_then(|token| token.to_token_kind().ok())
-                .map(|kind| PipeMemberFact::of_kind(&kind))
+            lookahead.peek().map(PipeMemberFact::of_ref)
         },
         0,
         allow_value_first,
@@ -1195,10 +841,11 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
     let mut seen_non_newline = false;
 
     while offset < remaining_tokens {
-        let Some(token_kind) = token_stream.token_kind_at_offset(offset) else {
+        let Some(token) = token_stream.token_ref_at_offset(offset) else {
             break;
         };
-        if token_kind == TokenKind::TypeParameterBracket {
+        let tag = token.tag();
+        if tag == TokenTag::TYPE_PARAMETER_BRACKET {
             match classify_pipe_list_at_cursor(
                 token_stream,
                 offset,
@@ -1216,166 +863,88 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
             }
         }
 
-        if record_pipe_depth == 0 && depth.is_top_level() && token_kind == TokenKind::Comma {
+        if record_pipe_depth == 0 && depth.is_top_level() && tag == TokenTag::COMMA {
             return true;
         }
 
         if record_pipe_depth == 0
             && depth.is_top_level()
-            && matches!(
-                token_kind,
-                TokenKind::Newline | TokenKind::End | TokenKind::Eof
-            )
+            && matches!(tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF)
         {
             break;
         }
 
-        if token_kind != TokenKind::Newline {
+        if tag != TokenTag::NEWLINE {
             seen_non_newline = true;
         }
-        depth.step(&token_kind);
+        depth.step_tag(tag);
         offset += 1;
     }
 
     false
 }
 
-#[cfg(test)]
-pub(crate) fn find_expression_end_index(
-    tokens: &[Token],
-    start_index: usize,
-    stop_tokens: &[TokenKind],
-) -> usize {
-    let mut index = start_index;
-    let mut depth = ExpressionBoundaryDepth::default();
-
-    while index < tokens.len() {
-        let token_kind = &tokens[index].kind;
-
-        if depth.is_top_level() && stop_tokens.iter().any(|stop| token_kind == stop) {
-            break;
-        }
-
-        depth.step(token_kind);
-
-        if matches!(token_kind, TokenKind::Eof) {
-            break;
-        }
-
-        index += 1;
-    }
-
-    index
-}
-
-#[cfg(test)]
-pub(crate) fn consume_balanced_template_region<E>(
-    token_stream: &mut FileTokens,
-    mut on_token: impl FnMut(Token, &TokenKind),
-    on_eof_error: impl Fn(SourceSpan) -> E,
-) -> Result<(), E> {
-    let mut balance = TemplateBalance::with_opening_template();
-
-    while balance.has_unclosed_templates() {
-        let token_kind = token_stream.current_token_kind().clone();
-        if matches!(token_kind, TokenKind::Eof) {
-            return Err(on_eof_error(token_stream.current_span()));
-        }
-
-        balance.step(&token_kind);
-        on_token(token_stream.current_token(), &token_kind);
-        token_stream.advance();
-    }
-
-    Ok(())
-}
 
 /// Consume a header-owned balanced template through the canonical source owner.
 ///
-/// The compatibility stream is advanced only to keep deferred parser cursors synchronized; all
-/// tags and spans observed by the callback come from checked `TokenRef`s. The opening token is
-/// already consumed by the caller, so the returned index is the first token after the close.
+/// The opening token is already consumed by the caller; the returned position is the first token
+/// after the close. Tags and spans are read only through checked `TokenRef`s owned by the cursor's
+/// canonical source, so this helper never creates a compatibility token window.
 pub(crate) fn consume_balanced_template_region_from_source<E>(
-    token_stream: &mut FileTokens,
-    opening_index: usize,
+    cursor: &mut TokenCursor<'_>,
+    opening: TokenRef<'_>,
     mut on_token: impl FnMut(TokenRef<'_>),
     on_eof_error: impl Fn(SourceSpan) -> E,
     on_infrastructure_error: impl Fn(CompilerError) -> E,
-) -> Result<usize, E> {
-    let opening = TokenIndex::try_from_index(opening_index).ok_or_else(|| {
-        on_infrastructure_error(CompilerError::compiler_error(
-            "template opening exceeded the source token index space",
-        ))
-    })?;
-    let expected_current = opening_index.checked_add(1).ok_or_else(|| {
-        on_infrastructure_error(CompilerError::compiler_error(
-            "template body index exceeded the source token index space",
-        ))
-    })?;
-    if token_stream.index != expected_current {
+) -> Result<TokenIndex, E> {
+    let source_tokens = cursor.source_tokens();
+    let source_id = source_tokens.source();
+    if opening.source() != source_id {
         return Err(on_infrastructure_error(CompilerError::compiler_error(
-            "template compatibility cursor was not positioned after its opening token",
+            "template opening source token owner does not match its cursor owner",
         )));
     }
 
-    {
-        let canonical = token_stream
-            .source_tokens()
-            .map_err(&on_infrastructure_error)?;
-        if canonical.source() != token_stream.file_id {
-            return Err(on_infrastructure_error(CompilerError::compiler_error(
-                "template source token owner does not match its file identity",
-            )));
-        }
-        if token_stream.length != canonical.len() || token_stream.tokens.len() != canonical.len() {
-            return Err(on_infrastructure_error(CompilerError::compiler_error(
-                "template token adapter length does not match its source owner",
-            )));
-        }
-        let opening_token = canonical.token(opening).map_err(|error| {
-            on_infrastructure_error(CompilerError::compiler_error(format!(
-                "template opening exceeded its source token owner: {error:?}",
-            )))
+    let expected_current = opening
+        .index()
+        .index()
+        .checked_add(1)
+        .and_then(TokenIndex::try_from_index)
+        .ok_or_else(|| {
+            on_infrastructure_error(CompilerError::compiler_error(
+                "template body index exceeded the source token index space",
+            ))
         })?;
-        if opening_token.tag() != TokenTag::TEMPLATE_HEAD {
-            return Err(on_infrastructure_error(CompilerError::compiler_error(
-                "template range did not begin with a template opening token",
-            )));
-        }
+    if cursor.position() != expected_current {
+        return Err(on_infrastructure_error(CompilerError::compiler_error(
+            "template cursor was not positioned after its opening token",
+        )));
+    }
+    if opening.tag() != TokenTag::TEMPLATE_HEAD {
+        return Err(on_infrastructure_error(CompilerError::compiler_error(
+            "template range did not begin with a template opening token",
+        )));
     }
 
     let mut balance = TemplateBalance::with_opening_template();
     while balance.has_unclosed_templates() {
-        let index = token_stream.index;
-        let position = TokenIndex::try_from_index(index).ok_or_else(|| {
+        let token = cursor.current().ok_or_else(|| {
             on_infrastructure_error(CompilerError::compiler_error(
-                "template token index exceeded its checked domain",
+                "template cursor exceeded its source token owner before its closing delimiter",
             ))
         })?;
-
-        {
-            let canonical = token_stream
-                .source_tokens()
-                .map_err(&on_infrastructure_error)?;
-            if canonical.source() != token_stream.file_id {
-                return Err(on_infrastructure_error(CompilerError::compiler_error(
-                    "template source token owner changed its file identity",
-                )));
-            }
-            let token = canonical.token(position).map_err(|error| {
-                on_infrastructure_error(CompilerError::compiler_error(format!(
-                    "template token index exceeded its source token owner: {error:?}",
-                )))
-            })?;
-            if token.is_eof() {
-                return Err(on_eof_error(token.source_span()));
-            }
-            balance.step_tag(token.tag());
-            on_token(token);
+        if token.source() != source_id {
+            return Err(on_infrastructure_error(CompilerError::compiler_error(
+                "template cursor token owner changed its source identity",
+            )));
         }
-
-        token_stream.advance();
+        if token.is_eof() {
+            return Err(on_eof_error(token.source_span()));
+        }
+        balance.step_tag(token.tag());
+        on_token(token);
+        let _ = cursor.advance();
     }
 
-    Ok(token_stream.index)
+    Ok(cursor.position())
 }

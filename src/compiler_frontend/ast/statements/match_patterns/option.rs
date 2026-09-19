@@ -15,13 +15,13 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Result for the option pattern family.
 ///
 /// Option parsing returns plain `CompilerDiagnostic` values on the diagnosed
 /// lane; the surrounding parser boundary owns any infrastructure failure.
-type OptionPatternResult<T> = Result<T, CompilerDiagnostic>;
+type OptionPatternResult<T> = Result<T, crate::compiler_frontend::ast::expressions::error::ExpressionParseError>;
 
 /// Parse a pattern for an optional scrutinee.
 ///
@@ -33,16 +33,16 @@ type OptionPatternResult<T> = Result<T, CompilerDiagnostic>;
 pub fn parse_option_pattern(
     token_stream: &mut AstCursor,
     option_inner_type_id: TypeId,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> OptionPatternResult<MatchPattern> {
-    if token_stream.current_token_kind() == &TokenKind::NoneLiteral {
+    if token_stream.current_tag() == TokenTag::NONE_LITERAL {
         let span = Some(token_stream.current_span());
         token_stream.advance();
         return Ok(MatchPattern::OptionNone { span });
     }
 
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         return parse_option_present_capture(token_stream, option_inner_type_id, string_table);
     }
 
@@ -63,7 +63,8 @@ pub fn parse_option_pattern(
                     None,
                     None,
                     value.span,
-                ));
+                )
+                .into());
             }
 
             let span = value.span;
@@ -88,55 +89,61 @@ pub fn parse_option_pattern(
 fn parse_option_present_capture(
     token_stream: &mut AstCursor,
     inner_type_id: TypeId,
-    _string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> OptionPatternResult<MatchPattern> {
     let span = Some(token_stream.current_span());
     token_stream.advance(); // consume opening '|'
     token_stream.skip_newlines();
 
-    let name = match token_stream.current_token_kind() {
-        TokenKind::Symbol(name) => *name,
-
-        TokenKind::TypeParameterBracket => {
+    let name = match token_stream.current_tag() {
+        TokenTag::TYPE_PARAMETER_BRACKET => {
             return Err(CompilerDiagnostic::invalid_match_pattern(
                 InvalidMatchPatternReason::EmptyOptionPresentCapture,
                 None,
                 None,
                 Some(token_stream.current_span()),
-            ));
+            )
+            .into());
         }
-
+        TokenTag::SYMBOL => token_stream.current_string_id_in(string_table)?.ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "option capture symbol is missing its payload",
+            )
+        })?,
         _ => {
             return Err(CompilerDiagnostic::invalid_match_pattern(
                 InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
                 None,
                 None,
                 Some(token_stream.current_span()),
-            ));
+            )
+            .into());
         }
     };
     let binding_span = Some(token_stream.current_span());
     token_stream.advance();
 
     // Reject type annotations such as `|name String|`.
-    if matches!(token_stream.current_token_kind(), TokenKind::Symbol(_)) {
+    if token_stream.current_tag() == TokenTag::SYMBOL {
         return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::OptionPresentCaptureTypeAnnotation,
             None,
             None,
             Some(token_stream.current_span()),
-        ));
+        )
+        .into());
     }
 
     token_stream.skip_newlines();
 
-    if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::MissingClosingPipe,
             None,
             None,
             Some(token_stream.current_span()),
-        ));
+        )
+        .into());
     }
     token_stream.advance(); // consume closing '|'
 

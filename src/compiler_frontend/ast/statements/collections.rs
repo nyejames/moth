@@ -32,7 +32,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedCurlyLiteralContext, ExpectedMapContext,
@@ -410,7 +410,11 @@ fn parse_expression_until_curly_entry_delimiter(
     );
     create_expression_until(
         input,
-        &[TokenKind::Assign, TokenKind::Comma, TokenKind::CloseCurly],
+        &[
+            TokenTag::ASSIGN,
+            TokenTag::COMMA,
+            TokenTag::CLOSE_CURLY,
+        ],
     )
 }
 

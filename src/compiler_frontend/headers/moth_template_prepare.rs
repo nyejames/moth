@@ -31,8 +31,8 @@ const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 /// Build the header-stage output for one `.mtf` source file.
 ///
 /// The input token stream must already have been tokenized with Moth template's template-body entry
-/// policy. Preparation retains only a checked body range and compact directive payload; parser
-/// wrapper tokens are materialized later, ephemerally, at the AST fold boundary.
+/// policy. Preparation retains only a checked body range and compact directive payload; the AST
+/// fold boundary supplies the structural `MothContentTemplateEntry` directly.
 pub(crate) fn prepare_moth_template_file(
     mut file_tokens: FileTokens,
     string_table: &mut StringTable,
@@ -40,8 +40,6 @@ pub(crate) fn prepare_moth_template_file(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
     let file_id = file_tokens.file_id;
-    let token_count = file_tokens.length;
-    let token_stats = file_tokens.token_stats;
     let src_path = file_tokens.src_path;
     let canonical_os_path = file_tokens.canonical_os_path.clone();
     let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
@@ -55,7 +53,9 @@ pub(crate) fn prepare_moth_template_file(
             "Moth template source token owner does not match its file identity",
         ));
     }
-    let body_range = MothTemplatePrepareContext::body_range(&canonical_owner, &file_tokens)?;
+    let token_count = canonical_owner.len();
+    let token_stats = canonical_owner.token_stats();
+    let body_range = MothTemplatePrepareContext::body_range(&canonical_owner)?;
     let context = MothTemplatePrepareContext::new(
         src_path,
         file_id,
@@ -163,19 +163,11 @@ impl MothTemplatePrepareContext {
         })
     }
 
-    fn body_range(
-        canonical: &SourceTokens,
-        file_tokens: &FileTokens,
-    ) -> Result<TokenRange, CompilerError> {
-        if file_tokens.length != canonical.len() || file_tokens.tokens.len() != canonical.len() {
-            return Err(CompilerError::compiler_error(
-                "Moth template token adapter length does not match its source owner",
-            ));
-        }
+    fn body_range(canonical: &SourceTokens) -> Result<TokenRange, CompilerError> {
         let body_start = TokenIndex::try_from_index(1).ok_or_else(|| {
             CompilerError::compiler_error("Moth template body range start exceeded index space")
         })?;
-        let body_end_index = file_tokens.length.checked_sub(1).ok_or_else(|| {
+        let body_end_index = canonical.len().checked_sub(1).ok_or_else(|| {
             CompilerError::compiler_error("Moth template token stream is missing its Eof token")
         })?;
         let body_end = TokenIndex::try_from_index(body_end_index).ok_or_else(|| {

@@ -121,7 +121,7 @@ fn parse_and_validate_statement_expression(
     if !is_expression_statement(&expression) {
         let found = match token_stream.current() {
             Some(found) => DiagnosticToken::from_token_ref(found),
-            None => DiagnosticToken::from(token_stream.current_token_kind()),
+            None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
         };
         return Err(CompilerDiagnostic::unexpected_token_from_tag(
             found,

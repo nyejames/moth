@@ -25,8 +25,9 @@ use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    ParsedNamedTypeReference, TypeAnnotationContext, parse_type_annotation,
+    ParsedNamedTypeReference, TypeAnnotationContext, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
@@ -56,6 +57,30 @@ fn stream_from_tokens(tokens: Vec<Token>, string_table: &mut StringTable) -> Fil
         SourceId::COMPILATION_ROOT,
         tokens,
     )
+}
+
+/// Parse a type annotation through the canonical source owner and declaration cursor.
+///
+/// Test fixtures may still use `FileTokens::new` to assemble legacy token records, but the
+/// parser handoff itself must borrow the checked canonical source range rather than a compatibility
+/// vector lane.
+fn parse_type_annotation_test(
+    stream: &FileTokens,
+    context: TypeAnnotationContext,
+    string_table: &mut StringTable,
+) -> Result<ParsedTypeRef, HeaderParseFailure> {
+    let source_tokens = stream
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let range = source_tokens
+        .full_range()
+        .expect("test canonical source owner must expose a checked full range");
+    let cursor = source_tokens
+        .cursor(range)
+        .expect("test canonical source owner must accept its checked full range");
+    let mut declaration_cursor =
+        DeclarationCursor::new(cursor).expect("test canonical cursor must build");
+    parse_type_annotation_cursor(&mut declaration_cursor, context, string_table)
 }
 
 fn token(kind: TokenKind) -> Token {
@@ -136,10 +161,10 @@ fn declaration_context_allows_inferred_annotations() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("declaration type annotation should parse");
 
@@ -211,10 +236,10 @@ fn declaration_context_parses_named_optional_type() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("named optional declaration type annotation should parse");
 
@@ -243,10 +268,10 @@ fn signature_parameter_rejects_none_type() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("none parameter type should fail"),
     );
@@ -270,10 +295,10 @@ fn signature_parameter_rejects_reserved_trait_this_type() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("reserved trait keyword type should fail"),
     );
@@ -297,10 +322,10 @@ fn declaration_target_rejects_type_keyword_inside_type_annotation() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("type keyword should be reserved"),
     );
@@ -324,10 +349,10 @@ fn signature_return_rejects_bare_of_keyword_with_structured_syntax_error() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureReturn,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("of keyword should fail in type position"),
     );
@@ -355,10 +380,10 @@ fn parses_generic_type_application() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("generic type application should parse");
 
@@ -397,10 +422,10 @@ fn public_option_type_syntax_is_deferred() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("public option syntax should parse before resolution rejects it");
 
@@ -443,10 +468,10 @@ fn public_result_type_syntax_is_deferred() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("public result syntax should parse before resolution rejects it");
 
@@ -489,10 +514,10 @@ fn parses_collection_of_generic_type_application() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("collection element generic type application should parse");
 
@@ -544,10 +569,10 @@ fn rejects_nested_generic_type_application() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("nested generic type application should fail"),
     );
@@ -581,10 +606,10 @@ fn duplicate_optional_marker_is_rejected() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureReturn,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("duplicate optional marker should fail"),
     );
@@ -1039,10 +1064,10 @@ fn parses_collection_with_capacity() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("collection with capacity should parse");
 
@@ -1074,10 +1099,10 @@ fn parses_collection_without_capacity() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("collection without capacity should parse");
 
@@ -1110,10 +1135,10 @@ fn rejects_old_post_element_collection_capacity_syntax() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("old post-element capacity syntax should not parse"),
     );
@@ -1153,10 +1178,10 @@ fn parses_collection_with_generic_element_and_capacity() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("collection with generic element and capacity should parse");
 
@@ -1192,10 +1217,10 @@ fn rejects_collection_capacity_arithmetic_before_optional_element() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("arithmetic in capacity position should be rejected"),
     );
@@ -1235,10 +1260,10 @@ fn parses_nested_fixed_collection_bare_capacity_constants() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("nested fixed collection should parse");
 
@@ -1289,10 +1314,10 @@ fn parses_namespaced_type_using_member_name_case() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("namespaced collection element should parse");
 
@@ -1321,10 +1346,10 @@ fn rejects_capacity_only_shorthand_in_signature_context() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("capacity-only shorthand should be rejected in signature context"),
     );
@@ -1359,10 +1384,10 @@ fn rejects_lower_snake_capacity_only_shorthand_in_signature_context() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("lower-snake capacity-only shorthand should be rejected in signatures"),
     );
@@ -1396,10 +1421,10 @@ fn parses_capacity_only_shorthand_in_declaration_target() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("capacity-only shorthand should parse in declaration target");
 
@@ -1429,10 +1454,10 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("missing collection close delimiter should fail"),
     );
@@ -1473,10 +1498,10 @@ fn parses_simple_map_type() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("simple map type should parse");
 
@@ -1507,10 +1532,10 @@ fn parses_map_type_with_collection_value() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::SignatureParameter,
-        &string_table,
+        &mut string_table,
     )
     .expect("map with collection value should parse");
 
@@ -1545,10 +1570,10 @@ fn parses_map_type_with_nested_map_value() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::SignatureReturn,
-        &string_table,
+        &mut string_table,
     )
     .expect("map with nested map value should parse");
 
@@ -1577,10 +1602,10 @@ fn parses_map_type_in_parameter_context() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::SignatureParameter,
-        &string_table,
+        &mut string_table,
     )
     .expect("map type in parameter context should parse");
 
@@ -1603,10 +1628,10 @@ fn rejects_map_type_with_empty_key() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("empty map key should fail"),
     );
@@ -1641,10 +1666,10 @@ fn rejects_map_type_with_empty_value() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("empty map value should fail"),
     );
@@ -1682,10 +1707,10 @@ fn rejects_map_type_with_multiple_separators() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("multiple map separators should fail"),
     );
@@ -1722,10 +1747,10 @@ fn rejects_fixed_capacity_map_syntax_on_key_side() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("fixed capacity on key side should fail"),
     );
@@ -1762,10 +1787,10 @@ fn rejects_fixed_capacity_map_syntax_on_value_side() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("fixed capacity on value side should fail"),
     );
@@ -1803,10 +1828,10 @@ fn rejects_named_capacity_map_syntax() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("named capacity on map key side should fail"),
     );
@@ -1844,10 +1869,10 @@ fn rejects_postfix_capacity_map_syntax_with_colon() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("postfix capacity with colon on map value side should fail"),
     );
@@ -1884,10 +1909,10 @@ fn rejects_postfix_capacity_map_syntax_with_number() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("postfix capacity with number on map value side should fail"),
     );
@@ -1925,10 +1950,10 @@ fn rejects_postfix_capacity_map_syntax_on_key_side() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("postfix capacity with colon on map key side should fail"),
     );
@@ -1967,10 +1992,10 @@ fn map_separator_inside_nested_braces_is_ignored() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("map with inner map key should parse");
 
@@ -2059,10 +2084,10 @@ fn parses_qualified_type_with_three_segments() {
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::SignatureParameter,
-        &string_table,
+        &mut string_table,
     )
     .expect("qualified type should parse");
 
@@ -2093,10 +2118,10 @@ fn rejects_generic_application_on_qualified_base() {
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("generic application on qualified base should fail"),
     );

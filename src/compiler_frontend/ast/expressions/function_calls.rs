@@ -41,7 +41,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input bundle for `parse_function_call` to avoid long argument lists.
 pub struct FunctionCallParseInput<'a, 'b, 'tokens> {
@@ -206,15 +206,15 @@ fn finish_function_call_expression(
 
     let Some(error_return_type_id) = error_return_type_id else {
         if matches!(
-            token_stream.current_token_kind(),
-            TokenKind::Bang | TokenKind::Catch
+            token_stream.current_tag(),
+            TokenTag::BANG | TokenTag::CATCH
         ) {
             let operand_is_optional = call_success_is_optional(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
             );
             return Err(CompilerDiagnostic::invalid_fallible_handling(
-                non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
+                non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
                 Some(token_stream.current_span()),
             )
             .into());
@@ -481,13 +481,13 @@ fn finish_external_function_call_expression(
     }
 
     if matches!(
-        token_stream.current_token_kind(),
-        TokenKind::Bang | TokenKind::Catch
+        token_stream.current_tag(),
+        TokenTag::BANG | TokenTag::CATCH
     ) {
         let operand_is_optional =
             call_success_is_optional(result_type_ids.as_slice(), type_interner.environment());
         return Err(CompilerDiagnostic::invalid_fallible_handling(
-            non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
+            non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
             Some(token_stream.current_span()),
         )
         .into());

@@ -1041,8 +1041,21 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
     }
     assert_eq!(tokens.current_token_kind(), &TokenKind::If);
     tokens.advance();
-    let mut cursor = AstCursor::from_file_tokens(&mut tokens)
-        .expect("test token stream must expose an AST cursor");
+    let owner = tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut cursor = AstCursor::from_source_tokens(
+        &owner,
+        tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(tokens.index)
+        .expect("the canonical cursor must seek to the tokenized header");
     classify_if_header(&mut cursor).shape
 }
 
@@ -1108,8 +1121,21 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
             tokens.advance();
         }
         tokens.advance();
-        let mut cursor = AstCursor::from_file_tokens(&mut tokens)
-            .expect("test token stream must expose an AST cursor");
+        let owner = tokens
+            .canonical_source_tokens_arc()
+            .expect("test token stream must expose canonical source tokens");
+        let range = owner
+            .full_range()
+            .expect("test token stream must expose a checked full range");
+        let mut cursor = AstCursor::from_source_tokens(
+            &owner,
+            tokens.canonical_os_path.clone(),
+            range,
+        )
+        .expect("test token stream must expose an AST cursor");
+        cursor
+            .set_position(tokens.index)
+            .expect("the canonical cursor must seek to the tokenized header");
         classify_if_header(&mut cursor)
     };
 

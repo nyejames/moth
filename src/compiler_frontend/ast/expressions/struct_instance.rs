@@ -33,7 +33,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Input bundle for `parse_struct_constructor_expression`.
@@ -86,7 +86,7 @@ pub(super) fn parse_struct_constructor_expression(
     // Advance past it to '(' so the shared call-argument parser can take over.
     token_stream.advance();
 
-    if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+    if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
         return Err(CompilerError::compiler_error(
             "Struct constructor parser called without an opening parenthesis",
         )

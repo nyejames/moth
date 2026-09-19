@@ -95,7 +95,9 @@ pub fn parse_declaration_syntax(
     span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> DeclarationShellResult<DeclarationSyntax> {
     let target_span = current_source_span(token_stream);
-    let config_qualifier = if starts_build_config_qualifier_at_cursor(token_stream, string_table) {
+    let config_qualifier = if starts_build_config_qualifier_at_cursor(token_stream, string_table)
+        .map_err(HeaderParseFailure::Infrastructure)?
+    {
         Some(parse_build_config_qualifier(
             token_stream,
             string_table,
@@ -191,7 +193,7 @@ pub fn parse_declaration_syntax(
 pub fn parse_binding_target_syntax(
     name: StringId,
     token_stream: &mut DeclarationCursor<'_>,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> DeclarationShellResult<BindingTargetSyntax> {
     let target_span = current_source_span(token_stream);

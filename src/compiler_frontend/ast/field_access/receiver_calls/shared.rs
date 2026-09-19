@@ -28,7 +28,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement,
 };
@@ -79,15 +79,15 @@ pub(super) fn receiver_result_type_ids_for_call(
     }
 
     if matches!(
-        token_stream.current_token_kind(),
-        TokenKind::Bang | TokenKind::Catch
+        token_stream.current_tag(),
+        TokenTag::BANG | TokenTag::CATCH
     ) {
         let operand_is_optional = call_success_is_optional(
             success_return_type_ids.as_slice(),
             type_interner.environment(),
         );
         return Err(CompilerDiagnostic::invalid_fallible_handling(
-            non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
+            non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
             Some(token_stream.current_span()),
         )
         .into());

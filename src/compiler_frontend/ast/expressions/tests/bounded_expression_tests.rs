@@ -22,7 +22,7 @@ use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -69,7 +69,7 @@ fn create_expression_until_for_test(
     context: &ScopeContext,
     expected_type: &mut ExpectedType,
     value_mode: &ValueMode,
-    stop_tokens: &[TokenKind],
+    stop_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<crate::compiler_frontend::ast::expressions::expression::Expression, ExpressionParseError>
@@ -102,8 +102,19 @@ fn bounded_expression_empty_at_delimiter_errors() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(
@@ -111,7 +122,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -144,8 +155,19 @@ fn bounded_expression_parses_simple_literal() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -153,7 +175,7 @@ fn bounded_expression_parses_simple_literal() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -163,7 +185,7 @@ fn bounded_expression_parses_simple_literal() {
 
     // The stop token (comma) should not be consumed.
     assert_eq!(stream.position(), 1);
-    assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
+    assert_eq!(stream.current_tag(), TokenTag::COMMA);
 }
 
 #[test]
@@ -184,8 +206,19 @@ fn bounded_expression_nested_parentheses() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -193,7 +226,7 @@ fn bounded_expression_nested_parentheses() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -204,7 +237,7 @@ fn bounded_expression_nested_parentheses() {
 
     // Stop token should remain unconsumed.
     assert_eq!(stream.position(), 7);
-    assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
+    assert_eq!(stream.current_tag(), TokenTag::COMMA);
 }
 
 #[test]
@@ -225,8 +258,19 @@ fn bounded_expression_nested_curly_braces() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -234,7 +278,7 @@ fn bounded_expression_nested_curly_braces() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -243,7 +287,7 @@ fn bounded_expression_nested_curly_braces() {
     // Should parse as a collection expression.
     assert!(matches!(expression.kind, ExpressionKind::Collection(_)));
     assert_eq!(stream.position(), 5);
-    assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
+    assert_eq!(stream.current_tag(), TokenTag::COMMA);
 }
 
 #[test]
@@ -259,8 +303,19 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(
@@ -268,7 +323,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )

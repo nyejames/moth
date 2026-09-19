@@ -35,7 +35,7 @@ type GenericParameterParseResult<T> = Result<T, HeaderParseFailure>;
 pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     token_stream: &mut DeclarationCursor<'_>,
     forbidden_names: &FxHashSet<StringId>,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> GenericParameterParseResult<GenericParameterList> {
     if token_stream.current_tag() != TokenTag::TYPE {
         return Err(CompilerError::new(
@@ -55,7 +55,10 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     loop {
         match token_stream.current_tag() {
             TokenTag::SYMBOL if expecting_parameter => {
-                let Some(name) = token_stream.current_string_id() else {
+                let Some(name) = token_stream
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
+                else {
                     return Err(CompilerError::compiler_error(
                         "symbol token is missing its string payload",
                     )
@@ -228,7 +231,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
 fn parse_trait_bounds_for_current_parameter(
     token_stream: &mut DeclarationCursor<'_>,
     parameters: &mut [GenericParameter],
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> GenericParameterParseResult<()> {
     let Some(parameter) = parameters.last_mut() else {
         let span = current_source_span(token_stream);
@@ -251,7 +254,10 @@ fn parse_trait_bounds_for_current_parameter(
     loop {
         match token_stream.current_tag() {
             TokenTag::SYMBOL if expecting_trait_name => {
-                let Some(trait_name) = token_stream.current_string_id() else {
+                let Some(trait_name) = token_stream
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
+                else {
                     return Err(CompilerError::compiler_error(
                         "symbol token is missing its string payload",
                     )

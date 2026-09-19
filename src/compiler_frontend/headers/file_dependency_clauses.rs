@@ -25,21 +25,28 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenIndex};
 
 type FileDependencyClauseResult<T> = Result<T, HeaderParseFailure>;
 
-fn dependency_clause_token_index(token_stream: &FileTokens) -> FileDependencyClauseResult<usize> {
-    token_stream.index.checked_sub(1).ok_or_else(|| {
+fn dependency_clause_token_index(
+    cursor: &TokenCursor<'_>,
+) -> FileDependencyClauseResult<TokenIndex> {
+    let index = cursor.position().index().checked_sub(1).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "dependency clause token preceded the source token index",
+        ))
+    })?;
+    TokenIndex::try_from_index(index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "dependency clause token exceeded its checked index domain",
         ))
     })
 }
 
-/// Parse and record an ordinary private dependency clause.
 pub(super) fn parse_and_record_private_dependency(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     clause_span: SourceSpan,
@@ -53,56 +60,60 @@ pub(super) fn parse_and_record_private_dependency(
         .into());
     }
     parse_and_record_dependency_clause(
-        token_stream,
+        cursor,
+        file_id,
         state,
         context,
         HeaderExportMode::Private,
         clause_span,
-        dependency_clause_token_index(token_stream)?,
+        dependency_clause_token_index(cursor)?,
         false,
     )
 }
 
-/// Parse and record one public dependency clause inside the single `export:` block.
 pub(super) fn parse_and_record_public_dependency(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     clause_span: SourceSpan,
 ) -> FileDependencyClauseResult<()> {
     parse_and_record_dependency_clause(
-        token_stream,
+        cursor,
+        file_id,
         state,
         context,
         HeaderExportMode::Public,
         clause_span,
-        dependency_clause_token_index(token_stream)?,
+        dependency_clause_token_index(cursor)?,
         true,
     )
 }
 
 fn parse_and_record_dependency_clause(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     export_mode: HeaderExportMode,
     clause_span: SourceSpan,
-    clause_token_index: usize,
+    clause_token_index: TokenIndex,
     require_selection_clause: bool,
 ) -> FileDependencyClauseResult<()> {
-    // Read the canonical source owner directly. The compatibility token vector remains the
-    // parser cursor, but clause facts must come from the checked source shape/span store.
-    let source_tokens = token_stream
-        .source_tokens()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    let path_syntax = token_stream
+    let source_tokens = cursor.source_tokens();
+    if source_tokens.source() != file_id {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "dependency clause source token owner does not match its file identity",
+        )));
+    }
+    let path_syntax = source_tokens
         .path_syntax_table()
         .map_err(HeaderParseFailure::Infrastructure)?;
     let (parsed, next_index) = parse_dependency_clause_at_source(
         source_tokens,
-        clause_token_index,
+        clause_token_index.index(),
         path_syntax,
-        token_stream.file_id,
+        file_id,
     )
     .map_err(|scanner_error| match scanner_error {
         DependencyClauseParseError::Diagnostic(diagnostic) => {
@@ -114,7 +125,7 @@ fn parse_and_record_dependency_clause(
     })?;
 
     // Path validity is independent of the selected binding shape. Validate it first so an
-    // obsolete provider spelling such as `@./drawing.js` receives the same path diagnostic
+    // obsolete provider spelling such as `@./drawing.js` receives the same path diagnostic.
     validate_dependency_path(
         parsed.provider.path,
         &parsed.provider.path_span,
@@ -149,7 +160,6 @@ fn parse_and_record_dependency_clause(
         return Err(CompilerDiagnostic::invalid_export_target(Some(clause_span)).into());
     }
 
-    let file_id = token_stream.file_id;
     let ordinal = u32::try_from(state.dependency_clause_count).map_err(|_| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "dependency clause ordinal exceeded its checked identity domain",
@@ -166,7 +176,6 @@ fn parse_and_record_dependency_clause(
                 ))
             })?;
     add_frontend_counter(FrontendCounter::DependencyClauseCount, 1);
-    add_frontend_counter(FrontendCounter::RetainedShellCount, 1);
     let selection_count = match &parsed.binding {
         ScannedDependencyBinding::Namespace { .. } => 0,
         ScannedDependencyBinding::DirectSelections { selections } => selections.len(),
@@ -183,7 +192,18 @@ fn parse_and_record_dependency_clause(
         &*context.path_fork,
     )?;
 
-    token_stream.index = next_index;
+    let next_position = TokenIndex::try_from_index(next_index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "dependency clause follower exceeded its checked index domain",
+        ))
+    })?;
+    cursor
+        .set_position(next_position)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "dependency clause follower exceeded its source token cursor: {error:?}",
+            )))
+        })?;
     Ok(())
 }
 

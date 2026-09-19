@@ -53,7 +53,7 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
         StyleDirectiveKind::Core(CoreStyleDirectiveKind::Insert)
     ) {
         let insert_name = string_table.intern("insert");
-        let slot_name = parse_required_slot_name_argument(insert_name, token_stream)?;
+        let slot_name = parse_required_slot_name_argument(insert_name, token_stream, string_table)?;
         build_state.kind = TemplateType::SlotInsert(SlotKey::named(slot_name));
         return Ok(true);
     }

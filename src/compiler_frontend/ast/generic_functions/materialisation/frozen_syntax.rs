@@ -272,10 +272,11 @@ impl StableBodySyntax {
             self.donor_file_id,
             resolved_file_references,
         )?);
-        // A retained path/string pair or string-only donor is checked donor identity metadata
-        // only: the requester's parse rebases the body's payloads out of these tables into its
-        // own. Without a retained path table the caller's installed identity pair takes over,
-        // which is how same-domain bodies rebase onto the requester's tables.
+        // A retained path/string pair or string-only donor is carried as independent identity
+        // metadata. The parser borrows the canonical donor range and installs these tables as
+        // TokenPayloadOrigin, translating only payloads it consumes into requester tables.
+        // Without a retained path table, the caller's installed identity pair supplies path
+        // provenance for same-domain materialisation.
         let (source_path_table, source_string_table) = match &self.source_path_table {
             Some(path_table) => (
                 Some(Arc::clone(path_table)),

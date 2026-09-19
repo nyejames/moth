@@ -28,7 +28,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -44,7 +44,10 @@ fn looks_like_nested_record_literal_at_cursor(
     pipe_index: usize,
 ) -> bool {
     let skip_newlines = |mut probe: usize| {
-        while matches!(cursor.token_kind_at(probe), Some(TokenKind::Newline)) {
+        while matches!(
+            cursor.token_tag_at(probe),
+            Some(TokenTag::NEWLINE)
+        ) {
             probe += 1;
         }
         probe
@@ -52,26 +55,29 @@ fn looks_like_nested_record_literal_at_cursor(
 
     let probe = skip_newlines(pipe_index + 1);
     if matches!(
-        cursor.token_kind_at(probe),
-        Some(TokenKind::TypeParameterBracket)
+        cursor.token_tag_at(probe),
+        Some(TokenTag::TYPE_PARAMETER_BRACKET)
     ) {
         return true;
     }
 
     let mut probe = skip_newlines(pipe_index + 1);
     if matches!(
-        cursor.token_kind_at(probe),
-        Some(TokenKind::TypeParameterBracket)
+        cursor.token_tag_at(probe),
+        Some(TokenTag::TYPE_PARAMETER_BRACKET)
     ) {
         return false;
     }
-    if !matches!(cursor.token_kind_at(probe), Some(TokenKind::Symbol(_))) {
+    if !matches!(
+        cursor.token_tag_at(probe),
+        Some(TokenTag::SYMBOL)
+    ) {
         return false;
     }
     probe = skip_newlines(probe + 1);
     matches!(
-        cursor.token_kind_at(probe),
-        Some(TokenKind::Assign) | Some(TokenKind::Comma)
+        cursor.token_tag_at(probe),
+        Some(TokenTag::ASSIGN) | Some(TokenTag::COMMA)
     )
 }
 
@@ -101,7 +107,7 @@ pub(super) fn parse_anonymous_const_record_expression(
 
     // Empty record: `| |` (with optional authored newlines) is allowed.
     token_stream.skip_newlines();
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         token_stream.advance();
         return Ok(finish_record(Vec::new(), record_span, type_interner));
     }
@@ -110,19 +116,26 @@ pub(super) fn parse_anonymous_const_record_expression(
         // Record regions span authored lines, so blank lines between fields are layout.
         token_stream.skip_newlines();
 
-        match token_stream.current_token_kind() {
-            TokenKind::TypeParameterBracket => {
+        match token_stream.current_tag() {
+            TokenTag::TYPE_PARAMETER_BRACKET => {
                 token_stream.advance();
                 break;
             }
 
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(unexpected_record_end(string_table, token_stream));
             }
 
-            TokenKind::Symbol(field_name) => {
+            TokenTag::SYMBOL => {
+                let field_name = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                            "anonymous record field symbol had no string payload",
+                        )
+                    })?;
                 parse_record_field(
-                    *field_name,
+                    field_name,
                     token_stream,
                     context,
                     type_interner,
@@ -145,34 +158,41 @@ pub(super) fn parse_anonymous_const_record_expression(
         // ------------------------
         //  Field separator
         // ------------------------
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
+        match token_stream.current_tag() {
+            TokenTag::COMMA => {
                 token_stream.advance();
                 token_stream.skip_newlines();
 
                 // A trailing comma before the closing pipe is allowed.
-                if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+                if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
                     token_stream.advance();
                     break;
                 }
             }
 
-            TokenKind::TypeParameterBracket => {
+            TokenTag::TYPE_PARAMETER_BRACKET => {
                 token_stream.advance();
                 break;
             }
 
-            TokenKind::Eof
-            | TokenKind::CloseParenthesis
-            | TokenKind::CloseCurly
-            | TokenKind::TemplateClose => {
+            TokenTag::EOF
+            | TokenTag::CLOSE_PARENTHESIS
+            | TokenTag::CLOSE_CURLY
+            | TokenTag::TEMPLATE_CLOSE => {
                 return Err(unexpected_record_end(string_table, token_stream));
             }
 
             _ => {
                 let found = match token_stream.current() {
-                    Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-                    None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+                    Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(
+                        |error| {
+                            crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
+                                error,
+                                "anonymous-record separator diagnostic",
+                            )
+                        },
+                    )?),
+                    None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
                 };
                 return Err(CompilerDiagnostic::expected_token_from_tags(
                     TokenTag::COMMA,
@@ -224,7 +244,7 @@ fn parse_record_field(
     let mut qualifier = {
         let parsed_qualifier = {
             let mut declaration_cursor = token_stream.declaration_cursor()?;
-            if !starts_build_config_qualifier_at_cursor(&declaration_cursor, string_table) {
+            if !starts_build_config_qualifier_at_cursor(&declaration_cursor, string_table)? {
                 None
             } else {
                 let qualifier =
@@ -239,7 +259,7 @@ fn parse_record_field(
             None
         }
     };
-    let has_initializer = token_stream.current_token_kind() == &TokenKind::Assign;
+    let has_initializer = token_stream.current_tag() == TokenTag::ASSIGN;
     if !has_initializer && qualifier.is_none() {
         // A field not followed by `=` is positional (`| a, b = 2 |`); report it through
         // the dedicated record-field reason instead of a generic `=` expectation.
@@ -255,8 +275,8 @@ fn parse_record_field(
         token_stream.skip_newlines();
 
         if matches!(
-            token_stream.current_token_kind(),
-            TokenKind::Comma | TokenKind::Eof
+            token_stream.current_tag(),
+            TokenTag::COMMA | TokenTag::EOF
         ) {
             return Err(CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::AnonymousRecordFieldNotNamed,
@@ -265,7 +285,7 @@ fn parse_record_field(
             .into());
         }
 
-        if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+        if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
             // Nested `|...|` values are rejected; the nested-record fact is token-local
             // lookahead through the canonical cursor position.
             let nested = token_stream
@@ -291,7 +311,7 @@ fn parse_record_field(
 
         // A bare `none` has no inferred option type. The qualifier carries the option contract,
         // so retain a sentinel and let the config resolver construct the typed OptionNone value.
-        if token_stream.current_token_kind() == &TokenKind::NoneLiteral && qualifier.is_some() {
+        if token_stream.current_tag() == TokenTag::NONE_LITERAL && qualifier.is_some() {
             let span = current_span(token_stream);
             token_stream.advance();
             if let Some(qualifier) = qualifier.as_mut() {

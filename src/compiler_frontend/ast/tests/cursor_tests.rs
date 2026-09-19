@@ -1,19 +1,54 @@
 //! AST cursor bounded-read regression tests.
 //!
 //! WHAT: asserts that ordinary parser reads over a bounded canonical range respect the
-//! active view, while explicit raw source-index inspection stays source-wide.
+//! active view, while the canonical owner still addresses neighbouring tokens source-wide.
 //! WHY: bounded parsing must not inspect a neighbouring declaration merely because its
 //! token is addressable in the same source.
 
 use std::sync::Arc;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::store::NumericLiteralStore;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenKind, TokenRange, TokenTag,
+    FileTokens, SourceTokens, Token, TokenIndex, TokenKind, TokenRange, TokenTag,
 };
+
+/// Assert a bounded cursor exposes a bool literal with the expected payload at `index`.
+fn assert_bounded_bool(cursor: &AstCursor, index: usize, expected: bool) {
+    let token = cursor
+        .token_ref_at(index)
+        .unwrap_or_else(|| panic!("bounded view should expose index {index}"));
+    assert_eq!(
+        token.tag(),
+        TokenTag::BOOL_LITERAL,
+        "tag mismatch at index {index}"
+    );
+    assert_eq!(
+        token.bool_value(),
+        Some(expected),
+        "payload mismatch at index {index}"
+    );
+}
+
+/// Assert a declaration cursor exposes a bool literal with the expected payload at `index`.
+fn assert_declaration_bool(cursor: &DeclarationCursor<'_>, index: usize, expected: bool) {
+    assert_eq!(
+        cursor.token_tag_at(index),
+        Some(TokenTag::BOOL_LITERAL),
+        "tag mismatch at index {index}"
+    );
+    assert_eq!(
+        cursor
+            .canonical_cursor()
+            .parser_token_at(index)
+            .and_then(|token| token.bool_value()),
+        Some(expected),
+        "payload mismatch at index {index}"
+    );
+}
 
 #[test]
 fn bounded_canonical_reads_respect_range_and_offset_limits() {
@@ -38,25 +73,31 @@ fn bounded_canonical_reads_respect_range_and_offset_limits() {
 
     assert_eq!(cursor.position(), 1);
     assert_eq!(cursor.length(), 3);
-    assert!(cursor.token_at(0).is_none());
-    assert_eq!(cursor.token_kind_at(1), Some(TokenKind::BoolLiteral(true)));
-    assert_eq!(cursor.token_kind_at(2), Some(TokenKind::BoolLiteral(false)));
-    assert!(cursor.token_at(3).is_none());
-    assert!(cursor.token_at(4).is_none());
+    assert!(cursor.token_ref_at(0).is_none());
+    assert_bounded_bool(&cursor, 1, true);
+    assert_bounded_bool(&cursor, 2, false);
+    assert!(cursor.token_ref_at(3).is_none());
+    assert!(cursor.token_ref_at(4).is_none());
+    let neighbour = owner
+        .token(
+            TokenIndex::try_from_index(0)
+                .expect("fixture index should fit the checked index domain"),
+        )
+        .expect("the canonical owner still addresses neighbours source-wide");
     assert_eq!(
-        cursor.raw_token_kind_at(0),
-        Some(TokenKind::ModuleStart),
-        "raw source-index inspection remains explicitly source-wide"
+        neighbour.tag(),
+        TokenTag::MODULE_START,
+        "neighbouring tokens stay addressable in the canonical owner, not in the bounded view"
     );
     assert_eq!(
-        cursor.token_kind_at_offset(0),
-        Some(TokenKind::BoolLiteral(true))
+        cursor.token_ref_at_offset(0).and_then(|token| token.bool_value()),
+        Some(true)
     );
     assert_eq!(
-        cursor.token_kind_at_offset(1),
-        Some(TokenKind::BoolLiteral(false))
+        cursor.token_ref_at_offset(1).and_then(|token| token.bool_value()),
+        Some(false)
     );
-    assert!(cursor.token_kind_at_offset(2).is_none());
+    assert!(cursor.token_ref_at_offset(2).is_none());
     let active_limit = cursor
         .set_limit(2)
         .expect("a limit inside the bounded range should be accepted");
@@ -90,15 +131,14 @@ fn canonical_subcursor_window_bounds_contiguous_reads() {
             .expect("bounded cursor should build");
     let mut child = parent
         .subcursor_window(1, 3)
-        .expect("interior window should validate")
-        .expect("canonical backing should produce a child");
+        .expect("interior window should validate against canonical backing");
 
     assert_eq!(child.position(), 1);
     assert_eq!(child.length(), 3);
-    assert!(child.token_kind_at(0).is_none());
-    assert_eq!(child.token_kind_at(1), Some(TokenKind::BoolLiteral(true)));
-    assert_eq!(child.token_kind_at(2), Some(TokenKind::BoolLiteral(false)));
-    assert!(child.token_kind_at(3).is_none());
+    assert!(child.token_ref_at(0).is_none());
+    assert_bounded_bool(&child, 1, true);
+    assert_bounded_bool(&child, 2, false);
+    assert!(child.token_ref_at(3).is_none());
     assert!(
         child
             .nested_cursor(TokenRange::from_raw(source, 0, 2).unwrap())
@@ -109,11 +149,16 @@ fn canonical_subcursor_window_bounds_contiguous_reads() {
         .nested_cursor(TokenRange::from_raw(source, 1, 3).unwrap())
         .expect("a nested view wholly inside the window should be accepted");
     assert_eq!(
-        nested.token_kind_at(1),
-        Some(TokenKind::BoolLiteral(true)),
+        nested.token_ref_at(1).map(|token| token.tag()),
+        Some(TokenTag::BOOL_LITERAL),
         "nested views must retain the window's visible tokens",
     );
-    assert!(child.peek_next_token().is_some());
+    assert_eq!(
+        nested.token_ref_at(1).and_then(|token| token.bool_value()),
+        Some(true),
+        "nested views must retain the window's typed payloads",
+    );
+    assert!(child.peek_next_tag().is_some());
     child.advance();
     child.advance();
     assert!(child.current().is_none());
@@ -163,12 +208,10 @@ fn canonical_subcursor_window_skips_segmented_source_gaps() {
 
     let mut child = parent
         .subcursor_window(1, 3)
-        .expect("segmented window should validate")
-        .expect("canonical backing should produce a child");
+        .expect("segmented window should validate against canonical backing");
     let narrow = parent
         .subcursor_window(2, 3)
-        .expect("a dense window inside the sequence should validate")
-        .expect("canonical segmented backing should produce a child");
+        .expect("a dense window inside the sequence should validate against canonical backing");
     assert!(
         narrow
             .nested_cursor(TokenRange::from_raw(source, 3, 4).unwrap())
@@ -178,10 +221,10 @@ fn canonical_subcursor_window_skips_segmented_source_gaps() {
 
     assert_eq!(child.position(), 1);
     assert_eq!(child.length(), 3);
-    assert!(child.token_kind_at(0).is_none());
-    assert_eq!(child.token_kind_at(1), Some(TokenKind::BoolLiteral(false)));
-    assert_eq!(child.token_kind_at(2), Some(TokenKind::BoolLiteral(true)));
-    assert!(child.token_kind_at(3).is_none());
+    assert!(child.token_ref_at(0).is_none());
+    assert_bounded_bool(&child, 1, false);
+    assert_bounded_bool(&child, 2, true);
+    assert!(child.token_ref_at(3).is_none());
     assert!(child.previous().is_none());
     child.advance();
     assert_eq!(
@@ -231,11 +274,16 @@ fn segmented_nested_cursor_translates_active_limit() {
         .expect("a child ending at the dense limit should be accepted");
     assert_eq!(child.position(), 3);
     assert_eq!(
-        child.token_kind_at(3),
-        Some(TokenKind::BoolLiteral(false)),
+        child.token_ref_at(3).map(|token| token.tag()),
+        Some(TokenTag::BOOL_LITERAL),
         "the child keeps its raw contiguous range after translation",
     );
-    assert!(child.token_at(4).is_none());
+    assert_eq!(
+        child.token_ref_at(3).and_then(|token| token.bool_value()),
+        Some(false),
+        "the child keeps its typed payload after translation",
+    );
+    assert!(child.token_ref_at(4).is_none());
     assert!(
         cursor
             .nested_cursor(TokenRange::from_raw(source, 3, 5).unwrap())
@@ -272,8 +320,7 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
             .expect("bounded cursor should build");
     let child = parent
         .subcursor_window(1, 3)
-        .expect("interior window should validate")
-        .expect("canonical backing should produce a child");
+        .expect("interior window should validate against canonical backing");
 
     let declaration = child
         .declaration_cursor()
@@ -285,23 +332,17 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
         "the declaration cursor ends at the window, not at the source end"
     );
     assert!(
-        declaration.token_at(0).is_none(),
+        declaration.token_tag_at(0).is_none(),
         "a declaration cursor must not read before its window"
     );
-    assert_eq!(
-        declaration.token_kind_at(1),
-        Some(TokenKind::BoolLiteral(true))
-    );
-    assert_eq!(
-        declaration.token_kind_at(2),
-        Some(TokenKind::BoolLiteral(false))
-    );
+    assert_declaration_bool(&declaration, 1, true);
+    assert_declaration_bool(&declaration, 2, false);
     assert!(
-        declaration.token_at(3).is_none(),
+        declaration.token_tag_at(3).is_none(),
         "a declaration cursor must not read the token after its window"
     );
     assert!(
-        declaration.token_at(4).is_none(),
+        declaration.token_tag_at(4).is_none(),
         "a declaration cursor must not reach the trailing source EOF"
     );
 
@@ -363,8 +404,7 @@ fn declaration_cursor_inherits_segmented_parser_window() {
         .expect("segmented AST cursor should build");
     let child = parent
         .subcursor_window(1, 2)
-        .expect("dense window should validate")
-        .expect("canonical backing should produce a child");
+        .expect("dense window should validate against canonical backing");
 
     let declaration = child
         .declaration_cursor()
@@ -373,15 +413,12 @@ fn declaration_cursor_inherits_segmented_parser_window() {
     assert_eq!(declaration.position(), 1);
     assert_eq!(declaration.length, 2);
     assert!(
-        declaration.token_at(0).is_none(),
+        declaration.token_tag_at(0).is_none(),
         "a segmented declaration cursor must not read before its dense window"
     );
-    assert_eq!(
-        declaration.token_kind_at(1),
-        Some(TokenKind::BoolLiteral(false))
-    );
+    assert_declaration_bool(&declaration, 1, false);
     assert!(
-        declaration.token_at(2).is_none(),
+        declaration.token_tag_at(2).is_none(),
         "a segmented declaration cursor must not read past its dense window"
     );
 }
@@ -415,12 +452,9 @@ fn declaration_cursor_respects_a_stricter_parent_limit() {
         .declaration_cursor()
         .expect("a limited canonical cursor should produce a declaration cursor");
     assert_eq!(declaration.length, 2);
-    assert_eq!(
-        declaration.token_kind_at(1),
-        Some(TokenKind::BoolLiteral(true))
-    );
+    assert_declaration_bool(&declaration, 1, true);
     assert!(
-        declaration.token_at(2).is_none(),
+        declaration.token_tag_at(2).is_none(),
         "a declaration cursor must not read at or beyond an active parent limit"
     );
 

@@ -32,10 +32,7 @@ pub(crate) fn token_is_line_initial(token_stream: &AstCursor, index: usize) -> b
         return false;
     }
 
-    let Some(tag) = token_stream
-        .token_kind_at(index)
-        .map(|kind| kind.token_tag())
-    else {
+    let Some(tag) = token_stream.token_ref_at(index).map(|token| token.tag()) else {
         return false;
     };
     if matches!(tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF) {
@@ -43,8 +40,8 @@ pub(crate) fn token_is_line_initial(token_stream: &AstCursor, index: usize) -> b
     }
     index == 0
         || token_stream
-            .token_kind_at(index.saturating_sub(1))
-            .is_some_and(|kind| kind.token_tag() == TokenTag::NEWLINE)
+            .token_ref_at(index.saturating_sub(1))
+            .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
 }
 
 /// Returns true when the token at `start_index` has a top-level `=>` in a match
@@ -60,12 +57,9 @@ fn find_top_level_match_arm_fat_arrow(
     token_stream: &AstCursor,
     start_index: usize,
 ) -> Option<usize> {
-    let Some(mut walk) = token_stream
+    let mut walk = token_stream
         .subcursor_window(start_index, token_stream.length())
-        .expect("match-arm window stays inside the active parser view")
-    else {
-        return find_top_level_match_arm_fat_arrow_indexed(token_stream, start_index);
-    };
+        .expect("match-arm window stays inside the active parser view");
     let mut nesting_depth = NestingDepth::default();
     let mut guard_started = false;
     let mut guard_expression_started = false;
@@ -94,7 +88,7 @@ fn find_top_level_match_arm_fat_arrow(
                 if guard_started && nesting_depth.is_top_level() {
                     guard_expression_started = true;
                 }
-                nesting_depth.step(walk.current_token_kind());
+                nesting_depth.step_tag(walk.current_tag());
             }
         }
         walk.advance();
@@ -113,8 +107,8 @@ fn find_top_level_match_arm_fat_arrow_indexed(
 
     let mut index = start_index;
     while index < token_stream.length() {
-        let kind = token_stream.token_kind_at(index)?;
-        match kind.token_tag() {
+        let tag = token_stream.token_ref_at(index)?.tag();
+        match tag {
             TokenTag::END | TokenTag::EOF => break,
             TokenTag::NEWLINE => {
                 if nesting_depth.is_top_level() && guard_started && !guard_expression_started {
@@ -136,7 +130,7 @@ fn find_top_level_match_arm_fat_arrow_indexed(
                 if guard_started && nesting_depth.is_top_level() {
                     guard_expression_started = true;
                 }
-                nesting_depth.step(&kind);
+                nesting_depth.step_tag(tag);
             }
         }
         index += 1;
@@ -172,10 +166,7 @@ pub(crate) fn token_index_starts_match_arm_header(
         return None;
     }
 
-    let Some(start_tag) = token_stream
-        .token_kind_at(start_index)
-        .map(|kind| kind.token_tag())
-    else {
+    let Some(start_tag) = token_stream.token_ref_at(start_index).map(|token| token.tag()) else {
         return None;
     };
 
@@ -200,12 +191,9 @@ fn find_top_level_token_on_line(
     start_index: usize,
     matches_target: impl Fn(TokenTag) -> bool,
 ) -> Option<usize> {
-    let Some(mut walk) = token_stream
+    let mut walk = token_stream
         .subcursor_window(start_index, token_stream.length())
-        .expect("match-arm line window stays inside the active parser view")
-    else {
-        return find_top_level_token_on_line_indexed(token_stream, start_index, matches_target);
-    };
+        .expect("match-arm line window stays inside the active parser view");
     let mut nesting_depth = NestingDepth::default();
     while !walk.is_at_end() {
         let tag = walk.current_tag();
@@ -214,7 +202,7 @@ fn find_top_level_token_on_line(
             _ if nesting_depth.is_top_level() && matches_target(tag) => {
                 return Some(walk.position());
             }
-            _ => nesting_depth.step(walk.current_token_kind()),
+            _ => nesting_depth.step_tag(walk.current_tag()),
         }
         walk.advance();
     }
@@ -229,14 +217,13 @@ fn find_top_level_token_on_line_indexed(
     let mut nesting_depth = NestingDepth::default();
     let mut index = start_index;
     while index < token_stream.length() {
-        let kind = token_stream.token_kind_at(index)?;
-        let tag = kind.token_tag();
+        let tag = token_stream.token_ref_at(index)?.tag();
         match tag {
             TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => break,
             _ if nesting_depth.is_top_level() && matches_target(tag) => {
                 return Some(index);
             }
-            _ => nesting_depth.step(&kind),
+            _ => nesting_depth.step_tag(tag),
         }
         index += 1;
     }

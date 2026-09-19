@@ -389,7 +389,14 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         .iter()
         .position(|token| matches!(token.kind, TokenKind::TemplateHead))
         .expect("template opener");
-    token_stream.index = opening_index + 1;
+    token_stream.index = opening_index;
+    let mut cursor = token_stream
+        .canonical_cursor_from_current()
+        .expect("tokenized source must expose canonical tokens");
+    let opening = cursor
+        .current()
+        .expect("template opener must be current");
+    cursor.advance();
 
     let malformed_clause = malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
     let mut warnings = Vec::new();
@@ -404,9 +411,9 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     };
     let failure = create_top_level_const_template(
         scope,
-        opening_index,
+        opening,
         0,
-        &mut token_stream,
+        &mut cursor,
         &mut context,
         span_builder,
     )

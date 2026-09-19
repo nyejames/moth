@@ -12,7 +12,8 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidCallShapeReason, InvalidFunctionSignatureReason,
-    InvalidGenericInstantiationReason, InvalidReceiverCallReason, InvalidReceiverDeclarationReason,
+    InvalidGenericInstantiationReason, InvalidMatchPatternReason, InvalidReceiverCallReason,
+    InvalidReceiverDeclarationReason,
     InvalidThisUsageReason, NameNamespace, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
@@ -854,6 +855,42 @@ fn parses_inline_option_present_capture_receiver_as_value_match() {
     );
     assert_eq!(value_match.exhaustiveness, MatchExhaustiveness::HasDefault);
 }
+#[test]
+fn rejects_empty_inline_option_present_capture() {
+    let payload = parse_function_diagnostic_payload(
+        "display |maybe_name String?| -> String:\n\
+         name = if maybe_name is || then name else \"guest\"\n\
+         return name\n\
+     ;\n",
+    );
+
+    assert!(matches!(
+        payload,
+        DiagnosticPayload::InvalidMatchPattern {
+            reason: InvalidMatchPatternReason::EmptyOptionPresentCapture,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn rejects_literal_inline_option_present_capture_binding() {
+    let payload = parse_function_diagnostic_payload(
+        "display |maybe_name String?| -> String:\n\
+         name = if maybe_name is |\"text\"| then name else \"guest\"\n\
+         return name\n\
+     ;\n",
+    );
+
+    assert!(matches!(
+        payload,
+        DiagnosticPayload::InvalidMatchPattern {
+            reason: InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
+            ..
+        }
+    ));
+}
+
 
 #[test]
 fn newline_between_is_and_option_capture_is_not_committed_at_inline_receiver() {

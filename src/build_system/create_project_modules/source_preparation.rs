@@ -9,6 +9,7 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
 };
@@ -122,16 +123,26 @@ pub(super) fn prepare_discovery_source_text(
         }
     };
 
+    let canonical_tokens = tokenized.canonical_source_tokens_arc()?;
+    let identity = source_files
+        .get(source_id)
+        .expect("discovery source identity must be registered");
+    let owner = SourceTokenOwner::new(
+        canonical_tokens,
+        identity.logical_path,
+        identity
+            .canonical_os_path
+            .as_ref()
+            .map(|path| path.to_path_buf()),
+    );
     let prepared_output = prepare_discovery_output(
         FrontendFilePrepareInput {
-            source: FrontendFilePrepareSource::Moth {
-                source_path: file_path.to_path_buf(),
-                tokens: Box::new(tokenized),
-            },
+            source: FrontendFilePrepareSource::Moth { owner },
             source_id,
             span_builder,
             const_template_offset: 0,
             runtime_fragment_offset: 0,
+            compatibility_tokens: Some(tokenized),
         },
         style_directives,
         project_path_resolver,
@@ -178,6 +189,7 @@ pub(super) fn prepare_discovery_template_source(
             span_builder: ExtendedSpanBuilder::new(),
             const_template_offset: 0,
             runtime_fragment_offset: 0,
+            compatibility_tokens: None,
         },
         style_directives,
         project_path_resolver,

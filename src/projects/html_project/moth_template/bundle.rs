@@ -952,6 +952,7 @@ fn prepare_one_source(
         span_builder: ExtendedSpanBuilder::new(),
         const_template_offset: 0,
         runtime_fragment_offset: 0,
+        compatibility_tokens: None,
     };
 
     Ok(CompilerFrontend::prepare_file_frontend_local(

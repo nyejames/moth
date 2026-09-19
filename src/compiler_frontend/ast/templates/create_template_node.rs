@@ -23,11 +23,13 @@ use crate::compiler_frontend::ast::templates::template::{
     BodyWhitespacePolicy, CommentDirectiveKind, Style, TemplateParsingMode, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_body_parser::{
-    NestedTemplateParseOptions, TemplateBodyParseRequest, parse_template_body,
+    NestedTemplateParseOptions, TemplateBodyEndPolicy, TemplateBodyParseRequest,
+    parse_template_body,
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateControlFlowValidationMode, validate_runtime_template_control_flow_slot_artifacts,
+    TemplateBodyParseMode, TemplateControlFlowValidationMode,
+    validate_runtime_template_control_flow_slot_artifacts,
 };
 use crate::compiler_frontend::ast::templates::template_head_parser::{
     ParsedTemplateHead, TemplateHeadParseRequest, apply_doc_comment_defaults, parse_template_head,
@@ -81,6 +83,25 @@ pub(crate) struct PreparedTemplateConstruction {
 }
 
 type PreparedTemplateConstructionResult = Result<PreparedTemplateConstruction, TemplateError>;
+
+/// Explicit parser facts for a Moth content constant.
+///
+/// The body cursor remains borrowed from the canonical source owner; this entry supplies only the
+/// virtual `$md` head effects and the donor-exhaustion close policy that the copied wrapper used to
+/// provide.
+pub(crate) struct MothContentTemplateEntry {
+    style: Style,
+    outer_span: Option<SourceSpan>,
+}
+
+impl MothContentTemplateEntry {
+    pub(crate) fn markdown(outer_span: Option<SourceSpan>) -> Self {
+        Self {
+            style: markdown_default_style(),
+            outer_span,
+        }
+    }
+}
 
 /// Mutable interner tables shared by nested template construction.
 ///
@@ -210,6 +231,32 @@ impl Template {
         )
     }
 
+    /// Construct a const-required template whose body is borrowed from a Moth source header.
+    pub(crate) fn new_moth_content_constant_with_type_interner(
+        token_stream: &mut AstCursor<'_>,
+        source_path: PathId,
+        context: &ScopeContext,
+        type_interner: &mut AstTypeInterner<'_>,
+        direct_child_wrappers: Vec<TemplateWrapperReference>,
+        string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
+        outer_span: Option<SourceSpan>,
+    ) -> PreparedTemplateConstructionResult {
+        Self::new_nested_template_with_entry(
+            token_stream,
+            source_path,
+            context,
+            type_interner,
+            direct_child_wrappers,
+            NestedTemplateParseOptions::const_required(),
+            TemplatePathTables {
+                string_table,
+                path_fork,
+            },
+            Some(MothContentTemplateEntry::markdown(outer_span)),
+        )
+    }
+
     /// Internal constructor that supports doc comment context propagation.
     /// Called recursively for nested templates in the body parser.
     pub(crate) fn new_nested_template(
@@ -220,6 +267,28 @@ impl Template {
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         parse_options: NestedTemplateParseOptions,
         tables: TemplatePathTables<'_>,
+    ) -> PreparedTemplateConstructionResult {
+        Self::new_nested_template_with_entry(
+            token_stream,
+            source_path,
+            context,
+            type_interner,
+            direct_child_wrappers,
+            parse_options,
+            tables,
+            None,
+        )
+    }
+
+    fn new_nested_template_with_entry(
+        token_stream: &mut AstCursor<'_>,
+        source_path: PathId,
+        context: &ScopeContext,
+        type_interner: &mut AstTypeInterner<'_>,
+        direct_child_wrappers: Vec<TemplateWrapperReference>,
+        parse_options: NestedTemplateParseOptions,
+        tables: TemplatePathTables<'_>,
+        entry: Option<MothContentTemplateEntry>,
     ) -> PreparedTemplateConstructionResult {
         let TemplatePathTables {
             string_table,
@@ -238,7 +307,10 @@ impl Template {
         // authoritative TIR identity exists, not mutated throughout parsing.
         let mut build_state = TemplateBuildState::new();
 
-        let construction_span = construction_span_for(token_stream);
+        let construction_span = entry
+            .as_ref()
+            .and_then(|entry| entry.outer_span)
+            .or_else(|| construction_span_for(token_stream));
         let mut construction_context =
             TemplateConstructionContext::new(context.template_ir_store.clone(), construction_span);
 
@@ -246,23 +318,38 @@ impl Template {
         //  Parse template head
         // ---------------------
         //
-        // Directives, expressions, and style config.
-        let parsed_head = parse_template_head(
-            token_stream,
-            TemplateHeadParseRequest {
-                context,
-                type_interner,
-                build_state: &mut build_state,
-                construction_context: &mut construction_context,
-                control_flow_validation,
-                string_table,
-                path_fork,
-            },
-        )?;
-
-        apply_default_style_if_needed(&mut build_state, &parsed_head, default_style.as_ref());
-
-        let body_mode = parsed_head.body_mode;
+        // A Moth content entry supplies the virtual `$md` directive effects without adding
+        // wrapper tokens to the donor stream. Ordinary templates still parse their authored head.
+        let (parsed_head, default_style, end_policy) = if let Some(entry) = entry {
+            build_state.style = entry.style;
+            (
+                ParsedTemplateHead {
+                    body_mode: TemplateBodyParseMode::Normal,
+                    has_explicit_template_directive: true,
+                },
+                Some(markdown_default_style()),
+                TemplateBodyEndPolicy::DonorExhaustionIsClose,
+            )
+        } else {
+            let parsed_head = parse_template_head(
+                token_stream,
+                TemplateHeadParseRequest {
+                    context,
+                    type_interner,
+                    build_state: &mut build_state,
+                    construction_context: &mut construction_context,
+                    control_flow_validation,
+                    string_table,
+                    path_fork,
+                },
+            )?;
+            apply_default_style_if_needed(&mut build_state, &parsed_head, default_style.as_ref());
+            (
+                parsed_head,
+                default_style,
+                TemplateBodyEndPolicy::RequireClose,
+            )
+        };
 
         if parsing_mode == TemplateParsingMode::DocComment {
             apply_doc_comment_defaults(&mut build_state);
@@ -275,8 +362,9 @@ impl Template {
             &mut construction_context,
             TemplateBodyParseRequest {
                 context,
+                end_policy,
                 type_interner,
-                body_mode,
+                body_mode: parsed_head.body_mode,
                 direct_child_wrappers: &direct_child_wrappers,
                 control_flow_validation,
                 control_context,

@@ -31,7 +31,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id,
@@ -85,18 +85,10 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn same_logi
     } else {
         (right_index, left_index)
     };
-
-    if let Ok(cursor) = token_stream.declaration_cursor() {
-        return (start..=end).all(|index| {
-            cursor
-                .token_kind_at(index)
-                .is_some_and(|kind| kind != TokenKind::Newline)
-        });
-    }
     (start..=end).all(|index| {
         token_stream
-            .token_kind_at(index)
-            .is_some_and(|kind| kind != TokenKind::Newline)
+            .token_ref_at(index)
+            .is_some_and(|token| token.tag() != TokenTag::NEWLINE)
     })
 }
 /// converting a retained-token lifecycle fault into a source diagnostic mid-parse.
@@ -122,7 +114,7 @@ fn parse_inline_then_else_with_target(
     let then_span = Some(token_stream.current_span());
     token_stream.advance(); // consume `then`
 
-    if token_stream.current_token_kind() == &TokenKind::Newline {
+    if token_stream.current_tag() == TokenTag::NEWLINE {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
@@ -132,7 +124,7 @@ fn parse_inline_then_else_with_target(
 
     // A retained newline is a multiline form. Every other definite boundary means
     // the branch has no value and must not reach expression evaluation.
-    if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
+    if is_missing_produced_value_boundary(token_stream.current_tag()) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterThen,
             Some(token_stream.current_span()),
@@ -246,7 +238,7 @@ pub(super) fn parse_inline_then_else(
     let then_request_start = then_context.generic_request_checkpoint();
     token_stream.advance(); // consume `then`
 
-    if token_stream.current_token_kind() == &TokenKind::Newline {
+    if token_stream.current_tag() == TokenTag::NEWLINE {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
@@ -256,7 +248,7 @@ pub(super) fn parse_inline_then_else(
 
     // A retained newline is a multiline form. Every other definite boundary means
     // the branch has no value and must not reach expression evaluation.
-    if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
+    if is_missing_produced_value_boundary(token_stream.current_tag()) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterThen,
             Some(token_stream.current_span()),
@@ -291,17 +283,17 @@ pub(super) fn parse_inline_then_else(
         path_fork,
     });
     let then_expr = if else_follows {
-        create_expression_until(input, &[TokenKind::Else])?
+        create_expression_until(input, &[TokenTag::ELSE])?
     } else {
         create_expression_until(
             input,
             &[
-                TokenKind::Newline,
-                TokenKind::End,
-                TokenKind::Eof,
-                TokenKind::Comma,
-                TokenKind::CloseParenthesis,
-                TokenKind::CloseCurly,
+                TokenTag::NEWLINE,
+                TokenTag::END,
+                TokenTag::EOF,
+                TokenTag::COMMA,
+                TokenTag::CLOSE_PARENTHESIS,
+                TokenTag::CLOSE_CURLY,
             ],
         )?
     };
@@ -422,13 +414,13 @@ fn cast_target_context_for_inline_branch(
 /// WHY: a later statement's unrelated `else` must not capture this value-if branch.
 fn inline_else_follows_before_statement_end(token_stream: &mut AstCursor) -> bool {
     let stop_tokens = [
-        TokenKind::Else,
-        TokenKind::Newline,
-        TokenKind::End,
-        TokenKind::Eof,
-        TokenKind::Comma,
-        TokenKind::CloseParenthesis,
-        TokenKind::CloseCurly,
+        TokenTag::ELSE,
+        TokenTag::NEWLINE,
+        TokenTag::END,
+        TokenTag::EOF,
+        TokenTag::COMMA,
+        TokenTag::CLOSE_PARENTHESIS,
+        TokenTag::CLOSE_CURLY,
     ];
     let resume = token_stream.position();
     let follows = inline_else_follows_from_position(token_stream, &stop_tokens);
@@ -443,18 +435,17 @@ fn inline_else_follows_before_statement_end(token_stream: &mut AstCursor) -> boo
 /// The caller owns the single position restore.
 fn inline_else_follows_from_position(
     token_stream: &mut AstCursor,
-    stop_tokens: &[TokenKind],
+    stop_tokens: &[TokenTag],
 ) -> bool {
     loop {
         let scan_start = token_stream.position();
         let mut depth = ExpressionBoundaryDepth::default();
         while !token_stream.is_at_end() {
-            if depth.is_top_level() && stop_tokens.contains(token_stream.current_token_kind()) {
+            if depth.is_top_level() && stop_tokens.contains(&token_stream.current_tag()) {
                 break;
             }
-            depth.step(token_stream.current_token_kind());
-            // A malformed payload also reports `Eof`, and `Eof` is stable under `advance`.
-            if token_stream.current_token_kind() == &TokenKind::Eof {
+            depth.step_tag(token_stream.current_tag());
+            if token_stream.current_tag() == TokenTag::EOF {
                 break;
             }
             token_stream.advance();
@@ -463,9 +454,9 @@ fn inline_else_follows_from_position(
             return false;
         }
 
-        match token_stream.current_token_kind() {
-            TokenKind::Else => return true,
-            TokenKind::Newline => {}
+        match token_stream.current_tag() {
+            TokenTag::ELSE => return true,
+            TokenTag::NEWLINE => {}
             _ => return false,
         }
 
@@ -473,8 +464,8 @@ fn inline_else_follows_from_position(
         // across it, either from the token before or the one after.
         let previous_continues = token_stream.position() > scan_start
             && token_stream
-                .previous_token()
-                .is_some_and(|kind| kind.token_tag().continues_expression());
+                .previous()
+                .is_some_and(|token| token.tag().continues_expression());
 
         token_stream.advance();
         token_stream.skip_newlines();
@@ -482,11 +473,11 @@ fn inline_else_follows_from_position(
             return false;
         }
 
-        let next_kind = token_stream.current_token_kind();
-        if next_kind == &TokenKind::Else {
+        let next_tag = token_stream.current_tag();
+        if next_tag == TokenTag::ELSE {
             return true;
         }
-        if !previous_continues && !next_kind.token_tag().continues_expression() {
+        if !previous_continues && !next_tag.continues_expression() {
             return false;
         }
     }
@@ -494,7 +485,7 @@ fn inline_else_follows_from_position(
 
 /// Requires that the current token is `else` and that it is on the same logical line.
 fn require_else_inline(token_stream: &AstCursor, then_index: usize) -> InlineThenElseResult<()> {
-    if token_stream.current_token_kind() != &TokenKind::Else {
+    if token_stream.current_tag() != TokenTag::ELSE {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfMissingElse,
             Some(token_stream.current_span()),
@@ -515,7 +506,7 @@ fn require_else_inline(token_stream: &AstCursor, then_index: usize) -> InlineThe
 
 /// Rejects `else then`, which is never valid in inline value-producing `if`.
 fn reject_else_then(token_stream: &AstCursor) -> InlineThenElseResult<()> {
-    if token_stream.current_token_kind() == &TokenKind::Then {
+    if token_stream.current_tag() == TokenTag::THEN {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfElseThen,
             Some(token_stream.current_span()),
@@ -528,7 +519,7 @@ fn reject_else_then(token_stream: &AstCursor) -> InlineThenElseResult<()> {
 
 /// Rejects a newline immediately after `else` in inline form.
 fn reject_newline_after_else(token_stream: &AstCursor) -> InlineThenElseResult<()> {
-    if token_stream.current_token_kind() == &TokenKind::Newline {
+    if token_stream.current_tag() == TokenTag::NEWLINE {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
@@ -541,7 +532,7 @@ fn reject_newline_after_else(token_stream: &AstCursor) -> InlineThenElseResult<(
 
 /// Rejects an empty `else` branch at its first definite boundary.
 fn reject_empty_value_after_else(token_stream: &AstCursor) -> InlineThenElseResult<()> {
-    if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
+    if is_missing_produced_value_boundary(token_stream.current_tag()) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterElse,
             Some(token_stream.current_span()),

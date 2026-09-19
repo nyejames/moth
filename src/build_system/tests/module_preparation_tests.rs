@@ -13,8 +13,9 @@ use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
     SourcePreparationDelta, parse_file_headers_with_table, prepare_header_syntax,
@@ -55,15 +56,21 @@ fn moth_prepared_input(
     source_path: &Path,
     tokens: FileTokens,
 ) -> PreparedSourceInput {
-    let source_id = source_files
+    let identity = source_files
         .get_by_canonical_path(source_path)
-        .expect("test source should have a registered identity")
-        .id;
+        .expect("test source should have a registered identity");
+    let source_id = identity.id;
+    let owner = SourceTokenOwner::new(
+        tokens
+            .canonical_source_tokens_arc()
+            .expect("test source should retain its canonical token owner"),
+        identity.logical_path,
+        identity.canonical_os_path.as_deref().map(Path::to_path_buf),
+    );
     PreparedSourceInput {
         source_id,
-        source: PreparedSourceKind::Moth {
-            tokens: Box::new(tokens),
-        },
+        source: PreparedSourceKind::Moth { owner },
+        compatibility_tokens: Some(tokens),
     }
 }
 
@@ -346,6 +353,17 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             &mut span_builder,
         )
         .expect("test source should tokenize");
+        let identity = frontend
+            .source_files
+            .get(source_id)
+            .expect("test source should have a registered identity");
+        let owner = SourceTokenOwner::new(
+            retained_tokens
+                .canonical_source_tokens_arc()
+                .expect("test source should retain its canonical token owner"),
+            identity.logical_path,
+            identity.canonical_os_path.as_deref().map(Path::to_path_buf),
+        );
 
         let fork_source = frontend.string_table.fork_source();
         let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
@@ -363,14 +381,12 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 options: &options,
             };
             let input = FrontendFilePrepareInput {
-                source: FrontendFilePrepareSource::Moth {
-                    source_path: source_path.clone(),
-                    tokens: Box::new(retained_tokens),
-                },
+                source: FrontendFilePrepareSource::Moth { owner },
                 source_id,
                 span_builder,
                 const_template_offset,
                 runtime_fragment_offset,
+                compatibility_tokens: Some(retained_tokens),
             };
 
             CompilerFrontend::prepare_file_frontend_local(

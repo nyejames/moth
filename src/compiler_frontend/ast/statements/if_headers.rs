@@ -105,11 +105,7 @@ impl IfHeaderClassification {
         if end >= token_stream.length() {
             return false;
         }
-        (start..=end).all(|index| {
-            token_stream
-                .token_kind_at(index)
-                .is_some_and(|kind| kind.token_tag() != TokenTag::NEWLINE)
-        })
+        (start..=end).all(|index| token_tag_at(token_stream, index) != Some(TokenTag::NEWLINE))
     }
 
     /// Returns true when `|` is the raw next token after `is`.
@@ -121,9 +117,8 @@ impl IfHeaderClassification {
         let Some(is_index) = self.is_index else {
             return false;
         };
-        token_stream
-            .token_kind_at(is_index.saturating_add(1))
-            .is_some_and(|kind| kind.token_tag() == TokenTag::TYPE_PARAMETER_BRACKET)
+        token_tag_at(token_stream, is_index.saturating_add(1))
+            == Some(TokenTag::TYPE_PARAMETER_BRACKET)
     }
 }
 
@@ -233,13 +228,12 @@ fn classify_if_header_from_position(token_stream: &mut AstCursor) -> IfHeaderCla
         if token_stream.current_tag() == TokenTag::EOF {
             break;
         }
-        nesting_depth.step(token_stream.current_token_kind());
+        nesting_depth.step_tag(token_stream.current_tag());
         token_stream.advance();
     }
 
     ordinary_bool_header(IfHeaderDelimiter::None, None)
 }
-
 fn classify_from_is(token_stream: &mut AstCursor, is_index: usize) -> IfHeaderClassification {
     let token_after_is = next_meaningful_token_index(token_stream, is_index.saturating_add(1));
     let Some(after_is) = token_after_is else {
@@ -252,9 +246,7 @@ fn classify_from_is(token_stream: &mut AstCursor, is_index: usize) -> IfHeaderCl
         };
     };
 
-    if let Some(tag) = token_stream
-        .token_kind_at(after_is)
-        .map(|kind| kind.token_tag())
+    if let Some(tag) = token_tag_at(token_stream, after_is)
         && let Some(delimiter) = full_match_delimiter(tag)
     {
         return IfHeaderClassification {
@@ -314,7 +306,7 @@ fn classify_single_predicate_after_pattern(
         if token_stream.current_tag() == TokenTag::EOF {
             break;
         }
-        nesting_depth.step(token_stream.current_token_kind());
+        nesting_depth.step_tag(token_stream.current_tag());
         token_stream.advance();
     }
 
@@ -457,4 +449,8 @@ fn if_condition_parse_context(
     path_fork: &mut PathInternerFork,
 ) -> ScopeContext {
     context.new_child_control_flow(ContextKind::Condition, string_table, path_fork)
+}
+
+fn token_tag_at(token_stream: &AstCursor, index: usize) -> Option<TokenTag> {
+    token_stream.token_ref_at(index).map(|token| token.tag())
 }

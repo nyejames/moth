@@ -42,7 +42,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Branches recursively parse function bodies, so retained-data failures travel to the module
 /// emission boundary instead of being recast as authored control-flow diagnostics.
@@ -629,7 +629,7 @@ fn parse_match_arm(
         token_stream,
         match_context,
         type_interner,
-        &[TokenKind::FatArrow],
+        &[TokenTag::FAT_ARROW],
         string_table,
         path_fork,
     )?;

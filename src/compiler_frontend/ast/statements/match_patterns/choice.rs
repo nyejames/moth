@@ -18,7 +18,7 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 use rustc_hash::FxHashMap;
 
@@ -43,7 +43,7 @@ pub fn parse_choice_variant_pattern(
     match_context: &ScopeContext,
     choice_nominal_path: &PathId,
     variants: &[ChoiceVariant],
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> ChoicePatternResult<ParsedChoicePattern> {
     // Choice patterns support exact variant names plus constructor-like payload captures.
@@ -61,7 +61,7 @@ pub fn parse_choice_variant_pattern(
         string_table,
     )?;
 
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(deferred_feature_reason_diagnostic(
             DeferredFeatureReason::CaptureTaggedPattern,
             current_span(token_stream),
@@ -100,12 +100,12 @@ fn parse_choice_pattern_captures(
     token_stream: &mut AstCursor,
     variant: &ChoiceVariant,
     _choice_name_display: &str,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> ChoicePatternResult<Vec<ParsedChoicePayloadCapture>> {
     match &variant.payload {
         ChoiceVariantPayload::Unit => {
-            if token_stream.current_token_kind() == &TokenKind::OpenParenthesis {
+            if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
                 return Err(CompilerDiagnostic::invalid_match_pattern(
                     InvalidMatchPatternReason::UnitVariantHasPayload,
                     Some(variant.id),
@@ -119,7 +119,7 @@ fn parse_choice_pattern_captures(
         }
 
         ChoiceVariantPayload::Record { fields } => {
-            if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+            if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
                 return Err(CompilerDiagnostic::invalid_match_pattern(
                     InvalidMatchPatternReason::PayloadVariantNeedsBindings,
                     Some(variant.id),
@@ -137,14 +137,14 @@ fn parse_choice_pattern_captures(
             loop {
                 token_stream.skip_newlines();
 
-                if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
+                if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
                     token_stream.advance();
                     break;
                 }
 
                 let capture_span = current_span(token_stream);
                 // Wildcards are not yet supported in choice payload position.
-                if token_stream.current_token_kind() == &TokenKind::Wildcard {
+                if token_stream.current_tag() == TokenTag::WILDCARD {
                     return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::WildcardNotSupported,
                         None,
@@ -154,37 +154,42 @@ fn parse_choice_pattern_captures(
                     .into());
                 }
 
-                let field_name = match token_stream.current_token_kind() {
-                    TokenKind::Symbol(name) => *name,
-                    _ => {
-                        return Err(CompilerDiagnostic::invalid_match_pattern(
-                            InvalidMatchPatternReason::CaptureBindingMustBeFieldName,
-                            None,
-                            None,
-                            capture_span,
+                if token_stream.current_tag() != TokenTag::SYMBOL {
+                    return Err(CompilerDiagnostic::invalid_match_pattern(
+                        InvalidMatchPatternReason::CaptureBindingMustBeFieldName,
+                        None,
+                        None,
+                        capture_span,
+                    )
+                    .into());
+                }
+                let field_name = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "choice payload field symbol had no string payload",
                         )
-                        .into());
-                    }
-                };
+                    })?;
                 token_stream.advance();
 
                 let mut binding_name = field_name;
                 let mut binding_span = capture_span;
 
-                // Parse optional `as <local_binding>` rename syntax.
-                if token_stream.current_token_kind() == &TokenKind::As {
+                if token_stream.current_tag() == TokenTag::AS {
                     token_stream.advance();
                     binding_span = current_span(token_stream);
-                    let after_as_token = token_stream.current_token_kind().to_owned();
-                    binding_name = match after_as_token {
-                        TokenKind::Symbol(name) => {
-                            token_stream.advance();
-                            name
-                        }
-                        TokenKind::End
-                        | TokenKind::Eof
-                        | TokenKind::CloseParenthesis
-                        | TokenKind::Comma => {
+                    binding_name = match token_stream.current_tag() {
+                        TokenTag::SYMBOL => token_stream
+                            .current_string_id_in(string_table)?
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "choice payload alias symbol had no string payload",
+                                )
+                            })?,
+                        TokenTag::END
+                        | TokenTag::EOF
+                        | TokenTag::CLOSE_PARENTHESIS
+                        | TokenTag::COMMA => {
                             return Err(CompilerDiagnostic::invalid_match_pattern(
                                 InvalidMatchPatternReason::ExpectedLocalBindingAfterAs,
                                 None,
@@ -203,10 +208,12 @@ fn parse_choice_pattern_captures(
                             .into());
                         }
                     };
+                    if token_stream.current_tag() == TokenTag::SYMBOL {
+                        token_stream.advance();
+                    }
                 }
 
-                // Reject named assignment: `Err(message = text) =>`
-                if token_stream.current_token_kind() == &TokenKind::Assign {
+                if token_stream.current_tag() == TokenTag::ASSIGN {
                     return Err(deferred_feature_reason_diagnostic(
                         DeferredFeatureReason::NamedPayloadPatternAssignment,
                         current_span(token_stream),
@@ -260,16 +267,16 @@ fn parse_choice_pattern_captures(
 
                 // Advance past the separator or detect the end of the capture list.
                 token_stream.skip_newlines();
-                match token_stream.current_token_kind() {
-                    TokenKind::Comma => {
+                match token_stream.current_tag() {
+                    TokenTag::COMMA => {
                         token_stream.advance();
                         continue;
                     }
-                    TokenKind::CloseParenthesis => {
+                    TokenTag::CLOSE_PARENTHESIS => {
                         token_stream.advance();
                         break;
                     }
-                    TokenKind::OpenParenthesis => {
+                    TokenTag::OPEN_PARENTHESIS => {
                         return Err(deferred_feature_reason_diagnostic(
                             DeferredFeatureReason::NestedPayloadPattern,
                             current_span(token_stream),
@@ -279,7 +286,9 @@ fn parse_choice_pattern_captures(
                     _ => {
                         let found = match token_stream.current() {
                             Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-                            None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+                            None => Some(DiagnosticToken::from_static_tag(
+                                token_stream.current_tag(),
+                            )),
                         };
                         return Err(CompilerDiagnostic::expected_token_from_tags(
                             TokenTag::COMMA,
@@ -333,16 +342,19 @@ fn parse_variant_name(
     choice_nominal_path: &PathId,
     _choice_name_display: &str,
     path_fork: &PathInternerFork,
-    _string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> ChoicePatternResult<(StringId, Option<SourceSpan>)> {
-    let leading_token = token_stream.current_token_kind().to_owned();
-
-    match leading_token {
-        TokenKind::Symbol(first_name) => {
+    match token_stream.current_tag() {
+        TokenTag::SYMBOL => {
+            let first_name = token_stream
+                .current_string_id_in(string_table)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("choice variant symbol had no string payload")
+                })?;
             let first_span = current_span(token_stream);
             token_stream.advance();
 
-            if token_stream.current_token_kind() == &TokenKind::DoubleColon {
+            if token_stream.current_tag() == TokenTag::DOUBLE_COLON {
                 let expected_choice_name = path_fork.component(*choice_nominal_path);
                 if expected_choice_name.is_some_and(|expected| first_name != expected)
                     && !qualifier_resolves_to_choice(match_context, first_name, choice_nominal_path)
@@ -359,31 +371,36 @@ fn parse_variant_name(
                 token_stream.advance();
                 token_stream.skip_newlines();
 
-                match token_stream.current_token_kind().to_owned() {
-                    TokenKind::Symbol(qualified_variant_name) => {
-                        let qualified_span = current_span(token_stream);
-                        token_stream.advance();
-                        Ok((qualified_variant_name, qualified_span))
-                    }
-                    _ => Err(CompilerDiagnostic::invalid_match_pattern(
+                if token_stream.current_tag() != TokenTag::SYMBOL {
+                    return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::ExpectedVariantNameAfterQualifier,
                         None,
                         None,
                         current_span(token_stream),
                     )
-                    .into()),
+                    .into());
                 }
+                let qualified_variant_name = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "qualified choice variant symbol had no string payload",
+                        )
+                    })?;
+                let qualified_span = current_span(token_stream);
+                token_stream.advance();
+                Ok((qualified_variant_name, qualified_span))
             } else {
                 Ok((first_name, first_span))
             }
         }
 
         // Literal tokens are not valid as choice variant names.
-        TokenKind::NumericLiteral(_)
-        | TokenKind::BoolLiteral(_)
-        | TokenKind::CharLiteral(_)
-        | TokenKind::StringSliceLiteral(_)
-        | TokenKind::Negative => Err(CompilerDiagnostic::invalid_match_pattern(
+        TokenTag::NUMERIC_LITERAL
+        | TokenTag::BOOL_LITERAL
+        | TokenTag::CHAR_LITERAL
+        | TokenTag::STRING_SLICE_LITERAL
+        | TokenTag::NEGATIVE => Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::MustUseVariantNamesNotLiterals,
             None,
             None,

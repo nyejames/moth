@@ -24,7 +24,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Input bundle for external namespace function member parsing.
@@ -78,7 +78,7 @@ pub(super) fn parse_external_namespace_function_member(
     }
 
     // Namespace function members must be followed by an argument list.
-    if token_stream.peek_next_token() != Some(&TokenKind::OpenParenthesis) {
+    if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
         return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
     }
 

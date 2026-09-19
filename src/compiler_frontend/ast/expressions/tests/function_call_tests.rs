@@ -32,7 +32,7 @@ use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
@@ -58,10 +58,21 @@ fn parse_args(
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let mut token_stream = AstCursor::from_file_tokens(&mut tokens)
-        .expect("test token stream must expose an AST cursor");
+    tokens.freeze_path_syntax_for_test();
+    let owner = tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut token_stream = AstCursor::from_source_tokens(
+        &owner,
+        tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
 
-    while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+    while token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
         token_stream.advance();
     }
 
@@ -108,10 +119,21 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let mut token_stream = AstCursor::from_file_tokens(&mut tokens)
-        .expect("test token stream must expose an AST cursor");
+    tokens.freeze_path_syntax_for_test();
+    let owner = tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut token_stream = AstCursor::from_source_tokens(
+        &owner,
+        tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
 
-    while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+    while token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
         token_stream.advance();
     }
 
@@ -196,10 +218,21 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let mut token_stream = AstCursor::from_file_tokens(&mut tokens)
-        .expect("test token stream must expose an AST cursor");
+    tokens.freeze_path_syntax_for_test();
+    let owner = tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut token_stream = AstCursor::from_source_tokens(
+        &owner,
+        tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
 
-    while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+    while token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
         token_stream.advance();
     }
 
@@ -338,10 +371,21 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let mut token_stream = AstCursor::from_file_tokens(&mut tokens)
-        .expect("test token stream must expose an AST cursor");
+    tokens.freeze_path_syntax_for_test();
+    let owner = tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut token_stream = AstCursor::from_source_tokens(
+        &owner,
+        tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
 
-    while token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+    while token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
         token_stream.advance();
     }
 

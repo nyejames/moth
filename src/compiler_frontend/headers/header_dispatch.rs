@@ -45,7 +45,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
+    SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
@@ -63,25 +63,14 @@ use std::collections::HashSet;
 /// WHY: delegated declaration parsers carry both lanes, so dispatch can propagate them directly
 ///      across each delegation step without converting either lane.
 type HeaderDispatchResult<T> = Result<T, HeaderParseFailure>;
-fn compatibility_cursor_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-}
 
 fn source_token_at_index<'a>(
-    token_stream: &'a FileTokens,
+    canonical: &'a SourceTokens,
+    file_id: SourceId,
     index: usize,
     owner: &'static str,
 ) -> HeaderDispatchResult<TokenRef<'a>> {
-    let canonical = token_stream.source_tokens().map_err(|_| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Header dispatch is missing its source token owner.",
-            None,
-        ))
-    })?;
-    if canonical.source() != token_stream.file_id {
+    if canonical.source() != file_id {
         return Err(internal_header_dispatch_error(
             "Header dispatch source token owner does not match its file identity.",
             None,
@@ -89,54 +78,55 @@ fn source_token_at_index<'a>(
         .into());
     }
     let position = TokenIndex::try_from_index(index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            owner,
-            compatibility_cursor_span(token_stream),
-        ))
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(owner, None))
     })?;
     canonical.token(position).map_err(|_| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            owner,
-            compatibility_cursor_span(token_stream),
-        ))
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(owner, None))
     })
 }
 
-fn source_tag_at_cursor(token_stream: &FileTokens) -> HeaderDispatchResult<TokenTag> {
-    Ok(source_token_at_index(
-        token_stream,
-        token_stream.index,
-        "Header dispatch token index exceeded its source owner.",
-    )?
-    .tag())
-}
-
-fn source_next_tag(token_stream: &FileTokens) -> HeaderDispatchResult<Option<TokenTag>> {
-    let next_index = token_stream.index.checked_add(1).ok_or_else(|| {
+fn source_tag_at_cursor(
+    cursor: &TokenCursor<'_>,
+    file_id: SourceId,
+) -> HeaderDispatchResult<TokenTag> {
+    let current = cursor.current().ok_or_else(|| {
         HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Header dispatch follower index overflowed its source range.",
-            compatibility_cursor_span(token_stream),
+            "Header dispatch cursor exceeded its source owner.",
+            None,
         ))
     })?;
-    let canonical = token_stream.source_tokens().map_err(|_| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Header dispatch is missing its source token owner.",
-            compatibility_cursor_span(token_stream),
-        ))
-    })?;
-    if canonical.source() != token_stream.file_id {
+    if current.source() != file_id {
         return Err(internal_header_dispatch_error(
             "Header dispatch source token owner does not match its file identity.",
-            compatibility_cursor_span(token_stream),
+            Some(current.source_span()),
         )
         .into());
     }
+    Ok(current.tag())
+}
+
+fn source_next_tag(cursor: &TokenCursor<'_>, file_id: SourceId) -> HeaderDispatchResult<Option<TokenTag>> {
+    let canonical = cursor.source_tokens();
+    if canonical.source() != file_id {
+        return Err(internal_header_dispatch_error(
+            "Header dispatch source token owner does not match its file identity.",
+            cursor.current().map(|token| token.source_span()),
+        )
+        .into());
+    }
+    let next_index = cursor.position().index().checked_add(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+            "Header dispatch follower index overflowed its source range.",
+            cursor.current().map(|token| token.source_span()),
+        ))
+    })?;
     if next_index >= canonical.len() {
         return Ok(None);
     }
     Ok(Some(
         source_token_at_index(
-            token_stream,
+            canonical,
+            file_id,
             next_index,
             "Header dispatch follower index exceeded its source owner.",
         )?
@@ -145,21 +135,24 @@ fn source_next_tag(token_stream: &FileTokens) -> HeaderDispatchResult<Option<Tok
 }
 
 fn starts_build_config_qualifier_at_cursor(
-    token_stream: &FileTokens,
+    cursor: &TokenCursor<'_>,
+    file_id: SourceId,
     string_table: &StringTable,
 ) -> HeaderDispatchResult<bool> {
-    let canonical = token_stream.source_tokens().map_err(|_| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Header dispatch is missing its source token owner.",
-            compatibility_cursor_span(token_stream),
-        ))
-    })?;
-    let index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+    let canonical = cursor.source_tokens();
+    let index = TokenIndex::try_from_index(cursor.position().index()).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
             "Header dispatch token index exceeded its checked domain.",
-            compatibility_cursor_span(token_stream),
+            cursor.current().map(|token| token.source_span()),
         ))
     })?;
+    if canonical.source() != file_id {
+        return Err(internal_header_dispatch_error(
+            "Header dispatch source token owner does not match its file identity.",
+            cursor.current().map(|token| token.source_span()),
+        )
+        .into());
+    }
     Ok(starts_build_config_qualifier_at_source(
         canonical,
         index,
@@ -167,10 +160,21 @@ fn starts_build_config_qualifier_at_cursor(
     ))
 }
 
-// WHAT: classifies one top-level declaration by its leading token and builds the concrete header
-// payload (kind + body source range + dependency set) that later AST passes consume.
-//
-// WHY: every declaration kind (function, struct, choice/union, constant) has a different leading
+fn set_cursor_position(
+    cursor: &mut TokenCursor<'_>,
+    position: TokenIndex,
+    owner: &'static str,
+) -> HeaderDispatchResult<()> {
+    cursor.set_position(position).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "{owner}: {error:?}",
+        )))
+    })
+}
+
+fn cursor_span(cursor: &TokenCursor<'_>, fallback: SourceSpan) -> SourceSpan {
+    cursor.current().map_or(fallback, |token| token.source_span())
+}
 // token pattern. This function dispatches on that token and delegates to kind-specific helpers
 // where they exist, or captures body source ranges directly for simpler cases.
 //
@@ -182,14 +186,15 @@ fn starts_build_config_qualifier_at_cursor(
 //   `must:` / `must TRAIT`       → trait declaration/conformance
 pub(super) fn create_header(
     full_name: PathId,
-    token_stream: &mut FileTokens,
-    declaration_token: &Token,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
+    declaration_span: SourceSpan,
+    declaration_order: usize,
     export_mode: HeaderExportMode,
     context: &mut HeaderBuildContext<'_>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> HeaderDispatchResult<Header> {
-    let name_span = SourceSpan::new(token_stream.file_id, declaration_token.span);
-    let declaration_order = token_stream.index;
+    let name_span = declaration_span;
     let Some(declaration_name) = context.path_fork.component(full_name) else {
         return Err(internal_header_dispatch_error(
             "Header declaration path is missing its declaration name.",
@@ -201,10 +206,10 @@ pub(super) fn create_header(
     let mut kind: HeaderKind = HeaderKind::StartFunction;
     let mut capacity_references: Vec<InitializerReference> = Vec::new();
     let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
-    let generic_parameters = parse_optional_generic_parameters(token_stream, context)?;
-    let current_tag = source_tag_at_cursor(token_stream)?;
-    let next_tag = source_next_tag(token_stream)?;
-    let mut body_range = empty_token_range(token_stream)?;
+    let generic_parameters = parse_optional_generic_parameters(cursor, file_id, context)?;
+    let current_tag = source_tag_at_cursor(cursor, file_id)?;
+    let next_tag = source_next_tag(cursor, file_id)?;
+    let mut body_range = empty_token_range(cursor, file_id)?;
 
     if current_tag == TokenTag::OF {
         if !generic_parameters.is_empty() {
@@ -217,16 +222,22 @@ pub(super) fn create_header(
             ));
         }
 
+        let mut trait_cursor = *cursor;
         let target = parse_specialized_conformance_target(
-            token_stream,
+            &mut trait_cursor,
             declaration_name,
-            declaration_token,
+            name_span,
         )?;
-        token_stream.advance(); // past must
+        let _ = trait_cursor.advance(); // past must
 
-        let conformance = parse_trait_conformance(token_stream, target, context)?;
-        kind = HeaderKind::TraitConformance { conformance };
-
+        let conformance = parse_trait_conformance(&mut trait_cursor, target, context)?;
+        let cursor_position = trait_cursor.position();
+        drop(trait_cursor);
+        set_cursor_position(
+            cursor,
+            cursor_position,
+            "specialized conformance cursor handoff exceeded its source owner",
+        )?;
         let conformance_id = conformance_header_path(
             full_name,
             name_span,
@@ -234,7 +245,7 @@ pub(super) fn create_header(
             context.string_table,
         )?;
         return Ok(Header {
-            kind,
+            kind: HeaderKind::TraitConformance { conformance },
             file_role: context.file_role,
             export_mode,
             local_ordering_hints,
@@ -270,29 +281,45 @@ pub(super) fn create_header(
             ensure_trait_name_is_all_caps(declaration_name, Some(name_span), context.string_table)?;
 
             // Trait incompatibility declaration: `Name must not TRAIT, TRAIT`
-            token_stream.advance(); // past must
-            token_stream.advance(); // past not
+            let mut trait_cursor = *cursor;
+            let _ = trait_cursor.advance(); // past must
+            let _ = trait_cursor.advance(); // past not
             let subject = TraitReferenceSyntax {
                 name: declaration_name,
                 span: name_span,
             };
             let incompatibility =
-                parse_trait_incompatibility(token_stream, subject, declaration_order, context)?;
+                parse_trait_incompatibility(&mut trait_cursor, subject, declaration_order, context)?;
+            let cursor_position = trait_cursor.position();
+            drop(trait_cursor);
+            set_cursor_position(
+                cursor,
+                cursor_position,
+                "trait incompatibility cursor handoff exceeded its source owner",
+            )?;
             kind = HeaderKind::TraitIncompatibility { incompatibility };
         } else if peek == Some(TokenTag::COLON) {
             ensure_trait_name_is_all_caps(declaration_name, Some(name_span), context.string_table)?;
 
             // Trait declaration: `Name must: requirements ;`
-            token_stream.advance(); // past must
-            token_stream.advance(); // past :
+            let mut trait_cursor = *cursor;
+            let _ = trait_cursor.advance(); // past must
+            let _ = trait_cursor.advance(); // past :
 
             let declaration = parse_trait_declaration(
-                token_stream,
-                declaration_token,
+                &mut trait_cursor,
+                name_span,
                 declaration_name,
                 declaration_order,
                 context,
                 span_builder,
+            )?;
+            let cursor_position = trait_cursor.position();
+            drop(trait_cursor);
+            set_cursor_position(
+                cursor,
+                cursor_position,
+                "trait declaration cursor handoff exceeded its source owner",
             )?;
 
             // Collect local declaration-ordering hints from requirement signatures.
@@ -322,16 +349,24 @@ pub(super) fn create_header(
             kind = HeaderKind::Trait { declaration };
         } else {
             // Conformance declaration: `Name must TRAIT, TRAIT`
-            token_stream.advance(); // past must
+            let mut trait_cursor = *cursor;
+            let _ = trait_cursor.advance(); // past must
 
             let conformance = parse_trait_conformance(
-                token_stream,
+                &mut trait_cursor,
                 ConformanceTargetSyntax {
                     name: declaration_name,
                     kind: ConformanceTargetKind::Named,
                     span: name_span,
                 },
                 context,
+            )?;
+            let cursor_position = trait_cursor.position();
+            drop(trait_cursor);
+            set_cursor_position(
+                cursor,
+                cursor_position,
+                "trait conformance cursor handoff exceeded its source owner",
             )?;
 
             kind = HeaderKind::TraitConformance { conformance };
@@ -381,8 +416,7 @@ pub(super) fn create_header(
                 IdentifierNamingKind::ValueLike,
                 context.string_table,
             );
-            let mut declaration_cursor =
-                DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
+            let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
             let signature = parse_function_signature_syntax(
                 &mut declaration_cursor,
                 context.warnings,
@@ -391,9 +425,13 @@ pub(super) fn create_header(
                 context.path_fork,
                 span_builder,
             )?;
-            let next_index = token_stream
-                .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-            token_stream.index = next_index;
+            let cursor_position = declaration_cursor.canonical_cursor().position();
+            drop(declaration_cursor);
+            set_cursor_position(
+                cursor,
+                cursor_position,
+                "function signature cursor handoff exceeded its source owner",
+            )?;
 
             // Local declaration-ordering hints: parameter + return type references only.
             for param in &signature.parameters {
@@ -418,18 +456,11 @@ pub(super) fn create_header(
                 )?;
             }
 
-            let mut body_cursor = token_stream
-                .canonical_cursor_from_current()
-                .map_err(HeaderParseFailure::Infrastructure)?;
             body_range = capture_function_body_range_from_cursor(
-                &mut body_cursor,
-                token_stream.file_id,
+                cursor,
+                file_id,
                 context.string_table,
             )?;
-            // Deferred parser handoff: the canonical cursor owns position; sync the legacy index.
-            token_stream.index = token_stream
-                .compatibility_index_for_cursor(body_cursor)
-                .map_err(HeaderParseFailure::Infrastructure)?;
 
             kind = HeaderKind::Function {
                 generic_parameters,
@@ -441,7 +472,7 @@ pub(super) fn create_header(
         TokenTag::TRAIT_THIS => {
             return Err(CompilerDiagnostic::invalid_this_usage(
                 crate::compiler_frontend::compiler_messages::InvalidThisUsageReason::OutsideTraitDeclaration,
-                Some(token_stream.current_span()),
+                Some(cursor_span(cursor, declaration_span)),
             )
             .into());
         }
@@ -462,9 +493,8 @@ pub(super) fn create_header(
                     IdentifierNamingKind::TypeLike,
                     context.string_table,
                 );
-                token_stream.advance();
-                let mut declaration_cursor =
-                    DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
+                cursor.advance();
+                let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
                 let fields = parse_struct_shell(
                     &mut declaration_cursor,
                     context.string_table,
@@ -473,10 +503,13 @@ pub(super) fn create_header(
                     context.path_fork,
                     span_builder,
                 )?;
-                let next_index = token_stream
-                    .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-                token_stream.index = next_index;
-
+                let cursor_position = declaration_cursor.canonical_cursor().position();
+                drop(declaration_cursor);
+                set_cursor_position(
+                    cursor,
+                    cursor_position,
+                    "struct declaration cursor handoff exceeded its source owner",
+                )?;
                 // Collect strict type edges from field types only (no default-expression edges).
                 for field in &fields {
                     collect_type_ordering_hints(
@@ -495,16 +528,15 @@ pub(super) fn create_header(
                 };
             }
         }
-
         // `#` (Hash): compile-time constant declaration `name #= value` or `name #Type = value`.
         TokenTag::HASH => {
             if !generic_parameters.is_empty()
-                && starts_build_config_qualifier_at_cursor(token_stream, context.string_table)?
+                && starts_build_config_qualifier_at_cursor(cursor, file_id, context.string_table)?
             {
                 return Err(CompilerDiagnostic::invalid_config_reason(
                     Some(declaration_name),
                     InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                    Some(token_stream.current_span()),
+                    Some(cursor_span(cursor, declaration_span)),
                 )
                 .into());
             }
@@ -523,7 +555,8 @@ pub(super) fn create_header(
 
             let constant_header = create_constant_header_payload(
                 &full_name,
-                token_stream,
+                cursor,
+                file_id,
                 context,
                 &mut local_ordering_hints,
                 &mut capacity_references,
@@ -550,8 +583,7 @@ pub(super) fn create_header(
                 context.string_table,
             );
 
-            let mut declaration_cursor =
-                DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
+            let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
             let choice_header = parse_choice_header_payload(
                 &mut declaration_cursor,
                 full_name,
@@ -560,9 +592,13 @@ pub(super) fn create_header(
                 context.warnings,
                 span_builder,
             )?;
-            let next_index = token_stream
-                .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-            token_stream.index = next_index;
+            let cursor_position = declaration_cursor.canonical_cursor().position();
+            drop(declaration_cursor);
+            set_cursor_position(
+                cursor,
+                cursor_position,
+                "choice declaration cursor handoff exceeded its source owner",
+            )?;
 
             // Collect strict type edges from payload field types.
             for variant in &choice_header {
@@ -614,17 +650,20 @@ pub(super) fn create_header(
                 context.string_table,
             );
 
-            token_stream.advance();
-            let mut declaration_cursor =
-                DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
+            cursor.advance();
+            let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
             let target = parse_type_annotation_cursor(
                 &mut declaration_cursor,
                 TypeAnnotationContext::TypeAliasTarget,
                 context.string_table,
             )?;
-            let next_index = token_stream
-                .compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-            token_stream.index = next_index;
+            let cursor_position = declaration_cursor.canonical_cursor().position();
+            drop(declaration_cursor);
+            set_cursor_position(
+                cursor,
+                cursor_position,
+                "type alias cursor handoff exceeded its source owner",
+            )?;
 
             let mut selection_error = None;
 
@@ -682,10 +721,11 @@ fn emit_header_naming_warning(
     }
 }
 fn parse_optional_generic_parameters(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
     context: &mut HeaderBuildContext<'_>,
 ) -> HeaderDispatchResult<GenericParameterList> {
-    if source_tag_at_cursor(token_stream)? != TokenTag::TYPE {
+    if source_tag_at_cursor(cursor, file_id)? != TokenTag::TYPE {
         return Ok(GenericParameterList::default());
     }
 
@@ -693,16 +733,19 @@ fn parse_optional_generic_parameters(
     // until the header parser has finished walking this file. File-level preparation validates
     // dependency-name collisions after all clauses and declaration shells are retained.
     let forbidden_names = FxHashSet::default();
-    let mut declaration_cursor =
-        DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
+    let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
     let result = parse_generic_parameter_list_after_type_keyword(
         &mut declaration_cursor,
         &forbidden_names,
         context.string_table,
     )?;
-    let next_index =
-        token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-    token_stream.index = next_index;
+    let cursor_position = declaration_cursor.canonical_cursor().position();
+    drop(declaration_cursor);
+    set_cursor_position(
+        cursor,
+        cursor_position,
+        "generic parameter cursor handoff exceeded its source owner",
+    )?;
     Ok(result)
 }
 
@@ -751,17 +794,20 @@ fn collect_type_ordering_hints(
     Ok(())
 }
 
-fn empty_token_range(token_stream: &FileTokens) -> HeaderDispatchResult<TokenRange> {
-    let index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+fn empty_token_range(
+    cursor: &TokenCursor<'_>,
+    file_id: SourceId,
+) -> HeaderDispatchResult<TokenRange> {
+    let index = TokenIndex::try_from_index(cursor.position().index()).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
             "Header token range exceeded the source token index space.",
-            Some(token_stream.current_span()),
+            cursor.current().map(|token| token.source_span()),
         ))
     })?;
-    TokenRange::new(token_stream.file_id, index, index).ok_or_else(|| {
+    TokenRange::new(file_id, index, index).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
             "Empty header token range was invalid.",
-            Some(token_stream.current_span()),
+            cursor.current().map(|token| token.source_span()),
         ))
     })
 }
@@ -852,10 +898,10 @@ pub(super) fn capture_function_body_range_from_cursor(
         )))
     })
 }
-
 fn create_constant_header_payload(
     full_name: &PathId,
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
     context: &mut HeaderBuildContext<'_>,
     local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
@@ -864,26 +910,29 @@ fn create_constant_header_payload(
     let Some(declaration_name) = context.path_fork.component(*full_name) else {
         return Err(internal_header_dispatch_error(
             "Constant header path is missing its declaration name.",
-            Some(token_stream.current_span()),
+            cursor.current().map(|token| token.source_span()),
         )
         .into());
     };
-    let mut declaration_cursor =
-        DeclarationCursor::new(token_stream.canonical_cursor_from_current()?)?;
+    let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
     let declaration_syntax = parse_declaration_syntax(
         &mut declaration_cursor,
         declaration_name,
         context.string_table,
         span_builder,
     )?;
-    let next_index =
-        token_stream.compatibility_index_for_cursor(declaration_cursor.canonical_cursor())?;
-    token_stream.index = next_index;
+    let cursor_position = declaration_cursor.canonical_cursor().position();
+    drop(declaration_cursor);
+    set_cursor_position(
+        cursor,
+        cursor_position,
+        "constant declaration cursor handoff exceeded its source owner",
+    )?;
     // A comma terminates anonymous-record fields, but it cannot terminate a top-level source
     // contract. Keep the shared declaration parser permissive for record fields and reject this
     // malformed source declaration at the header boundary.
     if declaration_syntax.initializer_range.is_none()
-        && source_tag_at_cursor(token_stream)? == TokenTag::COMMA
+        && source_tag_at_cursor(cursor, file_id)? == TokenTag::COMMA
         && let Some(qualifier) = &declaration_syntax.config_qualifier
     {
         return Err(CompilerDiagnostic::invalid_config_reason(

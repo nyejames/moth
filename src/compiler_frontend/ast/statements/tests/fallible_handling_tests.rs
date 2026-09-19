@@ -359,6 +359,14 @@ fn rejects_bound_inline_catch_then_at_eof() {
     ));
 }
 
+#[test]
+fn rejects_string_literal_as_catch_handler_binding() {
+    assert_invalid_fallible_handling(
+        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = can_error() catch |\"oops\"|:\n        then 0\n    ;\n    return value\n;\n",
+        InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
+    );
+}
+
 // --------------------------
 //  Fallback arity validation
 // --------------------------

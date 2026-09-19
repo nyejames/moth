@@ -43,7 +43,7 @@ use crate::compiler_frontend::source_packages::root_file::file_name_is_config_fi
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, Token, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
+    FileTokens, SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::{ScannedToken, TokenFactView};
 use rustc_hash::FxHashSet;
@@ -58,28 +58,19 @@ fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
 /// The compatibility vector remains available to deferred parser callees, but all Stage 0 facts
 /// come from the canonical source owner.
 fn source_token_at_index<'a>(
-    token_stream: &'a FileTokens,
-    index: usize,
+    canonical: &'a SourceTokens,
+    file_id: SourceId,
+    index: TokenIndex,
     owner: &str,
 ) -> FileParserResult<TokenRef<'a>> {
-    let canonical = token_stream.source_tokens().map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "{owner} is missing its source token owner: {error:?}"
-        )))
-    })?;
-    if canonical.source() != token_stream.file_id {
+    if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
             CompilerError::compiler_error(format!(
                 "{owner} source token owner does not match its file identity"
             )),
         ));
     }
-    let position = TokenIndex::try_from_index(index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "{owner} token index exceeded its checked domain"
-        )))
-    })?;
-    canonical.token(position).map_err(|error| {
+    canonical.token(index).map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "{owner} token index exceeded its source token owner: {error:?}"
         )))
@@ -88,10 +79,11 @@ fn source_token_at_index<'a>(
 
 fn record_start_body_token_from_source(
     state: &mut HeaderFileParseState,
-    token_stream: &FileTokens,
-    index: usize,
+    canonical: &SourceTokens,
+    file_id: SourceId,
+    index: TokenIndex,
 ) -> FileParserResult<()> {
-    let token = source_token_at_index(token_stream, index, "start-body token")?;
+    let token = source_token_at_index(canonical, file_id, index, "start-body token")?;
     state
         .record_start_body_token_ref(token)
         .map_err(HeaderParseFailure::Infrastructure)
@@ -101,19 +93,18 @@ fn record_start_body_token_from_source(
 // comes only from the root `export:` block. Non-declaration statements are collected into the
 // implicit start-function header for that file.
 pub(super) fn parse_headers_in_file(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
     file_id: SourceId,
+    source_file: PathId,
+    token_count: usize,
     context: &mut HeaderParseContext<'_>,
-) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let mut state = HeaderFileParseState::new(token_stream.length);
-
-    let result = parse_headers_in_file_inner(token_stream, context, &mut state);
-
-    match result {
-        Ok(()) => finish_file_output(token_stream, file_id, context, state),
-        Err(HeaderParseFailure::Diagnostic(diagnostic)) => Err(
-            FileFrontendPrepareFailure::Diagnosed(state.into_error(diagnostic)),
-        ),
+) -> Result<HeaderFileParseState, FileFrontendPrepareFailure> {
+    let mut state = HeaderFileParseState::new(token_count);
+    match parse_headers_in_file_inner(cursor, file_id, source_file, context, &mut state) {
+        Ok(()) => Ok(state),
+        Err(HeaderParseFailure::Diagnostic(diagnostic)) => {
+            Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(diagnostic)))
+        }
         Err(HeaderParseFailure::Infrastructure(error)) => {
             Err(FileFrontendPrepareFailure::Infrastructure(error))
         }
@@ -121,138 +112,90 @@ pub(super) fn parse_headers_in_file(
 }
 
 fn parse_headers_in_file_inner(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
+    source_file: PathId,
     context: &mut HeaderParseContext<'_>,
     state: &mut HeaderFileParseState,
 ) -> FileParserResult<()> {
-    // Canonical source-view walk: classification reads shapes/spans/tags through
-    // short-lived `TokenRef`s while `token_stream` keeps the legacy `index` for
-    // later declaration/AST callees. No durable reference is retained.
-    let canonical_len = token_stream
-        .source_tokens()
-        .map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "header walk is missing its source token owner: {error:?}"
-            )))
-        })?
-        .len();
-    let file_id = token_stream.file_id;
-    // Fail fast on an owner/adapter length mismatch so the source index below
-    // stays checked on both views.
-    if token_stream.length != canonical_len || token_stream.tokens.len() != canonical_len {
+    let canonical = cursor.source_tokens();
+    if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
             CompilerError::compiler_error(
-                "header token adapter length does not match its source token owner",
+                "header walk source token owner does not match its file identity",
             ),
         ));
     }
-    loop {
-        let current_index = token_stream.index;
-        let (current_span, current_tag, item) = {
-            let canonical = token_stream.source_tokens().map_err(|error| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                    "header walk is missing its source token owner: {error:?}"
-                )))
-            })?;
-            if canonical.source() != file_id {
-                return Err(HeaderParseFailure::Infrastructure(
-                    CompilerError::compiler_error(
-                        "header walk source token owner does not match its file identity",
-                    ),
-                ));
-            }
-            let current_position = TokenIndex::try_from_index(current_index).ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "header token index exceeded its checked domain",
-                ))
-            })?;
-            let current = canonical.token(current_position).map_err(|_| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "header token index exceeded its source token owner",
-                ))
-            })?;
-            let follower_index = current_index.checked_add(1).ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "header token follower index overflowed its source range",
-                ))
-            })?;
-            let follower_position =
-                TokenIndex::try_from_index(follower_index).ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                        "header token follower index exceeded its checked domain",
-                    ))
-                })?;
-            let follower = canonical.token(follower_position).ok();
-            let at_boundary = statement_boundary_at_source(canonical, current_index);
-            (
-                current.source_span(),
-                current.tag(),
-                classify_current_item_ref(current, follower, at_boundary),
-            )
-        };
-        // Keep the legacy compatibility cursor synchronized for genuine deferred
-        // 3F2–3F4 declaration/signature/type and AST/template parser handoffs.
-        // The legacy compatibility vector must resolve the same shape/tag that
-        // the source view just classified.
-        debug_assert_eq!(
-            token_stream
-                .tokens
-                .get(current_index)
-                .map(|token| token.kind.token_tag()),
-            Some(current_tag),
-            "source view and legacy adapter diverged at header index {current_index}"
-        );
-        // Match handlers receive the compatibility cursor after consuming the classified token.
-        // Declaration and hash parsers use `index - 1` to recover that token; keeping this
-        // advance here preserves their established cursor contract while classification above
-        // remains canonical-source-only.
-        token_stream.advance();
 
+    loop {
+        let current_index = cursor.position();
+        let current = cursor.current().ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "header cursor exceeded its source token owner",
+            ))
+        })?;
+        let follower_index = current_index.index().checked_add(1).ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "header token follower index overflowed its source range",
+            ))
+        })?;
+        let follower = TokenIndex::try_from_index(follower_index)
+            .and_then(|index| canonical.token(index).ok());
+        let at_boundary = statement_boundary_at_source(canonical, current_index.index());
+        let current_span = current.source_span();
+        let current_tag = current.tag();
+        let item = classify_current_item_ref(current, follower, at_boundary);
+        cursor.advance();
         match item {
             HeaderFileItem::Symbol(name_id) => {
-                let current_token = token_stream.tokens[current_index].clone();
                 handle_symbol_item(
-                    token_stream,
+                    cursor,
+                    file_id,
+                    source_file,
                     state,
                     context,
-                    current_token,
                     name_id,
                     current_span,
+                    current_index,
                 )?;
             }
 
             HeaderFileItem::BuiltinTypeConformanceTarget(type_name) => {
                 let name_id = context.string_table.intern(type_name);
-                let current_token = token_stream.tokens[current_index].clone();
                 handle_symbol_item(
-                    token_stream,
+                    cursor,
+                    file_id,
+                    source_file,
                     state,
                     context,
-                    current_token,
                     name_id,
                     current_span,
+                    current_index,
                 )?;
             }
 
             HeaderFileItem::Dependency => {
-                parse_and_record_private_dependency(token_stream, state, context, current_span)?;
+                parse_and_record_private_dependency(cursor, file_id, state, context, current_span)?;
             }
 
             HeaderFileItem::Export => {
-                reject_non_block_export(token_stream, context, current_span)?;
+                reject_non_block_export(cursor, file_id, context, current_span)?;
             }
 
             HeaderFileItem::ExportBlock => {
-                handle_export_block(token_stream, state, context, current_span)?;
+                handle_export_block(cursor, file_id, source_file, state, context, current_span)?;
             }
 
             HeaderFileItem::Hash {
                 at_statement_boundary,
             } => {
                 handle_hash_item(
-                    token_stream,
+                    cursor,
+                    file_id,
+                    source_file,
                     state,
                     context,
+                    current_index,
                     current_span,
                     at_statement_boundary,
                 )?;
@@ -263,17 +206,16 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::RuntimeTemplate => {
-                handle_runtime_template_item(token_stream, state, context)?;
+                handle_runtime_template_item(cursor, file_id, state, context)?;
             }
 
             HeaderFileItem::Eof => {
-                record_start_body_token_from_source(state, token_stream, current_index)?;
-                debug_assert_eq!(file_id, token_stream.file_id);
+                record_start_body_token_from_source(state, canonical, file_id, current_index)?;
                 break;
             }
 
             HeaderFileItem::StartBodyToken => {
-                record_start_body_token_from_source(state, token_stream, current_index)?;
+                record_start_body_token_from_source(state, canonical, file_id, current_index)?;
             }
         }
     }
@@ -282,7 +224,8 @@ fn parse_headers_in_file_inner(
 }
 
 fn reject_non_block_export(
-    token_stream: &mut FileTokens,
+    cursor: &TokenCursor<'_>,
+    file_id: SourceId,
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
@@ -295,7 +238,16 @@ fn reject_non_block_export(
 
     // Without the block delimiter, the token is not an export target. Keep this diagnostic in
     // header parsing instead of interpreting the following tokens through another syntax path.
-    let found = source_token_at_index(token_stream, token_stream.index, "export-block")?;
+    let found = cursor.current().ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "export-block cursor exceeded its source token owner",
+        ))
+    })?;
+    if found.source() != file_id {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "export-block source token owner does not match its file identity",
+        )));
+    }
     Err(diagnostic_failure(
         CompilerDiagnostic::expected_token_from_ref(
             TokenTag::COLON,
@@ -304,9 +256,10 @@ fn reject_non_block_export(
         ),
     ))
 }
-
 fn handle_export_block(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
+    source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
@@ -325,7 +278,16 @@ fn handle_export_block(
 
     // The classifier only produces ExportBlock when the current token is `:`, but consume it
     // here so the item parser starts at the first ordinary top-level item.
-    let colon = source_token_at_index(token_stream, token_stream.index, "export-block")?;
+    let colon = cursor.current().ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "export-block cursor exceeded its source token owner",
+        ))
+    })?;
+    if colon.source() != file_id {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "export-block source token owner does not match its file identity",
+        )));
+    }
     if colon.tag() != TokenTag::COLON {
         return Err(diagnostic_failure(
             CompilerDiagnostic::expected_token_from_ref(
@@ -337,76 +299,45 @@ fn handle_export_block(
     }
     state.seen_export_block = Some(export_span);
     state.export_mode = HeaderExportMode::Public;
-    token_stream.advance();
+    cursor.advance();
 
     loop {
-        let current_tag =
-            source_token_at_index(token_stream, token_stream.index, "export-block")?.tag();
+        let current = cursor.current().ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "export-block cursor exceeded its source token owner",
+            ))
+        })?;
+        let current_tag = current.tag();
         if current_tag == TokenTag::END || current_tag == TokenTag::EOF {
             break;
         }
         if current_tag == TokenTag::NEWLINE {
-            token_stream.advance();
+            cursor.advance();
             continue;
         }
 
-        let current_index = token_stream.index;
-        let (current_span, current_tag, item) = {
-            let canonical = token_stream.source_tokens().map_err(|error| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                    "export-block walk is missing its source token owner: {error:?}"
-                )))
-            })?;
-            if canonical.source() != token_stream.file_id {
-                return Err(HeaderParseFailure::Infrastructure(
-                    CompilerError::compiler_error(
-                        "export-block source token owner does not match its file identity",
-                    ),
-                ));
-            }
-            let current_position = TokenIndex::try_from_index(current_index).ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export-block token index exceeded its checked domain",
-                ))
-            })?;
-            let current = canonical.token(current_position).map_err(|_| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export-block token index exceeded its source token owner",
-                ))
-            })?;
-            let follower_index = current_index.checked_add(1).ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "export-block follower index overflowed its source range",
-                ))
-            })?;
-            let follower_position =
-                TokenIndex::try_from_index(follower_index).ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                        "export-block follower index exceeded its checked domain",
-                    ))
-                })?;
-            let follower = canonical.token(follower_position).ok();
-            (
-                current.source_span(),
-                current.tag(),
-                classify_export_block_item_ref(current, follower),
-            )
-        };
-        let current_token = match &item {
-            HeaderFileItem::Symbol(_) | HeaderFileItem::BuiltinTypeConformanceTarget(_) => {
-                Some(token_stream.tokens[current_index].clone())
-            }
-            _ => None,
-        };
-        token_stream.advance();
+        let current_index = current.index();
+        let follower_index = current_index.index().checked_add(1).ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "export-block follower index overflowed its source range",
+            ))
+        })?;
+        let follower = TokenIndex::try_from_index(follower_index)
+            .and_then(|index| cursor.source_tokens().token(index).ok());
+        let current_span = current.source_span();
+        let current_tag = current.tag();
+        let item = classify_export_block_item_ref(current, follower);
+        cursor.advance();
         parse_export_block_item(
-            token_stream,
+            cursor,
+            file_id,
+            source_file,
             state,
             context,
             item,
-            current_token,
             current_tag,
             current_span,
+            current_index,
         )?;
         state.export_block_item_count =
             state
@@ -419,7 +350,16 @@ fn handle_export_block(
                 })?;
     }
 
-    let current = source_token_at_index(token_stream, token_stream.index, "export-block")?;
+    let current = cursor.current().ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "export-block cursor exceeded its source token owner",
+        ))
+    })?;
+    if current.source() != file_id {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "export-block source token owner does not match its file identity",
+        )));
+    }
     if current.tag() == TokenTag::EOF {
         return Err(diagnostic_failure(
             CompilerDiagnostic::unexpected_end_of_file(
@@ -431,7 +371,7 @@ fn handle_export_block(
 
     // The block terminator belongs to this parser mode and must not become an implicit start-body
     // token for the surrounding file.
-    token_stream.advance();
+    cursor.advance();
     state.export_mode = HeaderExportMode::Private;
 
     if state.export_block_item_count == 0 {
@@ -444,54 +384,44 @@ fn handle_export_block(
 }
 
 fn parse_export_block_item(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
+    source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     item: HeaderFileItem,
-    current_token: Option<Token>,
     current_tag: TokenTag,
     current_span: SourceSpan,
+    current_index: TokenIndex,
 ) -> FileParserResult<()> {
     match item {
-        HeaderFileItem::Symbol(name_id) => {
-            let Some(current_token) = current_token else {
-                return Err(HeaderParseFailure::Infrastructure(
-                    CompilerError::compiler_error(
-                        "export symbol item lost its compatibility token handoff",
-                    ),
-                ));
-            };
-            handle_symbol_item(
-                token_stream,
-                state,
-                context,
-                current_token,
-                name_id,
-                current_span,
-            )
-        }
+        HeaderFileItem::Symbol(name_id) => handle_symbol_item(
+            cursor,
+            file_id,
+            source_file,
+            state,
+            context,
+            name_id,
+            current_span,
+            current_index,
+        ),
 
         HeaderFileItem::BuiltinTypeConformanceTarget(type_name) => {
-            let Some(current_token) = current_token else {
-                return Err(HeaderParseFailure::Infrastructure(
-                    CompilerError::compiler_error(
-                        "export builtin item lost its compatibility token handoff",
-                    ),
-                ));
-            };
             let name_id = context.string_table.intern(type_name);
             handle_symbol_item(
-                token_stream,
+                cursor,
+                file_id,
+                source_file,
                 state,
                 context,
-                current_token,
                 name_id,
                 current_span,
+                current_index,
             )
         }
 
         HeaderFileItem::Dependency => {
-            parse_and_record_public_dependency(token_stream, state, context, current_span)
+            parse_and_record_public_dependency(cursor, file_id, state, context, current_span)
         }
 
         HeaderFileItem::Export | HeaderFileItem::ExportBlock => Err(diagnostic_failure(
@@ -501,9 +431,12 @@ fn parse_export_block_item(
         HeaderFileItem::Hash {
             at_statement_boundary,
         } => handle_hash_item(
-            token_stream,
+            cursor,
+            file_id,
+            source_file,
             state,
             context,
+            current_index,
             current_span,
             at_statement_boundary,
         ),
@@ -601,29 +534,17 @@ fn recognize_legacy_dependency_start(
 }
 
 fn handle_symbol_item(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
+    source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    current_token: Token,
     name_id: StringId,
     current_span: SourceSpan,
+    current_index: TokenIndex,
 ) -> FileParserResult<()> {
-    let current_index = token_stream.index.checked_sub(1).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "header symbol token preceded the source token index",
-        ))
-    })?;
-    let import_index = TokenIndex::try_from_index(current_index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "header symbol token index exceeded its checked domain",
-        ))
-    })?;
-    let canonical = token_stream.source_tokens().map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "legacy dependency scan is missing its source token owner: {error:?}"
-        )))
-    })?;
-    if canonical.source() != token_stream.file_id {
+    let canonical = cursor.source_tokens();
+    if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
             CompilerError::compiler_error(
                 "legacy dependency scan source token owner does not match its file identity",
@@ -631,16 +552,18 @@ fn handle_symbol_item(
         ));
     }
     let facts = TokenFactView::from_source(canonical);
-    if let Some(start) =
-        recognize_legacy_dependency_start(facts, import_index, context.string_table)?
-    {
+    if let Some(start) = recognize_legacy_dependency_start(
+        facts,
+        current_index,
+        context.string_table,
+    )? {
         let path_syntax = (!context.is_config_file)
-            .then(|| token_stream.path_syntax_table())
+            .then(|| canonical.path_syntax_table())
             .transpose()
             .map_err(HeaderParseFailure::Infrastructure)?;
         return Err(diagnostic_failure(legacy_dependency_clause_diagnostic(
             facts,
-            token_stream.file_id,
+            file_id,
             path_syntax,
             context,
             current_span,
@@ -650,11 +573,12 @@ fn handle_symbol_item(
 
     let export_mode = state.export_mode;
     handle_symbol_item_with_export_mode(
-        token_stream,
+        cursor,
+        file_id,
+        source_file,
         state,
         context,
         SymbolItemRequest {
-            current_token,
             name_id,
             current_span,
             current_index,
@@ -871,37 +795,33 @@ fn clause_terminator(token: Option<ScannedToken>) -> bool {
 
 /// One already-read top-level symbol with the source facts its header dispatch needs.
 struct SymbolItemRequest {
-    current_token: Token,
     name_id: StringId,
     current_span: SourceSpan,
-    current_index: usize,
+    current_index: TokenIndex,
 }
 
 fn handle_symbol_item_with_export_mode(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
+    source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     symbol: SymbolItemRequest,
     export_mode: HeaderExportMode,
 ) -> FileParserResult<()> {
     let SymbolItemRequest {
-        current_token,
         name_id,
         current_span,
         current_index,
     } = symbol;
-    let follower_index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
+    let follower_index = TokenIndex::try_from_index(cursor.position().index()).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "symbol lookahead index exceeded its checked domain",
         ))
     })?;
     let (follower_tag, starts_duplicate, starts_trait, starts_specialized) = {
-        let canonical = token_stream.source_tokens().map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "symbol lookahead is missing its source token owner: {error:?}"
-            )))
-        })?;
-        if canonical.source() != token_stream.file_id {
+        let canonical = cursor.source_tokens();
+        if canonical.source() != file_id {
             return Err(HeaderParseFailure::Infrastructure(
                 CompilerError::compiler_error(
                     "symbol lookahead source token owner does not match its file identity",
@@ -931,9 +851,6 @@ fn handle_symbol_item_with_export_mode(
         let is_conformance_declaration =
             (follower_tag == TokenTag::MUST && !starts_trait) || starts_specialized;
 
-        // Conformance declarations reuse the target type name (`Type must TRAIT`).
-        // They do not conflict with the type declaration itself.
-        // AST evidence validation catches duplicate semantic conformance facts later.
         if !is_conformance_declaration && starts_duplicate {
             return Err(diagnostic_failure(
                 CompilerDiagnostic::duplicate_declaration(
@@ -945,21 +862,26 @@ fn handle_symbol_item_with_export_mode(
         }
 
         if !is_conformance_declaration {
-            record_start_body_token_from_source(state, token_stream, current_index)?;
-            // Body-level symbol/dependency resolution belongs to AST passes. Header parsing only validates
-            // duplicate top-level declaration starts at this stage.
+            record_start_body_token_from_source(
+                state,
+                cursor.source_tokens(),
+                file_id,
+                current_index,
+            )?;
             return Ok(());
         }
-
-        // Fall through for conformance declarations so they are parsed as real headers.
     }
 
     if state.start_body_symbols.contains(&name_id) && !starts_duplicate {
-        record_start_body_token_from_source(state, token_stream, current_index)?;
+        record_start_body_token_from_source(
+            state,
+            cursor.source_tokens(),
+            file_id,
+            current_index,
+        )?;
         return Ok(());
     }
 
-    let source_file = token_stream.src_path;
     let mut build_context = HeaderBuildContext {
         warnings: &mut state.warnings,
         source_file,
@@ -979,8 +901,10 @@ fn handle_symbol_item_with_export_mode(
         })?;
     let header = create_header(
         declaration_path,
-        token_stream,
-        &current_token,
+        cursor,
+        file_id,
+        current_span,
+        current_index.index(),
         export_mode,
         &mut build_context,
         context.span_builder,
@@ -1011,13 +935,15 @@ fn handle_symbol_item_with_export_mode(
 
     match &header.kind {
         HeaderKind::StartFunction => {
-            record_start_body_token_from_source(state, token_stream, current_index)?;
+            record_start_body_token_from_source(
+                state,
+                cursor.source_tokens(),
+                file_id,
+                current_index,
+            )?;
             state.register_start_body_symbol(name_id);
         }
         HeaderKind::TraitConformance { .. } | HeaderKind::TraitIncompatibility { .. } => {
-            // Conformance and incompatibility declarations reuse an existing target/subject
-            // name and must not shadow that name's entry in encountered_symbols for duplicate
-            // detection.
             state.register_header(header);
         }
 
@@ -1048,49 +974,41 @@ fn handle_trait_keyword_header_item(
 }
 
 fn handle_runtime_template_item(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
 ) -> FileParserResult<()> {
     // Runtime top-level templates stay in the start-function body and are evaluated in source
     // order by entry start(). The runtime fragment count lets later const fragments record their
     // insertion point relative to already-seen runtime fragments.
-    let opening_index = token_stream.index.checked_sub(1).ok_or_else(|| {
+    let opening_index = cursor.position().index().checked_sub(1).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "runtime template opening preceded the source token index",
         ))
     })?;
-    let opening = TokenIndex::try_from_index(opening_index).ok_or_else(|| {
+    let opening_index = TokenIndex::try_from_index(opening_index).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "runtime template opening exceeded the source token index space",
         ))
     })?;
-    let canonical_for_opening = token_stream
-        .source_tokens()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    let opening_token = canonical_for_opening.token(opening).map_err(|error| {
+    let canonical = cursor.source_tokens();
+    if canonical.source() != file_id {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "runtime template source token owner does not match its file identity",
+        )));
+    }
+    let opening = canonical.token(opening_index).map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "runtime template opening exceeded its source token owner: {error:?}",
         )))
     })?;
-    let mut template_cursor = token_stream
-        .canonical_cursor_from_current()
-        .map_err(HeaderParseFailure::Infrastructure)?;
     let range = capture_runtime_template_range_from_cursor(
-        opening_token,
-        &mut template_cursor,
-        token_stream.file_id,
+        opening,
+        cursor,
+        file_id,
         context.string_table,
     )?;
-    // Deferred parser handoff: the canonical cursor owns position; sync the legacy index.
-    token_stream.index = token_stream
-        .compatibility_index_for_cursor(template_cursor)
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    let canonical = token_stream.source_tokens().map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "runtime template range is missing its source token owner: {error:?}"
-        )))
-    })?;
     state
         .record_start_body_source_range_from_source_tokens(range, canonical)
         .map_err(HeaderParseFailure::Infrastructure)?;
@@ -1107,13 +1025,18 @@ fn handle_runtime_template_item(
 }
 fn find_config_marker_in_start_ranges(
     state: &HeaderFileParseState,
-    token_stream: &FileTokens,
+    canonical: &SourceTokens,
+    file_id: SourceId,
     string_table: &StringTable,
     span_builder: &crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> Result<Option<(SourceSpan, bool)>, CompilerError> {
-    let canonical = token_stream.source_tokens()?;
+    if canonical.source() != file_id {
+        return Err(CompilerError::compiler_error(
+            "start-body config scan source token owner does not match its file identity",
+        ));
+    }
     for range in &state.start_body_ranges {
-        if range.source() != token_stream.file_id {
+        if range.source() != file_id {
             return Err(CompilerError::compiler_error(
                 "start-body config scan encountered a foreign source range",
             ));
@@ -1131,17 +1054,21 @@ fn find_config_marker_in_start_ranges(
     }
     Ok(None)
 }
-
-fn finish_file_output(
+pub(super) fn finish_file_output(
     token_stream: &mut FileTokens,
-    _file_id: SourceId,
+    file_id: SourceId,
+    end_index: TokenIndex,
     context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    let canonical = token_stream
+        .source_tokens()
+        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     if context.file_role == FileRole::ImportedModuleRoot
         && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
             &state,
-            token_stream,
+            canonical,
+            file_id,
             context.string_table,
             context.span_builder,
         )
@@ -1191,15 +1118,17 @@ fn finish_file_output(
 
     let mut output = if context.file_role == FileRole::ActiveModuleRoot {
         state
-            .into_entry_output(token_stream, context.file_role)
+            .into_entry_output(token_stream, end_index, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     } else {
         state
             .into_non_entry_output(token_stream, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
-    let prepared_tokens = token_stream.take_for_prepared_source();
-    let canonical_owner = prepared_tokens
+    // The compatibility stream is only a parser boundary. Publish its existing canonical
+    // allocation directly; moving the stream itself would retain a legacy `FileTokens` shell in
+    // the prepared-source handoff.
+    let canonical_owner = token_stream
         .canonical_source_tokens_arc()
         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     attach_structural_file_facts(

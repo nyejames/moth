@@ -43,7 +43,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 pub(super) fn lookup_receiver_method<'a>(
     context: &'a ScopeContext,
@@ -214,7 +214,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         .into());
     }
 
-    if token_stream.peek_next_token() != Some(&TokenKind::OpenParenthesis) {
+    if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
         return Err(CompilerDiagnostic::invalid_receiver_call(
             InvalidReceiverCallReason::MustUseParentheses,
             None,

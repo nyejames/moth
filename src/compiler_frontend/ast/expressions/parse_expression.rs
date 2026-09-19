@@ -24,7 +24,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
@@ -100,13 +100,13 @@ fn create_multiple_expressions_inner(
         // Newlines are expression terminators almost everywhere else. Only normalize
         // them here when we're inside a parenthesized list so multiline calls like
         // `io.line(\n value\n)` leave us positioned on the comma or `)`.
-        if consume_closing_parenthesis && token_stream.current_token_kind() == &TokenKind::Newline {
+        if consume_closing_parenthesis && token_stream.current_tag() == TokenTag::NEWLINE {
             token_stream.skip_newlines();
         }
 
         // Comma check: every slot except the last must be followed by a comma.
         if type_index + 1 < context.expected_result_type_ids.len() {
-            if token_stream.current_token_kind() != &TokenKind::Comma {
+            if token_stream.current_tag() != TokenTag::COMMA {
                 return Err(CompilerDiagnostic::invalid_return_shape(
                     InvalidReturnShapeReason::TooFewReturnValues {
                         expected_count: context.expected_result_type_ids.len(),
@@ -122,10 +122,15 @@ fn create_multiple_expressions_inner(
     }
 
     if consume_closing_parenthesis {
-        if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
+        if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
             let found = match token_stream.current() {
-                Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-                None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+                Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "expression closing-delimiter diagnostic",
+                    )
+                })?),
+                None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
             };
             return Err(CompilerDiagnostic::expected_token_from_tags(
                 TokenTag::CLOSE_PARENTHESIS,
@@ -228,7 +233,7 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
     // this fragment into precedence-ordered RPN, resolves the final type, and folds constants.
     let mut next_number_negative = false;
     while input.token_stream.position() < input.token_stream.length() {
-        let token = input.token_stream.current_token_kind().to_owned();
+        let token = input.token_stream.current_tag();
         ast_log!("Parsing expression: ", #token);
         let mut dispatch_state = ExpressionDispatchState {
             expected_type: input.expected_type,
@@ -277,14 +282,14 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
 //      surrounding grammar layer to inspect and consume itself.
 pub(crate) fn create_expression_until(
     input: ExpressionParseInput<'_, '_, '_>,
-    stop_tokens: &[TokenKind],
+    stop_tokens: &[TokenTag],
 ) -> Result<Expression, ExpressionParseError> {
     create_expression_until_with_policy(input, stop_tokens)
 }
 
 fn create_expression_until_with_policy(
     input: ExpressionParseInput<'_, '_, '_>,
-    stop_tokens: &[TokenKind],
+    stop_tokens: &[TokenTag],
 ) -> Result<Expression, ExpressionParseError> {
     let allow_boundary_catch = input.trailing_policy.allow_boundary_catch;
     let allow_expected_result_evidence = input.trailing_policy.allow_expected_result_evidence;
@@ -310,23 +315,24 @@ fn create_expression_until_with_policy(
     // indexed reads re-scan segment prefixes on every step.
     let mut depth = ExpressionBoundaryDepth::default();
     while !input.token_stream.is_at_end() {
-        if depth.is_top_level() && stop_tokens.contains(input.token_stream.current_token_kind()) {
+        if depth.is_top_level() && stop_tokens.contains(&input.token_stream.current_tag()) {
             break;
         }
-        depth.step(input.token_stream.current_token_kind());
-        // A malformed payload also reports `Eof`, and `Eof` is stable under `advance`.
-        if input.token_stream.current_token_kind() == &TokenKind::Eof {
+        depth.step_tag(input.token_stream.current_tag());
+        // A malformed payload is surfaced by typed readers at the consuming parser boundary.
+        if input.token_stream.current_tag() == TokenTag::EOF {
             break;
         }
         input.token_stream.advance();
     }
     let end_index = input.token_stream.position();
+    let end_tag = (end_index < input.token_stream.length())
+        .then(|| input.token_stream.current_tag());
+    let end_span = input.token_stream.span_at(end_index);
     input
         .token_stream
         .set_position(start_index)
         .expect("expression boundary resume stays inside the active parser view");
-    let end_kind = input.token_stream.token_kind_at(end_index);
-    let end_span = input.token_stream.span_at(end_index);
 
     // ------------------------
     //  Validate window bounds
@@ -346,7 +352,7 @@ fn create_expression_until_with_policy(
         .into());
     }
 
-    let Some(end_kind) = end_kind else {
+    let Some(end_tag) = end_tag else {
         let formatted_stop_tokens: Vec<String> = stop_tokens
             .iter()
             .map(|token| format!("{token:?}"))
@@ -363,19 +369,20 @@ fn create_expression_until_with_policy(
 
     if end_index == start_index {
         return Err(CompilerDiagnostic::unexpected_token_from_tag(
-            DiagnosticToken::from(end_kind),
+            DiagnosticToken::from_static_tag(end_tag),
             end_span,
         )
         .into());
     }
 
-    if !stop_tokens.contains(&end_kind) {
+    if !stop_tokens.contains(&end_tag) {
         return Err(CompilerDiagnostic::unexpected_token_from_tag(
-            DiagnosticToken::from(end_kind),
+            DiagnosticToken::from_static_tag(end_tag),
             end_span,
         )
         .into());
     }
+
 
     // ------------------------
     //  Parse within window

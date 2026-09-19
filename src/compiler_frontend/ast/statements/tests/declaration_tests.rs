@@ -485,7 +485,8 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let declaration =
             parse_declaration_syntax(&mut declaration_cursor, name, &mut strings, &mut builder)
                 .expect("the authored declaration must produce its shell");
-        tokens.index = declaration_cursor.index;
+        let declaration_position = declaration_cursor.position();
+        drop(declaration_cursor);
         let expected_start = source.rfind("value ").unwrap() as u32 + "value ".len() as u32;
         let expected_range = (
             expected_start,
@@ -520,9 +521,21 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         )
         .with_declaring_file_id(file_id);
 
-        let mut owner = tokens;
-        let owner = AstCursor::from_file_tokens(&mut owner)
-            .expect("the tokenized source must expose an AST cursor");
+        let source_owner = tokens
+            .canonical_source_tokens_arc()
+            .expect("the tokenized source must expose a canonical source owner");
+        let source_range = source_owner
+            .full_range()
+            .expect("the tokenized source must expose a checked full range");
+        let mut owner = AstCursor::from_source_tokens(
+            &source_owner,
+            tokens.canonical_os_path.clone(),
+            source_range,
+        )
+        .expect("the tokenized source must expose an AST cursor");
+        owner
+            .set_position(declaration_position)
+            .expect("the canonical cursor must seek to the declaration position");
         let mut initializer = super::declaration_initializer_stream(
             Some(&owner),
             declaration.initializer_range,

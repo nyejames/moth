@@ -34,6 +34,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
     SourcePreparationDelta, parse_file_headers_with_table,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
@@ -141,20 +142,18 @@ pub(crate) struct FrontendFilePrepareContext<'a> {
 
 /// Borrowed per-file source payload for frontend preparation.
 ///
-/// WHAT: one variant per source kind. Moth carries the retained `FileTokens` from the
-///       single Stage 0 lexical pass; Moth template and PlainMarkdown borrow the exact source
+/// WHAT: one variant per source kind. Moth carries the canonical `SourceTokenOwner` published by
+///       its single Stage 0 lexical pass; Moth template and PlainMarkdown borrow the exact source
 ///       snapshot retained by the compilation boundary.
-/// WHY: the variant makes the source-kind/token relationship unrepresentable as an invalid
-///      state. The Moth preparation arm receives `FileTokens` by type, so it cannot panic
-///      on absent tokens, and Moth template/PlainMarkdown cannot carry Moth tokens.
+/// WHY: the variant makes the source-kind/token relationship unrepresentable as an invalid state.
+///      Moth identity is explicit beside its `SourceTokens` owner, while the transitional
+///      compatibility `FileTokens` stream lives on `FrontendFilePrepareInput` until the remaining
+///      header parser callees accept canonical cursors directly.
 ///
 /// The build system borrows source text from the immutable source database for the duration of
 /// preparation. Direct single-source APIs can borrow their caller-owned request text as well.
 pub(crate) enum FrontendFilePrepareSource<'a> {
-    Moth {
-        source_path: PathBuf,
-        tokens: Box<FileTokens>,
-    },
+    Moth { owner: SourceTokenOwner },
     MothTemplate {
         source_code: &'a str,
         source_path: PathBuf,
@@ -167,8 +166,8 @@ pub(crate) enum FrontendFilePrepareSource<'a> {
 
 /// Per-file source payload and numbering offsets for local frontend preparation.
 ///
-/// WHAT: keeps the state-safe source variant and synthetic-fragment offsets together for one
-///       worker item.
+/// WHAT: keeps the state-safe source variant, its narrow legacy parser adapter and synthetic-
+///       fragment offsets together for one worker item.
 /// WHY: grouping these inputs keeps the preparation API explicit without a broad argument list.
 pub(crate) struct FrontendFilePrepareInput<'a> {
     pub(crate) source: FrontendFilePrepareSource<'a>,
@@ -176,6 +175,11 @@ pub(crate) struct FrontendFilePrepareInput<'a> {
     pub(crate) span_builder: ExtendedSpanBuilder,
     pub(crate) const_template_offset: usize,
     pub(crate) runtime_fragment_offset: usize,
+    /// Transitional parser adapter paired with `FrontendFilePrepareSource::Moth`.
+    ///
+    /// The adapter shares the source variant's canonical `Arc<SourceTokens>` and is consumed
+    /// before the output crosses into retained prepared syntax.
+    pub(crate) compatibility_tokens: Option<FileTokens>,
 }
 
 /// Everything `headers_to_ast` needs to build one module's AST.
@@ -243,6 +247,58 @@ fn source_identity_facts(
     ))
 }
 
+/// Validate the explicit identity carried beside a canonical Moth token owner.
+///
+/// The owner was minted from the authoritative source table before this preparation pass. Do not
+/// re-intern or reconstruct that metadata from a filesystem path: validating the moved `PathId`,
+/// `SourceId` and canonical OS path preserves one identity owner through the handoff.
+fn source_identity_facts_for_owner(
+    source_files: &SourceDatabase,
+    owner: &SourceTokenOwner,
+    expected_source_id: SourceId,
+    path_fork: &PathInternerFork,
+) -> Result<(PathId, SourceId, Option<PathBuf>), FileFrontendPrepareFailure> {
+    let source_id = owner.source_id();
+    if source_id != expected_source_id {
+        return Err(FileFrontendPrepareFailure::Infrastructure(
+            CompilerError::compiler_error(format!(
+                "canonical Moth token owner identity {} does not match its preparation slot {}",
+                source_id.index(),
+                expected_source_id.index(),
+            )),
+        ));
+    }
+    if path_fork.try_depth(owner.logical_path()).is_none() {
+        return Err(FileFrontendPrepareFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "canonical Moth token owner carries a logical path outside the preparation fork",
+            ),
+        ));
+    }
+    let record = source_files.get(source_id).ok_or_else(|| {
+        FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "canonical Moth token owner {} was not registered before frontend preparation",
+            source_id.index()
+        )))
+    })?;
+    if record.logical_path != owner.logical_path() {
+        return Err(FileFrontendPrepareFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "canonical Moth token owner logical path does not match its source record",
+            ),
+        ));
+    }
+    let canonical_os_path = owner.os_path_cloned();
+    if record.canonical_os_path.as_deref() != canonical_os_path.as_deref() {
+        return Err(FileFrontendPrepareFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "canonical Moth token owner filesystem identity does not match its source record",
+            ),
+        ));
+    }
+    Ok((owner.logical_path(), source_id, canonical_os_path))
+}
+
 impl CompilerFrontend<'static> {
     // -----------------------------
     //  TOKENIZER
@@ -299,9 +355,17 @@ impl CompilerFrontend<'static> {
         add_frontend_counter(FrontendCounter::FilePreparationPassCount, 1);
         test_support::record_prepare(&input.source);
 
-        let file_id = input.source_id;
-        let mut span_builder = input.span_builder;
-        let result = (|| match input.source {
+        let FrontendFilePrepareInput {
+            source,
+            source_id,
+            span_builder,
+            const_template_offset,
+            runtime_fragment_offset,
+            compatibility_tokens,
+        } = input;
+        let file_id = source_id;
+        let mut span_builder = span_builder;
+        let result = (|| match source {
             FrontendFilePrepareSource::PlainMarkdown {
                 source_code,
                 source_path,
@@ -320,15 +384,32 @@ impl CompilerFrontend<'static> {
                 )
                 .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
-            FrontendFilePrepareSource::Moth {
-                source_path,
-                mut tokens,
-            } => {
-                // Moth files carry the exact token stream retained from the single Stage 0
-                // lexical pass. Rebind it to the module source identity and parse headers without
-                // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
+            FrontendFilePrepareSource::Moth { owner } => {
+                let mut tokens = compatibility_tokens.ok_or_else(|| {
+                    FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(
+                        "canonical Moth preparation is missing its transitional parser adapter",
+                    ))
+                })?;
                 let (logical_path, source_id, canonical_os_path) =
-                    source_identity_facts(context.source_files, &source_path, local_path_fork)?;
+                    source_identity_facts_for_owner(
+                        context.source_files,
+                        &owner,
+                        file_id,
+                        local_path_fork,
+                    )?;
+                let adapter_owner = tokens
+                    .canonical_source_tokens_arc()
+                    .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+                if !Arc::ptr_eq(&adapter_owner, owner.tokens()) {
+                    return Err(FileFrontendPrepareFailure::Infrastructure(
+                        CompilerError::compiler_error(
+                            "canonical Moth parser adapter does not share its source owner",
+                        ),
+                    ));
+                }
+                // The compatibility stream retains only the parser's mutable cursor and
+                // lifecycle shell. Its canonical owner is the same immutable allocation carried
+                // by the preparation source, so this rebind does not re-lex or copy a window.
                 tokens
                     .rebind_source_identity(logical_path, source_id, canonical_os_path)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
@@ -338,8 +419,8 @@ impl CompilerFrontend<'static> {
                     context.options,
                     local_string_table,
                     local_path_fork,
-                    input.const_template_offset,
-                    input.runtime_fragment_offset,
+                    const_template_offset,
+                    runtime_fragment_offset,
                     &mut span_builder,
                 )
             }

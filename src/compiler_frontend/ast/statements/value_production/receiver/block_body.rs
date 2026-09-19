@@ -25,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input for the shared then/else block-body parser.
 ///
@@ -87,7 +87,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
     )?;
     let then_request_end = outer_context.generic_request_checkpoint();
 
-    if token_stream.current_token_kind() != &TokenKind::Else {
+    if token_stream.current_tag() != TokenTag::ELSE {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfMissingElse,
             Some(token_stream.current_span()),

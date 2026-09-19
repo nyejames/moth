@@ -196,7 +196,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
         let operand_is_optional = type_environment.is_option(expression_type_id);
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             super::non_fallible_handler_reason(
-                token_stream.current_token_kind(),
+                token_stream.current_tag(),
                 operand_is_optional,
             ),
             Some(token_stream.current_span()),
@@ -539,57 +539,35 @@ fn parse_catch_handler(
 }
 
 fn next_catch_binding_is_inline(token_stream: &AstCursor) -> bool {
-    if let Ok(cursor) = token_stream.declaration_cursor() {
-        let mut index = cursor.position().checked_add(1);
-
-        while let Some(probe) = index {
-            let Some(tag) = cursor.token_kind_at(probe).map(|kind| kind.token_tag()) else {
-                return false;
-            };
-            match tag {
-                TokenTag::TYPE_PARAMETER_BRACKET => {
-                    let mut lookahead = probe.checked_add(1);
-                    while let Some(next) = lookahead {
-                        match cursor.token_kind_at(next).map(|kind| kind.token_tag()) {
-                            Some(TokenTag::NEWLINE) => lookahead = next.checked_add(1),
-                            Some(tag) => return tag == TokenTag::THEN,
-                            None => return false,
-                        }
-                    }
-                    return false;
-                }
-
-                TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => return false,
-
-                _ => index = probe.checked_add(1),
-            }
+    let mut index = token_stream.position().checked_add(1);
+    while let Some(probe) = index {
+        if probe >= token_stream.length() {
+            return false;
         }
-
-        return false;
-    }
-
-    let mut index = token_stream.position().saturating_add(1);
-    while index < token_stream.length() {
-        match token_stream
-            .token_kind_at(index)
-            .map(|kind| kind.token_tag())
-        {
-            Some(TokenTag::TYPE_PARAMETER_BRACKET) => {
-                let mut lookahead = index.saturating_add(1);
-                loop {
-                    match token_stream
-                        .token_kind_at(lookahead)
-                        .map(|kind| kind.token_tag())
-                    {
-                        Some(TokenTag::NEWLINE) => lookahead = lookahead.saturating_add(1),
-                        Some(tag) => return tag == TokenTag::THEN,
-                        None => return false,
+        let Some(token) = token_stream.token_ref_at(probe) else {
+            return false;
+        };
+        match token.tag() {
+            TokenTag::TYPE_PARAMETER_BRACKET => {
+                let mut lookahead = probe.checked_add(1);
+                while let Some(next) = lookahead {
+                    if next >= token_stream.length() {
+                        return false;
+                    }
+                    let Some(token) = token_stream.token_ref_at(next) else {
+                        return false;
+                    };
+                    match token.tag() {
+                        TokenTag::NEWLINE => lookahead = next.checked_add(1),
+                        tag => return tag == TokenTag::THEN,
                     }
                 }
+                return false;
             }
-            Some(TokenTag::NEWLINE) | Some(TokenTag::END) | Some(TokenTag::EOF) => return false,
-            Some(_) => index = index.saturating_add(1),
-            None => return false,
+
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => return false,
+
+            _ => index = probe.checked_add(1),
         }
     }
     false

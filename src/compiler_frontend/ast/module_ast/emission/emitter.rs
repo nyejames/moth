@@ -732,7 +732,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             return Ok(());
         };
         let parse_owner = body
-            .parse_owner(string_table, &mut *self.path_fork)
+            .parse_owner()
             .map_err(|error| self.error_messages(error, string_table))?;
         let (mut body_cursor, body_source_id) = parse_owner
             .cursor()

@@ -203,6 +203,7 @@ impl HeaderFileParseState {
     pub(super) fn into_entry_output(
         mut self,
         token_stream: &mut FileTokens,
+        end_index: TokenIndex,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
         let file_id = token_stream.file_id;
@@ -212,9 +213,6 @@ impl HeaderFileParseState {
         // Active module root: publish the source-owned start sequence for later AST body parsing.
         // `start` is never a dependency-graph participant, so this header keeps no graph edges.
         let token_sequence = token_stream.register_token_sequence(&self.start_body_ranges)?;
-        let end_index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
-            CompilerError::compiler_error("start header token range exceeded index space")
-        })?;
         let start_range = TokenRange::new(file_id, end_index, end_index)
             .expect("equal token indexes always form a valid empty range");
 

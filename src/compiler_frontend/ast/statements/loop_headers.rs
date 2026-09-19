@@ -4,8 +4,9 @@
 //! keyword has been consumed: conditional, numeric range, and collection iteration.
 //! WHY: statement loops and template loop suffixes need the same syntax, binding,
 //! and type-validation rules, while each caller owns its own body parsing. Headers
-//! parse from the canonical cursor window only; there is no compatibility vector lane.
+//! parse from the canonical cursor window only.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
@@ -34,7 +35,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::{ExpressionBoundaryDepth, NestingDepth};
@@ -115,7 +116,7 @@ struct CursorExpressionUntilInput<'a, 'types, 'cursor, 'tokens, 'stop> {
     value_mode: &'a ValueMode,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
-    stop_tokens: &'stop [TokenKind],
+    stop_tokens: &'stop [TokenTag],
 }
 
 struct RangeLoopSpecInput<'a, 'types, 'cursor, 'tokens> {
@@ -141,9 +142,8 @@ fn loop_header_error<T>(
 /// Parse the sole loop-header grammar directly from its bounded cursor window.
 ///
 /// WHAT: keeps all header reads on the short-lived `AstCursor` view and represents
-/// grammar splits as parser-position ranges rather than materialised `Token` vectors.
-/// WHY: this is the only loop-header parser. Non-canonical cursor backings survive only
-/// for test fixtures and are not a loop-header production feeder.
+/// grammar splits as parser-position ranges rather than materialised payload vectors.
+/// WHY: this is the only loop-header parser and consumes canonical source-token views.
 pub(crate) fn parse_loop_header_cursor(
     token_stream: &mut AstCursor,
     mut context: ScopeContext,
@@ -203,7 +203,7 @@ pub(crate) fn parse_loop_header_cursor(
             path_fork,
         };
 
-        if has_top_level_range_marker_cursor(token_stream, header_start, header_end) {
+        if has_top_level_range_marker_cursor(token_stream, header_start, header_end)? {
             parse_range_loop_header_cursor(token_stream, header_start, header_end, &mut parser)?
         } else {
             parse_non_range_loop_header_cursor(token_stream, header_start, header_end, &mut parser)?
@@ -220,7 +220,7 @@ fn parse_range_loop_header_cursor(
     parser: &mut LoopHeaderParser<'_, '_>,
 ) -> LoopHeaderResult<ParsedLoopHeader> {
     if let Some(pipe_binding_split) =
-        parse_pipe_binding_suffix_cursor(token_stream, header_start, header_end)?
+        parse_pipe_binding_suffix_cursor(token_stream, header_start, header_end, parser.string_table)?
     {
         let range = parse_range_loop_spec_cursor(RangeLoopSpecInput {
             token_stream,
@@ -238,8 +238,9 @@ fn parse_range_loop_header_cursor(
         return Ok(ParsedLoopHeader::Range { bindings, range });
     }
 
-    if let Some(bare_binding_suffix) =
-        detect_bare_loop_binding_suffix_cursor(token_stream, header_start, header_end)
+    let bare_binding_suffix =
+        detect_bare_loop_binding_suffix_cursor(token_stream, header_start, header_end)?;
+    if let Some(bare_binding_suffix) = bare_binding_suffix
         && parses_as_range_cursor(RangeLoopSpecInput {
             token_stream,
             range_start: header_start,
@@ -248,7 +249,7 @@ fn parse_range_loop_header_cursor(
             type_interner: parser.type_interner,
             string_table: parser.string_table,
             path_fork: parser.path_fork,
-        })
+        })?
     {
         return bare_loop_binding_syntax_error_cursor(&bare_binding_suffix);
     }
@@ -274,7 +275,7 @@ fn parse_non_range_loop_header_cursor(
     parser: &mut LoopHeaderParser<'_, '_>,
 ) -> LoopHeaderResult<ParsedLoopHeader> {
     if let Some(pipe_binding_split) =
-        parse_pipe_binding_suffix_cursor(token_stream, header_start, header_end)?
+        parse_pipe_binding_suffix_cursor(token_stream, header_start, header_end, parser.string_table)?
     {
         let (iterable, item_type) = parse_collection_iterable_cursor(CursorExpressionInput {
             token_stream,
@@ -290,9 +291,9 @@ fn parse_non_range_loop_header_cursor(
 
         return Ok(ParsedLoopHeader::Collection { bindings, iterable });
     }
-
-    if let Some(bare_binding_suffix) =
-        detect_bare_loop_binding_suffix_cursor(token_stream, header_start, header_end)
+    let bare_binding_suffix =
+        detect_bare_loop_binding_suffix_cursor(token_stream, header_start, header_end)?;
+    if let Some(bare_binding_suffix) = bare_binding_suffix
         && parses_as_collection_cursor(CursorExpressionInput {
             token_stream,
             expression_start: header_start,
@@ -302,7 +303,7 @@ fn parse_non_range_loop_header_cursor(
             value_mode: &ValueMode::ImmutableReference,
             string_table: parser.string_table,
             path_fork: parser.path_fork,
-        })
+        })?
     {
         return bare_loop_binding_syntax_error_cursor(&bare_binding_suffix);
     }
@@ -341,19 +342,19 @@ fn reject_removed_in_loop_syntax_cursor(
     token_stream: &AstCursor,
     header_start: usize,
     header_end: usize,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> LoopHeaderResult<()> {
     if header_end.saturating_sub(header_start) < 3 {
         return Ok(());
     }
 
-    if !token_stream
-        .token_kind_at(header_start)
-        .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL)
+    if token_tag_at(token_stream, header_start) != Some(TokenTag::SYMBOL)
+        || token_tag_at(token_stream, header_start + 1) != Some(TokenTag::SYMBOL)
     {
         return Ok(());
     }
-    let Some(TokenKind::Symbol(second_symbol)) = token_stream.token_kind_at(header_start + 1)
+    let Some(second_symbol) =
+        token_string_id_at(token_stream, header_start + 1, string_table)?
     else {
         return Ok(());
     };
@@ -372,22 +373,19 @@ fn parse_pipe_binding_suffix_cursor(
     token_stream: &AstCursor,
     header_start: usize,
     header_end: usize,
+    string_table: &mut StringTable,
 ) -> LoopHeaderResult<Option<CursorBindingSuffixSplit>> {
     let pipe_indices =
         collect_top_level_cursor_indexes(token_stream, header_start, header_end, |tag| {
             tag == TokenTag::TYPE_PARAMETER_BRACKET
-        });
+        })?;
     if pipe_indices.is_empty() {
         return Ok(None);
     }
 
     let last_index = header_end.checked_sub(1);
     if last_index
-        .and_then(|index| {
-            token_stream
-                .token_kind_at(index)
-                .map(|kind| kind.token_tag())
-        })
+        .and_then(|index| token_tag_at(token_stream, index))
         .is_none_or(|tag| tag != TokenTag::TYPE_PARAMETER_BRACKET)
     {
         return loop_header_error(
@@ -418,26 +416,22 @@ fn parse_pipe_binding_suffix_cursor(
             token_stream.span_at(open_pipe_index),
         );
     }
-
-    let bindings = parse_binding_cursor(token_stream, open_pipe_index + 1, close_pipe_index)?;
+    let bindings =
+        parse_binding_cursor(token_stream, open_pipe_index + 1, close_pipe_index, string_table)?;
 
     Ok(Some(CursorBindingSuffixSplit {
         core_end: open_pipe_index,
         bindings,
     }))
 }
-
 fn parse_binding_cursor(
     token_stream: &AstCursor,
     binding_start: usize,
     binding_end: usize,
+    string_table: &mut StringTable,
 ) -> LoopHeaderResult<ParsedBindingNames> {
     let binding_indices = (binding_start..binding_end)
-        .filter(|index| {
-            token_stream
-                .token_kind_at(*index)
-                .is_some_and(|kind| kind.token_tag() != TokenTag::NEWLINE)
-        })
+        .filter(|index| token_tag_at(token_stream, *index) != Some(TokenTag::NEWLINE))
         .collect::<Vec<_>>();
     if binding_indices.is_empty() {
         return loop_header_error(
@@ -450,16 +444,21 @@ fn parse_binding_cursor(
     let mut position = 0;
     while position < binding_indices.len() {
         let token_index = binding_indices[position];
-        let token_kind = token_stream
-            .token_kind_at(token_index)
+        let token_tag = token_tag_at(token_stream, token_index)
             .expect("binding index was collected from a readable cursor token");
-        if token_kind.token_tag() == TokenTag::THIS {
+        if token_tag == TokenTag::THIS {
             return loop_header_error(
                 InvalidLoopHeaderReason::ThisBinding,
                 token_stream.span_at(token_index),
             );
         }
-        let TokenKind::Symbol(symbol_id) = token_kind else {
+        if token_tag != TokenTag::SYMBOL {
+            return loop_header_error(
+                InvalidLoopHeaderReason::BindingMustBeSymbol,
+                token_stream.span_at(token_index),
+            );
+        }
+        let Some(symbol_id) = token_string_id_at(token_stream, token_index, string_table)? else {
             return loop_header_error(
                 InvalidLoopHeaderReason::BindingMustBeSymbol,
                 token_stream.span_at(token_index),
@@ -476,11 +475,7 @@ fn parse_binding_cursor(
             break;
         }
         let separator_index = binding_indices[position];
-        if token_stream
-            .token_kind_at(separator_index)
-            .map(|kind| kind.token_tag())
-            != Some(TokenTag::COMMA)
-        {
+        if token_tag_at(token_stream, separator_index) != Some(TokenTag::COMMA) {
             return loop_header_error(
                 InvalidLoopHeaderReason::MissingBindingComma,
                 token_stream.span_at(separator_index),
@@ -502,38 +497,34 @@ fn detect_bare_loop_binding_suffix_cursor(
     token_stream: &AstCursor,
     header_start: usize,
     header_end: usize,
-) -> Option<CursorBareLoopBindingSuffix> {
+) -> Result<Option<CursorBareLoopBindingSuffix>, CompilerError> {
     let non_newline_indices =
         collect_top_level_cursor_indexes(token_stream, header_start, header_end, |tag| {
             tag != TokenTag::NEWLINE
-        });
+        })?;
     if non_newline_indices.len() < 2 {
-        return None;
+        return Ok(None);
     }
 
     if non_newline_indices.len() >= 3 {
         let first_index = non_newline_indices[non_newline_indices.len() - 3];
         let separator_index = non_newline_indices[non_newline_indices.len() - 2];
         let second_index = non_newline_indices[non_newline_indices.len() - 1];
-        let first_is_symbol = token_stream
-            .token_kind_at(first_index)
-            .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL);
-        let separator_is_comma = token_stream
-            .token_kind_at(separator_index)
-            .is_some_and(|kind| kind.token_tag() == TokenTag::COMMA);
-        let separator_is_symbol = token_stream
-            .token_kind_at(separator_index)
-            .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL);
-        let second_is_symbol = token_stream
-            .token_kind_at(second_index)
-            .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL);
+        let first_is_symbol =
+            token_tag_at(token_stream, first_index) == Some(TokenTag::SYMBOL);
+        let separator_is_comma =
+            token_tag_at(token_stream, separator_index) == Some(TokenTag::COMMA);
+        let separator_is_symbol =
+            token_tag_at(token_stream, separator_index) == Some(TokenTag::SYMBOL);
+        let second_is_symbol =
+            token_tag_at(token_stream, second_index) == Some(TokenTag::SYMBOL);
 
         if first_is_symbol && separator_is_comma && second_is_symbol && first_index > header_start {
-            return Some(CursorBareLoopBindingSuffix {
+            return Ok(Some(CursorBareLoopBindingSuffix {
                 core_end: first_index,
                 span: token_stream.span_at(first_index),
                 kind: BareLoopBindingKind::Dual,
-            });
+            }));
         }
 
         if first_is_symbol
@@ -541,32 +532,29 @@ fn detect_bare_loop_binding_suffix_cursor(
             && second_is_symbol
             && separator_index > header_start
         {
-            return Some(CursorBareLoopBindingSuffix {
+            return Ok(Some(CursorBareLoopBindingSuffix {
                 core_end: separator_index,
                 span: token_stream.span_at(separator_index),
                 kind: BareLoopBindingKind::Dual,
-            });
+            }));
         }
     }
 
-    let binding_index = *non_newline_indices.last()?;
+    let Some(binding_index) = non_newline_indices.last().copied() else {
+        return Ok(None);
+    };
     let core_tail_index = non_newline_indices[non_newline_indices.len() - 2];
-    if token_stream
-        .token_kind_at(binding_index)
-        .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL)
-        && token_stream
-            .token_kind_at(core_tail_index)
-            .map(|kind| kind.token_tag())
-            != Some(TokenTag::COMMA)
+    if token_tag_at(token_stream, binding_index) == Some(TokenTag::SYMBOL)
+        && token_tag_at(token_stream, core_tail_index) != Some(TokenTag::COMMA)
     {
-        return Some(CursorBareLoopBindingSuffix {
+        return Ok(Some(CursorBareLoopBindingSuffix {
             core_end: binding_index,
             span: token_stream.span_at(binding_index),
             kind: BareLoopBindingKind::Single,
-        });
+        }));
     }
 
-    None
+    Ok(None)
 }
 
 fn bare_loop_binding_syntax_error_cursor<T>(
@@ -621,7 +609,7 @@ fn parse_range_loop_spec_cursor(
                 value_mode: &ValueMode::ImmutableReference,
                 string_table,
                 path_fork,
-                stop_tokens: &[TokenKind::ExclusiveRange],
+                stop_tokens: &[TokenTag::EXCLUSIVE_RANGE],
             })?
         };
 
@@ -655,7 +643,7 @@ fn parse_range_loop_spec_cursor(
 
         let end_start = token_stream.position();
         let by_index =
-            find_top_level_expression_boundary_cursor_token(token_stream, end_start, range_end);
+            find_top_level_expression_boundary_cursor_token(token_stream, end_start, range_end)?;
         let end = if by_index.is_some() {
             parse_cursor_expression_until(CursorExpressionUntilInput {
                 token_stream,
@@ -666,7 +654,7 @@ fn parse_range_loop_spec_cursor(
                 value_mode: &ValueMode::ImmutableReference,
                 string_table,
                 path_fork,
-                stop_tokens: &[TokenKind::By],
+                stop_tokens: &[TokenTag::BY],
             })?
         } else {
             parse_cursor_expression(CursorExpressionInput {
@@ -895,7 +883,9 @@ fn parse_collection_iterable_cursor(
     Ok((collection_expression, item_type_id))
 }
 
-fn parses_as_collection_cursor(input: CursorExpressionInput<'_, '_, '_, '_>) -> bool {
+fn parses_as_collection_cursor(
+    input: CursorExpressionInput<'_, '_, '_, '_>,
+) -> LoopHeaderResult<bool> {
     let CursorExpressionInput {
         token_stream,
         expression_start,
@@ -911,7 +901,7 @@ fn parses_as_collection_cursor(input: CursorExpressionInput<'_, '_, '_, '_>) -> 
         &ValueMode::ImmutableReference,
         "loop collection probes parse as immutable references",
     );
-    let Ok(expression) = parse_cursor_expression(CursorExpressionInput {
+    let expression = match parse_cursor_expression(CursorExpressionInput {
         token_stream,
         expression_start,
         expression_end,
@@ -920,43 +910,50 @@ fn parses_as_collection_cursor(input: CursorExpressionInput<'_, '_, '_, '_>) -> 
         value_mode,
         string_table,
         path_fork,
-    }) else {
-        return false;
+    }) {
+        Ok(expression) => expression,
+        Err(ExpressionParseError::Diagnostic(_)) => return Ok(false),
+        Err(error) => return Err(error),
     };
-    type_interner
+    Ok(type_interner
         .environment()
         .collection_element_type(expression.type_id)
-        .is_some()
+        .is_some())
 }
 
-fn parses_as_range_cursor(input: RangeLoopSpecInput<'_, '_, '_, '_>) -> bool {
-    parse_range_loop_spec_cursor(input).is_ok()
+fn parses_as_range_cursor(input: RangeLoopSpecInput<'_, '_, '_, '_>) -> LoopHeaderResult<bool> {
+    match parse_range_loop_spec_cursor(input) {
+        Ok(_) => Ok(true),
+        Err(ExpressionParseError::Diagnostic(_)) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn has_top_level_range_marker_cursor(
     token_stream: &AstCursor,
     header_start: usize,
     header_end: usize,
-) -> bool {
-    find_top_level_cursor_token(
+) -> Result<bool, CompilerError> {
+    Ok(find_top_level_cursor_token(
         token_stream,
         header_start,
         header_end,
         TokenTag::EXCLUSIVE_RANGE,
-    )
-    .is_some()
+    )?
+    .is_some())
 }
 
 /// Short-lived canonical child over the header window `[start, end)`.
 ///
 /// WHAT: positions a walk cursor at `start` and bounds it at `end`.
 /// WHY: every loop-header probe below runs inside a canonical header window that already
-/// validated these bounds, so a missing child means a caller broke that invariant.
-fn header_probe_walk<'a>(token_stream: &AstCursor<'a>, start: usize, end: usize) -> AstCursor<'a> {
-    match token_stream.subcursor_window(start, end) {
-        Ok(Some(walk)) => walk,
-        _ => unreachable!("loop header probes run inside the canonical header window"),
-    }
+/// validated these bounds.
+fn header_probe_walk<'a>(
+    token_stream: &'a AstCursor<'a>,
+    start: usize,
+    end: usize,
+) -> Result<AstCursor<'a>, CompilerError> {
+    token_stream.subcursor_window(start, end)
 }
 
 fn collect_top_level_cursor_indexes(
@@ -964,31 +961,23 @@ fn collect_top_level_cursor_indexes(
     start: usize,
     end: usize,
     predicate: impl Fn(TokenTag) -> bool,
-) -> Vec<usize> {
-    let mut walk = header_probe_walk(token_stream, start, end);
+) -> Result<Vec<usize>, CompilerError> {
+    let mut walk = header_probe_walk(token_stream, start, end)?;
     let mut nesting_depth = NestingDepth::default();
     let mut indexes = Vec::new();
     while !walk.is_at_end() {
-        // Skip a malformed payload, which has no `TokenKind`.
-        if walk
-            .current()
-            .is_some_and(|current| current.to_token_kind().is_err())
-        {
-            walk.advance();
-            continue;
-        }
         let tag = walk.current_tag();
         if nesting_depth.is_top_level() && predicate(tag) {
             indexes.push(walk.position());
         }
         let is_eof = tag == TokenTag::EOF;
-        nesting_depth.step(walk.current_token_kind());
+        nesting_depth.step_tag(tag);
         if is_eof {
             break;
         }
         walk.advance();
     }
-    indexes
+    Ok(indexes)
 }
 
 fn find_top_level_cursor_token(
@@ -996,30 +985,22 @@ fn find_top_level_cursor_token(
     start: usize,
     end: usize,
     target: TokenTag,
-) -> Option<usize> {
-    let mut walk = header_probe_walk(token_stream, start, end);
+) -> Result<Option<usize>, CompilerError> {
+    let mut walk = header_probe_walk(token_stream, start, end)?;
     let mut nesting_depth = NestingDepth::default();
     while !walk.is_at_end() {
-        // Skip malformed payloads, which have no `TokenKind`.
-        if walk
-            .current()
-            .is_some_and(|current| current.to_token_kind().is_err())
-        {
-            walk.advance();
-            continue;
-        }
         let tag = walk.current_tag();
         if nesting_depth.is_top_level() && tag == target {
-            return Some(walk.position());
+            return Ok(Some(walk.position()));
         }
         let is_eof = tag == TokenTag::EOF;
-        nesting_depth.step(walk.current_token_kind());
+        nesting_depth.step_tag(tag);
         if is_eof {
             break;
         }
         walk.advance();
     }
-    None
+    Ok(None)
 }
 
 /// Find a range-step separator using the same delimiter depth as
@@ -1033,29 +1014,22 @@ fn find_top_level_expression_boundary_cursor_token(
     token_stream: &AstCursor,
     start: usize,
     end: usize,
-) -> Option<usize> {
-    let mut walk = header_probe_walk(token_stream, start, end);
+) -> Result<Option<usize>, CompilerError> {
+    let mut walk = header_probe_walk(token_stream, start, end)?;
     let mut depth = ExpressionBoundaryDepth::default();
     while !walk.is_at_end() {
-        // A malformed payload has no `TokenKind`; the step split cannot be decided here.
-        if walk
-            .current()
-            .is_some_and(|current| current.to_token_kind().is_err())
-        {
-            return None;
-        }
         let tag = walk.current_tag();
         if depth.is_top_level() && tag == TokenTag::BY {
-            return Some(walk.position());
+            return Ok(Some(walk.position()));
         }
         let is_eof = tag == TokenTag::EOF;
-        depth.step(walk.current_token_kind());
+        depth.step_tag(tag);
         if is_eof {
             break;
         }
         walk.advance();
     }
-    None
+    Ok(None)
 }
 
 fn build_binding_name_pair(
@@ -1087,6 +1061,21 @@ fn build_binding_name_pair(
         item: item_binding,
         index: index_binding,
     })
+}
+
+fn token_tag_at(token_stream: &AstCursor, index: usize) -> Option<TokenTag> {
+    token_stream.token_ref_at(index).map(|token| token.tag())
+}
+
+fn token_string_id_at(
+    token_stream: &AstCursor,
+    index: usize,
+    string_table: &mut StringTable,
+) -> Result<Option<StringId>, CompilerError> {
+    if token_tag_at(token_stream, index) != Some(TokenTag::SYMBOL) {
+        return Ok(None);
+    }
+    token_stream.token_string_id_at_in(index, string_table)
 }
 
 fn is_numeric_type_id(type_id: TypeId, type_environment: &TypeEnvironment) -> bool {

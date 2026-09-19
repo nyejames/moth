@@ -34,7 +34,7 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -97,7 +97,7 @@ pub(crate) fn parse_scrutinee_until_is(
         string_table,
         path_fork,
     });
-    create_expression_until(input, &[TokenKind::Is])
+    create_expression_until(input, &[TokenTag::IS])
 }
 
 /// Build an option-present capture arm scope and pattern.
@@ -173,7 +173,7 @@ pub(crate) fn parse_match_arm_header(
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    guard_end_tokens: &[TokenKind],
+    guard_end_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<ParsedMatchArmHeader> {
@@ -250,7 +250,7 @@ fn parse_match_guard(
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    guard_end_tokens: &[TokenKind],
+    guard_end_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<Option<Expression>> {
@@ -332,7 +332,7 @@ fn parse_match_pattern_header(
             // Optional scrutinees must use option-specific patterns.
             // Bare capture symbols are rejected because `|name|` is the only
             // valid capture form for optional values.
-            if let TokenKind::Symbol(_) = token_stream.current_token_kind()
+            if token_stream.current_tag() == TokenTag::SYMBOL
                 && !option_pattern_constructor_like(token_stream)
             {
                 return Err(CompilerDiagnostic::invalid_match_pattern(

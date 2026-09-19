@@ -15,7 +15,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 
 pub(crate) fn parse_option_propagation_suffix_for_expression(
@@ -65,7 +65,7 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
         .into());
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Catch {
+    if token_stream.current_tag() == TokenTag::CATCH {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::OptionPropagationCatchConflict,
             Some(token_stream.current_postfix_operator_span()),

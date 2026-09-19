@@ -433,10 +433,11 @@ impl ModulePreparationContext<'_> {
         let active_root_role = stable_origin.role();
 
         // 1. Prepare all selected files against one local string-table fork per worker chunk.
-        //    Directory Moth inputs parse retained tokens, synthetic Moth and Moth-template inputs
-        //    consume complete outputs retained during discovery, and deferred inputs resolve
-        //    their kind from the authoritative source database before their one preparation.
-        //    Merge/remap once before aggregating header syntax.
+        //    Directory Moth inputs parse the canonical owner through the narrow transitional
+        //    adapter, synthetic Moth and Moth-template inputs consume complete outputs retained
+        //    during discovery, and deferred inputs resolve their kind from the authoritative
+        //    source database before their one preparation. Merge/remap once before aggregating
+        //    header syntax.
         let (prepared_header_syntax, file_warnings) = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             timing_context,
@@ -974,16 +975,23 @@ impl ModulePreparationContext<'_> {
         let mut span_builders = Vec::with_capacity(plan.file_range.len());
 
         for (file_index, (file, span_builder)) in module {
-            let PreparedSourceInput { source_id, source } = file;
+            let PreparedSourceInput {
+                source_id,
+                source,
+                compatibility_tokens,
+            } = file;
             let (string_domain, delta) = match source {
-                PreparedSourceKind::MothPrepared { output } => (
-                    PreparedFileStringDomain::AlreadyGlobal,
-                    SourcePreparationDelta {
-                        file_id: source_id,
-                        span_builder,
-                        result: Ok(*output),
-                    },
-                ),
+                PreparedSourceKind::MothPrepared { output } => {
+                    drop(compatibility_tokens);
+                    (
+                        PreparedFileStringDomain::AlreadyGlobal,
+                        SourcePreparationDelta {
+                            file_id: source_id,
+                            span_builder,
+                            result: Ok(*output),
+                        },
+                    )
+                }
                 source => {
                     let delta = match frontend_source(
                         source,
@@ -999,6 +1007,7 @@ impl ModulePreparationContext<'_> {
                                 span_builder,
                                 const_template_offset,
                                 runtime_fragment_offset,
+                                compatibility_tokens,
                             },
                             &mut local_string_table,
                             &mut local_path_fork,
@@ -1105,7 +1114,11 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             .into());
         }
 
-        let source_id = source.source_id();
+        let PreparedSourceInput {
+            source_id,
+            source,
+            compatibility_tokens,
+        } = source;
         let source_byte_len = source_byte_len(
             self.context.source_files,
             source_id,
@@ -1128,7 +1141,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             options: &options,
         };
         let frontend_source = frontend_source(
-            source.source,
+            source,
             source_id,
             self.context.source_files,
             Some(self.selected_source_texts),
@@ -1139,6 +1152,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             span_builder: source_spans.take_span_builder(source_id),
             const_template_offset: 0,
             runtime_fragment_offset: 0,
+            compatibility_tokens,
         };
 
         let SourcePreparationDelta {
@@ -1288,13 +1302,10 @@ fn frontend_source<'a>(
     sources: &'a SourceDatabase,
     selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
 ) -> Result<FrontendFilePrepareSource<'a>, CompilerError> {
-    let source_path = source_path_for_id(sources, source_id)?;
     Ok(match source {
-        PreparedSourceKind::Moth { tokens } => FrontendFilePrepareSource::Moth {
-            source_path,
-            tokens,
-        },
+        PreparedSourceKind::Moth { owner } => FrontendFilePrepareSource::Moth { owner },
         PreparedSourceKind::Deferred => {
+            let source_path = source_path_for_id(sources, source_id)?;
             let source_code = retained_source_text(sources, source_id, selected_source_texts)?;
             match sources.get(source_id).and_then(|record| record.kind) {
                 Some(SourceKind::Compiler(SourceFileKind::MothTemplate)) => {

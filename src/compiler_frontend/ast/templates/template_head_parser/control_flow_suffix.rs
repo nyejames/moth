@@ -19,14 +19,13 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
 /// Template head control flow joins ordinary expression parsing with template construction. It
@@ -145,23 +144,11 @@ pub(crate) fn parse_loop_suffix(
         .into());
     }
 
-    let body_start_index = find_template_body_start(token_stream)?;
     let start_index = token_stream.position();
-    // Canonical suffix window only; compatibility streams have no owner to window. The
-    // boundary scan stays parent-bounded because it must observe the `StartTemplateBody`
-    // terminator at `body_start_index`, while every interior suffix read below stays inside
-    // `[start_index, body_start_index)` via the window.
-    // Dense segmented coordinates are window-relative; canonical `SourceTokens` are never
-    // cloned into a new `FileTokens` vector here.
-    let Some(mut window) = token_stream
+    let body_start_index = find_template_body_start(token_stream)?;
+    let mut window = token_stream
         .subcursor_window(start_index, body_start_index)
-        .map_err(TemplateError::from)?
-    else {
-        return Err(CompilerError::compiler_error(
-            "compatibility token stream cannot parse a loop header",
-        )
-        .into());
-    };
+        .map_err(TemplateError::from)?;
     let mut warnings = Vec::new();
     if has_top_level_suffix_separator_in_window(&mut window) {
         return Err(with_token_span(
@@ -238,21 +225,14 @@ fn next_meaningful_token_is_body_boundary(token_stream: &mut AstCursor) -> bool 
     let end = token_stream.length();
     let mut boundary = true;
     while token_stream.position() < end && !token_stream.is_at_end() {
-        // A malformed payload has no `TokenKind`; treat it as a boundary here and let the header parser report it.
-        if token_stream
-            .current()
-            .is_some_and(|current| current.to_token_kind().is_err())
-        {
-            break;
-        }
-        let kind = token_stream.current_token_kind();
+        let tag = token_stream.current_tag();
         if matches!(
-            kind,
-            TokenKind::StartTemplateBody | TokenKind::TemplateClose | TokenKind::Eof
+            tag,
+            TokenTag::START_TEMPLATE_BODY | TokenTag::TEMPLATE_CLOSE | TokenTag::EOF
         ) {
             break;
         }
-        if !matches!(kind, TokenKind::Newline) {
+        if tag != TokenTag::NEWLINE {
             boundary = false;
             break;
         }
@@ -265,9 +245,9 @@ fn next_meaningful_token_is_body_boundary(token_stream: &mut AstCursor) -> bool 
 }
 
 fn ensure_suffix_ends_at_body_start(token_stream: &AstCursor) -> ControlFlowSuffixResult<()> {
-    match token_stream.current_token_kind() {
-        TokenKind::StartTemplateBody => Ok(()),
-        TokenKind::Comma => Err(with_current_token_span(
+    match token_stream.current_tag() {
+        TokenTag::START_TEMPLATE_BODY => Ok(()),
+        TokenTag::COMMA => Err(with_current_token_span(
             token_stream,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
@@ -296,20 +276,13 @@ fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixRe
     let mut nesting_depth = NestingDepth::default();
     let mut outcome: Option<ControlFlowSuffixResult<usize>> = None;
     while token_stream.position() < end && !token_stream.is_at_end() {
-        // A malformed payload has no `TokenKind`; stop and fall through to the generic
-        // diagnostic below.
-        if let Some(current) = token_stream.current()
-            && current.to_token_kind().is_err()
-        {
-            break;
-        }
-        let kind = token_stream.current_token_kind();
+        let tag = token_stream.current_tag();
         let is_top_level = nesting_depth.is_top_level();
-        if is_top_level && matches!(kind, TokenKind::StartTemplateBody) {
+        if is_top_level && tag == TokenTag::START_TEMPLATE_BODY {
             outcome = Some(Ok(token_stream.position()));
             break;
         }
-        if is_top_level && matches!(kind, TokenKind::TemplateClose | TokenKind::Eof) {
+        if is_top_level && matches!(tag, TokenTag::TEMPLATE_CLOSE | TokenTag::EOF) {
             let span = token_stream.current_span();
             outcome = Some(Err(with_token_span(
                 token_stream,
@@ -323,10 +296,10 @@ fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixRe
             break;
         }
         // A nested `Eof` never advances; stop instead of re-reading it.
-        if matches!(kind, TokenKind::Eof) {
+        if tag == TokenTag::EOF {
             break;
         }
-        nesting_depth.step(kind);
+        nesting_depth.step_tag(tag);
         token_stream.advance();
     }
     token_stream
@@ -389,28 +362,20 @@ fn has_top_level_suffix_separator_in_window(window: &mut AstCursor) -> bool {
     let mut pipe_depth = 0usize;
     let mut separated = false;
     while window.position() < end && !window.is_at_end() {
-        // A malformed payload has no `TokenKind`; skip it and keep scanning.
-        if window
-            .current()
-            .is_some_and(|current| current.to_token_kind().is_err())
-        {
-            window.advance();
-            continue;
-        }
-        let kind = window.current_token_kind();
+        let tag = window.current_tag();
         if nesting_depth.is_top_level() {
-            if matches!(kind, TokenKind::TypeParameterBracket) {
+            if tag == TokenTag::TYPE_PARAMETER_BRACKET {
                 pipe_depth = if pipe_depth == 0 { 1 } else { 0 };
-            } else if pipe_depth == 0 && matches!(kind, TokenKind::Comma) {
+            } else if pipe_depth == 0 && tag == TokenTag::COMMA {
                 separated = true;
                 break;
             }
         }
         // `Eof` never advances, so stop before re-reading it.
-        if matches!(kind, TokenKind::Eof) {
+        if tag == TokenTag::EOF {
             break;
         }
-        nesting_depth.step(kind);
+        nesting_depth.step_tag(tag);
         window.advance();
     }
     window

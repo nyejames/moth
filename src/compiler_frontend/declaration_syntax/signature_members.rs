@@ -310,7 +310,10 @@ pub fn parse_signature_members_syntax(
 
             TokenTag::SYMBOL => {
                 ensure_member_slot(expecting_member, token_stream)?;
-                let Some(member_name) = token_stream.current_string_id() else {
+                let Some(member_name) = token_stream
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
+                else {
                     return Err(CompilerError::compiler_error(
                         "symbol token is missing its string payload",
                     )
@@ -988,7 +991,8 @@ fn parse_return_list_syntax(
             }
             TokenTag::SYMBOL
                 if token_stream
-                    .current_string_id()
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
                     .is_some_and(|symbol| string_table.resolve(symbol) == "where") =>
             {
                 return Err(CompilerDiagnostic::invalid_function_signature(
@@ -1043,7 +1047,7 @@ fn parse_return_list_syntax(
 fn parse_single_return_item_syntax(
     token_stream: &mut DeclarationCursor<'_>,
     _parameters: &[SignatureMemberSyntax],
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     type_context: TypeAnnotationContext,
 ) -> SignatureMemberParseResult<ReturnSlotSyntax> {
     parse_value_return_type_syntax(token_stream, string_table, type_context)
@@ -1051,7 +1055,7 @@ fn parse_single_return_item_syntax(
 
 fn parse_value_return_type_syntax(
     token_stream: &mut DeclarationCursor<'_>,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     type_context: TypeAnnotationContext,
 ) -> SignatureMemberParseResult<ReturnSlotSyntax> {
     let span = current_source_span(token_stream);

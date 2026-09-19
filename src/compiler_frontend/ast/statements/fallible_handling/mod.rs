@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // --------------------------
 //  Re-exports
@@ -51,11 +51,11 @@ pub(crate) fn token_stream_starts_fallible_handling_suffix(token_stream: &AstCur
 /// WHY: the old umbrella `NotResultExpression` reason hardcoded `!` wording and called every
 ///      carrier a result, so each construction site needs the exact handler and carrier pair.
 pub(crate) fn non_fallible_handler_reason(
-    handler_token: &TokenKind,
+    handler_tag: TokenTag,
     operand_is_optional: bool,
 ) -> InvalidFallibleHandlingReason {
-    match handler_token {
-        TokenKind::Catch => {
+    match handler_tag {
+        TokenTag::CATCH => {
             if operand_is_optional {
                 InvalidFallibleHandlingReason::CatchOnOptional
             } else {

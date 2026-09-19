@@ -53,7 +53,7 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
@@ -102,13 +102,16 @@ fn reject_adjacent_operand(
 
 fn unexpected_token_at_current(
     token_stream: &AstCursor,
-    fallback: TokenKind,
+    fallback: TokenTag,
 ) -> CompilerDiagnostic {
     let span = Some(token_stream.current_span());
     if let Some(found) = token_stream.current() {
         CompilerDiagnostic::unexpected_token_from_ref(found, span)
     } else {
-        CompilerDiagnostic::unexpected_token_from_tag(DiagnosticToken::from(fallback), span)
+        CompilerDiagnostic::unexpected_token_from_tag(
+            DiagnosticToken::from_static_tag(fallback),
+            span,
+        )
     }
 }
 
@@ -127,7 +130,7 @@ fn reject_second_operand_after_value_template(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    while token_stream.current_token_kind() == &TokenKind::TemplateHead {
+    while token_stream.current_tag() == TokenTag::TEMPLATE_HEAD {
         let next_template_start = Some(token_stream.current_span());
         let next_template = parse_template_expression(
             token_stream,
@@ -178,8 +181,8 @@ fn push_expression_after_suffixes(
     // ----------------------------
     // Detect `!=` (Bang + Assign) before treating `!` as a result-handling suffix.
     if token_stream.position() < token_stream.length()
-        && token_stream.current_token_kind() == &TokenKind::Bang
-        && token_stream.peek_next_token() == Some(&TokenKind::Assign)
+        && token_stream.current_tag() == TokenTag::BANG
+        && token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
     {
         if let Some(error) = check_expression_common_mistake(token_stream, false) {
             return Err(error.into());
@@ -196,10 +199,10 @@ fn push_expression_after_suffixes(
     //  Fallible handling suffix
     // ----------------------------
     let expression_after_fallible = if token_stream.position() < token_stream.length()
-        && (token_stream.current_token_kind() == &TokenKind::Bang
-            || token_stream.current_token_kind() == &TokenKind::Catch
-            || (matches!(token_stream.current_token_kind(), TokenKind::Symbol(_))
-                && token_stream.peek_next_token() == Some(&TokenKind::Bang)))
+        && (token_stream.current_tag() == TokenTag::BANG
+            || token_stream.current_tag() == TokenTag::CATCH
+            || (token_stream.current_tag() == TokenTag::SYMBOL
+                && token_stream.peek_next_tag() == Some(TokenTag::BANG)))
     {
         let value_required = expression_after_postfix.type_id != builtin_type_ids::NONE;
         parse_fallible_handling_suffix_for_expression(
@@ -222,7 +225,7 @@ fn push_expression_after_suffixes(
     //  Option propagation suffix
     // ----------------------------
     let expression_after_option_propagation = if token_stream.position() < token_stream.length()
-        && token_stream.current_token_kind() == &TokenKind::QuestionMark
+        && token_stream.current_tag() == TokenTag::QUESTION_MARK
     {
         parse_option_propagation_suffix_for_expression(
             token_stream,
@@ -312,7 +315,7 @@ pub(super) fn push_expression_operand_with_span(
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let expression_after_postfix = if token_stream.position() < token_stream.length()
-        && token_stream.current_token_kind() == &TokenKind::Dot
+        && token_stream.current_tag() == TokenTag::DOT
     {
         parse_postfix_chain_expression(
             token_stream,
@@ -370,12 +373,9 @@ fn parse_unary_operator(
     expression: &mut Vec<ExpressionRpnItem>,
     next_number_negative: &mut bool,
 ) -> bool {
-    match token_stream.current_token_kind() {
-        TokenKind::Negative => {
-            if matches!(
-                token_stream.peek_next_token(),
-                Some(TokenKind::NumericLiteral(_))
-            ) {
+    match token_stream.current_tag() {
+        TokenTag::NEGATIVE => {
+            if token_stream.peek_next_tag() == Some(TokenTag::NUMERIC_LITERAL) {
                 *next_number_negative = true;
             } else {
                 // Token-local postfix span comes from the AstCursor view.
@@ -387,7 +387,7 @@ fn parse_unary_operator(
             }
             true
         }
-        TokenKind::Not => {
+        TokenTag::NOT => {
             let span = Some(token_stream.current_postfix_operator_span());
             expression.push(ExpressionRpnItem::Operator {
                 operator: Operator::Not,
@@ -421,7 +421,7 @@ fn advance_with_operator(
 }
 
 pub(super) fn dispatch_expression_token(
-    token: TokenKind,
+    token: TokenTag,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -432,51 +432,35 @@ pub(super) fn dispatch_expression_token(
     // A following `name =` starts the next const-record parameter, not a second operand.
     if context.inside_anonymous_const_record
         && matches!(state.expression.last(), Some(ExpressionRpnItem::Operand(_)))
-        && matches!(token, TokenKind::Symbol(_))
+        && token == TokenTag::SYMBOL
         && token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
     {
         return Ok(ExpressionTokenStep::Break);
     }
 
     // Reject definite adjacency before semantic name, call or constructor parsing.
-    let token_tag = token.token_tag();
-    if is_value_operand_start_token(token_tag) {
+    if is_value_operand_start_token(token) {
         reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
     }
 
     // This state machine is intentionally flat: each token either appends one AST node, advances
     // past a nested parse, or signals the caller that the surrounding grammar owns the delimiter.
     match token {
-        // -------------------------------
-        //  Delimiters and terminators
-        // -------------------------------
-        TokenKind::CloseCurly
-        | TokenKind::Comma
-        | TokenKind::Eof
-        | TokenKind::TemplateClose
-        | TokenKind::Arrow
-        | TokenKind::StartTemplateBody
-        | TokenKind::Colon
-        | TokenKind::Else
-        | TokenKind::End => {
-            dispatch_delimiter_token(token, token_tag, token_stream, state, string_table)
-        }
+        TokenTag::CLOSE_CURLY
+        | TokenTag::COMMA
+        | TokenTag::EOF
+        | TokenTag::TEMPLATE_CLOSE
+        | TokenTag::ARROW
+        | TokenTag::START_TEMPLATE_BODY
+        | TokenTag::COLON
+        | TokenTag::ELSE
+        | TokenTag::END => dispatch_delimiter_token(token, token_stream, state, string_table),
 
-        // -------------------------------
-        //  Parentheses and grouping
-        // -------------------------------
-        TokenKind::CloseParenthesis => dispatch_close_parenthesis(token, token_stream, state),
+        TokenTag::CLOSE_PARENTHESIS => dispatch_close_parenthesis(token, token_stream, state),
 
-        TokenKind::OpenParenthesis => {
+        TokenTag::OPEN_PARENTHESIS => {
             let group_span = Some(token_stream.current_postfix_operator_span());
             token_stream.advance();
-            // A grouped expression is no longer the immediate receiving boundary.
-            // This keeps `(cast value)` from acting as an operator operand while
-            // still allowing `cast (left + right)` to narrow the cast operand.
-            // Keep the parse-time literal context available to the group, but do not let the
-            // group's natural result type become the outer expression's expected type. The
-            // grouped expression remains an operand in the surrounding RPN stream, whose
-            // operator policy owns the final result type.
             let mut grouped_expected_type = *state.expected_type;
             let mut grouped_cast_target_context = CastTargetContext::None;
             let grouped_input =
@@ -509,13 +493,13 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenKind::DatatypeInt
-        | TokenKind::DatatypeFloat
-        | TokenKind::DatatypeBool
-        | TokenKind::DatatypeString
-        | TokenKind::DatatypeChar => {
+        TokenTag::DATATYPE_INT
+        | TokenTag::DATATYPE_FLOAT
+        | TokenTag::DATATYPE_BOOL
+        | TokenTag::DATATYPE_STRING
+        | TokenTag::DATATYPE_CHAR => {
             if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
-                let cast_name = match token_tag {
+                let cast_name = match token {
                     TokenTag::DATATYPE_INT => Some(string_table.intern("Int")),
                     TokenTag::DATATYPE_FLOAT => Some(string_table.intern("Float")),
                     TokenTag::DATATYPE_BOOL => Some(string_table.intern("Bool")),
@@ -540,7 +524,7 @@ pub(super) fn dispatch_expression_token(
             Err(unexpected_token_at_current(token_stream, token).into())
         }
 
-        TokenKind::OpenCurly => {
+        TokenTag::OPEN_CURLY => {
             parse_curly_literal_expression(
                 token_stream,
                 context,
@@ -554,12 +538,9 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Advance)
         }
 
-        TokenKind::Newline => dispatch_newline(token_stream, context, state),
+        TokenTag::NEWLINE => dispatch_newline(token_stream, context, state),
 
-        // -------------------------------
-        //  Primary expressions
-        // -------------------------------
-        TokenKind::Symbol(..) | TokenKind::This => {
+        TokenTag::SYMBOL | TokenTag::THIS => {
             parse_identifier_or_call(
                 token_stream,
                 context,
@@ -573,7 +554,7 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenKind::Mutable => {
+        TokenTag::MUTABLE => {
             parse_mutable_receiver_expression(
                 token_stream,
                 context,
@@ -586,11 +567,11 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenKind::NumericLiteral(_)
-        | TokenKind::StringSliceLiteral(_)
-        | TokenKind::BoolLiteral(_)
-        | TokenKind::CharLiteral(_)
-        | TokenKind::NoneLiteral => {
+        TokenTag::NUMERIC_LITERAL
+        | TokenTag::STRING_SLICE_LITERAL
+        | TokenTag::BOOL_LITERAL
+        | TokenTag::CHAR_LITERAL
+        | TokenTag::NONE_LITERAL => {
             let mut literal_state = LiteralParseState {
                 expected_type: state.expected_type,
                 value_mode: state.value_mode,
@@ -609,8 +590,15 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenKind::Path(path_syntax) => {
+        TokenTag::PATH => {
             let path_span = Some(token_stream.current_postfix_operator_span());
+            let path_syntax = token_stream
+                .current()
+                .and_then(|token| token.path_syntax_id())
+                .ok_or_else(|| CompilerError::compiler_error("path token had no payload"))?;
+            token_stream.current_path_syntax()?.ok_or_else(|| {
+                CompilerError::compiler_error("path token had no validated syntax row")
+            })?;
             let operand = resolve_file_value(
                 path_syntax,
                 token_stream,
@@ -637,7 +625,7 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenKind::TemplateHead => {
+        TokenTag::TEMPLATE_HEAD => {
             let template_expression = parse_template_expression(
                 token_stream,
                 context,
@@ -653,7 +641,6 @@ pub(super) fn dispatch_expression_token(
             };
 
             reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
-
             reject_second_operand_after_value_template(
                 token_stream,
                 context,
@@ -667,7 +654,7 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Return(Box::new(template_expression)))
         }
 
-        TokenKind::Copy => {
+        TokenTag::COPY => {
             let copy_span = Some(token_stream.current_span());
             token_stream.advance();
 
@@ -694,23 +681,20 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        // -------------------------------
-        //  Reserved / invalid tokens
-        // -------------------------------
-        TokenKind::If => Err(CompilerDiagnostic::invalid_control_flow_statement(
+        TokenTag::IF => Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueBlockOutsideReceiver,
             Some(token_stream.current_span()),
         )
         .into()),
 
-        TokenKind::Assert => Err(CompilerDiagnostic::invalid_builtin_call(
+        TokenTag::ASSERT => Err(CompilerDiagnostic::invalid_builtin_call(
             InvalidBuiltinCallReason::ExpressionPositionNotAllowed,
             Some(string_table.intern("assert")),
             Some(token_stream.current_span()),
         )
         .into()),
 
-        TokenKind::Must | TokenKind::TraitThis => {
+        TokenTag::MUST | TokenTag::TRAIT_THIS => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
                 token_stream.current_tag(),
                 Some(token_stream.current_span()),
@@ -721,14 +705,14 @@ pub(super) fn dispatch_expression_token(
             Err(reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into())
         }
 
-        TokenKind::Hash => {
+        TokenTag::HASH => {
             if token_stream.peek_next_tag() != Some(TokenTag::TEMPLATE_HEAD) {
                 return Err(unexpected_token_at_current(token_stream, token).into());
             }
 
             Ok(ExpressionTokenStep::Advance)
         }
-        TokenKind::Reactive if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) => {
+        TokenTag::REACTIVE if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) => {
             Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ReactiveSubscriptionOutsideTemplate,
                 Some(token_stream.current_span()),
@@ -736,7 +720,7 @@ pub(super) fn dispatch_expression_token(
             .into())
         }
 
-        TokenKind::Cast | TokenKind::CastBang => parse_cast_expression(
+        TokenTag::CAST | TokenTag::CAST_BANG => parse_cast_expression(
             token,
             token_stream,
             context,
@@ -746,7 +730,7 @@ pub(super) fn dispatch_expression_token(
             path_fork,
         ),
 
-        TokenKind::Negative | TokenKind::Not => {
+        TokenTag::NEGATIVE | TokenTag::NOT => {
             let _ = parse_unary_operator(
                 token_stream,
                 context,
@@ -756,35 +740,29 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Advance)
         }
 
-        // -------------------------------
-        //  Arithmetic operators
-        // -------------------------------
-        TokenKind::Add => {
+        TokenTag::ADD => {
             advance_with_operator(state.expression, context, token_stream, Operator::Add)
         }
-        TokenKind::Subtract => {
+        TokenTag::SUBTRACT => {
             advance_with_operator(state.expression, context, token_stream, Operator::Subtract)
         }
-        TokenKind::Multiply => {
+        TokenTag::MULTIPLY => {
             advance_with_operator(state.expression, context, token_stream, Operator::Multiply)
         }
-        TokenKind::Divide => {
+        TokenTag::DIVIDE => {
             advance_with_operator(state.expression, context, token_stream, Operator::Divide)
         }
-        TokenKind::IntDivide => {
+        TokenTag::INT_DIVIDE => {
             advance_with_operator(state.expression, context, token_stream, Operator::IntDivide)
         }
-        TokenKind::Exponent => {
+        TokenTag::EXPONENT => {
             advance_with_operator(state.expression, context, token_stream, Operator::Exponent)
         }
-        TokenKind::Modulus => {
+        TokenTag::MODULUS => {
             advance_with_operator(state.expression, context, token_stream, Operator::Modulus)
         }
 
-        // -------------------------------
-        //  Comparison operators
-        // -------------------------------
-        TokenKind::Is => dispatch_is_token(
+        TokenTag::IS => dispatch_is_token(
             token,
             token_stream,
             context,
@@ -794,44 +772,41 @@ pub(super) fn dispatch_expression_token(
             path_fork,
         ),
 
-        TokenKind::LessThan => {
+        TokenTag::LESS_THAN => {
             advance_with_operator(state.expression, context, token_stream, Operator::LessThan)
         }
-        TokenKind::LessThanOrEqual => advance_with_operator(
+        TokenTag::LESS_THAN_OR_EQUAL => advance_with_operator(
             state.expression,
             context,
             token_stream,
             Operator::LessThanOrEqual,
         ),
-        TokenKind::GreaterThan => advance_with_operator(
+        TokenTag::GREATER_THAN => advance_with_operator(
             state.expression,
             context,
             token_stream,
             Operator::GreaterThan,
         ),
-        TokenKind::GreaterThanOrEqual => advance_with_operator(
+        TokenTag::GREATER_THAN_OR_EQUAL => advance_with_operator(
             state.expression,
             context,
             token_stream,
             Operator::GreaterThanOrEqual,
         ),
-        TokenKind::And => {
+        TokenTag::AND => {
             advance_with_operator(state.expression, context, token_stream, Operator::And)
         }
-        TokenKind::Or => {
+        TokenTag::OR => {
             advance_with_operator(state.expression, context, token_stream, Operator::Or)
         }
 
-        TokenKind::ExclusiveRange => {
+        TokenTag::EXCLUSIVE_RANGE => {
             advance_with_operator(state.expression, context, token_stream, Operator::Range)
         }
 
-        // -------------------------------
-        //  Unexpected tokens
-        // -------------------------------
-        TokenKind::Wildcard => Err(unexpected_token_at_current(token_stream, token).into()),
+        TokenTag::WILDCARD => Err(unexpected_token_at_current(token_stream, token).into()),
 
-        TokenKind::TypeParameterBracket => {
+        TokenTag::TYPE_PARAMETER_BRACKET => {
             // A complete operand precedes `|`: there is no binary `|` operator. Runtime
             // `||` is the C-family `or` mistake; nested record literals are rejected.
             if matches!(state.expression.last(), Some(ExpressionRpnItem::Operand(_))) {
@@ -882,7 +857,7 @@ pub(super) fn dispatch_expression_token(
             }
         }
 
-        TokenKind::AddAssign => Err(unexpected_token_at_current(token_stream, token).into()),
+        TokenTag::ADD_ASSIGN => Err(unexpected_token_at_current(token_stream, token).into()),
 
         _ => {
             if let Some(error) =
@@ -897,7 +872,6 @@ pub(super) fn dispatch_expression_token(
 }
 
 fn dispatch_delimiter_token(
-    token: TokenKind,
     token_tag: TokenTag,
     token_stream: &mut AstCursor,
     state: &mut ExpressionDispatchState<'_>,
@@ -906,7 +880,7 @@ fn dispatch_delimiter_token(
     if state.expression.is_empty() {
         match token_tag {
             TokenTag::COMMA | TokenTag::ARROW => {
-                return Err(unexpected_token_at_current(token_stream, token).into());
+                return Err(unexpected_token_at_current(token_stream, token_tag).into());
             }
 
             _ => {}
@@ -928,7 +902,7 @@ fn dispatch_delimiter_token(
 //  Close parenthesis
 // -------------------------------
 fn dispatch_close_parenthesis(
-    token: TokenKind,
+    token: TokenTag,
     token_stream: &mut AstCursor,
     state: &mut ExpressionDispatchState<'_>,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
@@ -951,13 +925,10 @@ fn dispatch_newline(
     context: &ScopeContext,
     state: &mut ExpressionDispatchState<'_>,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    let previous_token = token_stream
-        .position()
-        .checked_sub(1)
-        .and_then(|previous| token_stream.token_kind_at(previous))
-        .or_else(|| token_stream.previous_token().cloned())
-        .unwrap_or(TokenKind::Newline);
-    let previous_tag = previous_token.token_tag();
+    let previous_tag = token_stream
+        .previous()
+        .map(|token| token.tag())
+        .unwrap_or(TokenTag::NEWLINE);
     if state.consume_closing_parenthesis
         || (previous_tag.continues_expression()
             && !matches!(
@@ -995,7 +966,7 @@ fn dispatch_newline(
 }
 
 fn dispatch_is_token(
-    token: TokenKind,
+    token: TokenTag,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -1041,7 +1012,7 @@ fn dispatch_is_token(
 /// WHY: cast is a prefix keyword whose meaning depends on the receiver type, so it is handled
 ///      directly by the dispatcher rather than the general operator or call machinery.
 fn parse_cast_expression(
-    token: TokenKind,
+    token: TokenTag,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -1094,12 +1065,12 @@ fn parse_cast_expression(
     };
 
     let cast_span = Some(token_stream.current_span());
-    let propagate = matches!(token_stream.current_token_kind(), TokenKind::CastBang);
+    let propagate = token == TokenTag::CAST_BANG;
     token_stream.advance();
 
     // Attached `cast!` is a lexical token. A standalone `!` after `cast` is a
     // separated spelling and must not be treated as propagation.
-    if token_stream.current_token_kind() == &TokenKind::Bang {
+    if token_stream.current_tag() == TokenTag::BANG {
         return Err(CompilerDiagnostic::invalid_cast(
             InvalidCastReason::BangMustAttachToCast,
             None,
@@ -1124,7 +1095,7 @@ fn parse_cast_expression(
     )?;
 
     // `cast!` and `cast ... catch:` are mutually exclusive.
-    if propagate && token_stream.current_token_kind() == &TokenKind::Catch {
+    if propagate && token_stream.current_tag() == TokenTag::CATCH {
         return Err(CompilerDiagnostic::invalid_cast(
             InvalidCastReason::PropagationAndRecoveryConflict,
             None,
@@ -1139,7 +1110,7 @@ fn parse_cast_expression(
     let mut catch_handler = None;
     let handling = if propagate {
         CastHandling::Propagate
-    } else if token_stream.current_token_kind() == &TokenKind::Catch {
+    } else if token_stream.current_tag() == TokenTag::CATCH {
         let error_type_id =
             resolve_builtin_error_type_typed(context, operand.span, string_table)?.type_id;
         catch_handler = Some(parse_cast_catch_handling_suffix(
@@ -1235,13 +1206,13 @@ fn parse_cast_operand_expression(
     let mut depth = ExpressionBoundaryDepth::default();
     let mut catch_is_cast_suffix = false;
     while !token_stream.is_at_end() {
-        if depth.is_top_level() && token_stream.current_token_kind() == &TokenKind::Catch {
+        if depth.is_top_level() && token_stream.current_tag() == TokenTag::CATCH {
             catch_is_cast_suffix = true;
             break;
         }
-        depth.step(token_stream.current_token_kind());
-        // A malformed payload also reports `Eof`, and `Eof` is stable under `advance`.
-        if token_stream.current_token_kind() == &TokenKind::Eof {
+        depth.step_tag(token_stream.current_tag());
+        // A malformed payload is surfaced by typed readers at the consuming parser boundary.
+        if token_stream.current_tag() == TokenTag::EOF {
             break;
         }
         token_stream.advance();
@@ -1266,7 +1237,7 @@ fn parse_cast_operand_expression(
             },
             false,
         );
-        return create_expression_until(input, &[TokenKind::Catch]);
+        return create_expression_until(input, &[TokenTag::CATCH]);
     }
 
     let input = ExpressionParseInput::without_boundary_catch(

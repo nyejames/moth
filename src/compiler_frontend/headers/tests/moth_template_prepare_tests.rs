@@ -34,6 +34,7 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::pipeline::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -174,6 +175,7 @@ fn prepare_via_pipeline(source: &str) -> SourcePreparationDelta {
         span_builder: ExtendedSpanBuilder::new(),
         const_template_offset: 0,
         runtime_fragment_offset: 0,
+        compatibility_tokens: None,
     };
     let context = FrontendFilePrepareContext {
         source_files: &source_files,
@@ -252,6 +254,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         span_builder: ExtendedSpanBuilder::new(),
         const_template_offset: 0,
         runtime_fragment_offset: 0,
+        compatibility_tokens: None,
     };
     let SourcePreparationDelta { result, .. } = CompilerFrontend::prepare_file_frontend_local(
         &context,
@@ -679,7 +682,7 @@ impl MothTemplateScopeFixture {
                 .unwrap_or(SourceFileKind::Moth);
 
             let mut span_builder = ExtendedSpanBuilder::new();
-            let source = match source_kind {
+            let (source, compatibility_tokens) = match source_kind {
                 SourceFileKind::Moth => {
                     let tokens = CompilerFrontend::tokenize_source(
                         &self.source_files,
@@ -700,19 +703,33 @@ impl MothTemplateScopeFixture {
                             panic!("fixture tokenization hit infrastructure failure: {error:?}")
                         }
                     })?;
-                    FrontendFilePrepareSource::Moth {
-                        source_path,
-                        tokens: Box::new(tokens),
-                    }
+                    let identity = self
+                        .source_files
+                        .get(source_id)
+                        .expect("fixture source identity should be registered");
+                    let owner = SourceTokenOwner::new(
+                        tokens
+                            .canonical_source_tokens_arc()
+                            .expect("fixture Moth source should retain canonical tokens"),
+                        identity.logical_path,
+                        identity.canonical_os_path.as_deref().map(Path::to_path_buf),
+                    );
+                    (FrontendFilePrepareSource::Moth { owner }, Some(tokens))
                 }
-                SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
-                    source_code: source_code.as_str(),
-                    source_path,
-                },
-                SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
-                    source_code: source_code.as_str(),
-                    source_path,
-                },
+                SourceFileKind::MothTemplate => (
+                    FrontendFilePrepareSource::MothTemplate {
+                        source_code: source_code.as_str(),
+                        source_path,
+                    },
+                    None,
+                ),
+                SourceFileKind::PlainMarkdown => (
+                    FrontendFilePrepareSource::PlainMarkdown {
+                        source_code: source_code.as_str(),
+                        source_path,
+                    },
+                    None,
+                ),
             };
             let input = FrontendFilePrepareInput {
                 source,
@@ -720,6 +737,7 @@ impl MothTemplateScopeFixture {
                 span_builder,
                 const_template_offset: 0,
                 runtime_fragment_offset: 0,
+                compatibility_tokens,
             };
 
             let SourcePreparationDelta {

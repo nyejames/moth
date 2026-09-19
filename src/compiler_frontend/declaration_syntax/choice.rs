@@ -187,7 +187,10 @@ pub(crate) fn parse_choice_shell(
             }
 
             TokenTag::SYMBOL => {
-                let Some(variant_name) = token_stream.current_string_id() else {
+                let Some(variant_name) = token_stream
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
+                else {
                     return Err(CompilerError::compiler_error(
                         "symbol token is missing its string payload",
                     )

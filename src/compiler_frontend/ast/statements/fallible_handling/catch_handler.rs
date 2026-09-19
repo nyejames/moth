@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::validation::{
@@ -151,7 +151,15 @@ fn parse_catch_error_binding(
         .into());
     }
 
-    let TokenKind::Symbol(handler_name) = token_stream.current_token_kind().to_owned() else {
+    if token_stream.current_tag() != TokenTag::SYMBOL {
+        return Err(CompilerDiagnostic::invalid_fallible_handling(
+            InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
+
+    let Some(handler_name) = token_stream.current_string_id_in(string_table)? else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
             Some(token_stream.current_span()),
@@ -387,7 +395,7 @@ fn parse_inline_catch_handler_body(
         .into());
     }
 
-    if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
+    if is_missing_produced_value_boundary(token_stream.current_tag()) {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ThenRequiresValues,
             Some(token_stream.current_span()),

@@ -8,12 +8,14 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidStatementPositionReason,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, TokenKind, TokenTag, TokenizerEntryMode,
+};
 
 fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
@@ -38,20 +40,34 @@ fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
     (file_tokens, string_table)
 }
 
-fn move_to_token(tokens: &mut FileTokens, kind: TokenKind) {
-    tokens.index = tokens
+fn token_position(tokens: &FileTokens, kind: TokenKind) -> usize {
+    tokens
         .tokens
         .iter()
         .position(|token| token.kind == kind)
-        .expect("statement diagnostic fixture should contain the requested token");
+        .expect("statement diagnostic fixture should contain the requested token")
 }
 #[test]
 fn unexpected_statement_token_retains_exact_multibyte_span() {
-    let (mut tokens, mut string_table) = tokenize_source("value = \"é\"\n,\n");
-    move_to_token(&mut tokens, TokenKind::Comma);
-    let token_span = tokens.current_token().span;
-    let cursor = AstCursor::from_file_tokens(&mut tokens)
-        .expect("test token stream must expose an AST cursor");
+    let (tokens, mut string_table) = tokenize_source("value = \"é\"\n,\n");
+    let token_position = token_position(&tokens, TokenKind::Comma);
+    let owner = tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut cursor = AstCursor::from_source_tokens(
+        &owner,
+        tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(token_position)
+        .expect("the canonical cursor must seek to the requested token");
+    assert_eq!(cursor.current_tag(), TokenTag::COMMA);
+    let token_span = cursor.current_span();
     let diagnostic = unexpected_statement_token(&cursor, &mut string_table);
 
     assert!(matches!(
@@ -60,18 +76,29 @@ fn unexpected_statement_token_retains_exact_multibyte_span() {
             reason: InvalidStatementPositionReason::UnexpectedComma
         }
     ));
-    assert_eq!(
-        diagnostic.primary_span,
-        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, token_span))
-    );
+    assert_eq!(diagnostic.primary_span, Some(token_span));
 }
 #[test]
 fn unexpected_scope_close_retains_exact_multibyte_span() {
-    let (mut tokens, _string_table) = tokenize_source("value = \"é\";\n");
-    move_to_token(&mut tokens, TokenKind::End);
-    let token_span = tokens.current_token().span;
-    let cursor = AstCursor::from_file_tokens(&mut tokens)
-        .expect("test token stream must expose an AST cursor");
+    let (tokens, _string_table) = tokenize_source("value = \"é\";\n");
+    let token_position = token_position(&tokens, TokenKind::End);
+    let owner = tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut cursor = AstCursor::from_source_tokens(
+        &owner,
+        tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(token_position)
+        .expect("the canonical cursor must seek to the requested token");
+    assert_eq!(cursor.current_tag(), TokenTag::END);
+    let token_span = cursor.current_span();
     let diagnostic = unexpected_scope_close(UnexpectedScopeCloseContext::Expression, &cursor);
 
     assert!(matches!(
@@ -80,8 +107,5 @@ fn unexpected_scope_close_retains_exact_multibyte_span() {
             reason: InvalidStatementPositionReason::UnexpectedScopeCloseInExpression
         }
     ));
-    assert_eq!(
-        diagnostic.primary_span,
-        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, token_span))
-    );
+    assert_eq!(diagnostic.primary_span, Some(token_span));
 }

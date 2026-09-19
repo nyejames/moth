@@ -27,7 +27,7 @@ use crate::compiler_frontend::headers::binding_environment::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input bundle for namespace access parsing.
 ///
@@ -80,12 +80,12 @@ pub(super) fn parse_namespace_access(
     let mut current_record = root_record;
 
     loop {
-        let member_span = if matches!(token_stream.current_token_kind(), TokenKind::Eof) {
+        let member_span = if token_stream.current_tag() == TokenTag::EOF {
             dot_span
         } else {
             Some(token_stream.current_span())
         };
-        let TokenKind::Symbol(member_name) = token_stream.current_token_kind().to_owned() else {
+        if token_stream.current_tag() != TokenTag::SYMBOL {
             return Err(CompilerDiagnostic::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
@@ -94,10 +94,17 @@ pub(super) fn parse_namespace_access(
                 member_span,
             )
             .into());
-        };
+        }
+        let member_name = token_stream
+            .current_string_id_in(string_table)?
+            .ok_or_else(|| {
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "namespace member symbol had no string payload",
+                )
+            })?;
 
         let lookup = lookup_namespace_member(current_record, member_name);
-        let has_following_dot = token_stream.peek_next_token() == Some(&TokenKind::Dot);
+        let has_following_dot = token_stream.peek_next_tag() == Some(TokenTag::DOT);
 
         // Source and module public-surface records are shallow. Any attempt to descend further
         // than one member must keep using the existing `nested_traversal` diagnostic, which the

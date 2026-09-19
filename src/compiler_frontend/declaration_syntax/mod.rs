@@ -22,7 +22,7 @@ pub(crate) mod r#struct;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{
-    Token, TokenCursor, TokenKind, TokenRef, TokenTag,
+    TokenCursor, TokenPayloadOrigin, TokenRef, TokenTag,
 };
 
 pub(crate) fn cursor_current_span(cursor: &TokenCursor<'_>) -> Option<SourceSpan> {
@@ -35,38 +35,23 @@ pub(crate) mod type_syntax;
 ///
 /// WHAT: preserves parser ergonomics (`current_tag`, `advance` and newline skipping) while the
 /// backing storage is a checked `TokenCursor` over `SourceTokens`.
-/// WHY: classification uses `TokenTag`; string payloads come from the compact shape. `TokenKind`
-/// remains only for the compatibility vector lane and diagnostic constructors that still take it.
+/// WHY: classification uses `TokenTag`; typed payloads come from the canonical `TokenRef` view.
 pub(crate) struct DeclarationCursor<'a> {
     cursor: TokenCursor<'a>,
-    /// Parser position for a cursor without a compatibility lane.
-    ///
-    /// Contiguous cursors retain their canonical absolute position; segmented cursors expose the
-    /// dense sequence position used by parser APIs.
-    ///
-    /// When a parser adapter supplies `compatibility_tokens`, `index` becomes that adapter's
-    /// relative position so bounded and segmented adapters share the legacy parser contract.
+    /// Canonical parser position exposed for the declaration shell handoff.
     pub(crate) index: usize,
-    /// End of the active parser view. This is canonical for a bare contiguous cursor, logical for
-    /// a bare segmented cursor, and adapter-relative when a compatibility lane is present.
+    /// Exclusive end of the active canonical parser view.
     pub(crate) length: usize,
-    source: crate::compiler_frontend::source::SourceId,
-    current_kind: TokenKind,
     current_tag: TokenTag,
-    current_token: Option<Token>,
-    compatibility_tokens: Option<&'a [Token]>,
-    compatibility_base: usize,
-    compatibility_end: usize,
+    /// Frozen donor identity for retained foreign bodies. Payload IDs are translated only by
+    /// the explicit `*_in` accessors at the requester read boundary.
+    payload_origin: Option<TokenPayloadOrigin<'a>>,
 }
 
 impl<'a> DeclarationCursor<'a> {
     pub(crate) fn new(
         cursor: TokenCursor<'a>,
     ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
-        // SourceTokens validates every compact payload at construction/publication. Adapters
-        // validate their legacy lane when they are built, so validating the entire remaining
-        // range here would repeat that work for every declaration in a file.
-        let source = cursor.range().source();
         let index = cursor.parser_position();
         let length = cursor.parser_length();
         let current_tag = cursor.current().map(TokenRef::tag).unwrap_or(TokenTag::EOF);
@@ -74,60 +59,21 @@ impl<'a> DeclarationCursor<'a> {
             cursor,
             index,
             length,
-            source,
-            current_kind: TokenKind::Eof,
             current_tag,
-            current_token: None,
-            compatibility_tokens: None,
-            compatibility_base: 0,
-            compatibility_end: 0,
+            payload_origin: None,
         })
     }
 
-    /// Build a declaration cursor from a parser stream's canonical provenance and compatibility
-    /// lane. The lane is borrowed only for this parser handoff, never retained by a syntax shell.
-    #[cfg(test)]
-    pub(crate) fn from_file_tokens(
-        token_stream: &'a crate::compiler_frontend::tokenizer::tokens::FileTokens,
-    ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
-        let cursor = token_stream.canonical_cursor_from_current()?;
-        Self::with_compatibility_bounds(
-            cursor,
-            &token_stream.tokens,
-            token_stream.index,
-            token_stream.tokens.len(),
-        )
+    pub(crate) fn with_payload_origin(
+        mut self,
+        origin: Option<TokenPayloadOrigin<'a>>,
+    ) -> Self {
+        self.payload_origin = origin;
+        self
     }
 
-    pub(crate) fn with_compatibility_bounds(
-        cursor: TokenCursor<'a>,
-        compatibility_tokens: &'a [Token],
-        compatibility_index: usize,
-        compatibility_end: usize,
-    ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
-        if compatibility_index > compatibility_end || compatibility_end > compatibility_tokens.len()
-        {
-            return Err(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                    "declaration compatibility cursor bounds are outside its token lane",
-                ),
-            );
-        }
-        let mut declaration_cursor = Self::new(cursor)?;
-        let local_position = cursor.compatibility_position_from_start()?;
-        let compatibility_base =
-            compatibility_index
-                .checked_sub(local_position)
-                .ok_or_else(|| {
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                        "declaration compatibility cursor position precedes its canonical range",
-                    )
-                })?;
-        declaration_cursor.compatibility_tokens = Some(compatibility_tokens);
-        declaration_cursor.compatibility_base = compatibility_base;
-        declaration_cursor.compatibility_end = compatibility_end;
-        declaration_cursor.refresh();
-        Ok(declaration_cursor)
+    pub(crate) fn payload_origin(&self) -> Option<TokenPayloadOrigin<'a>> {
+        self.payload_origin
     }
 
     pub(crate) fn canonical_cursor(&self) -> TokenCursor<'a> {
@@ -138,32 +84,11 @@ impl<'a> DeclarationCursor<'a> {
         &mut self.cursor
     }
 
-    pub(crate) fn compatibility_tokens(&self) -> Option<&'a [Token]> {
-        self.compatibility_tokens
-    }
-    pub(crate) fn compatibility_index(&self) -> Option<usize> {
-        self.compatibility_tokens.map(|_| self.index)
-    }
-    pub(crate) fn token_at(&self, index: usize) -> Option<Token> {
-        let lower_bound = self.compatibility_tokens.map_or_else(
-            || self.cursor.parser_window_start(),
-            |_| self.compatibility_base,
-        );
-        if index < lower_bound || index >= self.length {
+    pub(crate) fn token_tag_at(&self, index: usize) -> Option<TokenTag> {
+        if index < self.cursor.parser_window_start() || index >= self.length {
             return None;
         }
-        if let Some(tokens) = self.compatibility_tokens {
-            return tokens.get(index).cloned();
-        }
-
-        let token = self.cursor.parser_token_at(index)?;
-        token
-            .to_token_kind()
-            .ok()
-            .map(|kind| Token::new(kind, token.span()))
-    }
-    pub(crate) fn token_kind_at(&self, index: usize) -> Option<TokenKind> {
-        self.token_at(index).map(|token| token.kind)
+        self.cursor.parser_token_at(index).map(TokenRef::tag)
     }
 
     pub(crate) fn position(&self) -> usize {
@@ -171,33 +96,8 @@ impl<'a> DeclarationCursor<'a> {
     }
 
     pub(crate) fn refresh(&mut self) {
-        if let Some(tokens) = self.compatibility_tokens {
-            let local_position = self
-                .cursor
-                .compatibility_position_from_start()
-                .expect("validated declaration cursor must have a valid compatibility position");
-            self.index = self
-                .compatibility_base
-                .checked_add(local_position)
-                .expect("declaration compatibility cursor index must fit usize");
-            self.length = self.compatibility_end;
-            self.current_token = (self.index < self.compatibility_end)
-                .then(|| tokens.get(self.index))
-                .flatten()
-                .cloned();
-            self.current_kind = self
-                .current_token
-                .as_ref()
-                .map(|token| token.kind.clone())
-                .unwrap_or(TokenKind::Eof);
-            self.current_tag = self.current_kind.token_tag();
-            return;
-        }
-
         self.index = self.cursor.parser_position();
         self.length = self.cursor.parser_length();
-        self.current_token = None;
-        self.current_kind = TokenKind::Eof;
         self.current_tag = self
             .cursor
             .current()
@@ -209,34 +109,11 @@ impl<'a> DeclarationCursor<'a> {
         self.current_tag
     }
 
-    pub(crate) fn current_string_id(&self) -> Option<StringId> {
-        if self.current_tag != TokenTag::SYMBOL {
-            return None;
-        }
-        if self.compatibility_tokens.is_some() {
-            return match &self.current_kind {
-                TokenKind::Symbol(name) => Some(*name),
-                _ => None,
-            };
-        }
-        self.cursor.current().and_then(TokenRef::string_id)
-    }
-
     pub(crate) fn current_span(&self) -> Option<SourceSpan> {
-        if let Some(token) = &self.current_token {
-            return Some(SourceSpan::new(self.source, token.span));
-        }
         self.cursor.current().map(TokenRef::source_span)
     }
 
     pub(crate) fn peek_next_tag(&self) -> Option<TokenTag> {
-        if let Some(tokens) = self.compatibility_tokens {
-            let next_index = self.index.checked_add(1)?;
-            return (next_index < self.compatibility_end)
-                .then(|| tokens.get(next_index))
-                .flatten()
-                .map(|token| token.kind.token_tag());
-        }
         let token = if self.cursor.is_segmented() {
             self.cursor.parser_peek_next()
         } else {
@@ -245,25 +122,107 @@ impl<'a> DeclarationCursor<'a> {
         Some(token.tag())
     }
 
-    pub(crate) fn peek_next_string_id(&self) -> Option<StringId> {
-        if let Some(tokens) = self.compatibility_tokens {
-            let next_index = self.index.checked_add(1)?;
-            if next_index >= self.compatibility_end {
-                return None;
-            }
-            return match tokens.get(next_index).map(|token| &token.kind) {
-                Some(TokenKind::Symbol(name)) => Some(*name),
-                _ => None,
-            };
+    /// Borrow the current canonical token without materialising a wide payload.
+    pub(crate) fn current_token_ref(&self) -> Option<TokenRef<'a>> {
+        self.cursor.current()
+    }
+
+    fn string_id_in(
+        &self,
+        token: TokenRef<'a>,
+        destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+        let Some(id) = token.string_id() else {
+            return Ok(None);
+        };
+        let Some(origin) = self.payload_origin else {
+            return Ok(Some(id));
+        };
+        let spelling = origin.strings.try_resolve(id).ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
+                "donor string handle {id:?} is outside its issuing frozen table"
+            ))
+        })?;
+        Ok(Some(destination.intern(spelling)))
+    }
+
+    /// Read the current symbol payload in the requester's string-table domain.
+    pub(crate) fn current_string_id_in(
+        &self,
+        destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+        if self.current_tag != TokenTag::SYMBOL {
+            return Ok(None);
         }
-        let token = if self.cursor.is_segmented() {
+        let token = self.current_token_ref().ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "symbol token is missing its canonical source view",
+            )
+        })?;
+        if token.string_id().is_none() {
+            return Err(
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "canonical symbol token is missing its payload",
+                ),
+            );
+        }
+        self.string_id_in(token, destination)
+    }
+
+    /// Read the next symbol payload in the requester's string-table domain.
+    pub(crate) fn peek_next_string_id_in(
+        &self,
+        destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+        if self.peek_next_tag() != Some(TokenTag::SYMBOL) {
+            return Ok(None);
+        }
+        let token = self.peek_next_token_ref().ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "next symbol token is missing its canonical source view",
+            )
+        })?;
+        if token.string_id().is_none() {
+            return Err(
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "canonical next symbol token is missing its payload",
+                ),
+            );
+        }
+        self.string_id_in(token, destination)
+    }
+
+    /// Read a token-at symbol payload in the requester's string-table domain.
+    pub(crate) fn token_string_id_at_in(
+        &self,
+        index: usize,
+        destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+        if self.token_tag_at(index) != Some(TokenTag::SYMBOL) {
+            return Ok(None);
+        }
+        let token = self.cursor.parser_token_at(index).ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "symbol token-at is missing its canonical source view",
+            )
+        })?;
+        if token.string_id().is_none() {
+            return Err(
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "canonical token-at symbol is missing its payload",
+                ),
+            );
+        }
+        self.string_id_in(token, destination)
+    }
+
+    /// Borrow the next canonical token without materialising a wide payload.
+    pub(crate) fn peek_next_token_ref(&self) -> Option<TokenRef<'a>> {
+        if self.cursor.is_segmented() {
             self.cursor.parser_peek_next()
         } else {
             self.cursor.peek_next()
-        }?;
-        (token.tag() == TokenTag::SYMBOL)
-            .then(|| token.string_id())
-            .flatten()
+        }
     }
 
     pub(crate) fn advance(&mut self) {

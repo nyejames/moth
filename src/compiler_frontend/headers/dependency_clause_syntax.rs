@@ -17,8 +17,6 @@ use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-#[cfg(test)]
-use crate::compiler_frontend::tokenizer::tokens::Token;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::utilities::token_scan::{ScannedToken, TokenFactView};
 use rustc_hash::FxHashSet;
@@ -145,20 +143,6 @@ pub struct ScannedDependencyClause {
     pub binding: ScannedDependencyBinding,
 }
 
-#[cfg(test)]
-pub(crate) fn parse_dependency_clause(
-    tokens: &[Token],
-    start_index: usize,
-    path_syntax: &PathSyntaxTable,
-    source_id: SourceId,
-) -> DependencyClauseResult<(ScannedDependencyClause, usize)> {
-    parse_dependency_clause_scanned(
-        TokenFactView::from_slice(tokens),
-        start_index,
-        path_syntax,
-        source_id,
-    )
-}
 
 /// Canonical-source dependency-clause scan.
 ///

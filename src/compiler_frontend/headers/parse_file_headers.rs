@@ -22,7 +22,9 @@ use crate::compiler_frontend::headers::constant_dependencies::{
     ConstantDependencyInput, add_constant_initializer_dependencies,
 };
 use crate::compiler_frontend::headers::dependency_canonicalization::canonicalize_local_ordering_hints;
-use crate::compiler_frontend::headers::file_parser::parse_headers_in_file;
+use crate::compiler_frontend::headers::file_parser::{
+    finish_file_output, parse_headers_in_file,
+};
 use crate::compiler_frontend::headers::public_exports::build_public_exports;
 use crate::compiler_frontend::headers::symbol_collection::build_module_symbols;
 pub(crate) use crate::compiler_frontend::headers::types::SourcePreparationDelta;
@@ -36,7 +38,10 @@ use crate::compiler_frontend::headers::types::{HeaderParseContext, HeaderParseFa
 // HeaderExportMode is re-exported for focused AST tests that construct Header values with
 // explicit export modes. Production code calls HeaderExportMode::is_public() through the
 // header field, so this re-export is only reached from test modules.
-use crate::compiler_frontend::declaration_syntax::build_config_contract::normalize_source_build_config_contract;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    normalize_source_build_config_contract_from_token,
+    normalize_source_build_config_contract_non_primitive,
+};
 #[cfg(test)]
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -48,7 +53,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, TokenCursor, TokenKind, TokenRange, TokenTag,
+    FileTokens, SourceTokens, TokenCursor, TokenRange, TokenTag,
 };
 use rustc_hash::FxHashMap;
 use std::mem;
@@ -135,7 +140,46 @@ pub fn parse_file_headers_with_table(
         const_template_offset,
         runtime_fragment_offset,
     };
-    let file_output = parse_headers_in_file(file_tokens, file_id, &mut parse_context);
+    let parsed = {
+        let canonical = file_tokens
+            .source_tokens()
+            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+        if canonical.source() != file_id {
+            return Err(FileFrontendPrepareFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "header parse source token owner does not match its file identity",
+                ),
+            ));
+        }
+        let range = canonical.full_range().map_err(|error| {
+            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "header parse source range could not be constructed: {error:?}",
+            )))
+        })?;
+        let mut cursor = canonical.cursor(range).map_err(|error| {
+            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "header parse source cursor could not be constructed: {error:?}",
+            )))
+        })?;
+        parse_headers_in_file(
+            &mut cursor,
+            file_id,
+            file_tokens.src_path,
+            canonical.len(),
+            &mut parse_context,
+        )
+        .map(|state| (state, cursor.position()))
+    };
+    let file_output = match parsed {
+        Ok((state, end_index)) => finish_file_output(
+            file_tokens,
+            file_id,
+            end_index,
+            &mut parse_context,
+            state,
+        ),
+        Err(error) => Err(error),
+    };
     capture_preparation_spans(file_output, file_id)
 }
 
@@ -596,7 +640,7 @@ fn collect_source_build_config_contracts(
                 continue;
             };
 
-            let initializer = if let Some(range) = declaration.initializer_range {
+            let normalized = if let Some(range) = declaration.initializer_range {
                 let source = source_tokens.ok_or_else(|| {
                     HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
                         "source config initializer has no canonical source token owner",
@@ -612,35 +656,42 @@ fn collect_source_build_config_contracts(
                         "source config initializer range is empty",
                     ))
                 })?;
-                let kind = if range.len() == 1 {
-                    token.to_token_kind().map_err(|error| {
-                        HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
-                            format!("source config initializer token is malformed: {error:?}"),
-                        ))
-                    })?
+                if range.len() == 1 {
+                    normalize_source_build_config_contract_from_token(
+                        name,
+                        name_span,
+                        qualifier,
+                        Some(token),
+                        string_table,
+                    )
                 } else {
-                    // Source config defaults are deliberately limited to one primitive token.
-                    // Feed the existing normalizer's non-primitive path instead of silently
-                    // accepting only the first token of a full expression.
-                    TokenKind::Assign
-                };
-                Some((kind, token.source_span()))
+                    normalize_source_build_config_contract_non_primitive(
+                        name,
+                        name_span,
+                        qualifier,
+                        token.source_span(),
+                        string_table,
+                    )
+                }
             } else {
-                None
+                normalize_source_build_config_contract_from_token(
+                    name,
+                    name_span,
+                    qualifier,
+                    None,
+                    string_table,
+                )
             };
 
-            match normalize_source_build_config_contract(
-                name,
-                name_span,
-                qualifier,
-                initializer,
-                string_table,
-            ) {
+            match normalized {
                 Ok(contract) => contracts.push(contract),
-                Err(mut diagnostic) => {
+                Err(HeaderParseFailure::Diagnostic(mut diagnostic)) => {
                     capture(output.file_id, &mut diagnostic)
                         .map_err(HeaderPreparationFailure::Infrastructure)?;
                     diagnostics.push(diagnostic);
+                }
+                Err(HeaderParseFailure::Infrastructure(error)) => {
+                    return Err(HeaderPreparationFailure::Infrastructure(error));
                 }
             }
         }

@@ -27,7 +27,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -48,15 +48,15 @@ pub struct ProducedValuesParseInput<'a, 'b, 'tokens> {
 }
 
 /// Returns whether the current token proves that no produced value was authored.
-pub(crate) fn is_missing_produced_value_boundary(kind: &TokenKind) -> bool {
+pub(crate) fn is_missing_produced_value_boundary(tag: TokenTag) -> bool {
     matches!(
-        kind,
-        TokenKind::Else
-            | TokenKind::Eof
-            | TokenKind::End
-            | TokenKind::Comma
-            | TokenKind::CloseParenthesis
-            | TokenKind::CloseCurly
+        tag,
+        TokenTag::ELSE
+            | TokenTag::EOF
+            | TokenTag::END
+            | TokenTag::COMMA
+            | TokenTag::CLOSE_PARENTHESIS
+            | TokenTag::CLOSE_CURLY
     )
 }
 
@@ -133,7 +133,7 @@ pub fn parse_produced_values_typed<'a, 'b, 'tokens>(
             if let DiagnosticPayload::InvalidReturnShape {
                 reason: InvalidReturnShapeReason::TooFewReturnValues { expected_count, .. },
             } = &diagnostic.payload
-                && is_expression_start_token(token_stream.current_token_kind())
+                && is_expression_start_tag(token_stream.current_tag())
             {
                 return Err(CompilerDiagnostic::invalid_return_shape(
                     InvalidReturnShapeReason::TooManyReturnValues {
@@ -150,7 +150,7 @@ pub fn parse_produced_values_typed<'a, 'b, 'tokens>(
     };
 
     // Explicit too-many check: comma after the expected count means an extra value follows.
-    if token_stream.current_token_kind() == &TokenKind::Comma {
+    if token_stream.current_tag() == TokenTag::COMMA {
         return Err(CompilerDiagnostic::invalid_return_shape(
             InvalidReturnShapeReason::TooManyReturnValues {
                 expected_count: target.result_type_ids.len(),
@@ -216,7 +216,7 @@ fn parse_single_inferred_declaration_value(
     );
     let expression = create_expression_with_trailing_newline_policy(input)?;
 
-    if token_stream.current_token_kind() == &TokenKind::Comma {
+    if token_stream.current_tag() == TokenTag::COMMA {
         return Err(CompilerDiagnostic::invalid_return_shape(
             InvalidReturnShapeReason::TooManyReturnValues { expected_count: 1 },
             Some(token_stream.current_span()),
@@ -287,7 +287,7 @@ pub(crate) fn parse_fixed_arity_inferred_values(
         values.push(expression);
 
         if index + 1 < arity {
-            if token_stream.current_token_kind() != &TokenKind::Comma {
+            if token_stream.current_tag() != TokenTag::COMMA {
                 return Err(CompilerDiagnostic::invalid_return_shape(
                     InvalidReturnShapeReason::TooFewReturnValues {
                         expected_count: arity,
@@ -301,7 +301,7 @@ pub(crate) fn parse_fixed_arity_inferred_values(
         }
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Comma {
+    if token_stream.current_tag() == TokenTag::COMMA {
         return Err(CompilerDiagnostic::invalid_return_shape(
             InvalidReturnShapeReason::TooManyReturnValues {
                 expected_count: arity,
@@ -356,26 +356,26 @@ fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismat
 // stopped may actually be the start of an extra produced value (user forgot a comma).
 // Distinguishing expression starts from statement keywords or terminators lets us report
 // TooManyReturnValues instead of the misleading TooFewReturnValues.
-fn is_expression_start_token(token: &TokenKind) -> bool {
+fn is_expression_start_tag(tag: TokenTag) -> bool {
     matches!(
-        token,
-        TokenKind::Symbol(_)
-            | TokenKind::NumericLiteral(_)
-            | TokenKind::StringSliceLiteral(_)
-            | TokenKind::RawStringLiteral(_)
-            | TokenKind::CharLiteral(_)
-            | TokenKind::BoolLiteral(_)
-            | TokenKind::NoneLiteral
-            | TokenKind::OpenCurly
-            | TokenKind::OpenParenthesis
-            | TokenKind::TemplateHead
-            | TokenKind::DatatypeInt
-            | TokenKind::DatatypeFloat
-            | TokenKind::DatatypeBool
-            | TokenKind::DatatypeString
-            | TokenKind::DatatypeChar
-            | TokenKind::Subtract
-            | TokenKind::Copy
-            | TokenKind::Mutable
+        tag,
+        TokenTag::SYMBOL
+            | TokenTag::NUMERIC_LITERAL
+            | TokenTag::STRING_SLICE_LITERAL
+            | TokenTag::RAW_STRING_LITERAL
+            | TokenTag::CHAR_LITERAL
+            | TokenTag::BOOL_LITERAL
+            | TokenTag::NONE_LITERAL
+            | TokenTag::OPEN_CURLY
+            | TokenTag::OPEN_PARENTHESIS
+            | TokenTag::TEMPLATE_HEAD
+            | TokenTag::DATATYPE_INT
+            | TokenTag::DATATYPE_FLOAT
+            | TokenTag::DATATYPE_BOOL
+            | TokenTag::DATATYPE_STRING
+            | TokenTag::DATATYPE_CHAR
+            | TokenTag::SUBTRACT
+            | TokenTag::COPY
+            | TokenTag::MUTABLE
     )
 }

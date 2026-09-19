@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 /// Prepare one owned compiler-semantic source row directly into the module's input lane.
 ///
@@ -101,13 +102,13 @@ fn prepare_owned_source_text(
     path_fork: &mut PathInternerFork,
     builder: &mut ExtendedSpanBuilder,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
-    let source = match kind {
+    let (source, compatibility_tokens) = match kind {
         SourceFileKind::Moth => {
             let path = source_files
                 .get(source_id)
                 .expect("owned source identity must be registered")
                 .logical_path;
-            let tokens = tokenize(
+            let tokenized = tokenize(
                 text,
                 path,
                 TokenizerEntryMode::SourceFile,
@@ -125,13 +126,32 @@ fn prepare_owned_source_text(
                     SourceDiscoveryError::Infrastructure(error)
                 }
             })?;
-            PreparedSourceKind::Moth {
-                tokens: Box::new(tokens),
-            }
+            let canonical_tokens = tokenized
+                .canonical_source_tokens_arc()
+                .map_err(SourceDiscoveryError::Infrastructure)?;
+            let identity = source_files
+                .get(source_id)
+                .expect("owned source identity must be registered");
+            let owner = SourceTokenOwner::new(
+                canonical_tokens,
+                identity.logical_path,
+                identity
+                    .canonical_os_path
+                    .as_ref()
+                    .map(|path| path.to_path_buf()),
+            );
+            (
+                PreparedSourceKind::Moth { owner },
+                Some(tokenized),
+            )
         }
         SourceFileKind::MothTemplate | SourceFileKind::PlainMarkdown => {
-            PreparedSourceKind::Deferred
+            (PreparedSourceKind::Deferred, None)
         }
     };
-    Ok(PreparedSourceInput { source_id, source })
+    Ok(PreparedSourceInput {
+        source_id,
+        source,
+        compatibility_tokens,
+    })
 }

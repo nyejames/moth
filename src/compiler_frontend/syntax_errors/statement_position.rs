@@ -10,29 +10,28 @@
 use super::common_syntax_mistake;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerDiagnostic};
-use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Check for common statement-position mistakes before falling back to a generic error.
 ///
 /// Called from the main body dispatch loop when a token does not match any known
 /// statement start.
 pub(crate) fn check_statement_common_mistake(
-    token: &TokenKind,
+    token_tag: TokenTag,
     token_stream: &AstCursor,
 ) -> Option<CompilerDiagnostic> {
     let location = token_stream.current_span();
 
-    match token {
+    match token_tag {
         // `//` is integer division; comments use `--`
-        TokenKind::IntDivide => Some(common_syntax_mistake(
+        TokenTag::INT_DIVIDE => Some(common_syntax_mistake(
             CommonSyntaxMistakeReason::StatementLineComment,
             location,
         )),
 
         // `!` in statement position (not fallible handling)
-        TokenKind::Bang => Some(common_syntax_mistake(
+        TokenTag::BANG => Some(common_syntax_mistake(
             CommonSyntaxMistakeReason::BooleanBangNegation,
             location,
         )),

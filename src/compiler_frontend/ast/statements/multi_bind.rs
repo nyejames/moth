@@ -42,7 +42,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::has_top_level_comma_before_statement_end;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -97,7 +97,7 @@ pub(crate) fn parse_multi_bind_statement(
         path_fork,
     )?;
 
-    let rhs_expression = if token_stream.current_token_kind() == &TokenKind::If {
+    let rhs_expression = if token_stream.current_tag() == TokenTag::IF {
         match try_parse_multi_bind_value_block(
             token_stream,
             &rhs_context,
@@ -215,7 +215,7 @@ fn parse_target_list(
     let mut continuation_comma = None;
 
     loop {
-        if token_stream.current_token_kind() == &TokenKind::This {
+        if token_stream.current_tag() == TokenTag::THIS {
             return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                 InvalidMultiBindReason::ThisTargetReserved,
                 Some(token_stream.current_span()),
@@ -223,7 +223,19 @@ fn parse_target_list(
             .into());
         }
 
-        let TokenKind::Symbol(name) = token_stream.current_token_kind().to_owned() else {
+        if token_stream.current_tag() != TokenTag::SYMBOL {
+            return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+                if continuation_comma.is_some() {
+                    InvalidMultiBindReason::MissingTargetAfterComma
+                } else {
+                    InvalidMultiBindReason::ExpectedTargetName
+                },
+                continuation_comma.unwrap_or_else(|| Some(token_stream.current_span())),
+            )
+            .into());
+        }
+
+        let Some(name) = token_stream.current_string_id_in(string_table)? else {
             return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                 if continuation_comma.is_some() {
                     InvalidMultiBindReason::MissingTargetAfterComma
@@ -252,20 +264,23 @@ fn parse_target_list(
         validate_target_mutability(&target_syntax, string_table)?;
         parsed_targets.push(target_syntax);
 
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
+        match token_stream.current_tag() {
+            TokenTag::COMMA => {
                 saw_comma = true;
                 let comma_location = Some(token_stream.current_span());
                 continuation_comma = Some(comma_location);
                 token_stream.advance();
 
-                while token_stream.current_token_kind() == &TokenKind::Newline {
+                while token_stream.current_tag() == TokenTag::NEWLINE {
                     token_stream.advance();
                 }
 
                 if matches!(
-                    token_stream.current_token_kind(),
-                    TokenKind::Comma | TokenKind::Assign | TokenKind::End | TokenKind::Eof
+                    token_stream.current_tag(),
+                    TokenTag::COMMA
+                        | TokenTag::ASSIGN
+                        | TokenTag::END
+                        | TokenTag::EOF
                 ) {
                     return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                         InvalidMultiBindReason::MissingTargetAfterComma,
@@ -275,9 +290,9 @@ fn parse_target_list(
                 }
             }
 
-            TokenKind::Assign => break,
+            TokenTag::ASSIGN => break,
 
-            TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
                 return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                     InvalidMultiBindReason::MissingAssignmentOperator,
                     Some(token_stream.current_span()),
@@ -352,8 +367,8 @@ fn parse_multi_bind_rhs_expression(
     path_fork: &mut PathInternerFork,
 ) -> MultiBindResult<Expression> {
     if matches!(
-        token_stream.current_token_kind(),
-        TokenKind::Newline | TokenKind::End | TokenKind::Eof
+        token_stream.current_tag(),
+        TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF
     ) {
         return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
             InvalidMultiBindReason::MissingRightHandExpression,
@@ -373,7 +388,7 @@ fn parse_multi_bind_rhs_expression(
         path_fork,
     )?;
 
-    if token_stream.current_token_kind() == &TokenKind::Comma {
+    if token_stream.current_tag() == TokenTag::COMMA {
         return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
             InvalidMultiBindReason::MultipleRightHandExpressions,
             Some(token_stream.current_span()),

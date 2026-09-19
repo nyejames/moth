@@ -16,7 +16,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TokenIndex, TokenRange, TokenRef, TokenTag,
+    SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::{
     InitializerReference, NestingDepth, TokenFactView, collect_scanned_symbol_references,
@@ -25,14 +25,12 @@ use crate::projects::settings::TOP_LEVEL_CONST_TEMPLATE_NAME;
 use std::collections::HashSet;
 
 fn canonical_token_at<'a>(
-    token_stream: &'a FileTokens,
+    canonical: &'a SourceTokens,
+    file_id: SourceId,
     index: usize,
     owner: &'static str,
 ) -> Result<TokenRef<'a>, HeaderParseFailure> {
-    let canonical = token_stream
-        .source_tokens()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    if canonical.source() != token_stream.file_id {
+    if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
             CompilerError::compiler_error(format!(
                 "{owner} source token owner does not match its file identity"
@@ -53,9 +51,9 @@ fn canonical_token_at<'a>(
 
 pub(super) fn create_top_level_const_template(
     scope: PathId,
-    opening_index: usize,
+    opening: TokenRef<'_>,
     const_template_number: usize,
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
     context: &mut HeaderBuildContext<'_>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<Header, HeaderParseFailure> {
@@ -63,47 +61,36 @@ pub(super) fn create_top_level_const_template(
         "{TOP_LEVEL_CONST_TEMPLATE_NAME}{const_template_number}"
     ));
     let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
-    let source_start = SourceSpan::new(token_stream.file_id, LocalSpan::source_start());
-    let first_body_index = opening_index.checked_add(1).ok_or_else(|| {
+    let file_id = opening.source();
+    let source_start = SourceSpan::new(file_id, LocalSpan::source_start());
+    let first_body_index = opening.index().index().checked_add(1).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "const-template first body index exceeded the source token index space",
         ))
     })?;
+    let canonical = cursor.source_tokens();
     let start_span = canonical_token_at(
-        token_stream,
+        canonical,
+        file_id,
         first_body_index,
         "const-template first body token",
     )?
     .source_span();
     let closing_bracket = context.string_table.intern("]");
-    let post_close_index =
-        crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region_from_source(
-            token_stream,
-            opening_index,
-            |_token| {},
-            |span| {
-                HeaderParseFailure::Diagnostic(CompilerDiagnostic::unexpected_end_of_file(
-                    Some(closing_bracket),
-                    Some(span),
-                ))
-            },
-            HeaderParseFailure::Infrastructure,
-        )?;
-
-    let opening = TokenIndex::try_from_index(opening_index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "const-template opening exceeded the source token index space",
-        ))
-    })?;
-    let post_close = TokenIndex::try_from_index(post_close_index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "const-template post-close index exceeded the source token index space",
-        ))
-    })?;
-    let canonical = token_stream
-        .source_tokens()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    let template_range = canonical.range(opening, post_close).map_err(|error| {
+    let post_close = crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region_from_source(
+        cursor,
+        opening,
+        |_token| {},
+        |span| {
+            HeaderParseFailure::Diagnostic(CompilerDiagnostic::unexpected_end_of_file(
+                Some(closing_bracket),
+                Some(span),
+            ))
+        },
+        HeaderParseFailure::Infrastructure,
+    )?;
+    let opening_index = opening.index();
+    let template_range = canonical.range(opening_index, post_close).map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "const-template retained range exceeded its source owner: {error:?}",
         )))
@@ -137,10 +124,15 @@ pub(super) fn create_top_level_const_template(
         }
     }
 
-    let end_span = canonical_token_at(token_stream, post_close_index, "const-template post-close")?
+    let end_span = canonical
+        .token(post_close)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "const-template post-close index exceeded its source owner: {error:?}",
+            )))
+        })?
         .source_span();
-    let condition_references =
-        collect_template_if_condition_references(template_facts, token_stream.file_id);
+    let condition_references = collect_template_if_condition_references(template_facts, file_id);
 
     let full_name = context
         .path_fork
@@ -164,9 +156,15 @@ pub(super) fn create_top_level_const_template(
             ),
         })?;
 
-    let mut body_end = post_close_index;
-    let post_close_tag =
-        canonical_token_at(token_stream, post_close_index, "const-template post-close")?.tag();
+    let mut body_end = post_close.index();
+    let post_close_tag = canonical
+        .token(post_close)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "const-template post-close index exceeded its source owner: {error:?}",
+            )))
+        })?
+        .tag();
     if post_close_tag == TokenTag::EOF {
         body_end = body_end.checked_add(1).ok_or_else(|| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
@@ -174,12 +172,13 @@ pub(super) fn create_top_level_const_template(
             ))
         })?;
     } else if post_close_tag == TokenTag::NEWLINE {
-        let next_index = post_close_index.checked_add(1).ok_or_else(|| {
+        let next_index = post_close.index().checked_add(1).ok_or_else(|| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
                 "const-template newline follower exceeded the source token index space",
             ))
         })?;
-        if canonical_token_at(token_stream, next_index, "const-template EOF follower")?.tag()
+        if canonical_token_at(canonical, file_id, next_index, "const-template EOF follower")?
+            .tag()
             == TokenTag::EOF
         {
             body_end = body_end.checked_add(2).ok_or_else(|| {
@@ -194,18 +193,16 @@ pub(super) fn create_top_level_const_template(
             "const-template body end exceeded the source token index space",
         ))
     })?;
-    let retained_range = TokenRange::new(token_stream.file_id, opening, end).ok_or_else(|| {
+    let retained_range = TokenRange::new(file_id, opening_index, end).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
             "const-template body range was reversed",
         ))
     })?;
-    canonical
-        .range(retained_range.start(), retained_range.end())
-        .map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "const-template body range exceeded its source owner: {error:?}",
-            )))
-        })?;
+    canonical.range(retained_range.start(), retained_range.end()).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "const-template body range exceeded its source owner: {error:?}",
+        )))
+    })?;
 
     Ok(Header {
         kind: HeaderKind::ConstTemplate {

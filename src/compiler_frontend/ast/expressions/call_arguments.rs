@@ -33,7 +33,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
@@ -182,7 +182,7 @@ fn parse_call_arguments_inner(
         takes_no_arguments: true,
     } = argument_syntax
     {
-        if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+        if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
             return Err(CompilerDiagnostic::invalid_builtin_call(
                 InvalidBuiltinCallReason::MissingParentheses,
                 Some(member_name),
@@ -194,7 +194,7 @@ fn parse_call_arguments_inner(
         token_stream.advance();
         token_stream.skip_newlines();
 
-        if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
+        if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
             return Err(CompilerDiagnostic::invalid_builtin_call(
                 InvalidBuiltinCallReason::TakesNoArguments,
                 Some(member_name),
@@ -210,10 +210,15 @@ fn parse_call_arguments_inner(
     // ------------------------
     //  Consume opening paren
     // ------------------------
-    if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+    if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
         let found = match token_stream.current() {
-            Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-            None => Some(DiagnosticToken::from(token_stream.current_token_kind())),
+            Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "call opening-delimiter diagnostic",
+                )
+            })?),
+            None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
         };
         return Err(CompilerDiagnostic::expected_token_from_tags(
             TokenTag::OPEN_PARENTHESIS,
@@ -226,7 +231,7 @@ fn parse_call_arguments_inner(
     token_stream.advance();
     token_stream.skip_newlines();
 
-    if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
+    if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
         token_stream.advance();
         return Ok(Vec::new());
     }
@@ -239,7 +244,7 @@ fn parse_call_arguments_inner(
     // ------------------------
     loop {
         token_stream.skip_newlines();
-        if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
+        if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
             token_stream.advance();
             break;
         }
@@ -247,24 +252,23 @@ fn parse_call_arguments_inner(
         let argument_span = current_span(token_stream);
 
         reject_simple_generic_argument_type_ascription(token_stream, syntax_context)?;
+        let lookahead_base = token_stream.position();
 
         // Detect named-target syntax (`name = expr`) or reject unsupported variants.
         // Pure lookahead only: probe deeper tokens without advancing the stream.
-        let lookahead_base = token_stream.position();
         let lookahead_third_is_assign =
-            lookahead_kind_at(token_stream, lookahead_base.saturating_add(2)).as_ref()
-                == Some(&TokenKind::Assign);
+            lookahead_tag_at(token_stream, lookahead_base.saturating_add(2))
+                == Some(TokenTag::ASSIGN);
         let lookahead_third_is_close_paren =
-            lookahead_kind_at(token_stream, lookahead_base.saturating_add(2))
-                == Some(TokenKind::CloseParenthesis);
+            lookahead_tag_at(token_stream, lookahead_base.saturating_add(2))
+                == Some(TokenTag::CLOSE_PARENTHESIS);
         let lookahead_fourth_is_assign =
-            lookahead_kind_at(token_stream, lookahead_base.saturating_add(3))
-                == Some(TokenKind::Assign);
-        let named_target = match token_stream.current_token_kind() {
+            lookahead_tag_at(token_stream, lookahead_base.saturating_add(3))
+                == Some(TokenTag::ASSIGN);
+        let named_target = match token_stream.current_tag() {
             // `~name = expr` is not supported.
-            TokenKind::Mutable
-                if next_token_kind(token_stream)
-                    .is_some_and(|kind| matches!(kind, TokenKind::Symbol(_)))
+            TokenTag::MUTABLE
+                if next_token_tag(token_stream) == Some(TokenTag::SYMBOL)
                     && lookahead_third_is_assign =>
             {
                 return Err(CompilerDiagnostic::unexpected_token_from_tag(
@@ -275,11 +279,15 @@ fn parse_call_arguments_inner(
             }
 
             // Standard named argument: `name = expr`.
-            TokenKind::Symbol(name)
-                if next_token_kind(token_stream).as_ref() == Some(&TokenKind::Assign) =>
-            {
+            TokenTag::SYMBOL if next_token_tag(token_stream) == Some(TokenTag::ASSIGN) => {
                 let target_span = current_span(token_stream);
-                let target_name = *name;
+                let target_name = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                            "named argument symbol had no string payload",
+                        )
+                    })?;
                 token_stream.advance();
                 token_stream.advance();
                 token_stream.skip_newlines();
@@ -287,9 +295,8 @@ fn parse_call_arguments_inner(
             }
 
             // Parenthesized names like `(name) = expr` are not supported.
-            TokenKind::OpenParenthesis
-                if next_token_kind(token_stream)
-                    .is_some_and(|kind| matches!(kind, TokenKind::Symbol(_)))
+            TokenTag::OPEN_PARENTHESIS
+                if next_token_tag(token_stream) == Some(TokenTag::SYMBOL)
                     && lookahead_third_is_close_paren
                     && lookahead_fourth_is_assign =>
             {
@@ -305,7 +312,7 @@ fn parse_call_arguments_inner(
 
         let parameter_slot = slot_router.route(named_target.as_ref(), argument_span)?;
 
-        let (access_mode, marker_span) = if token_stream.current_token_kind() == &TokenKind::Mutable
+        let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE
         {
             let marker_span = current_span(token_stream);
             token_stream.advance();
@@ -315,12 +322,17 @@ fn parse_call_arguments_inner(
         };
 
         // A named target or access mode without a following value is an error.
-        if token_stream.current_token_kind() == &TokenKind::Comma
-            || token_stream.current_token_kind() == &TokenKind::CloseParenthesis
+        if token_stream.current_tag() == TokenTag::COMMA
+            || token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS
         {
             let found = match token_stream.current() {
-                Some(found) => DiagnosticToken::from_token_ref(found),
-                None => DiagnosticToken::from(token_stream.current_token_kind()),
+                Some(found) => DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "call argument value diagnostic",
+                    )
+                })?,
+                None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
             };
             return Err(CompilerDiagnostic::unexpected_token_from_tag(
                 found,
@@ -387,19 +399,24 @@ fn parse_call_arguments_inner(
         };
         arguments.push(argument);
 
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
+        match token_stream.current_tag() {
+            TokenTag::COMMA => {
                 token_stream.advance();
                 token_stream.skip_newlines();
             }
-            TokenKind::CloseParenthesis => {
+            TokenTag::CLOSE_PARENTHESIS => {
                 token_stream.advance();
                 break;
             }
             _ => {
                 let found = match token_stream.current() {
-                    Some(found) => DiagnosticToken::from_token_ref(found),
-                    None => DiagnosticToken::from(token_stream.current_token_kind()),
+                    Some(found) => DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "call argument separator diagnostic",
+                        )
+                    })?,
+                    None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
                 };
                 return Err(CompilerDiagnostic::unexpected_token_from_tag(
                     found,
@@ -415,23 +432,18 @@ fn parse_call_arguments_inner(
 
 /// Returns whether the current argument is exactly `none` before its call delimiter.
 ///
-/// WHAT: distinguishes the context-sensitive literal from larger expressions such as
-///      `none is optional_value`.
-/// WHY: only the bare literal needs the receiving option type during parsing. Larger expressions
-///      must keep natural inference so their result type and diagnostics stay call-owned.
 fn argument_is_bare_none(token_stream: &AstCursor) -> bool {
-    if token_stream.current_token_kind() != &TokenKind::NoneLiteral {
+    if token_stream.current_tag() != TokenTag::NONE_LITERAL {
         return false;
     }
 
     let mut next_index = token_stream.position().saturating_add(1);
-    while lookahead_kind_at(token_stream, next_index).is_some_and(|kind| kind == TokenKind::Newline)
-    {
+    while lookahead_tag_at(token_stream, next_index) == Some(TokenTag::NEWLINE) {
         next_index = next_index.saturating_add(1);
     }
 
-    lookahead_kind_at(token_stream, next_index)
-        .is_some_and(|kind| matches!(kind, TokenKind::Comma | TokenKind::CloseParenthesis))
+    lookahead_tag_at(token_stream, next_index)
+        .is_some_and(|tag| matches!(tag, TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS))
 }
 
 /// Maintains one parser-time declaration-order routing state for a call argument list.
@@ -614,19 +626,17 @@ fn known_parameter_names(expectations: &[ParameterExpectation]) -> Vec<StringId>
         .filter_map(|expectation| expectation.name)
         .collect()
 }
-/// Read-only lookahead through the canonical cursor view.
+/// Read-only tag lookahead through the canonical cursor view.
 ///
-/// WHAT: probes one token kind without advancing the stream.
-/// WHY: call-argument named-target and bare-`none` scans are pure lookahead.
-/// `AstCursor::token_kind_at` already covers both canonical and compatibility
-/// backings, so compatibility-only streams stay on the explicit lane without a
-/// separate bridge.
-fn lookahead_kind_at(token_stream: &AstCursor, index: usize) -> Option<TokenKind> {
-    token_stream.token_kind_at(index)
+/// WHAT: probes one stable token tag without advancing the stream.
+/// WHY: call-argument named-target and bare-`none` scans must not clone wide payload-bearing
+/// token values.
+fn lookahead_tag_at(token_stream: &AstCursor, index: usize) -> Option<TokenTag> {
+    token_stream.token_ref_at(index).map(|token| token.tag())
 }
 
-fn next_token_kind(token_stream: &AstCursor) -> Option<TokenKind> {
-    lookahead_kind_at(token_stream, token_stream.position().saturating_add(1))
+fn next_token_tag(token_stream: &AstCursor) -> Option<TokenTag> {
+    token_stream.token_ref_at_offset(1).map(|token| token.tag())
 }
 
 fn reject_simple_generic_argument_type_ascription(
@@ -659,34 +669,34 @@ fn reject_simple_generic_argument_type_ascription(
 /// the shared call parser and could change ordinary call errors.
 fn starts_simple_value_with_attached_type(token_stream: &AstCursor) -> bool {
     let base = token_stream.position();
-    let Some(value_kind) = lookahead_kind_at(token_stream, base) else {
+    let Some(value_tag) = lookahead_tag_at(token_stream, base) else {
         return false;
     };
-    let Some(type_kind) = lookahead_kind_at(token_stream, base.saturating_add(1)) else {
+    let Some(type_tag) = lookahead_tag_at(token_stream, base.saturating_add(1)) else {
         return false;
     };
-    let Some(boundary_kind) = lookahead_kind_at(token_stream, base.saturating_add(2)) else {
+    let Some(boundary_tag) = lookahead_tag_at(token_stream, base.saturating_add(2)) else {
         return false;
     };
 
     matches!(
-        value_kind,
-        TokenKind::NumericLiteral(_)
-            | TokenKind::StringSliceLiteral(_)
-            | TokenKind::BoolLiteral(_)
-            | TokenKind::CharLiteral(_)
-            | TokenKind::NoneLiteral
+        value_tag,
+        TokenTag::NUMERIC_LITERAL
+            | TokenTag::STRING_SLICE_LITERAL
+            | TokenTag::BOOL_LITERAL
+            | TokenTag::CHAR_LITERAL
+            | TokenTag::NONE_LITERAL
     ) && matches!(
-        type_kind,
-        TokenKind::DatatypeInt
-            | TokenKind::DatatypeFloat
-            | TokenKind::DatatypeBool
-            | TokenKind::DatatypeString
-            | TokenKind::DatatypeChar
-            | TokenKind::DatatypeNone
+        type_tag,
+        TokenTag::DATATYPE_INT
+            | TokenTag::DATATYPE_FLOAT
+            | TokenTag::DATATYPE_BOOL
+            | TokenTag::DATATYPE_STRING
+            | TokenTag::DATATYPE_CHAR
+            | TokenTag::DATATYPE_NONE
     ) && matches!(
-        boundary_kind,
-        TokenKind::Comma | TokenKind::CloseParenthesis | TokenKind::Newline
+        boundary_tag,
+        TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS | TokenTag::NEWLINE
     )
 }
 

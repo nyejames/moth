@@ -12,6 +12,7 @@
 use super::head_expressions::{
     TemplateHeadExpressionContext, push_template_head_reactive_subscription,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
@@ -24,14 +25,14 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Typed result for reactive subscription parsing.
 type ReactiveSubscriptionResult<T> = Result<T, TemplateError>;
 
 /// Parses and validates a `$(source)` template subscription.
 ///
-/// The token stream enters on `TokenKind::Reactive` and exits on the token after
+/// The token stream enters on the reactive tag and exits on the token after
 /// the closing `)`.
 pub(super) fn parse_reactive_subscription(
     token_stream: &mut AstCursor,
@@ -48,7 +49,7 @@ pub(super) fn parse_reactive_subscription(
     ));
 
     token_stream.advance();
-    if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+    if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
         return Err(with_token_span(
             token_stream,
             subscription_token_span,
@@ -62,8 +63,8 @@ pub(super) fn parse_reactive_subscription(
 
     token_stream.advance();
     let source_token = token_stream.current();
-    let source_name = match token_stream.current_token_kind() {
-        TokenKind::CloseParenthesis => {
+    let source_name = match token_stream.current_tag() {
+        TokenTag::CLOSE_PARENTHESIS => {
             return Err(with_current_token_span(
                 token_stream,
                 CompilerDiagnostic::invalid_template_structure(
@@ -74,7 +75,11 @@ pub(super) fn parse_reactive_subscription(
             .into());
         }
 
-        TokenKind::Symbol(source_name) => *source_name,
+        TokenTag::SYMBOL => token_stream
+            .current_string_id_in(string_table)?
+            .ok_or_else(|| {
+                CompilerError::compiler_error("reactive source symbol had no payload")
+            })?,
 
         _ => {
             return Err(with_current_token_span(
@@ -92,8 +97,8 @@ pub(super) fn parse_reactive_subscription(
     let source_span = Some(SourceSpan::new(token_stream.source_id(), source_token_span));
 
     token_stream.advance();
-    if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
-        let reason = if token_stream.current_token_kind() == &TokenKind::Comma {
+    if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
+        let reason = if token_stream.current_tag() == TokenTag::COMMA {
             InvalidTemplateStructureReason::ReactiveSubscriptionMultipleSources
         } else {
             InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression
@@ -107,9 +112,17 @@ pub(super) fn parse_reactive_subscription(
     }
 
     let Some(reference) = context.get_reference(&source_name) else {
-        let found = source_token
-            .map(DiagnosticToken::from_token_ref)
-            .unwrap_or_else(|| DiagnosticToken::from(TokenKind::Symbol(source_name)));
+        let found = match source_token {
+            Some(source_token) => DiagnosticToken::try_from_token_ref(source_token)
+                .map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "reactive subscription source diagnostic",
+                    )
+                })
+                .map_err(TemplateError::from)?,
+            None => DiagnosticToken::from_static_tag(TokenTag::SYMBOL),
+        };
         return Err(with_token_span(
             token_stream,
             source_token_span,

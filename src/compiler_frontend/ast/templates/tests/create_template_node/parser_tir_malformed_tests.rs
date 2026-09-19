@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
@@ -24,8 +25,18 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let context = new_constant_context(source_path, &path_fork);
 
     expect_template_diagnostic(
@@ -50,31 +61,35 @@ fn parse_template_diagnostic_with_replaced_body_token(
     let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     // Normal template-body lexing emits text, newline, nested-template, and close tokens only.
-    // Replace the retained text token to exercise the parser's defensive unexpected-token lane
-    // while keeping its authored UTF-8 span and source identity intact.
-    // The lexer output is a canonical owner, so its compatibility vector is ignored by the
-    // canonical cursor. Rebuild the mutated vector as an explicit unbounded compatibility
-    // adapter; the adapter shares the frozen path table but owns no canonical provenance,
-    // so `AstCursor` reads the replaced token.
+    // Corrupt the canonical payload in place so the parser exercises its defensive
+    // unexpected-token lane without falling back to a compatibility token vector.
     let opener_index = file_tokens.index;
-    let mut mutated_tokens = file_tokens.tokens.clone();
-    let body_token = mutated_tokens
-        .iter_mut()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("template source should contain a body token");
-    body_token.kind = TokenKind::Comma;
-    let mut file_tokens = FileTokens::new_substream(
-        &file_tokens,
-        file_tokens.src_path,
-        file_tokens.file_id,
-        mutated_tokens,
-    );
-    // `new_substream` resets the cursor to zero; restore the template-opener position so the
-    // parser starts at the same token as the unmutated fixture.
-    file_tokens.index = opener_index;
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_os_path = file_tokens.canonical_os_path.clone();
+    let mut canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    drop(file_tokens);
+    let body_index = canonical_owner
+        .shapes()
+        .iter()
+        .position(|shape| shape.tag() == TokenTag::STRING_SLICE_LITERAL)
+        .expect("template source should contain a body token");
+    Arc::get_mut(&mut canonical_owner)
+        .expect("canonical owner should be uniquely mutable before cursor construction")
+        .corrupt_payload_for_test(body_index, TokenTag::COMMA);
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        canonical_os_path,
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(opener_index)
+        .expect("template opener position must remain in the canonical range");
     let context = new_constant_context(source_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(
@@ -100,8 +115,18 @@ fn parse_template_diagnostic_with_span_builder(
     let mut file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let context = new_constant_context(source_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(

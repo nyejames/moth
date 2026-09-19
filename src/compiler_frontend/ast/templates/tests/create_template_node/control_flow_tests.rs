@@ -18,8 +18,18 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
         &mut path_fork,
     );
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut context =
         runtime_template_context(&source_path.clone(), &mut string_table, &mut path_fork);
 
@@ -183,8 +193,18 @@ fn template_else_if_option_capture_binding_is_branch_local() {
         &mut path_fork,
     );
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut context =
         runtime_template_context(&source_path.clone(), &mut string_table, &mut path_fork);
 
@@ -636,8 +656,18 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         &mut path_fork,
     );
     let card_source_path = card_file_tokens.src_path;
-    let mut card_tokens = AstCursor::from_file_tokens(&mut card_file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = card_file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut card_tokens = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        card_file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let card_context = new_constant_context(card_source_path, &path_fork);
     let card_template = Template::new(
         &mut card_tokens,
@@ -670,8 +700,18 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         &mut path_fork,
     );
     let source_path = file_tokens.src_path;
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    let canonical_owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens_for_handoff(
+        &canonical_owner,
+        file_tokens.canonical_os_path.clone(),
+        canonical_range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
 

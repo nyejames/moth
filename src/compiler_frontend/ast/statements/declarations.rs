@@ -60,7 +60,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenRange};
+use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
@@ -88,25 +88,22 @@ fn pipe_opens_value_record_at_cursor(
     if compile_time {
         return true;
     }
-    let kind_at = |probe: usize| cursor.token_kind_at(probe);
+    let tag_at = |probe: usize| cursor.token_tag_at(probe);
     let skip_newlines = |mut probe: usize| {
-        while matches!(kind_at(probe), Some(TokenKind::Newline)) {
+        while matches!(tag_at(probe), Some(TokenTag::NEWLINE)) {
             probe += 1;
         }
         probe
     };
     let mut probe = skip_newlines(pipe_index + 1);
-    if matches!(kind_at(probe), Some(TokenKind::TypeParameterBracket)) {
+    if matches!(tag_at(probe), Some(TokenTag::TYPE_PARAMETER_BRACKET)) {
         return false;
     }
-    if !matches!(kind_at(probe), Some(TokenKind::Symbol(_))) {
+    if !matches!(tag_at(probe), Some(TokenTag::SYMBOL)) {
         return false;
     }
     probe = skip_newlines(probe + 1);
-    matches!(
-        kind_at(probe),
-        Some(TokenKind::Assign) | Some(TokenKind::Comma)
-    )
+    matches!(tag_at(probe), Some(TokenTag::ASSIGN) | Some(TokenTag::COMMA))
 }
 
 /// Returns `Some(capacity)` when the parsed type is a capacity-only shorthand `{N}`.
@@ -130,8 +127,10 @@ fn initializer_starts_with_type_parameter(source: &AstCursor, range: Option<Toke
         return false;
     };
     matches!(
-        source.raw_token_kind_at(range.start().index()),
-        Some(TokenKind::TypeParameterBracket)
+        source
+            .token_ref_at(range.start().index())
+            .map(|token| token.tag()),
+        Some(TokenTag::TYPE_PARAMETER_BRACKET)
     )
 }
 
@@ -298,7 +297,7 @@ pub(crate) fn new_declaration(
     // ----------------------------
     // Function declarations are parsed eagerly here because they use
     // a dedicated signature/body syntax that does not fit value declarations.
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         if let Some(warning) = naming_warning_for_identifier(
             symbol_id,
             Some(token_stream.current_span()),
@@ -531,7 +530,7 @@ pub fn resolve_declaration_syntax(
         )?;
 
         // Shorthand requires an immediate collection literal initializer.
-        if initializer_stream.current_token_kind() != &TokenKind::OpenCurly {
+        if initializer_stream.current_tag() != TokenTag::OPEN_CURLY {
             return Err(CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::ShorthandNonLiteralRhs,
                 Some(initializer_stream.current_span()),
@@ -554,7 +553,7 @@ pub fn resolve_declaration_syntax(
 
         // The collection literal parser stops at the closing `}` without consuming it.
         // Advance past it so the remainder of the declaration validation sees EOF.
-        if initializer_stream.current_token_kind() == &TokenKind::CloseCurly {
+        if initializer_stream.current_tag() == TokenTag::CLOSE_CURLY {
             initializer_stream.advance();
         }
 
@@ -580,10 +579,10 @@ pub fn resolve_declaration_syntax(
         }
 
         initializer_stream.skip_newlines();
-        if initializer_stream.current_token_kind() != &TokenKind::Eof {
+        if initializer_stream.current_tag() != TokenTag::EOF {
             let found = match initializer_stream.current() {
                 Some(found) => DiagnosticToken::from_token_ref(found),
-                None => DiagnosticToken::from(initializer_stream.current_token_kind()),
+                None => DiagnosticToken::from_static_tag(initializer_stream.current_tag()),
             };
             return Err(CompilerDiagnostic::unexpected_token_from_tag(
                 found,
@@ -692,12 +691,12 @@ pub fn resolve_declaration_syntax(
         declaration_syntax.span,
     )?;
 
-    let mut parsed_initializer = match initializer_stream.current_token_kind() {
+    let mut parsed_initializer = match initializer_stream.current_tag() {
         // Struct Definition
         //
         // Compile-time `| name = expr |` and empty `#= | |` are const records. Ordinary
         // empty `| |` and `| name Type |` stay with the struct shell grammar.
-        TokenKind::TypeParameterBracket
+        TokenTag::TYPE_PARAMETER_BRACKET
             if !initializer_stream
                 .declaration_cursor()
                 .map(|cursor| {
@@ -870,7 +869,7 @@ pub fn resolve_declaration_syntax(
     // If tokens remain, the parser stopped early (e.g. a newline broke the
     // expression before it was complete). This prevents silent truncation.
     initializer_stream.skip_newlines();
-    if initializer_stream.current_token_kind() == &TokenKind::Else
+    if initializer_stream.current_tag() == TokenTag::ELSE
         && type_interner
             .environment()
             .option_inner_type(parsed_initializer.type_id)
@@ -883,14 +882,13 @@ pub fn resolve_declaration_syntax(
         .into());
     }
 
-    if initializer_stream.current_token_kind() != &TokenKind::Eof {
-        if matches!(
-            initializer_stream.current_token_kind(),
-            TokenKind::TypeParameterBracket
-        ) && matches!(
-            parsed_initializer.kind,
-            ExpressionKind::AnonymousConstRecord { .. }
-        ) {
+    if initializer_stream.current_tag() != TokenTag::EOF {
+        if initializer_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET
+            && matches!(
+                parsed_initializer.kind,
+                ExpressionKind::AnonymousConstRecord { .. }
+            )
+        {
             // Extra `|` after a complete record is the usual leftover from an
             // inline nested `|...|` that the parser already closed.
             return Err(CompilerDiagnostic::invalid_expression(
@@ -903,7 +901,7 @@ pub fn resolve_declaration_syntax(
         return Err(CompilerDiagnostic::unexpected_token_from_tag(
             match initializer_stream.current() {
                 Some(found) => DiagnosticToken::from_token_ref(found),
-                None => DiagnosticToken::from(initializer_stream.current_token_kind()),
+                None => DiagnosticToken::from_static_tag(initializer_stream.current_tag()),
             },
             Some(initializer_stream.current_span()),
         )

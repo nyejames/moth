@@ -88,6 +88,11 @@ impl SourceTokenOwner {
         self.logical_path
     }
 
+    /// Source identity carried by the canonical token owner.
+    pub(crate) fn source_id(&self) -> SourceId {
+        self.tokens.source()
+    }
+
     #[cfg(test)]
     pub(crate) fn os_path(&self) -> Option<&Path> {
         self.canonical_os_path.as_deref()

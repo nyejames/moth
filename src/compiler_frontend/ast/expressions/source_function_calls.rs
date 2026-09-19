@@ -25,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input bundle for source callable member parsing.
 ///
@@ -85,11 +85,11 @@ pub(super) fn parse_source_callable_member(
     //  Generic source call
     // ------------------------
     if let Some(template) = generic_template {
-        match token_stream.peek_next_token() {
+        match token_stream.peek_next_tag() {
             // Explicit call-site type arguments are not part of the Alpha surface.
             // Reject the known foreign spellings before they can be interpreted as
             // generic function values, comparisons, or templates.
-            Some(TokenKind::Of | TokenKind::LessThan | TokenKind::TemplateHead) => {
+            Some(TokenTag::OF | TokenTag::LESS_THAN | TokenTag::TEMPLATE_HEAD) => {
                 // Pure lookahead: read the offending follower span through the cursor view.
                 let follower_span = token_stream.span_at(token_stream.position().saturating_add(1));
                 let explicit_syntax_span = follower_span.or(call_span);
@@ -103,7 +103,7 @@ pub(super) fn parse_source_callable_member(
 
             // Generic functions must be called; using them as first-class values is
             // deferred for Alpha. Require an immediate `(` to route into the call parser.
-            Some(TokenKind::OpenParenthesis) => {}
+            Some(TokenTag::OPEN_PARENTHESIS) => {}
 
             _ => {
                 return Err(with_generic_primary_span(

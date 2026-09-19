@@ -6,8 +6,6 @@
 
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::line_scanning::find_top_level_fat_arrow_on_line_in_scanned_tokens;
-#[cfg(test)]
-use crate::compiler_frontend::tokenizer::tokens::Token;
 use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, TokenRef, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::TokenFactView;
 
@@ -194,17 +192,6 @@ pub(super) enum SymbolStatementStart {
     Other,
 }
 
-/// Classify a follower token in a bounded token slice (classifier tests only).
-///
-/// WHAT: reads only the follower and its bounded lookahead without projecting the source owner.
-/// WHY: bounded slice callers reuse the same classification core without a second implementation.
-#[cfg(test)]
-pub(crate) fn classify_symbol_statement_start_at(
-    tokens: &[Token],
-    follower_index: usize,
-) -> SymbolStatementStart {
-    classify_symbol_statement_start_at_scanned(TokenFactView::from_slice(tokens), follower_index)
-}
 
 /// Classify a follower token in canonical source storage.
 ///

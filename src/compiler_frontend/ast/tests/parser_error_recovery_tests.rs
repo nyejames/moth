@@ -137,6 +137,21 @@ fn reports_multi_bind_malformed_comma_sequence() {
 }
 
 #[test]
+fn reports_string_literal_as_invalid_multi_bind_target() {
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "pair || -> Int, Int:\n    return 1, 2\n;\n\na, \"b\" = pair()\n",
+    );
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidMultiBind {
+            reason: InvalidMultiBindReason::MissingTargetAfterComma,
+            target_name: None,
+        }
+    ));
+}
+
+#[test]
 fn parses_multi_bind_targets_across_comma_continuation_newline() {
     parse_single_file_ast("pair || -> Int, Int:\n    return 1, 2\n;\n\na,\n    b = pair()\n");
 }

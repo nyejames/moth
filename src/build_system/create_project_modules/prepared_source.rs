@@ -1,51 +1,59 @@
 //! State-safe prepared source input for discovered project compilation.
 //!
-//! WHAT: one token-owned variant, one retained-output variant and one deferred-text variant,
+//! WHAT: one canonical-owner variant, one retained-output variant and one deferred-text variant,
 //!       plus one move-owned `PreparedSource` slot value per selected `SourceId` and the
 //!       `PreparedSourceSlots` store that retains those values in deterministic input order.
-//!       Directory Moth inputs carry their final `SourceId` and retained tokens for the one
-//!       header-preparation pass; synthetic Moth and Moth-template inputs carry one complete
-//!       prepared output produced during discovery. Deferred Moth-template and Markdown inputs
-//!       carry only their final `SourceId`; source kind, paths and snapshots come from the
-//!       authoritative `SourceDatabase`.
-//! WHY: the variant makes work-product ownership explicit without duplicating source kind. A
-//!      directory Moth source cannot reach header preparation without its retained `FileTokens`,
-//!      while synthetic inputs cannot be prepared again after their complete outputs have been
-//!      retained. The slot owner makes the exactly-once result ownership explicit: each selected
-//!      source contributes one `FileFrontendPrepareOutput` whose stamped `file_id` must match its
-//!      slot's `SourceId`, without per-source `Arc` or cloned outputs.
+//!       Directory Moth inputs carry their final `SourceId`, one `SourceTokenOwner` and a
+//!       transitional parser adapter for the one header-preparation pass; synthetic Moth and
+//!       Moth-template inputs carry one complete prepared output produced during discovery.
+//!       Deferred Moth-template and Markdown inputs carry only their final `SourceId`; source
+//!       kind, paths and snapshots come from the authoritative `SourceDatabase`.
+//! WHY: the variant makes canonical-token ownership explicit without duplicating source kind. A
+//!      directory Moth source cannot reach header preparation without its retained canonical
+//!      owner and the narrow legacy parser adapter, while synthetic inputs cannot be prepared
+//!      again after their complete outputs have been retained. The slot owner makes the
+//!      exactly-once result ownership explicit: each selected source contributes one
+//!      `FileFrontendPrepareOutput` whose stamped `file_id` must match its slot's `SourceId`,
+//!      without per-source token copies or cloned outputs.
 //!
 //! This type is the build-system-owned transient handoff between Stage 0 source selection and
 //! frontend file/header preparation. Each input carries its final source identity plus the one
-//! work product that cannot be recomputed without repeating Stage 0 (tokens or complete prepared
-//! output, or nothing for deferred text); source kind, paths and retained snapshots are resolved
-//! from the shared source database.
+//! work product that cannot be recomputed without repeating Stage 0 (the canonical token owner
+//! and its parser adapter, a complete prepared output, or nothing for deferred text); source kind,
+//! paths and retained snapshots are resolved from the shared source database.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareOutput;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 /// Owned prepared source input keyed by its final build-lifetime source identity.
 ///
 /// Construct this only from Stage 0 source preparation. Directory Moth files have already been
-/// tokenized once; their retained `FileTokens` are carried here so header preparation never lexes
-/// the same source again. Synthetic Moth and Moth-template files carry one complete prepared
-/// output because their complete header output was already produced while discovering the source
-/// closure. Deferred Moth-template and Markdown files carry only their `SourceId` because their
-/// one preparation pass borrows retained text directly.
+/// tokenized once; their canonical `SourceTokenOwner` is carried here and the legacy
+/// `FileTokens` compatibility adapter is moved separately until the remaining header parser
+/// callees accept canonical cursors directly. Synthetic Moth and Moth-template files carry one
+/// complete prepared output because their complete header output was already produced while
+/// discovering the source closure. Deferred Moth-template and Markdown files carry only their
+/// `SourceId` because their one preparation pass borrows retained text directly.
 ///
 /// Source kind, paths and snapshots belong to the final `SourceDatabase`. The source ID is the
-/// only identity carried by this transient handoff, so consumers resolve kind, paths and retained
-/// text from one authoritative database.
+/// only identity carried by this transient handoff besides the canonical token owner metadata.
 pub(crate) struct PreparedSourceInput {
     pub(crate) source_id: SourceId,
     pub(crate) source: PreparedSourceKind,
+    /// Transitional compatibility stream for the header parser's remaining `FileTokens` callees.
+    ///
+    /// This owns no second canonical token store: the stream and `SourceTokenOwner` share the
+    /// same `Arc<SourceTokens>` allocation. It is consumed at the preparation boundary and never
+    /// crosses into retained prepared syntax.
+    pub(crate) compatibility_tokens: Option<FileTokens>,
 }
 
 pub(crate) enum PreparedSourceKind {
-    /// A Moth module source with tokens from its single lexical pass.
-    Moth { tokens: Box<FileTokens> },
+    /// A Moth module source with one canonical token owner from its single lexical pass.
+    Moth { owner: SourceTokenOwner },
     /// Complete Moth or Moth-template syntax retained by private synthetic discovery.
     MothPrepared {
         output: Box<FileFrontendPrepareOutput>,

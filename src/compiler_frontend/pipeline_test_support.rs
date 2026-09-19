@@ -18,9 +18,11 @@ static FILE_FRONTEND_PREPARE_TRACK_PREFIX: Mutex<Option<PathBuf>> = Mutex::new(N
 
 pub(super) fn record_prepare(source: &FrontendFilePrepareSource<'_>) {
     let source_path = match source {
-        FrontendFilePrepareSource::Moth { source_path, .. }
-        | FrontendFilePrepareSource::MothTemplate { source_path, .. }
-        | FrontendFilePrepareSource::PlainMarkdown { source_path, .. } => source_path,
+        FrontendFilePrepareSource::Moth { owner } => owner
+            .os_path_cloned()
+            .expect("Moth preparation owner should carry a canonical OS path"),
+        FrontendFilePrepareSource::MothTemplate { source_path, .. }
+        | FrontendFilePrepareSource::PlainMarkdown { source_path, .. } => source_path.clone(),
     };
     let prefix = FILE_FRONTEND_PREPARE_TRACK_PREFIX
         .lock()

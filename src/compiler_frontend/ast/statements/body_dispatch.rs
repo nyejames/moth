@@ -297,7 +297,7 @@ pub(crate) fn parse_function_body_statements(
                 };
 
                 if token_stream.current_tag() == TokenTag::NEWLINE
-                    || is_missing_produced_value_boundary(token_stream.current_token_kind())
+                    || is_missing_produced_value_boundary(token_stream.current_tag())
                 {
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_fallible_handling(
@@ -428,7 +428,7 @@ pub(crate) fn parse_function_body_statements(
             // Unrecognized tokens
             _ => {
                 if let Some(diagnostic) =
-                    check_statement_common_mistake(token_stream.current_token_kind(), token_stream)
+                    check_statement_common_mistake(token_stream.current_tag(), token_stream)
                 {
                     return Err(statement_dispatch_error(diagnostic));
                 }

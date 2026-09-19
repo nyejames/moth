@@ -11,11 +11,11 @@ use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
-use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::PayloadRebaseContext;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
+use crate::compiler_frontend::symbols::string_interning::FrozenStringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use crate::compiler_frontend::tokenizer::tokens::TokenCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenPayloadOrigin;
 use crate::compiler_frontend::tokenizer::tokens::TokenRange;
 use crate::compiler_frontend::tokenizer::tokens::TokenSequenceId;
 use crate::compiler_frontend::tokenizer::tokens::TokenSequenceView;
@@ -28,10 +28,8 @@ use std::sync::Arc;
 /// WHAT: retains the canonical `SourceTokens` owner, a checked contiguous range or segmented
 /// sequence, and the declaration/donor identities later parsers need.
 /// WHY: generic syntax can outlive the declaring AST pass, but it must never retain a second
-/// token representation. Parsers borrow the retained owner in the declaring domain and rebase one
-/// window into a transient canonical owner across a requester boundary, so a materialised body
-/// carries the identity tables that issued its retained payload IDs and the rebase works by
-/// spelling instead of trusting numeric identity.
+/// token representation. Every parse borrows the retained owner in place and carries the donor
+/// identity tables separately, so payloads translate by spelling at consumption.
 #[derive(Clone)]
 pub(crate) enum GenericFunctionBody {
     /// Source templates use the declaring module's canonical source owner.
@@ -44,12 +42,10 @@ pub(crate) enum GenericFunctionBody {
     },
     /// Materialised bodies share the donor's canonical owner plus its issuing identity tables.
     ///
-    /// The retained pair names the tables that issued the payload IDs, not a proven domain
-    /// difference: capture always stamps a frozen string owner, so every body produced by
-    /// materialisation carries one and rebases by spelling at the requester boundary.
-    /// `source_path_table` is additionally `Some` when path roots must be rebased too, and a
-    /// path table without its issuing string table is rejected at construction. The transient
-    /// rebased owner is derived per parse and never retained.
+    /// The retained pair names the tables that issued the payload IDs. Every parse borrows the
+    /// donor range and carries these tables as `TokenPayloadOrigin`; typed payload readers
+    /// translate only values consumed by the requester.
+    /// A path table without its issuing string table is rejected at construction.
     Materialised {
         source_owner: Arc<SourceTokens>,
         canonical_os_path: Option<PathBuf>,
@@ -95,66 +91,41 @@ impl MaterialisedDonorContext {
 
 /// The canonical owner one generic body parses from.
 ///
-/// WHAT: either the body's retained owner with its checked bounds, or a transient owner whose
-/// payloads were rebased into the requester's domain for this parse.
-/// WHY: a transient owner cannot be borrowed out of the retained body, so building the owner
-/// and borrowing its cursor are two steps at the call site.
-pub(crate) enum BodyParseOwner<'a> {
-    Borrowed {
-        owner: &'a Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
-        token_range: TokenRange,
-        token_sequence: Option<TokenSequenceId>,
-    },
-    Rebased {
-        owner: Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
-    },
+/// WHAT: borrows the body's retained owner with its checked bounds plus the optional donor
+/// identity that issued its payload IDs.
+/// WHY: every parse uses the retained owner in place; requester payloads translate by spelling
+/// at consumption through the cursor's typed readers instead of a copied token window.
+pub(crate) struct BodyParseOwner<'a> {
+    pub(crate) owner: &'a Arc<SourceTokens>,
+    pub(crate) canonical_os_path: Option<PathBuf>,
+    pub(crate) token_range: TokenRange,
+    pub(crate) token_sequence: Option<TokenSequenceId>,
+    pub(crate) payload_origin: Option<TokenPayloadOrigin<'a>>,
 }
 
 impl BodyParseOwner<'_> {
     /// Borrow this body's parser cursor and the source identity its spans belong to.
-    ///
-    /// A rebased owner is dense and contiguous, so its whole extent is the body.
     pub(crate) fn cursor(
         &self,
     ) -> Result<(AstCursor<'_>, SourceId), crate::compiler_frontend::compiler_errors::CompilerError>
     {
-        match self {
-            Self::Borrowed {
-                owner,
-                canonical_os_path,
-                token_range,
-                token_sequence,
-            } => {
-                let cursor = match token_sequence {
-                    Some(sequence) => AstCursor::from_source_sequence(
-                        owner,
-                        canonical_os_path.clone(),
-                        *sequence,
-                    )?,
-                    None => AstCursor::from_source_tokens(
-                        owner,
-                        canonical_os_path.clone(),
-                        *token_range,
-                    )?,
-                };
-                Ok((cursor, owner.source()))
-            }
-            Self::Rebased {
-                owner,
-                canonical_os_path,
-            } => {
-                let range = owner.full_range().map_err(|error| {
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                        format!("rebased generic body owner has no whole extent: {error:?}"),
-                    )
-                })?;
-                let cursor =
-                    AstCursor::from_source_tokens(owner, canonical_os_path.clone(), range)?;
-                Ok((cursor, owner.source()))
-            }
-        }
+        let cursor = match self.token_sequence {
+            Some(sequence) => AstCursor::from_source_sequence(
+                self.owner,
+                self.canonical_os_path.clone(),
+                sequence,
+            )?,
+            None => AstCursor::from_source_tokens(
+                self.owner,
+                self.canonical_os_path.clone(),
+                self.token_range,
+            )?,
+        };
+        let cursor = match self.payload_origin {
+            Some(origin) => cursor.with_payload_origin(origin),
+            None => cursor,
+        };
+        Ok((cursor, self.owner.source()))
     }
 }
 
@@ -279,46 +250,28 @@ impl GenericFunctionBody {
 
     /// Choose the canonical owner this body parses from.
     ///
-    /// Source bodies borrow their retained owner directly. A materialised body with a retained
-    /// string owner interprets its payload IDs through that table, so it rebases its window into
-    /// a transient canonical owner first; that owner is never retained. Capture always retains a
-    /// string owner, so every materialised body reaching a parser takes the rebasing lane.
+    /// Source bodies and materialised bodies both borrow their retained canonical owner and
+    /// checked range/sequence. Materialised bodies additionally carry the frozen donor identity
+    /// through `TokenPayloadOrigin`; payloads are translated only when a parser consumes them.
     pub(crate) fn parse_owner(
         &self,
-        string_table: &mut StringTable,
-        path_fork: &mut PathInternerFork,
     ) -> Result<BodyParseOwner<'_>, crate::compiler_frontend::compiler_errors::CompilerError> {
-        if let Self::Materialised {
-            source_owner,
-            canonical_os_path,
-            token_range,
-            token_sequence,
-            source_path_table,
-            source_string_table: Some(source_strings),
-            ..
-        } = self
-        {
-            let owner = source_owner.rebased_window_owner(
-                *token_range,
-                *token_sequence,
-                PayloadRebaseContext {
-                    source_path_table: source_path_table.as_deref(),
-                    source_strings: source_strings.as_ref(),
-                    destination_strings: string_table,
-                    path_fork: Some(path_fork),
-                },
-            )?;
-            return Ok(BodyParseOwner::Rebased {
-                owner: Arc::new(owner),
-                canonical_os_path: canonical_os_path.clone(),
-            });
-        }
         let (source_owner, token_range, token_sequence) = self.canonical_view();
-        Ok(BodyParseOwner::Borrowed {
+        let payload_origin = match self {
+            Self::Materialised {
+                source_string_table: Some(source_strings),
+                ..
+            } => Some(TokenPayloadOrigin {
+                strings: source_strings.as_ref(),
+            }),
+            Self::Source { .. } | Self::Materialised { .. } => None,
+        };
+        Ok(BodyParseOwner {
             owner: source_owner,
             canonical_os_path: self.canonical_os_path().cloned(),
             token_range,
             token_sequence,
+            payload_origin,
         })
     }
 

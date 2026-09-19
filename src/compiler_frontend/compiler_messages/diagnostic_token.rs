@@ -37,6 +37,16 @@ impl DiagnosticToken {
     fn string_token(tag: TokenTag, value: StringId) -> Self {
         Self::new(tag, 0, value.index())
     }
+    pub(crate) fn from_string_tag(tag: TokenTag, value: StringId) -> Self {
+        debug_assert!(matches!(
+            tag.descriptor().payload(),
+            TokenDescriptorPayload::Symbol
+                | TokenDescriptorPayload::StyleDirective
+                | TokenDescriptorPayload::StringLiteral
+                | TokenDescriptorPayload::RawStringLiteral
+        ));
+        Self::string_token(tag, value)
+    }
 
     /// Project a static/path descriptor without touching cold payload rows.
     /// WHAT: builds the retained token for expected delimiters/keywords whose

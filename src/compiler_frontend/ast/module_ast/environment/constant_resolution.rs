@@ -20,9 +20,10 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::module_ast::environment::{
     ResolvedConstantSet, TopLevelDeclarationTable,
 };
@@ -32,7 +33,14 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
 use crate::compiler_frontend::ast::statements::declarations::{
     DeclarationLoweringTables, resolve_declaration_syntax,
 };
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::ast::templates::template::{
+    TemplateConstValueKind, TemplateType,
+};
+use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
+use crate::compiler_frontend::ast::templates::tir::{
+    TemplateIrStore, TemplatePreparationOutcome, TemplateTirPhase, TirView,
+    fold_prepared_template,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::build_config::{
@@ -42,20 +50,21 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::headers::synthetic_content_header::materialize_synthetic_content_initializer;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
+use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
@@ -210,43 +219,143 @@ impl ConstantResolutionSession {
             .into());
         }
 
-        let synthetic_owner = if let Some(payload) = payload {
-            Some(Arc::new(
-                materialize_synthetic_content_initializer(payload, file_tokens, header.tokens)
-                    .map_err(ExpressionParseError::from)?,
-            ))
-        } else {
-            None
-        };
-        let synthetic_range = synthetic_owner
-            .as_ref()
-            .map(|owner| {
-                owner.full_range().map_err(|error| {
-                    ExpressionParseError::from(CompilerError::compiler_error(format!(
-                        "synthetic content owner has no whole extent: {error:?}"
-                    )))
-                })
-            })
-            .transpose()?;
-        let synthetic_cursor = synthetic_owner
-            .as_ref()
-            .zip(synthetic_range)
-            .map(|(owner, range)| {
-                AstCursor::from_source_tokens_for_handoff(owner, None, range).map_err(|error| {
-                    ExpressionParseError::from(CompilerError::compiler_error(format!(
-                        "synthetic content range is outside its source owner: {error:?}"
-                    )))
-                })
-            })
-            .transpose()?;
+        let mut declaration = match payload {
+            Some(SyntheticContentPayload::RenderedHtml(rendered_html)) => Declaration {
+                id: header.declaration_path,
+                value: Expression::string_slice(
+                    rendered_html,
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
+                binding_span: None,
+                config_qualifier: declaration.config_qualifier.clone(),
+            },
+            Some(SyntheticContentPayload::MothTemplate {
+                markdown_directive,
+            }) => {
+            let owner = file_owner.ok_or_else(|| {
+                ExpressionParseError::from(CompilerError::compiler_error(
+                    "MothTemplate synthetic content has no canonical source token owner",
+                ))
+            })?;
+            let directive_name = string_table.resolve(markdown_directive);
+            if self
+                .module_view
+                .style_directives
+                .find(directive_name)
+                .is_none()
+            {
+                return Err(CompilerDiagnostic::invalid_template_directive(
+                    Some(markdown_directive),
+                    crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::UnknownDirective,
+                    None,
+                )
+                .into());
+            }
 
-        // Retain the canonical source owner for bounded initializer handoffs. This path never
-        // reads parser facts from the cursor, so avoid materialising its initial token window for
-        // every ordinary constant header. Synthetic content parses from its transient owner.
-        let body_cursor = if synthetic_cursor.is_some() {
-            None
-        } else {
-            file_owner
+            let mut donor_cursor = if let Some(sequence) = header.token_sequence {
+                AstCursor::from_source_sequence(
+                    owner.tokens(),
+                    owner.os_path_cloned(),
+                    sequence,
+                )
+            } else {
+                AstCursor::from_source_tokens(
+                    owner.tokens(),
+                    owner.os_path_cloned(),
+                    header.tokens,
+                )
+            }
+            .map_err(|error| {
+                ExpressionParseError::from(CompilerError::compiler_error(format!(
+                    "MothTemplate synthetic body range is outside its canonical source owner: {error:?}"
+                )))
+            })?;
+            let template_context = scope_context.new_template_parsing_context();
+            let construction =
+                crate::compiler_frontend::ast::templates::template::Template::new_moth_content_constant_with_type_interner(
+                    &mut donor_cursor,
+                    header.declaration_path,
+                    &template_context,
+                    &mut type_interner,
+                    vec![],
+                    string_table,
+                    path_fork,
+                    None,
+                )
+                .map_err(ExpressionParseError::from)?;
+            let template = construction.template;
+            let preparation = construction.preparation;
+            let template_span = template.span;
+            let template_kind = {
+                let store = template_context.template_ir_store.borrow();
+                store
+                    .get_template(template.tir_reference.root)
+                    .map(|template_ir| template_ir.kind.clone())
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Parsed template kind was missing from its module-local TIR store.",
+                        )
+                    })?
+            };
+            let value = if matches!(template_kind, TemplateType::String)
+                && matches!(preparation.outcome, TemplatePreparationOutcome::Foldable)
+                && !matches!(
+                    preparation.facts.final_value_kind,
+                    TemplateConstValueKind::WrapperTemplate
+                )
+            {
+                let reference = template.tir_reference;
+                let store = template_context.template_ir_store.borrow();
+                let view = TirView::with_minimum_phase(
+                    &store,
+                    reference.root,
+                    reference.phase,
+                    TemplateTirPhase::Composed,
+                    reference.context,
+                )?;
+                let mut fold_context = template_context.new_tir_fold_context(string_table);
+                let fold_result = fold_prepared_template(&preparation, view, &mut fold_context)?;
+                let mut folded_expression = match fold_result.emission {
+                    TemplateEmission::Output(ConstStringValue::Text(value)) => {
+                        Expression::string_slice(value, template_span, ValueMode::ImmutableOwned)
+                    }
+                    TemplateEmission::Output(ConstStringValue::Pieces(pieces)) => Expression::new(
+                        ExpressionKind::StructuralString { pieces },
+                        template_span,
+                        builtin_type_ids::STRING,
+                        DataType::StringSlice,
+                        ValueMode::ImmutableOwned,
+                    ),
+                    TemplateEmission::NoOutput => Expression::string_slice(
+                        fold_context.string_table.intern(""),
+                        template_span,
+                        ValueMode::ImmutableOwned,
+                    ),
+                    TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
+                        return Err(CompilerError::compiler_error(
+                            "Template loop-control signal escaped the nearest template loop during folding.",
+                        )
+                        .into());
+                    }
+                };
+                folded_expression.synthetic_interface_provenance = fold_result.provenance;
+                folded_expression
+            } else {
+                Expression::template(template, ValueMode::ImmutableOwned)
+            };
+            Declaration {
+                id: header.declaration_path,
+                value,
+                binding_span: None,
+                config_qualifier: declaration.config_qualifier.clone(),
+            }
+        },
+        None => {
+            // Retain the canonical source owner for bounded initializer handoffs. This path never
+            // reads parser facts from the cursor, so avoid materialising its initial token window
+            // for every ordinary constant header.
+            let body_cursor = file_owner
                 .map(|owner| -> Result<AstCursor<'_>, ExpressionParseError> {
                     let tokens = owner.tokens_ref();
                     let full = tokens.full_range().map_err(|error| {
@@ -263,27 +372,24 @@ impl ConstantResolutionSession {
                         },
                     )
                 })
-                .transpose()?
-        };
-        let source_owner = synthetic_cursor.as_ref().or(body_cursor.as_ref());
-        let mut declaration_syntax = declaration.clone();
-        if let Some(range) = synthetic_range {
-            declaration_syntax.initializer_range = Some(range);
+                .transpose()?;
+            let declaration_syntax = declaration.clone();
+            resolve_declaration_syntax(
+                declaration_syntax,
+                header.declaration_path.to_owned(),
+                body_cursor.as_ref(),
+                &mut scope_context,
+                &mut type_interner,
+                DeclarationLoweringTables {
+                    string_table,
+                    path_fork,
+                },
+            )?
         }
-        let declaration_result = resolve_declaration_syntax(
-            declaration_syntax,
-            header.declaration_path.to_owned(),
-            source_owner,
-            &mut scope_context,
-            &mut type_interner,
-            DeclarationLoweringTables {
-                string_table,
-                path_fork,
-            },
-        );
-        let mut declaration = declaration_result?;
-        // Top-level constant binding anchor is the header name token, not the
-        // initializer value span left empty by `resolve_declaration_syntax`.
+        };
+
+        // Top-level constant binding anchor is the header name token, not the initializer value
+        // span left empty by synthetic content lowering.
         declaration.binding_span = header.name_span;
         if let Some(config_resolution) = &self.module_view.config_resolution {
             resolve_direct_project_config_qualifiers(

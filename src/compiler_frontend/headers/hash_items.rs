@@ -16,54 +16,45 @@ use crate::compiler_frontend::headers::types::{
     FileRole, HeaderBuildContext, HeaderParseContext, HeaderParseFailure, TopLevelConstFragment,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenIndex, TokenTag};
+use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenIndex, TokenTag};
 
-fn source_tag_at_cursor(token_stream: &FileTokens) -> Result<TokenTag, HeaderParseFailure> {
-    let canonical = token_stream
-        .source_tokens()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    if canonical.source() != token_stream.file_id {
+fn source_tag_at_cursor(
+    cursor: &TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
+) -> Result<TokenTag, HeaderParseFailure> {
+    let canonical = cursor.source_tokens();
+    if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
             CompilerError::compiler_error(
                 "hash item source token owner does not match its file identity",
             ),
         ));
     }
-    let index = TokenIndex::try_from_index(token_stream.index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "hash item token index exceeded its checked domain",
-        ))
-    })?;
-    canonical
-        .token(index)
+    cursor
+        .current()
         .map(|token| token.tag())
-        .map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "hash item token index exceeded its source token owner: {error:?}",
-            )))
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "hash item cursor exceeded its source token owner",
+            ))
         })
 }
 
 fn record_start_body_token_from_source(
     state: &mut HeaderFileParseState,
-    token_stream: &FileTokens,
-    index: usize,
+    cursor: &TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
+    index: TokenIndex,
 ) -> Result<(), HeaderParseFailure> {
-    let source_tokens = token_stream
-        .source_tokens()
-        .map_err(HeaderParseFailure::Infrastructure)?;
-    if source_tokens.source() != token_stream.file_id {
+    let source_tokens = cursor.source_tokens();
+    if source_tokens.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
             CompilerError::compiler_error(
                 "hash item source token owner does not match its file identity",
             ),
         ));
     }
-    let index = TokenIndex::try_from_index(index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "hash item token index exceeded its checked domain",
-        ))
-    })?;
     let token = source_tokens.token(index).map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "hash item token index exceeded its source token owner: {error:?}",
@@ -74,39 +65,46 @@ fn record_start_body_token_from_source(
         .map_err(HeaderParseFailure::Infrastructure)
 }
 
+
 pub(super) fn handle_hash_item(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
+    source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
+    current_index: TokenIndex,
     current_span: SourceSpan,
     at_statement_boundary: bool,
 ) -> Result<(), HeaderParseFailure> {
-    let current_index = token_stream.index.checked_sub(1).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "hash item token preceded the source token index",
-        ))
-    })?;
-
     if !at_statement_boundary {
-        record_start_body_token_from_source(state, token_stream, current_index)?;
+        record_start_body_token_from_source(state, cursor, file_id, current_index)?;
         return Ok(());
     }
 
-    match source_tag_at_cursor(token_stream)? {
+    match source_tag_at_cursor(cursor, file_id)? {
         TokenTag::TEMPLATE_HEAD => {
             if state.export_mode.is_public() {
                 return Err(CompilerDiagnostic::invalid_export_target(Some(current_span)).into());
             }
 
-            handle_top_level_const_template(token_stream, state, context, current_span)
+            handle_top_level_const_template(
+                cursor,
+                file_id,
+                source_file,
+                state,
+                context,
+                current_span,
+            )
         }
 
-        _ => record_start_body_token_from_source(state, token_stream, current_index),
+        _ => record_start_body_token_from_source(state, cursor, file_id, current_index),
     }
 }
 
 fn handle_top_level_const_template(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
+    source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     current_span: SourceSpan,
@@ -122,44 +120,19 @@ fn handle_top_level_const_template(
     }
 
     if context.file_role == FileRole::ImportedModuleRoot {
-        let template_index = token_stream.index;
-        token_stream.advance();
-        let opening = TokenIndex::try_from_index(template_index).ok_or_else(|| {
+        let opening = cursor.current().ok_or_else(|| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "runtime template opening exceeded the source token index space",
+                "runtime template opening exceeded its source token owner",
             ))
         })?;
-        let canonical_for_opening = token_stream
-            .source_tokens()
-            .map_err(HeaderParseFailure::Infrastructure)?;
-        let opening_token = canonical_for_opening.token(opening).map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "runtime template opening exceeded its source token owner: {error:?}",
-            )))
-        })?;
-        let mut template_cursor = token_stream
-            .canonical_cursor_from_current()
-            .map_err(HeaderParseFailure::Infrastructure)?;
+        cursor.advance();
         let range = capture_runtime_template_range_from_cursor(
-            opening_token,
-            &mut template_cursor,
-            token_stream.file_id,
+            opening,
+            cursor,
+            file_id,
             context.string_table,
         )?;
-        // Deferred parser handoff: the canonical cursor owns position; sync the legacy index.
-        token_stream.index = token_stream
-            .compatibility_index_for_cursor(template_cursor)
-            .map_err(HeaderParseFailure::Infrastructure)?;
-        let canonical = token_stream
-            .source_tokens()
-            .map_err(HeaderParseFailure::Infrastructure)?;
-        if canonical.source() != token_stream.file_id {
-            return Err(HeaderParseFailure::Infrastructure(
-                CompilerError::compiler_error(
-                    "discarded template source token owner does not match its file identity",
-                ),
-            ));
-        }
+        let canonical = cursor.source_tokens();
         let cursor = canonical.cursor(range).map_err(|error| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
                 "discarded template range exceeds its source token owner: {error:?}",
@@ -193,8 +166,12 @@ fn handle_top_level_const_template(
         );
     }
 
-    let opening_index = token_stream.index;
-    token_stream.advance();
+    let opening = cursor.current().ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "const-template opening exceeded its source token owner",
+        ))
+    })?;
+    cursor.advance();
 
     let const_template_number = context
         .const_template_offset
@@ -205,7 +182,6 @@ fn handle_top_level_const_template(
             ))
         })?;
 
-    let source_file = token_stream.src_path;
     let mut build_context = HeaderBuildContext {
         warnings: &mut state.warnings,
         source_file,
@@ -217,9 +193,9 @@ fn handle_top_level_const_template(
     };
     let header = create_top_level_const_template(
         source_file,
-        opening_index,
+        opening,
         const_template_number,
-        token_stream,
+        cursor,
         &mut build_context,
         context.span_builder,
     )?;

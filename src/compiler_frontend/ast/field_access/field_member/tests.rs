@@ -121,9 +121,21 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
             Token::new(TokenKind::Eof, LocalSpan::source_start()),
         ],
     );
-    let stream = AstCursor::from_file_tokens(&mut tokens)
-        .expect("test token stream must expose an AST cursor");
-    let error = super::parse_member_name_typed(&stream, &string_table)
+    tokens.freeze_path_syntax_for_test();
+    let owner = tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let stream = AstCursor::from_source_tokens(
+        &owner,
+        tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
+    let mut string_table = string_table;
+    let error = super::parse_member_name_typed(&stream, &mut string_table)
         .expect_err("a non-name token after '.' must be rejected as a missing member name");
     let crate::compiler_frontend::ast::expressions::error::ExpressionParseError::Diagnostic(
         diagnostic,

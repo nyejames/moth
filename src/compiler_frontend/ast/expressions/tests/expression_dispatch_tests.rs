@@ -33,7 +33,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenKind, TokenizerEntryMode,
+    FileTokens, Token, TokenKind, TokenTag, TokenizerEntryMode,
 };
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
@@ -88,8 +88,19 @@ fn hash_in_expression_position_rejected() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -109,7 +120,7 @@ fn hash_in_expression_position_rejected() {
 
     // First token: NumericLiteral(1)
     let result = dispatch_expression_token(
-        numeric_token_kind("1", &mut string_table),
+        numeric_token_kind("1", &mut string_table).token_tag(),
         &mut stream,
         &context,
         &mut type_interner,
@@ -122,7 +133,7 @@ fn hash_in_expression_position_rejected() {
 
     // Second token: Hash — should error because next token is NumericLiteral, not TemplateHead
     let result = dispatch_expression_token(
-        TokenKind::Hash,
+        TokenTag::HASH,
         &mut stream,
         &context,
         &mut type_interner,
@@ -146,8 +157,19 @@ fn hash_before_template_head_allowed() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -166,7 +188,7 @@ fn hash_before_template_head_allowed() {
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
     let result = dispatch_expression_token(
-        TokenKind::Hash,
+        TokenTag::HASH,
         &mut stream,
         &context,
         &mut type_interner,
@@ -191,8 +213,19 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -211,7 +244,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
     let result = dispatch_expression_token(
-        TokenKind::Negative,
+        TokenTag::NEGATIVE,
         &mut stream,
         &context,
         &mut type_interner,
@@ -268,8 +301,19 @@ fn hash_from_tokenized_source_rejected() {
         .try_intern_portable_path("test.moth", &mut string_table)
         .expect("test path fits");
     let mut expr_file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, expr_tokens);
-    let mut stream = AstCursor::from_file_tokens(&mut expr_file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    expr_file_tokens.freeze_path_syntax_for_test();
+    let owner = expr_file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(
+        &owner,
+        expr_file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
@@ -382,8 +426,19 @@ fn constant_identifier_uses_module_store_tir() {
         token(TokenKind::Eof, &scope),
     ];
     let mut file_tokens = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
-    let mut token_stream = AstCursor::from_file_tokens(&mut file_tokens)
-        .expect("test token stream must expose an AST cursor");
+    file_tokens.freeze_path_syntax_for_test();
+    let owner = file_tokens
+        .canonical_source_tokens_arc()
+        .expect("test token stream must retain its canonical source owner");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut token_stream = AstCursor::from_source_tokens(
+        &owner,
+        file_tokens.canonical_os_path.clone(),
+        range,
+    )
+    .expect("test token stream must expose an AST cursor");
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
