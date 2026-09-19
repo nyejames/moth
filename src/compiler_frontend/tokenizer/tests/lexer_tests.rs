@@ -21,7 +21,9 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenShape};
+use crate::compiler_frontend::tokenizer::tokens::{
+    TokenIndex, TokenShape, token_store_append_fits, token_store_length_fits,
+};
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 
 fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
@@ -3063,24 +3065,46 @@ fn lexed_canonical_shapes_match_compatibility_payloads() {
 
 /// Token-count exhaustion stays on the typed user diagnostic lane without huge allocation.
 ///
-/// WHAT: asserts the `TokenIndex`/`NumericLiteralId` domain edges directly and proves the
-/// builder's capacity lane maps to `SourceSpanCapacityResource::Token` through the production
-/// `map_source_token_build_error`.
+/// WHAT: exercises the production half-open token-store count predicate at its maximum and
+///       immediate overflow, keeps the distinct zero-based token-index and one-based numeric
+///       handle domain edges visible, and proves the builder's capacity lane maps to
+///       `SourceSpanCapacityResource::Token` through `map_source_token_build_error`.
 /// WHY: the lexer reports `SourceTokenBuildError::Capacity` as a user diagnostic while malformed
-/// trusted records stay infrastructure failures; allocating billions of tokens to reach the edge
-/// would be absurd, so the bounded domain-plus-mapping check is the contract.
+///      trusted records stay infrastructure failures; allocating billions of tokens to reach the
+///      edge would be absurd, so the bounded domain-plus-mapping check is the contract.
 #[test]
 fn token_count_exhaustion_reports_a_typed_user_capacity_diagnostic() {
     use crate::compiler_frontend::numeric_text::store::NumericLiteralId;
+
+    let max_store_length = u32::MAX as usize;
+    assert!(
+        token_store_length_fits(max_store_length),
+        "u32::MAX is the largest valid half-open token-store length"
+    );
+    assert!(
+        token_store_append_fits(max_store_length - 1),
+        "a store at u32::MAX - 1 may accept one append"
+    );
+    assert!(
+        !token_store_append_fits(max_store_length),
+        "an append resulting in u32::MAX + 1 tokens must be rejected"
+    );
+    let max_plus_one = max_store_length
+        .checked_add(1)
+        .expect("this target must represent the first invalid token-store length");
+    assert!(
+        !token_store_length_fits(max_plus_one),
+        "the resulting length u32::MAX + 1 must be rejected"
+    );
 
     assert!(
         TokenIndex::try_from_index(u32::MAX as usize).is_some(),
         "the token domain addresses its own maximum index"
     );
     assert_eq!(
-        TokenIndex::try_from_index((u32::MAX as usize).checked_add(1).unwrap()),
+        TokenIndex::try_from_index(max_plus_one),
         None,
-        "the token store cannot address another token past its u32 domain"
+        "the token index domain cannot address another token past its u32 domain"
     );
     assert_eq!(
         NumericLiteralId::try_from_index(u32::MAX as usize),

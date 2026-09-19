@@ -147,6 +147,21 @@ impl TokenIndex {
         self.0 as usize
     }
 }
+/// Check the half-open length domain of one source token store.
+///
+/// A token index may address `u32::MAX`, because that value is a valid zero-based index.
+/// The store length is different: its half-open endpoint must fit in the same `u32`
+/// representation, so `u32::MAX` is the largest valid length and the next length is rejected.
+pub(crate) const fn token_store_length_fits(length: usize) -> bool {
+    length <= u32::MAX as usize
+}
+/// Check whether appending one token keeps the half-open store length in its `u32` domain.
+pub(crate) const fn token_store_append_fits(current_length: usize) -> bool {
+    match current_length.checked_add(1) {
+        Some(next_length) => token_store_length_fits(next_length),
+        None => false,
+    }
+}
 
 /// A half-open token interval `[start, end)` qualified by its source identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -605,6 +620,13 @@ impl SourceTokensBuilder {
             numeric_literal_ids: Vec::with_capacity(capacity),
         }
     }
+    fn ensure_next_token_capacity(&self) -> Result<(), SourceTokenBuildError> {
+        if token_store_append_fits(self.shapes.len()) {
+            Ok(())
+        } else {
+            Err(SourceTokenBuildError::Capacity)
+        }
+    }
 
     pub(crate) fn push(
         &mut self,
@@ -623,10 +645,12 @@ impl SourceTokensBuilder {
                     "trusted token at index {next_index} has a malformed compact shape"
                 )))
             })?;
-        if numeric_id != NumericLiteralId::NONE {
-            self.staged_numeric = self.staged_numeric.saturating_add(1);
+        let has_numeric_id = numeric_id != NumericLiteralId::NONE;
+        self.push_packed(shape, span)?;
+        if has_numeric_id {
+            self.staged_numeric += 1;
         }
-        self.push_packed(shape, span)
+        Ok(())
     }
 
     /// Append one already-packed shape whose payload is in this builder's own domain.
@@ -651,9 +675,13 @@ impl SourceTokensBuilder {
                     )),
                 ));
             }
-            self.staged_numeric = self.staged_numeric.saturating_add(1);
         }
-        self.push_packed(shape, span)
+        let has_numeric_id = shape.numeric_literal_id().is_some();
+        self.push_packed(shape, span)?;
+        if has_numeric_id {
+            self.staged_numeric += 1;
+        }
+        Ok(())
     }
 
     fn next_numeric_id(&self) -> Result<NumericLiteralId, SourceTokenBuildError> {
@@ -665,8 +693,9 @@ impl SourceTokensBuilder {
         shape: TokenShape,
         span: LocalSpan,
     ) -> Result<(), SourceTokenBuildError> {
-        TokenIndex::try_from_index(self.shapes.len()).ok_or(SourceTokenBuildError::Capacity)?;
+        self.ensure_next_token_capacity()?;
         self.token_stats.accumulate_shape(shape);
+
         self.shapes.push(shape);
         self.spans.push(span);
         #[cfg(test)]
@@ -827,7 +856,7 @@ impl SourceTokens {
                 "source token shape/span arrays have different lengths",
             ));
         }
-        if self.shapes.len() > u32::MAX as usize {
+        if !token_store_length_fits(self.shapes.len()) {
             return Err(CompilerError::compiler_error(
                 "source token arrays exceed their checked u32 index domain",
             ));
