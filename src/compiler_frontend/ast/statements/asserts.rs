@@ -30,7 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 pub(crate) fn parse_assert_statement(
     token_stream: &mut AstCursor,
@@ -135,7 +135,7 @@ pub(crate) fn parse_assert_statement(
     }
 
     // Reject `assert(...)!` — assert is not a fallible expression.
-    if token_stream.current_token_kind() == &TokenKind::Bang {
+    if token_stream.current_tag() == TokenTag::BANG {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::BangOnNonFallible,
             Some(token_stream.current_span()),
@@ -144,7 +144,7 @@ pub(crate) fn parse_assert_statement(
     }
 
     // Reject `assert(...) catch ...` — assert is not a fallible expression.
-    if token_stream.current_token_kind() == &TokenKind::Catch {
+    if token_stream.current_tag() == TokenTag::CATCH {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOnNonFallible,
             Some(token_stream.current_span()),

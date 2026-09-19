@@ -22,14 +22,14 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Whether the token ends a return statement with no expression following.
-fn is_return_terminator(token: &TokenKind) -> bool {
-    matches!(token, TokenKind::Newline | TokenKind::End | TokenKind::Eof)
+/// Whether the tag ends a return statement with no expression following.
+fn is_return_terminator(tag: TokenTag) -> bool {
+    matches!(tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF)
 }
 
 // --------------------------
@@ -58,7 +58,7 @@ pub(crate) fn parse_return_statement(
     }
 
     let return_span = Some(token_stream.current_span());
-    let is_error_return = token_stream.current_token_kind() == &TokenKind::ReturnBang;
+    let is_error_return = token_stream.current_tag() == TokenTag::RETURN_BANG;
     token_stream.advance();
 
     // --------------------------
@@ -74,7 +74,7 @@ pub(crate) fn parse_return_statement(
             .into());
         };
 
-        if is_return_terminator(token_stream.current_token_kind()) {
+        if is_return_terminator(token_stream.current_tag()) {
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::MissingReturnBangValue,
                 Some(token_stream.current_span()),
@@ -111,7 +111,7 @@ pub(crate) fn parse_return_statement(
         return Ok(());
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Bang {
+    if token_stream.current_tag() == TokenTag::BANG {
         return Err(CompilerDiagnostic::unexpected_token_from_tag(
             DiagnosticToken::from_static_tag(TokenTag::BANG),
             Some(token_stream.current_span()),
@@ -123,9 +123,7 @@ pub(crate) fn parse_return_statement(
     //  Value-producing return if
     // --------------------------
 
-    if token_stream.current_token_kind() == &TokenKind::If
-        && !context.expected_result_type_ids.is_empty()
-    {
+    if token_stream.current_tag() == TokenTag::IF && !context.expected_result_type_ids.is_empty() {
         let value_block_expr = match try_parse_value_block_at_receiver(
             token_stream,
             context,
@@ -181,7 +179,7 @@ pub(crate) fn parse_return_statement(
     // --------------------------
 
     let returned_values = if context.expected_result_type_ids.is_empty() {
-        if is_return_terminator(token_stream.current_token_kind()) {
+        if is_return_terminator(token_stream.current_tag()) {
             Vec::new()
         } else {
             return Err(CompilerDiagnostic::invalid_return_shape(
@@ -191,7 +189,7 @@ pub(crate) fn parse_return_statement(
             .into());
         }
     } else {
-        if is_return_terminator(token_stream.current_token_kind()) {
+        if is_return_terminator(token_stream.current_tag()) {
             let expected_count = context.expected_result_type_ids.len();
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::BareReturnWithExpectedValues { expected_count },
@@ -210,7 +208,7 @@ pub(crate) fn parse_return_statement(
             path_fork,
         )?;
 
-        if token_stream.current_token_kind() == &TokenKind::Comma {
+        if token_stream.current_tag() == TokenTag::COMMA {
             let expected_count = context.expected_result_type_ids.len();
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::TooManyReturnValues { expected_count },

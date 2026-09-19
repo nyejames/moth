@@ -33,7 +33,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 
 // --------------------------
 //  Accessed-symbol statement helper
@@ -69,15 +69,6 @@ fn push_accessed_symbol_statement(
         InvalidStandaloneStatementReason::Expression,
         Some(token_stream.current_span()),
     ))
-}
-
-/// Read the next token kind through the canonical cursor view.
-///
-/// WHAT: pure read-only lookahead at the adapter-relative next position.
-/// WHY: symbol dispatch only needs one token of lookahead; `AstCursor::token_kind_at`
-/// already covers both canonical and compatibility backings.
-fn peek_next_kind(token_stream: &AstCursor) -> Option<TokenKind> {
-    token_stream.token_kind_at(token_stream.position().saturating_add(1))
 }
 
 // --------------------------
@@ -116,9 +107,9 @@ pub(crate) fn parse_this_statement(
         .into());
     };
 
-    match peek_next_kind(token_stream).as_ref() {
+    match token_stream.peek_next_tag() {
         // Direct reassignment of `this` is never allowed.
-        Some(next_token) if next_token.token_tag().is_assignment_operator() => {
+        Some(next_tag) if next_tag.is_assignment_operator() => {
             Err(CompilerDiagnostic::invalid_this_usage(
                 InvalidThisUsageReason::Reassignment,
                 Some(token_stream.current_span()),
@@ -128,7 +119,7 @@ pub(crate) fn parse_this_statement(
 
         // Field access on `this`: may be a mutation (`this.x = ...`) or a
         // method/collection call (`this.x()`).
-        Some(TokenKind::Dot) => {
+        Some(TokenTag::DOT) => {
             token_stream.advance();
             let accessed_node = parse_field_access(
                 token_stream,
@@ -214,6 +205,7 @@ pub(crate) fn parse_symbol_statement(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
+    // Payload extraction stays on the token kind: only the symbol id needs the wide value.
     let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
         return Err(CompilerDiagnostic::expected_symbol_statement(Some(
             token_stream.current_span(),
@@ -264,9 +256,9 @@ pub(crate) fn parse_symbol_statement(
     // If the symbol already names a visible local, treat it as a use
     // (assignment, field access, or expression) rather than a new declaration.
     if let Some(existing_reference) = context.get_reference(&symbol_id) {
-        match peek_next_kind(token_stream).as_ref() {
+        match token_stream.peek_next_tag() {
             // Direct reassignment of an existing local variable.
-            Some(next_token) if next_token.token_tag().is_assignment_operator() => {
+            Some(next_tag) if next_tag.is_assignment_operator() => {
                 token_stream.advance();
                 let mutation_node = handle_mutation(
                     token_stream,
@@ -283,7 +275,7 @@ pub(crate) fn parse_symbol_statement(
             }
 
             // Field access on an existing local: may be a mutation or a call.
-            Some(TokenKind::Dot) => {
+            Some(TokenTag::DOT) => {
                 token_stream.advance();
                 let accessed_node = parse_field_access(
                     token_stream,
@@ -336,12 +328,12 @@ pub(crate) fn parse_symbol_statement(
 
             // A type keyword after an existing symbol means the user is trying to
             // redeclare it with an explicit type, which is a shadowing error.
-            Some(TokenKind::DatatypeInt)
-            | Some(TokenKind::DatatypeFloat)
-            | Some(TokenKind::DatatypeBool)
-            | Some(TokenKind::DatatypeString)
-            | Some(TokenKind::DatatypeChar)
-            | Some(TokenKind::Mutable) => {
+            Some(TokenTag::DATATYPE_INT)
+            | Some(TokenTag::DATATYPE_FLOAT)
+            | Some(TokenTag::DATATYPE_BOOL)
+            | Some(TokenTag::DATATYPE_STRING)
+            | Some(TokenTag::DATATYPE_CHAR)
+            | Some(TokenTag::MUTABLE) => {
                 let mut diagnostic = CompilerDiagnostic::shadowed_name(
                     symbol_id,
                     existing_reference.value.span,
@@ -377,7 +369,7 @@ pub(crate) fn parse_symbol_statement(
     if let Some((external_function_id, external_function_def)) =
         context.lookup_visible_external_function(symbol_id)
     {
-        if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::TypeParameterBracket) {
+        if token_stream.peek_next_tag() == Some(TokenTag::TYPE_PARAMETER_BRACKET) {
             // Explicit external imports retain the authored dependency span; prelude-injected
             // symbols intentionally have no source span to attach.
             let previous_span = context
@@ -423,7 +415,7 @@ pub(crate) fn parse_symbol_statement(
 
     // An open parenthesis after an unknown symbol means a call attempt.
     // Provide targeted diagnostics for receiver methods and external types.
-    if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::OpenParenthesis) {
+    if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
         if let Some(receiver_method_entry) =
             context.lookup_visible_receiver_method_by_name(symbol_id)
         {
@@ -456,7 +448,7 @@ pub(crate) fn parse_symbol_statement(
     // namespace symbol, but they are valid side-effect statements when the field access resolves
     // to a call. Route them through expression-statement validation before declaration parsing
     // interprets the leading symbol as a malformed declaration.
-    if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::Dot) {
+    if token_stream.peek_next_tag() == Some(TokenTag::DOT) {
         let expression = parse_symbol_expression_statement_candidate(
             token_stream,
             context,
