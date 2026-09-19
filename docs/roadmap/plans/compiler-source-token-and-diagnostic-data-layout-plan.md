@@ -115,7 +115,7 @@ ACTIVE_PLAN:
   - F2 (3H-R1b): closed — monotone parser scans walk the cursor instead of re-searching the
     segmented prefix on every step.
   - F3 (3H-R3): loop-header grammar is one cursor parser; the owned non-canonical cursor is
-    gone; declaration_syntax and statement sentinels classify on TokenTag; remaining Token/TokenKind consumers and the test-only compatibility cursor still remain.
+    gone; declaration_syntax, statement sentinels, and control-flow headers classify on TokenTag; remaining Token/TokenKind consumers and the test-only compatibility cursor still remain.
   - F4 (3H-R2 done, 3H-R4 open): retained generic bodies bound one canonical `SourceTokens` owner;
     header and prepared-source ownership still need their cutover.
   - F5 (3H-R5): Phase 3 performance acceptance is open.
@@ -1429,6 +1429,10 @@ canonical (R3b, R3c), which is what finally lets every parser consumer drop the 
   on `current_tag` / `peek_next_tag`. Leftovers: `is_missing_produced_value_boundary` and
   `check_statement_common_mistake` still take `&TokenKind`; symbol payload extraction stays
   on `current_token_kind`. 318 `ast::statements` tests; 7 `ast::cursor_tests`.
+- Control-flow TokenTag cutover: branching, if-headers, match-arm boundaries, and match-headers
+  classify keyword/delimiter identity on `current_tag` / `peek_next_tag`. Leftovers: stop-token
+  slices and `guard_end_tokens` still take `&[TokenKind]`; Symbol payload stays on
+  `current_token_kind`; `NestingDepth::step` still takes `&TokenKind`. 318 `ast::statements` tests.
 - Preserve exact diagnostic projection facts with stable code, reason and ordering contracts, and
   retain one lexical grammar owner and one numeric-text owner.
 

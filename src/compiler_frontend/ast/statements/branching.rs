@@ -42,7 +42,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 
 /// Branches recursively parse function bodies, so retained-data failures travel to the module
 /// emission boundary instead of being recast as authored control-flow diagnostics.
@@ -81,19 +81,16 @@ pub(crate) struct ParsedMatchBlock {
     pub exhaustiveness: MatchExhaustiveness,
     pub scope: PathId,
 }
-/// Peek at the index and kind of the next non-newline token without advancing.
+/// Peek at the index and tag of the next non-newline token without advancing.
 ///
 /// Restores the entry position before returning, including the not-found path.
-fn peek_next_non_newline(token_stream: &mut AstCursor) -> Option<(usize, TokenKind)> {
+fn peek_next_non_newline(token_stream: &mut AstCursor) -> Option<(usize, TokenTag)> {
     let resume = token_stream.position();
     token_stream.advance();
     let mut found = None;
     while !token_stream.is_at_end() {
-        if *token_stream.current_token_kind() != TokenKind::Newline {
-            found = Some((
-                token_stream.position(),
-                token_stream.current_token_kind().clone(),
-            ));
+        if token_stream.current_tag() != TokenTag::NEWLINE {
+            found = Some((token_stream.position(), token_stream.current_tag()));
             break;
         }
         token_stream.advance();
@@ -106,13 +103,13 @@ fn peek_next_non_newline(token_stream: &mut AstCursor) -> Option<(usize, TokenKi
 
 fn reject_same_line_else_if(token_stream: &AstCursor) -> BranchingResult<()> {
     let else_span = Some(token_stream.current_span());
-    let Some(next_kind) = token_stream.peek_next_token().cloned() else {
+    let Some(next_tag) = token_stream.peek_next_tag() else {
         return Ok(());
     };
 
     // Statement `else if` is deliberately not a branch-chain syntax. A nested
     // `if` remains available as the first statement inside a separate `else` body.
-    if matches!(next_kind, TokenKind::If) {
+    if next_tag == TokenTag::IF {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ElseIfUnsupported,
@@ -187,7 +184,7 @@ pub fn create_branch(
     };
 
     ast_log!("Creating If Statement");
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
@@ -213,7 +210,7 @@ pub fn create_branch(
     )?;
     let then_request_end = context.generic_request_checkpoint();
 
-    let (else_block, else_scope) = if token_stream.current_token_kind() == &TokenKind::Else {
+    let (else_block, else_scope) = if token_stream.current_tag() == TokenTag::ELSE {
         reject_same_line_else_if(token_stream)?;
         token_stream.advance();
         let else_context =
@@ -273,7 +270,7 @@ fn create_option_present_capture_branch(
         then_context,
         header_span,
     } = parsed_header;
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
@@ -291,7 +288,7 @@ fn create_option_present_capture_branch(
         path_fork,
     )?;
 
-    let else_block = if token_stream.current_token_kind() == &TokenKind::Else {
+    let else_block = if token_stream.current_tag() == TokenTag::ELSE {
         reject_same_line_else_if(token_stream)?;
         token_stream.advance();
         let else_context =
@@ -398,7 +395,7 @@ pub(crate) fn parse_match_block(
 ) -> BranchingResult<ParsedMatchBlock> {
     ast_log!("Creating Match Statement");
 
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
@@ -422,12 +419,12 @@ pub(crate) fn parse_match_block(
     loop {
         token_stream.skip_newlines();
 
-        match token_stream.current_token_kind() {
-            TokenKind::End => {
+        match token_stream.current_tag() {
+            TokenTag::END => {
                 let next = peek_next_non_newline(token_stream);
                 let semicolon_separates_same_level_arms = !seen_else
-                    && next.is_some_and(|(index, kind)| {
-                        kind == TokenKind::Else
+                    && next.is_some_and(|(index, tag)| {
+                        tag == TokenTag::ELSE
                             || token_index_has_top_level_fat_arrow(token_stream, index)
                     });
 
@@ -441,7 +438,7 @@ pub(crate) fn parse_match_block(
                 break;
             }
 
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(branching_error(
                     CompilerDiagnostic::invalid_control_flow_statement(
                         InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch,
@@ -450,7 +447,7 @@ pub(crate) fn parse_match_block(
                 ));
             }
 
-            TokenKind::Else => {
+            TokenTag::ELSE => {
                 if arms.is_empty() {
                     return Err(branching_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
@@ -568,21 +565,21 @@ fn parse_else_arm(
     token_stream.advance();
     token_stream.skip_newlines();
 
-    if token_stream.current_token_kind() == &TokenKind::Colon {
+    if token_stream.current_tag() == TokenTag::COLON {
         return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::LegacyElseSyntax,
             Some(token_stream.current_span()),
         )));
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Arrow {
+    if token_stream.current_tag() == TokenTag::ARROW {
         return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             Some(token_stream.current_span()),
         )));
     }
 
-    if token_stream.current_token_kind() != &TokenKind::FatArrow {
+    if token_stream.current_tag() != TokenTag::FAT_ARROW {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,
@@ -637,7 +634,7 @@ fn parse_match_arm(
         path_fork,
     )?;
 
-    if token_stream.current_token_kind() != &TokenKind::FatArrow {
+    if token_stream.current_tag() != TokenTag::FAT_ARROW {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,

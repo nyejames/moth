@@ -34,7 +34,7 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -237,7 +237,7 @@ pub(crate) fn parse_single_predicate_match_pattern(
 
     // Colon starts the block body of a single-predicate value match. Full match
     // arms still reject it as legacy `pattern:` syntax through `parse_match_arm_header`.
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         reject_invalid_pattern_suffix(token_stream)?;
     }
 
@@ -254,7 +254,7 @@ fn parse_match_guard(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<Option<Expression>> {
-    if token_stream.current_token_kind() != &TokenKind::If {
+    if token_stream.current_tag() != TokenTag::IF {
         return Ok(None);
     }
 
@@ -392,7 +392,7 @@ fn parse_match_pattern_header(
 }
 
 fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<()> {
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(deferred_feature_reason_diagnostic(
             DeferredFeatureReason::CaptureTaggedPattern,
             Some(token_stream.current_span()),
@@ -400,7 +400,7 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
         .into());
     }
 
-    if token_stream.current_token_kind() == &TokenKind::As {
+    if token_stream.current_tag() == TokenTag::AS {
         return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::AsNotValid,
             None,
@@ -410,7 +410,7 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
         .into());
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Colon {
+    if token_stream.current_tag() == TokenTag::COLON {
         return Err(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::LegacyColonSyntax,
             Some(token_stream.current_span()),
@@ -418,7 +418,7 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
         .into());
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Arrow {
+    if token_stream.current_tag() == TokenTag::ARROW {
         return Err(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             Some(token_stream.current_span()),
@@ -436,8 +436,8 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
 /// unsupported-pattern diagnostic instead of being mistaken for a capture.
 fn option_pattern_constructor_like(token_stream: &AstCursor) -> bool {
     token_stream
-        .peek_next_token()
-        .is_some_and(|kind| matches!(kind, TokenKind::OpenParenthesis | TokenKind::DoubleColon))
+        .peek_next_tag()
+        .is_some_and(|tag| matches!(tag, TokenTag::OPEN_PARENTHESIS | TokenTag::DOUBLE_COLON))
 }
 /// Build a choice arm scope and final pattern with fully resolved capture binding paths.
 ///

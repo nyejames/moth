@@ -25,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchPatternReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -108,7 +108,7 @@ impl IfHeaderClassification {
         (start..=end).all(|index| {
             token_stream
                 .token_kind_at(index)
-                .is_some_and(|kind| kind != TokenKind::Newline)
+                .is_some_and(|kind| kind.token_tag() != TokenTag::NEWLINE)
         })
     }
 
@@ -121,8 +121,9 @@ impl IfHeaderClassification {
         let Some(is_index) = self.is_index else {
             return false;
         };
-        token_stream.token_kind_at(is_index.saturating_add(1))
-            == Some(TokenKind::TypeParameterBracket)
+        token_stream
+            .token_kind_at(is_index.saturating_add(1))
+            .is_some_and(|kind| kind.token_tag() == TokenTag::TYPE_PARAMETER_BRACKET)
     }
 }
 
@@ -185,7 +186,7 @@ pub(crate) fn parse_if_header(
         path_fork,
     )?;
 
-    if token_stream.current_token_kind() == &TokenKind::Is {
+    if token_stream.current_tag() == TokenTag::IS {
         token_stream.advance();
         return Ok(ParsedIfHeader::MatchStyle {
             scrutinee: condition,
@@ -218,10 +219,10 @@ fn classify_if_header_from_position(token_stream: &mut AstCursor) -> IfHeaderCla
         let index = token_stream.position();
 
         if nesting_depth.is_top_level() {
-            if token_stream.current_token_kind() == &TokenKind::Is {
+            if token_stream.current_tag() == TokenTag::IS {
                 return classify_from_is(token_stream, index);
             }
-            if let Some(delimiter) = predicate_body_delimiter(token_stream.current_token_kind()) {
+            if let Some(delimiter) = predicate_body_delimiter(token_stream.current_tag()) {
                 return ordinary_bool_header(delimiter, Some(index));
             }
         }
@@ -229,7 +230,7 @@ fn classify_if_header_from_position(token_stream: &mut AstCursor) -> IfHeaderCla
         // A malformed payload also reports `Eof`, and `Eof` is stable under
         // `advance`, so break on it at any depth: an unclosed delimiter before
         // the end of the stream must terminate the scan.
-        if token_stream.current_token_kind() == &TokenKind::Eof {
+        if token_stream.current_tag() == TokenTag::EOF {
             break;
         }
         nesting_depth.step(token_stream.current_token_kind());
@@ -251,8 +252,10 @@ fn classify_from_is(token_stream: &mut AstCursor, is_index: usize) -> IfHeaderCl
         };
     };
 
-    if let Some(kind) = token_stream.token_kind_at(after_is)
-        && let Some(delimiter) = full_match_delimiter(&kind)
+    if let Some(tag) = token_stream
+        .token_kind_at(after_is)
+        .map(|kind| kind.token_tag())
+        && let Some(delimiter) = full_match_delimiter(tag)
     {
         return IfHeaderClassification {
             shape: IfHeaderShape::FullMatch,
@@ -287,7 +290,7 @@ fn classify_single_predicate_after_pattern(
         let index = token_stream.position();
 
         if nesting_depth.is_top_level()
-            && let Some(delimiter) = predicate_body_delimiter(token_stream.current_token_kind())
+            && let Some(delimiter) = predicate_body_delimiter(token_stream.current_tag())
         {
             let shape = match delimiter {
                 IfHeaderDelimiter::InlineThen => IfHeaderShape::PotentialInlineSinglePredicate,
@@ -308,7 +311,7 @@ fn classify_single_predicate_after_pattern(
         // A malformed payload also reports `Eof`, and `Eof` is stable under
         // `advance`, so break on it: an unclosed delimiter before the end of the
         // stream leaves the header an ordinary Bool.
-        if token_stream.current_token_kind() == &TokenKind::Eof {
+        if token_stream.current_tag() == TokenTag::EOF {
             break;
         }
         nesting_depth.step(token_stream.current_token_kind());
@@ -318,18 +321,18 @@ fn classify_single_predicate_after_pattern(
     ordinary
 }
 
-fn full_match_delimiter(token_kind: &TokenKind) -> Option<IfHeaderDelimiter> {
-    match token_kind {
-        TokenKind::Colon => Some(IfHeaderDelimiter::Colon),
-        TokenKind::StartTemplateBody => Some(IfHeaderDelimiter::TemplateBody),
-        TokenKind::TemplateClose => Some(IfHeaderDelimiter::TemplateClose),
+fn full_match_delimiter(tag: TokenTag) -> Option<IfHeaderDelimiter> {
+    match tag {
+        TokenTag::COLON => Some(IfHeaderDelimiter::Colon),
+        TokenTag::START_TEMPLATE_BODY => Some(IfHeaderDelimiter::TemplateBody),
+        TokenTag::TEMPLATE_CLOSE => Some(IfHeaderDelimiter::TemplateClose),
         _ => None,
     }
 }
 
-fn predicate_body_delimiter(token_kind: &TokenKind) -> Option<IfHeaderDelimiter> {
-    match token_kind {
-        TokenKind::Then => Some(IfHeaderDelimiter::InlineThen),
+fn predicate_body_delimiter(tag: TokenTag) -> Option<IfHeaderDelimiter> {
+    match tag {
+        TokenTag::THEN => Some(IfHeaderDelimiter::InlineThen),
         other => full_match_delimiter(other),
     }
 }
@@ -357,7 +360,7 @@ fn next_meaningful_token_index(token_stream: &mut AstCursor, start_index: usize)
     }
     token_stream.skip_newlines();
 
-    if token_stream.is_at_end() || token_stream.current_token_kind() == &TokenKind::Eof {
+    if token_stream.is_at_end() || token_stream.current_tag() == TokenTag::EOF {
         return None;
     }
 
