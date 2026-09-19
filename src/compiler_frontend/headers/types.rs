@@ -34,9 +34,7 @@ use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
-use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, TokenRange, TokenSequenceId,
-};
+use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenRange, TokenSequenceId};
 use crate::compiler_frontend::traits::syntax::{
     TraitConformanceSyntax, TraitDeclarationSyntax, TraitIncompatibilitySyntax,
 };
@@ -44,7 +42,6 @@ use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
-#[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -93,7 +90,60 @@ impl SourceTokenOwner {
         self.tokens.source()
     }
 
-    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.tokens.len()
+    }
+
+    pub(crate) fn token_stats(&self) -> TokenStats {
+        self.tokens.token_stats()
+    }
+
+    pub(crate) fn full_range(&self) -> Result<TokenRange, CompilerError> {
+        self.tokens.full_range().map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "canonical source token range could not be constructed: {error:?}"
+            ))
+        })
+    }
+
+    pub(crate) fn cursor(
+        &self,
+        range: TokenRange,
+    ) -> Result<crate::compiler_frontend::tokenizer::tokens::TokenCursor<'_>, CompilerError> {
+        self.tokens.cursor(range).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "canonical source token cursor could not be constructed: {error:?}"
+            ))
+        })
+    }
+
+    pub(crate) fn try_register_token_sequence(
+        &mut self,
+        ranges: &[TokenRange],
+    ) -> Result<TokenSequenceId, crate::compiler_frontend::tokenizer::tokens::TokenSequenceError>
+    {
+        Arc::get_mut(&mut self.tokens)
+            .ok_or(
+                crate::compiler_frontend::tokenizer::tokens::TokenSequenceError::NoCanonicalOwner,
+            )?
+            .try_register_token_sequence(ranges)
+    }
+
+    pub(crate) fn register_token_sequence(
+        &mut self,
+        ranges: &[TokenRange],
+    ) -> Result<TokenSequenceId, CompilerError> {
+        self.try_register_token_sequence(ranges).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "source token sequence registration failed: {error:?}"
+            ))
+        })
+    }
+
+    pub(crate) fn into_tokens(self) -> Arc<SourceTokens> {
+        self.tokens
+    }
+
     pub(crate) fn os_path(&self) -> Option<&Path> {
         self.canonical_os_path.as_deref()
     }
@@ -121,11 +171,9 @@ pub struct PreparedHeaderSyntax {
     pub headers: Vec<Header>,
     /// One canonical source owner per tokenized `SourceId`.
     ///
-    /// Each owner bundles the sole canonical `SourceTokens` allocation (Arc-cloned from
-    /// the transient lexer `FileTokens` at publication and never rebuilt from slices)
-    /// with its logical path and optional canonical OS path. The table remains
-    /// available only so bounded parser adapters can materialize retained ranges
-    /// or sequences.
+    /// Each owner bundles the sole canonical `SourceTokens` allocation published by the lexer
+    /// with its logical path and optional canonical OS path. Path rows remain separate until the
+    /// prepared-file freeze and are never rebuilt from retained token ranges.
     pub(crate) source_token_owners: SourceTokenOwners,
     /// Provider-independent source `#Config` declarations, normalized from top-level constant
     /// shells before any provider binding or AST expression resolution.
@@ -576,8 +624,12 @@ pub struct Header {
 
     // Contiguous retained body syntax is a source-qualified range. The source token owner lives
     // once in `PreparedHeaderSyntax::source_token_owners`.
+    /// Source-owned retained declaration syntax.
+    ///
+    /// The range resolves through the canonical source-token owner. No header-owned token vector
+    /// is retained.
     pub tokens: TokenRange,
-    /// Complete declaration path (the former `FileTokens::src_path` field).
+    /// Complete declaration path carried by the canonical source owner.
     pub declaration_path: PathId,
     /// Source-owned segmented syntax for the implicit `start` body.
     ///
@@ -1419,7 +1471,7 @@ pub struct FileFrontendPrepareOutput {
     /// Complete logical identity of the prepared source file in the active path table.
     ///
     /// WHAT: the `PathId` interned for this file through the owning `PathInternerFork`,
-    ///      shared with its `FileTokens.src_path` and authored path rows.
+    ///      shared with the canonical source owner and authored path rows.
     /// WHY: tokenizer and dependency owners share one compact path domain; the
     ///      filesystem `canonical_os_path` remains the only `PathBuf` identity for IO.
     pub source_file: PathId,
@@ -1463,9 +1515,8 @@ pub struct FileFrontendPrepareOutput {
     pub canonical_os_path: Option<std::path::PathBuf>,
     pub headers: Vec<Header>,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
-    /// The canonical `SourceTokens` owner for this file, Arc-cloned from the transient
-    /// lexer `FileTokens` at publication and never rebuilt from slices.
-    /// It is shared at module scope only so bounded parser adapters can be built.
+    /// The canonical `SourceTokens` owner retained for this file after header parsing.
+    /// It is shared at module scope as the sole source owner for bounded body cursors.
     pub(crate) source_token_stream: Option<Arc<SourceTokens>>,
     /// WHY: const-template synthetic names must remain unique across the module while per-file
     /// parsing reports its contribution separately from module aggregation.
@@ -1497,10 +1548,6 @@ pub(crate) enum PreparedFilePathSyntax {
 }
 
 impl PreparedFilePathSyntax {
-    pub(crate) fn from_file_tokens(tokens: &mut FileTokens) -> Result<Self, CompilerError> {
-        Ok(Self::Preparing(tokens.take_preparing_path_syntax()?))
-    }
-
     pub(crate) fn empty() -> Self {
         Self::Preparing(Arc::new(PathSyntaxTable::new()))
     }
@@ -1524,7 +1571,6 @@ impl PreparedFilePathSyntax {
             )
         })
     }
-
     /// The caller performs no fallible operations after this transition. Retained headers resolve
     /// through cloned immutable handles immediately afterward, so an attachment failure cannot
     /// leave a partially frozen output or make a mutable table observable through copy-on-write.
@@ -1820,22 +1866,6 @@ impl FileFrontendPrepareOutput {
             canonical.attach_shared_path_syntax(Arc::clone(&path_syntax));
             canonical.freeze_numeric_literals();
         }
-        Ok(())
-    }
-    /// Install the one canonical source owner after parsing has finished.
-    ///
-    /// The owner is Arc-cloned from the transient lexer `FileTokens` at publication, never
-    /// rebuilt from slices.
-    pub(crate) fn install_source_token_stream(
-        &mut self,
-        source: Arc<SourceTokens>,
-    ) -> Result<(), CompilerError> {
-        if source.source() != self.file_id {
-            return Err(CompilerError::compiler_error(
-                "prepared source token stream identity does not match its file output",
-            ));
-        }
-        self.source_token_stream = Some(source);
         Ok(())
     }
 
@@ -2442,6 +2472,11 @@ pub(super) struct HeaderParseContext<'a> {
     pub string_table: &'a mut StringTable,
     pub path_fork: &'a mut PathInternerFork,
     pub span_builder: &'a mut ExtendedSpanBuilder,
+    /// The source-owned path rows used by dependency parsing and legacy diagnostics.
+    ///
+    /// WHAT: remains separate from the canonical token owner until output freeze.
+    /// WHY: path rows are mutable preparation state and must not be recovered from token storage.
+    pub path_syntax: Arc<PathSyntaxTable>,
     /// Module-wide base offset for const-template synthetic names in this file.
     ///
     /// WHY: const-template names must be unique across the module; each file's parser

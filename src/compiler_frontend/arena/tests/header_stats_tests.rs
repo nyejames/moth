@@ -6,6 +6,7 @@ use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_te
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 
@@ -79,7 +80,7 @@ fn multi_file_declarations_are_aggregated() {
             .try_intern_filesystem_path(path, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let tokens = tokenize(
+        let handoff = tokenize(
             source,
             interned_path,
             TokenizerEntryMode::SourceFile,
@@ -89,9 +90,17 @@ fn multi_file_declarations_are_aggregated() {
             source_id,
             &mut span_builder,
         )
-        .expect("source should tokenize");
+        .expect("source should tokenize")
+        .into_canonical_lexer_handoff()
+        .expect("source tokenization should produce a canonical lexer handoff");
+        let owner = SourceTokenOwner::new(
+            handoff.tokens,
+            handoff.logical_path,
+            handoff.canonical_os_path,
+        );
         prepare_file_from_tokens(
-            tokens,
+            owner,
+            handoff.path_syntax,
             &entry_path,
             &HeaderParseOptions::default(),
             &mut string_table,

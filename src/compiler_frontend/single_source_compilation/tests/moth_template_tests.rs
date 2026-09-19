@@ -339,7 +339,6 @@ fn prepare_bundle_source(
         span_builder: ExtendedSpanBuilder::new(),
         const_template_offset: 0,
         runtime_fragment_offset: 0,
-        compatibility_tokens: None,
     };
     let SourcePreparationDelta {
         span_builder,

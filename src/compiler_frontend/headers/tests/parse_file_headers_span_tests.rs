@@ -35,8 +35,10 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         &mut spans,
     )
     .expect("source should tokenize");
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        path_syntax,
         &canonical,
         &options,
         &mut strings,
@@ -181,8 +183,10 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         &mut spans,
     )
     .expect("source should tokenize");
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        path_syntax,
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
@@ -404,8 +408,10 @@ Generic of A must {trait_name}\n"
         &mut spans,
     )
     .expect("source should tokenize");
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        path_syntax,
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,

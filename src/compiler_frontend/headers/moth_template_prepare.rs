@@ -12,50 +12,47 @@ use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
 use crate::compiler_frontend::headers::types::{
-    FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax, SyntheticContentPayload,
+    FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax, SourceTokenOwner,
+    SyntheticContentPayload,
 };
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, TokenIndex, TokenRange,
-};
+use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, TokenRange};
 use crate::compiler_frontend::utilities::token_scan::{
     TokenFactView, collect_scanned_symbol_references,
 };
 use std::path::PathBuf;
+use std::sync::Arc;
 const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 
 /// Build the header-stage output for one `.mtf` source file.
 ///
-/// The input token stream must already have been tokenized with Moth template's template-body entry
-/// policy. Preparation retains only a checked body range and compact directive payload; the AST
-/// fold boundary supplies the structural `MothContentTemplateEntry` directly.
+/// The canonical source owner must be paired with its preparing path table. Preparation retains
+/// only a checked body range and compact directive payload; the AST fold boundary supplies the
+/// structural `MothContentTemplateEntry` directly.
 pub(crate) fn prepare_moth_template_file(
-    mut file_tokens: FileTokens,
+    owner: SourceTokenOwner,
+    path_syntax: Arc<PathSyntaxTable>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
-    let file_id = file_tokens.file_id;
-    let src_path = file_tokens.src_path;
-    let canonical_os_path = file_tokens.canonical_os_path.clone();
-    let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
-    let canonical_owner = file_tokens.canonical_source_tokens_arc().map_err(|_| {
-        CompilerError::compiler_error(
-            "Moth template source token owner does not match its file identity",
-        )
-    })?;
-    if canonical_owner.source() != file_id {
+    let file_id = owner.source_id();
+    let src_path = owner.logical_path();
+    let canonical_os_path = owner.os_path_cloned();
+    let canonical = owner.tokens_ref();
+    if canonical.source() != file_id {
         return Err(CompilerError::compiler_error(
             "Moth template source token owner does not match its file identity",
         ));
     }
-    let token_count = canonical_owner.len();
-    let token_stats = canonical_owner.token_stats();
-    let body_range = MothTemplatePrepareContext::body_range(&canonical_owner)?;
+    let token_count = owner.len();
+    let token_stats = owner.token_stats();
+    let body_range = MothTemplatePrepareContext::body_range(canonical)?;
     let context = MothTemplatePrepareContext::new(
         src_path,
         file_id,
@@ -64,19 +61,13 @@ pub(crate) fn prepare_moth_template_file(
         string_table,
     )?;
     let (content_header, config_owned_path_syntax_ids) = {
-        let body_facts = TokenFactView::from_source_range(&canonical_owner, context.body_range)
+        let body_facts = TokenFactView::from_source_range(canonical, context.body_range)
             .map_err(|error| {
                 CompilerError::compiler_error(format!(
                     "Moth template body view is invalid: {error:?}"
                 ))
             })?;
-        let body_cursor = canonical_owner
-            .cursor(context.body_range)
-            .map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "Moth template body cursor is invalid: {error:?}"
-                ))
-            })?;
+        let body_cursor = owner.cursor(context.body_range)?;
         let content_header = context.content_header(body_facts, string_table, path_fork)?;
         let config_owned_path_syntax_ids =
             if find_config_qualifier_marker_in_cursor(body_cursor, string_table, span_builder)
@@ -94,7 +85,7 @@ pub(crate) fn prepare_moth_template_file(
     };
     let mut headers = vec![content_header];
     let structural_file_references = classify_prepared_file_references(
-        path_syntax.table(),
+        path_syntax.as_ref(),
         config_owned_path_syntax_ids,
         context.file_id,
         path_fork,
@@ -104,17 +95,18 @@ pub(crate) fn prepare_moth_template_file(
     // body range takes the same token-level content ordering facts as authored shells.
     collect_content_source_ordering_hints(
         &mut headers,
-        &canonical_owner,
+        canonical,
         &structural_file_references,
-        path_syntax.table(),
+        path_syntax.as_ref(),
         string_table,
         path_fork,
     )?;
 
+    let source_token_stream = owner.into_tokens();
     Ok(FileFrontendPrepareOutput {
         source_file: context.source_file,
         file_id: context.file_id,
-        path_syntax,
+        path_syntax: PreparedFilePathSyntax::Preparing(path_syntax),
         token_count,
         token_stats,
         file_role: FileRole::Normal,
@@ -124,7 +116,7 @@ pub(crate) fn prepare_moth_template_file(
         canonical_os_path: context.canonical_os_path,
         headers,
         top_level_const_fragments: Vec::new(),
-        source_token_stream: Some(canonical_owner),
+        source_token_stream: Some(source_token_stream),
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,

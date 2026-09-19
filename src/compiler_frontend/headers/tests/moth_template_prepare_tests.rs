@@ -83,9 +83,17 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
         &mut span_builder,
     )
     .expect("Moth template body should tokenize");
-
+    let handoff = file_tokens
+        .into_canonical_lexer_handoff()
+        .expect("freshly tokenized Moth template should provide the canonical handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
     let output = prepare_moth_template_file(
-        file_tokens,
+        owner,
+        handoff.path_syntax,
         &mut string_table,
         &mut path_fork,
         &mut span_builder,
@@ -119,18 +127,12 @@ fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
         .take_preparing_path_syntax()
         .expect("fresh token stream should own its preparing path table");
 
-    let error = match prepare_moth_template_file(
-        file_tokens,
-        &mut string_table,
-        &mut path_fork,
-        &mut span_builder,
-    ) {
-        Ok(_) => panic!("a deferred source token stream must fail through CompilerError"),
-        Err(error) => error,
-    };
+    let error = file_tokens
+        .into_canonical_lexer_handoff()
+        .expect_err("a deferred source token stream must fail through CompilerError");
 
     assert!(
-        format!("{error:?}").contains("deferred stream"),
+        format!("{error:?}").contains("preparing path table"),
         "error should retain the path-table lifecycle failure: {error:?}"
     );
 }
@@ -175,7 +177,6 @@ fn prepare_via_pipeline(source: &str) -> SourcePreparationDelta {
         span_builder: ExtendedSpanBuilder::new(),
         const_template_offset: 0,
         runtime_fragment_offset: 0,
-        compatibility_tokens: None,
     };
     let context = FrontendFilePrepareContext {
         source_files: &source_files,
@@ -254,7 +255,6 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         span_builder: ExtendedSpanBuilder::new(),
         const_template_offset: 0,
         runtime_fragment_offset: 0,
-        compatibility_tokens: None,
     };
     let SourcePreparationDelta { result, .. } = CompilerFrontend::prepare_file_frontend_local(
         &context,
@@ -682,9 +682,9 @@ impl MothTemplateScopeFixture {
                 .unwrap_or(SourceFileKind::Moth);
 
             let mut span_builder = ExtendedSpanBuilder::new();
-            let (source, compatibility_tokens) = match source_kind {
+            let source = match source_kind {
                 SourceFileKind::Moth => {
-                    let tokens = CompilerFrontend::tokenize_source(
+                    let (owner, path_syntax) = CompilerFrontend::tokenize_source(
                         &self.source_files,
                         &style_directives,
                         &source_code,
@@ -703,33 +703,16 @@ impl MothTemplateScopeFixture {
                             panic!("fixture tokenization hit infrastructure failure: {error:?}")
                         }
                     })?;
-                    let identity = self
-                        .source_files
-                        .get(source_id)
-                        .expect("fixture source identity should be registered");
-                    let owner = SourceTokenOwner::new(
-                        tokens
-                            .canonical_source_tokens_arc()
-                            .expect("fixture Moth source should retain canonical tokens"),
-                        identity.logical_path,
-                        identity.canonical_os_path.as_deref().map(Path::to_path_buf),
-                    );
-                    (FrontendFilePrepareSource::Moth { owner }, Some(tokens))
+                    FrontendFilePrepareSource::Moth { owner, path_syntax }
                 }
-                SourceFileKind::MothTemplate => (
-                    FrontendFilePrepareSource::MothTemplate {
-                        source_code: source_code.as_str(),
-                        source_path,
-                    },
-                    None,
-                ),
-                SourceFileKind::PlainMarkdown => (
-                    FrontendFilePrepareSource::PlainMarkdown {
-                        source_code: source_code.as_str(),
-                        source_path,
-                    },
-                    None,
-                ),
+                SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
+                    source_code: source_code.as_str(),
+                    source_path,
+                },
+                SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
+                    source_code: source_code.as_str(),
+                    source_path,
+                },
             };
             let input = FrontendFilePrepareInput {
                 source,
@@ -737,7 +720,6 @@ impl MothTemplateScopeFixture {
                 span_builder,
                 const_template_offset: 0,
                 runtime_fragment_offset: 0,
-                compatibility_tokens,
             };
 
             let SourcePreparationDelta {
@@ -904,8 +886,17 @@ fn prepare_moth_source(
     )
     .expect("Moth source should tokenize");
 
+    let handoff = file_tokens
+        .into_canonical_lexer_handoff()
+        .expect("Moth source should provide the canonical preparation handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
     let output = prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        handoff.path_syntax,
         entry_file_path,
         &HeaderParseOptions::default(),
         string_table,

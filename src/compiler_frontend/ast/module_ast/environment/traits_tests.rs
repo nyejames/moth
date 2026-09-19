@@ -19,6 +19,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderKind, HeaderParseOptions, parse_file_headers_with_table,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -381,7 +382,7 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         .try_intern_filesystem_path(&path, &mut strings)
         .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         source,
         scope,
         TokenizerEntryMode::SourceFile,
@@ -392,8 +393,17 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         &mut spans,
     )
     .expect("signature tokens");
+    let handoff = tokens
+        .into_canonical_lexer_handoff()
+        .expect("signature tokenization should produce a canonical lexer handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
     let prepared = parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        handoff.path_syntax,
         &path,
         &HeaderParseOptions::default(),
         &mut strings,

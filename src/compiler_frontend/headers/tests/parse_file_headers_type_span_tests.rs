@@ -55,8 +55,10 @@ INFERRED #= 1\n"
         tokenizer_extended_span_count, 5,
         "only the long named, qualified, generic and capacity identifier tokens should overflow"
     );
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        path_syntax,
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
@@ -249,8 +251,10 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         "trait declarations, generic declarations, bounds and type uses should own the long rows"
     );
 
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        path_syntax,
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,

@@ -58,8 +58,10 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
         &mut span_builder,
     )
     .expect("tokenization should succeed");
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
     let mut outputs = [prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         &file_path,
         &options,
         &mut string_table,
@@ -121,8 +123,10 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         &mut span_builder,
     )
     .expect("tokenization should succeed");
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
     let mut outputs = [prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
@@ -311,7 +315,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     let source_id = SourceId::from_index(7);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = tokenize(
+    let file_tokens = tokenize(
         &source,
         interned_path,
         TokenizerEntryMode::SourceFile,
@@ -322,16 +326,28 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
         &mut span_builder,
     )
     .expect("source should tokenize");
-    let long_span = file_tokens
-        .tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("tokenized source should retain the long string literal")
-        .span;
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
+    let long_span = {
+        let range = owner.full_range().expect("canonical source range should fit");
+        let mut cursor = owner
+            .cursor(range)
+            .expect("canonical source cursor should fit");
+        loop {
+            let token = cursor.advance().expect("source should contain a string literal");
+            if matches!(
+                token.to_token_kind().expect("canonical token should materialize"),
+                TokenKind::StringSliceLiteral(_)
+            ) {
+                break token.span();
+            }
+            assert!(!token.is_eof(), "source should contain a string literal");
+        }
+    };
     let expected_range = long_span.resolve_with(span_builder.resolver_for(source_id));
 
     let error = match parse_file_headers_with_table(
-        &mut file_tokens,
+        owner,
+        path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
@@ -394,8 +410,10 @@ fn dependency_shell_with_compilation_root_identity_prepares() {
     )
     .expect("tokenization should succeed");
 
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
     let output = prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,

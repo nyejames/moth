@@ -1,7 +1,7 @@
 //! Header-prep classification of graph-active file-value paths.
 
 use crate::compiler_frontend::headers::parse_file_headers::prepare_file_from_tokens;
-use crate::compiler_frontend::headers::types::HeaderParseOptions;
+use crate::compiler_frontend::headers::types::{HeaderParseOptions, SourceTokenOwner};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -37,8 +37,17 @@ fn prepare_source(
         &mut span_builder,
     )
     .expect("tokenization should succeed");
+    let handoff = file_tokens
+        .into_canonical_lexer_handoff()
+        .expect("lexer output should provide the canonical preparation handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
     let output = prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        handoff.path_syntax,
         file_path,
         &HeaderParseOptions::default(),
         &mut string_table,

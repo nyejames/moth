@@ -102,13 +102,13 @@ fn prepare_owned_source_text(
     path_fork: &mut PathInternerFork,
     builder: &mut ExtendedSpanBuilder,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
-    let (source, compatibility_tokens) = match kind {
+    let source = match kind {
         SourceFileKind::Moth => {
             let path = source_files
                 .get(source_id)
                 .expect("owned source identity must be registered")
                 .logical_path;
-            let tokenized = tokenize(
+            let mut tokenized = tokenize(
                 text,
                 path,
                 TokenizerEntryMode::SourceFile,
@@ -126,32 +126,29 @@ fn prepare_owned_source_text(
                     SourceDiscoveryError::Infrastructure(error)
                 }
             })?;
-            let canonical_tokens = tokenized
-                .canonical_source_tokens_arc()
-                .map_err(SourceDiscoveryError::Infrastructure)?;
             let identity = source_files
                 .get(source_id)
                 .expect("owned source identity must be registered");
-            let owner = SourceTokenOwner::new(
-                canonical_tokens,
-                identity.logical_path,
-                identity
-                    .canonical_os_path
-                    .as_ref()
-                    .map(|path| path.to_path_buf()),
-            );
-            (
-                PreparedSourceKind::Moth { owner },
-                Some(tokenized),
-            )
+            tokenized.canonical_os_path = identity
+                .canonical_os_path
+                .as_ref()
+                .map(|path| path.to_path_buf());
+            let handoff = tokenized
+                .into_canonical_lexer_handoff()
+                .map_err(SourceDiscoveryError::Infrastructure)?;
+            let crate::compiler_frontend::tokenizer::tokens::CanonicalLexerHandoff {
+                tokens,
+                logical_path,
+                canonical_os_path,
+                path_syntax,
+                ..
+            } = handoff;
+            let owner = SourceTokenOwner::new(tokens, logical_path, canonical_os_path);
+            PreparedSourceKind::Moth { owner, path_syntax }
         }
         SourceFileKind::MothTemplate | SourceFileKind::PlainMarkdown => {
-            (PreparedSourceKind::Deferred, None)
+            PreparedSourceKind::Deferred
         }
     };
-    Ok(PreparedSourceInput {
-        source_id,
-        source,
-        compatibility_tokens,
-    })
+    Ok(PreparedSourceInput { source_id, source })
 }

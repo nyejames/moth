@@ -83,7 +83,7 @@ pub(super) fn prepare_discovery_source_text(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
-    // Register the file before tokenization because `FileTokens` is minted with the traversal-local
+    // Register the file before tokenization so the lexer handoff carries the traversal-local
     // source identity. Discovery rebinds every prepared result to the final sorted database once
     // the closure is complete, and this table dies with the traversal.
     let source_id = source_files.insert(
@@ -99,7 +99,7 @@ pub(super) fn prepare_discovery_source_text(
     // Stage 0 classification pass so provider-free discovery does not re-read the same Moth
     // file before assembling `PreparedSourceInput` values.
     let mut span_builder = ExtendedSpanBuilder::new();
-    let tokenized = match tokenize(
+    let mut tokenized = match tokenize(
         &source,
         logical_path,
         TokenizerEntryMode::SourceFile,
@@ -122,27 +122,31 @@ pub(super) fn prepare_discovery_source_text(
             });
         }
     };
-
-    let canonical_tokens = tokenized.canonical_source_tokens_arc()?;
     let identity = source_files
         .get(source_id)
         .expect("discovery source identity must be registered");
-    let owner = SourceTokenOwner::new(
-        canonical_tokens,
-        identity.logical_path,
-        identity
-            .canonical_os_path
-            .as_ref()
-            .map(|path| path.to_path_buf()),
-    );
+    tokenized.canonical_os_path = identity
+        .canonical_os_path
+        .as_ref()
+        .map(|path| path.to_path_buf());
+    let handoff = tokenized
+        .into_canonical_lexer_handoff()
+        .map_err(SourceDiscoveryError::from)?;
+    let crate::compiler_frontend::tokenizer::tokens::CanonicalLexerHandoff {
+        tokens,
+        logical_path,
+        canonical_os_path,
+        path_syntax,
+        ..
+    } = handoff;
+    let owner = SourceTokenOwner::new(tokens, logical_path, canonical_os_path);
     let prepared_output = prepare_discovery_output(
         FrontendFilePrepareInput {
-            source: FrontendFilePrepareSource::Moth { owner },
+            source: FrontendFilePrepareSource::Moth { owner, path_syntax },
             source_id,
             span_builder,
             const_template_offset: 0,
             runtime_fragment_offset: 0,
-            compatibility_tokens: Some(tokenized),
         },
         style_directives,
         project_path_resolver,
@@ -189,7 +193,6 @@ pub(super) fn prepare_discovery_template_source(
             span_builder: ExtendedSpanBuilder::new(),
             const_template_offset: 0,
             runtime_fragment_offset: 0,
-            compatibility_tokens: None,
         },
         style_directives,
         project_path_resolver,

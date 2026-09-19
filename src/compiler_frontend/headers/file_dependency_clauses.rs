@@ -106,9 +106,7 @@ fn parse_and_record_dependency_clause(
             "dependency clause source token owner does not match its file identity",
         )));
     }
-    let path_syntax = source_tokens
-        .path_syntax_table()
-        .map_err(HeaderParseFailure::Infrastructure)?;
+    let path_syntax = &context.path_syntax;
     let (parsed, next_index) = parse_dependency_clause_at_source(
         source_tokens,
         clause_token_index.index(),

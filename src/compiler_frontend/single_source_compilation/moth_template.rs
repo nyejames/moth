@@ -675,7 +675,6 @@ fn prepare_template_source(
         span_builder,
         const_template_offset: 0,
         runtime_fragment_offset: 0,
-        compatibility_tokens: None,
     };
 
     CompilerFrontend::prepare_file_frontend_local(&context, input, string_table, path_fork)

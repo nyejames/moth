@@ -33,7 +33,7 @@ use crate::compiler_frontend::headers::top_level_classifier::{
 use crate::compiler_frontend::headers::types::{
     DependencySelection, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, Header,
     HeaderBuildContext, HeaderExportMode, HeaderKind, HeaderParseContext, HeaderParseFailure,
-    RetainedDependencyClause,
+    RetainedDependencyClause, SourceTokenOwner,
 };
 use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
@@ -43,20 +43,21 @@ use crate::compiler_frontend::source_packages::root_file::file_name_is_config_fi
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
+    SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::{ScannedToken, TokenFactView};
 use rustc_hash::FxHashSet;
+use std::sync::Arc;
 
 type FileParserResult<T> = Result<T, HeaderParseFailure>;
 
 fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
     HeaderParseFailure::Diagnostic(diagnostic)
 }
-/// Resolve one checked source-owned token at a compatibility cursor index.
+/// Resolve one checked source-owned token at a canonical cursor index.
 ///
-/// The compatibility vector remains available to deferred parser callees, but all Stage 0 facts
-/// come from the canonical source owner.
+/// All Stage 0 facts come from the canonical source owner; retained parser state stores only
+/// checked source ranges and sequence handles.
 fn source_token_at_index<'a>(
     canonical: &'a SourceTokens,
     file_id: SourceId,
@@ -558,13 +559,11 @@ fn handle_symbol_item(
         context.string_table,
     )? {
         let path_syntax = (!context.is_config_file)
-            .then(|| canonical.path_syntax_table())
-            .transpose()
-            .map_err(HeaderParseFailure::Infrastructure)?;
+            .then(|| Arc::clone(&context.path_syntax));
         return Err(diagnostic_failure(legacy_dependency_clause_diagnostic(
             facts,
             file_id,
-            path_syntax,
+            path_syntax.as_deref(),
             context,
             current_span,
             start,
@@ -1055,15 +1054,14 @@ fn find_config_marker_in_start_ranges(
     Ok(None)
 }
 pub(super) fn finish_file_output(
-    token_stream: &mut FileTokens,
+    owner: SourceTokenOwner,
+    path_syntax: Arc<PathSyntaxTable>,
     file_id: SourceId,
     end_index: TokenIndex,
     context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let canonical = token_stream
-        .source_tokens()
-        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+    let canonical = owner.tokens_ref();
     if context.file_role == FileRole::ImportedModuleRoot
         && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
             &state,
@@ -1118,19 +1116,22 @@ pub(super) fn finish_file_output(
 
     let mut output = if context.file_role == FileRole::ActiveModuleRoot {
         state
-            .into_entry_output(token_stream, end_index, context.file_role)
+            .into_entry_output(owner, path_syntax, end_index, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     } else {
         state
-            .into_non_entry_output(token_stream, context.file_role)
+            .into_non_entry_output(owner, path_syntax, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
-    // The compatibility stream is only a parser boundary. Publish its existing canonical
-    // allocation directly; moving the stream itself would retain a legacy `FileTokens` shell in
-    // the prepared-source handoff.
-    let canonical_owner = token_stream
-        .canonical_source_tokens_arc()
-        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+    let canonical_owner = output
+        .source_token_stream
+        .as_ref()
+        .map(Arc::clone)
+        .ok_or_else(|| {
+            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(
+                "prepared file output is missing its canonical source token owner",
+            ))
+        })?;
     attach_structural_file_facts(
         &mut output,
         &canonical_owner,
@@ -1138,9 +1139,6 @@ pub(super) fn finish_file_output(
         context.path_fork,
     )
     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-    output
-        .install_source_token_stream(canonical_owner)
-        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     Ok(output)
 }
 

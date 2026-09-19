@@ -287,11 +287,13 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
             TokenizerEntryMode::SourceFile,
         )
         .expect("source should tokenize");
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
     let tokenizer_span_count = {
         let (string_table, span_builder) = source_context.preparation_parts();
         let count = span_builder.len();
         let output = prepare_file_from_tokens(
-            file_tokens,
+            owner,
+            path_syntax,
             &file_path,
             &HeaderParseOptions::default(),
             string_table,
@@ -382,20 +384,30 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
             TokenizerEntryMode::SourceFile,
         )
         .expect("source should tokenize");
-    let scope = token_stream.src_path;
+    let handoff = token_stream
+        .into_canonical_lexer_handoff()
+        .expect("tokenized source must expose the canonical preparation handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
+    let scope = owner.logical_path();
     let (string_table, span_builder) = source_context.preparation_parts();
-    let opening_index = token_stream
-        .tokens
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::TemplateHead))
-        .expect("template opener");
-    token_stream.index = opening_index;
-    let mut cursor = token_stream
-        .canonical_cursor_from_current()
+    let mut cursor = owner
+        .cursor(owner.full_range().expect("canonical source range should fit"))
         .expect("tokenized source must expose canonical tokens");
-    let opening = cursor
-        .current()
-        .expect("template opener must be current");
+    let opening = loop {
+        let token = cursor.current().expect("template opener");
+        if matches!(
+            token.to_token_kind().expect("canonical token should materialize"),
+            TokenKind::TemplateHead
+        ) {
+            break token;
+        }
+        assert!(!token.is_eof(), "template opener must be present");
+        cursor.advance();
+    };
     cursor.advance();
 
     let malformed_clause = malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));

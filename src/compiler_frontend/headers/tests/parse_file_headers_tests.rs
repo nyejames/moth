@@ -29,8 +29,9 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::types::{
     DependencyBindingSyntax, DependencySelectionRange, HeaderBuildContext, HeaderExportMode,
-    HeaderParseFailure, RetainedDependencyClause,
+    HeaderParseFailure, RetainedDependencyClause, SourceTokenOwner,
 };
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::test_support::TestSourceContext;
@@ -43,7 +44,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, Token, TokenKind, TokenizerEntryMode,
+    FileTokens, Token, TokenKind, TokenizerEntryMode,
 };
 use crate::compiler_frontend::traits::syntax::ConformanceTargetKind;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -110,6 +111,20 @@ struct HeaderTestPrepareContext<'a> {
     style_directives: &'a StyleDirectiveRegistry,
 }
 
+fn canonical_handoff(
+    file_tokens: FileTokens,
+) -> (SourceTokenOwner, Arc<crate::compiler_frontend::paths::path_syntax::PathSyntaxTable>) {
+    let handoff = file_tokens
+        .into_canonical_lexer_handoff()
+        .expect("lexer output should provide the canonical preparation handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
+    (owner, handoff.path_syntax)
+}
+
 /// Prepare one self-contained fixture whose output is not reused across a path-table boundary.
 pub(crate) fn prepare_single_file(
     source: &str,
@@ -153,8 +168,10 @@ pub(crate) fn prepare_single_file_with_fork(
     )
     .expect("tokenization should succeed");
 
+    let (owner, path_syntax) = canonical_handoff(file_tokens);
     let output = prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         entry_file_path,
         &options,
         string_table,
@@ -196,8 +213,10 @@ fn prepare_test_source_file(
     )
     .map_err(FileFrontendPrepareFailure::from_tokenization)?;
 
+    let (owner, path_syntax) = canonical_handoff(file_tokens);
     prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         context.entry_file_path,
         context.options,
         string_table,
@@ -217,7 +236,7 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
         .expect("test path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = tokenize(
+    let file_tokens = tokenize(
         source,
         interned_path,
         TokenizerEntryMode::SourceFile,
@@ -228,14 +247,12 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    // The canonical SourceTokens owner is authoritative for clause parsing. Corrupt its paired
-    // preparation table instead of only mutating the compatibility token vector.
-    file_tokens.path_syntax = FilePathSyntax::Preparing(std::sync::Arc::new(
-        crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
-    ));
+    let (owner, _path_syntax) = canonical_handoff(file_tokens);
+    let invalid_path_syntax = Arc::new(PathSyntaxTable::new());
 
     match prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        invalid_path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
@@ -313,19 +330,13 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
         &mut other_span_builder,
     )
     .expect("other file should tokenize");
-    let other_path_syntax = (*other_tokens.path_syntax).clone();
-    // The stream keeps its own identity; only the path table is another file's.
-    let swapped = FileTokens::new_with_identity(
-        file_tokens.src_path,
-        file_tokens.file_id,
-        file_tokens.canonical_os_path,
-        file_tokens.tokens,
-        other_path_syntax,
-    );
-
+    let (owner, _file_path_syntax) = canonical_handoff(file_tokens);
+    let (_other_owner, other_path_syntax) = canonical_handoff(other_tokens);
+    // The source owner keeps its own identity; only the preparing path table is another file's.
     expect_prepare_infrastructure(
         match prepare_file_from_tokens(
-            swapped,
+            owner,
+            other_path_syntax,
             &file_path,
             &HeaderParseOptions::default(),
             &mut string_table,
@@ -526,8 +537,10 @@ fn parse_single_file_headers_with_entry(
     )
     .expect("tokenization should succeed");
 
+    let (owner, path_syntax) = canonical_handoff(file_tokens);
     let prepare_result = prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         &entry_file_path,
         &options,
         &mut string_table,

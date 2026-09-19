@@ -19,6 +19,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, HeaderPreparationFailure, bind_module_headers, prepare_file_from_tokens,
     prepare_header_syntax,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
@@ -41,7 +42,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -132,7 +133,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
 
-    let file_tokens = source_context
+    let handoff = source_context
         .tokenize(
             source,
             &mut path_fork,
@@ -144,11 +145,20 @@ pub(crate) fn parse_single_file_ast_build_result(
             TokenizeFailure::Infrastructure(error) => {
                 panic!("parse fixture tokenization encountered infrastructure failure: {error:?}")
             }
-        })?;
+        })?
+        .into_canonical_lexer_handoff()
+        .expect("parse fixture should produce a canonical lexer handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
+    let path_syntax = handoff.path_syntax;
     let (string_table, span_builder) = source_context.preparation_parts();
 
     let output = prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         &file_path,
         &options,
         string_table,
@@ -312,8 +322,8 @@ pub(crate) fn tokenize_source_for_test(
     module_path: &std::path::Path,
     tokenizer_entry_mode: TokenizerEntryMode,
     span_builder: &mut ExtendedSpanBuilder,
-) -> Result<FileTokens, CompilerDiagnostic> {
-    CompilerFrontend::tokenize_source(
+) -> Result<(SourceTokenOwner, Arc<PathSyntaxTable>), CompilerDiagnostic> {
+    let (owner, path_syntax) = CompilerFrontend::tokenize_source(
         frontend.source_files.as_ref(),
         frontend.style_directives,
         source_code,
@@ -332,5 +342,6 @@ pub(crate) fn tokenize_source_for_test(
         crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
             error,
         ) => panic!("tokenization test hit infrastructure failure: {error:?}"),
-    })
+    })?;
+    Ok((owner, path_syntax))
 }

@@ -39,7 +39,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -50,27 +50,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Retain tokens under their registered source identity; the caller owns their span builder.
+/// Retain a canonical owner and its preparing path table under their registered source identity.
 fn moth_prepared_input(
     source_files: &SourceDatabase,
     source_path: &Path,
-    tokens: FileTokens,
+    owner: SourceTokenOwner,
+    path_syntax: Arc<PathSyntaxTable>,
 ) -> PreparedSourceInput {
     let identity = source_files
         .get_by_canonical_path(source_path)
         .expect("test source should have a registered identity");
-    let source_id = identity.id;
-    let owner = SourceTokenOwner::new(
-        tokens
-            .canonical_source_tokens_arc()
-            .expect("test source should retain its canonical token owner"),
-        identity.logical_path,
-        identity.canonical_os_path.as_deref().map(Path::to_path_buf),
+    assert_eq!(
+        owner.source_id(),
+        identity.id,
+        "test source owner should retain its registered identity"
     );
     PreparedSourceInput {
-        source_id,
-        source: PreparedSourceKind::Moth { owner },
-        compatibility_tokens: Some(tokens),
+        source_id: identity.id,
+        source: PreparedSourceKind::Moth { owner, path_syntax },
     }
 }
 
@@ -87,7 +84,7 @@ fn tokenized_moth_prepared_input(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> PreparedSourceInput {
     let mut path_fork = source_files.fork_path_interner();
-    let tokens = CompilerFrontend::tokenize_source(
+    let (owner, path_syntax) = CompilerFrontend::tokenize_source(
         source_files,
         style_directives,
         source_code,
@@ -98,7 +95,7 @@ fn tokenized_moth_prepared_input(
         span_builder,
     )
     .expect("test source should tokenize");
-    moth_prepared_input(source_files, &source_path, tokens)
+    moth_prepared_input(source_files, &source_path, owner, path_syntax)
 }
 
 fn source_byte_count(input_files: &[PreparedSourceInput], source_files: &SourceDatabase) -> usize {
@@ -177,7 +174,7 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
             .expect("test source should have a registered identity")
             .id;
         let mut span_builder = source_spans.take_span_builder(source_id);
-        let tokens = CompilerFrontend::tokenize_source(
+        let (owner, path_syntax) = CompilerFrontend::tokenize_source(
             source_files,
             &style_directives,
             source,
@@ -188,7 +185,12 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
             &mut span_builder,
         )
         .expect("fixture source should tokenize");
-        input_files.push(moth_prepared_input(source_files, canonical, tokens));
+        input_files.push(moth_prepared_input(
+            source_files,
+            canonical,
+            owner,
+            path_syntax,
+        ));
         source_spans.retain_span_builder(source_id, span_builder);
     }
 
@@ -342,7 +344,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .expect("test source should have a registered identity")
             .id;
         let mut span_builder = ExtendedSpanBuilder::new();
-        let retained_tokens = CompilerFrontend::tokenize_source(
+        let (owner, path_syntax) = CompilerFrontend::tokenize_source(
             frontend.source_files,
             frontend.style_directives,
             source_code,
@@ -353,17 +355,6 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             &mut span_builder,
         )
         .expect("test source should tokenize");
-        let identity = frontend
-            .source_files
-            .get(source_id)
-            .expect("test source should have a registered identity");
-        let owner = SourceTokenOwner::new(
-            retained_tokens
-                .canonical_source_tokens_arc()
-                .expect("test source should retain its canonical token owner"),
-            identity.logical_path,
-            identity.canonical_os_path.as_deref().map(Path::to_path_buf),
-        );
 
         let fork_source = frontend.string_table.fork_source();
         let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
@@ -381,12 +372,14 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 options: &options,
             };
             let input = FrontendFilePrepareInput {
-                source: FrontendFilePrepareSource::Moth { owner },
+                source: FrontendFilePrepareSource::Moth {
+                    owner,
+                    path_syntax,
+                },
                 source_id,
                 span_builder,
                 const_template_offset,
                 runtime_fragment_offset,
-                compatibility_tokens: Some(retained_tokens),
             };
 
             CompilerFrontend::prepare_file_frontend_local(
@@ -1772,7 +1765,7 @@ fn parsed_prepared_output(
         .try_intern_filesystem_path(&source_path, string_table)
         .expect("test source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         source_code,
         source_identity,
         TokenizerEntryMode::SourceFile,
@@ -1783,9 +1776,20 @@ fn parsed_prepared_output(
         span_builder,
     )
     .expect("test source should tokenize");
+    let crate::compiler_frontend::tokenizer::tokens::CanonicalLexerHandoff {
+        tokens,
+        logical_path,
+        canonical_os_path,
+        path_syntax,
+        ..
+    } = tokens
+        .into_canonical_lexer_handoff()
+        .expect("test source should retain its canonical lexer handoff");
+    let owner = SourceTokenOwner::new(tokens, logical_path, canonical_os_path);
 
     parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        path_syntax,
         Path::new(source_name),
         &HeaderParseOptions::default(),
         string_table,

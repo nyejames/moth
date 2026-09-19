@@ -34,7 +34,9 @@ pub use crate::compiler_frontend::headers::types::{
     LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin, PreparedHeaderSyntax,
     RetainedDependencyClause, TopLevelConstFragment,
 };
-use crate::compiler_frontend::headers::types::{HeaderParseContext, HeaderParseFailure};
+use crate::compiler_frontend::headers::types::{
+    HeaderParseContext, HeaderParseFailure, SourceTokenOwner,
+};
 // HeaderExportMode is re-exported for focused AST tests that construct Header values with
 // explicit export modes. Production code calls HeaderExportMode::is_public() through the
 // header field, so this re-export is only reached from test modules.
@@ -45,6 +47,7 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
 #[cfg(test)]
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::{
@@ -53,11 +56,12 @@ use crate::compiler_frontend::source_packages::root_file::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, TokenCursor, TokenRange, TokenTag,
+    SourceTokens, TokenCursor, TokenRange, TokenTag,
 };
 use rustc_hash::FxHashMap;
 use std::mem;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Parse one tokenized file using the supplied string table.
 ///
@@ -69,10 +73,11 @@ use std::path::Path;
 /// can retain their exact primary and related byte ranges before the result crosses a preparation boundary.
 #[allow(
     clippy::too_many_arguments,
-    reason = "header parsing keeps the token stream, entry path, options, mutable string/path/span state, and the two fragment offsets as separate borrows"
+    reason = "header parsing keeps the canonical source owner, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
 )]
 pub fn parse_file_headers_with_table(
-    file_tokens: &mut FileTokens,
+    owner: SourceTokenOwner,
+    path_syntax: Arc<PathSyntaxTable>,
     entry_file_path: &Path,
     options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
@@ -81,26 +86,22 @@ pub fn parse_file_headers_with_table(
     runtime_fragment_offset: usize,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let file_id = file_tokens.file_id;
+    let file_id = owner.source_id();
+    let source_file = owner.logical_path();
     let HeaderParseOptions { entry_file_id, .. } = options;
 
     let is_entry_file = entry_file_id.map_or_else(
         || {
             let mut scratch = Vec::new();
-            path_fork.render_native(file_tokens.src_path, string_table, &mut scratch)
-                == entry_file_path
+            path_fork.render_native(source_file, string_table, &mut scratch) == entry_file_path
         },
         |expected_id| expected_id == file_id,
     );
 
-    let source_path = file_tokens
-        .canonical_os_path
-        .as_deref()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| {
-            let mut scratch = Vec::new();
-            path_fork.render_native(file_tokens.src_path, string_table, &mut scratch)
-        });
+    let source_path = owner.os_path_cloned().unwrap_or_else(|| {
+        let mut scratch = Vec::new();
+        path_fork.render_native(source_file, string_table, &mut scratch)
+    });
     // Directory Stage 0 supplies normal and support roots through `ModuleRootTable`. Keep the
     // canonical filename check as a fallback for synthetic or otherwise unindexed preparation so
     // a `+*.moth` support-package root remains export-capable in those contexts too.
@@ -137,13 +138,12 @@ pub fn parse_file_headers_with_table(
         string_table,
         path_fork,
         span_builder,
+        path_syntax: Arc::clone(&path_syntax),
         const_template_offset,
         runtime_fragment_offset,
     };
     let parsed = {
-        let canonical = file_tokens
-            .source_tokens()
-            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+        let canonical = owner.tokens_ref();
         if canonical.source() != file_id {
             return Err(FileFrontendPrepareFailure::Infrastructure(
                 CompilerError::compiler_error(
@@ -151,28 +151,25 @@ pub fn parse_file_headers_with_table(
                 ),
             ));
         }
-        let range = canonical.full_range().map_err(|error| {
-            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "header parse source range could not be constructed: {error:?}",
-            )))
-        })?;
-        let mut cursor = canonical.cursor(range).map_err(|error| {
-            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "header parse source cursor could not be constructed: {error:?}",
-            )))
-        })?;
+        let range = owner
+            .full_range()
+            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+        let mut cursor = owner
+            .cursor(range)
+            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
         parse_headers_in_file(
             &mut cursor,
             file_id,
-            file_tokens.src_path,
-            canonical.len(),
+            source_file,
+            owner.len(),
             &mut parse_context,
         )
         .map(|state| (state, cursor.position()))
     };
     let file_output = match parsed {
         Ok((state, end_index)) => finish_file_output(
-            file_tokens,
+            owner,
+            path_syntax,
             file_id,
             end_index,
             &mut parse_context,
@@ -228,10 +225,11 @@ fn capture_preparation_spans(
 ///      ranges, then retains that same builder for later retained-token span resolution.
 #[allow(
     clippy::too_many_arguments,
-    reason = "file preparation keeps owned tokens, the entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
+    reason = "file preparation keeps the canonical owner, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
 )]
 pub(crate) fn prepare_file_from_tokens(
-    mut file_tokens: FileTokens,
+    owner: SourceTokenOwner,
+    path_syntax: Arc<PathSyntaxTable>,
     entry_file_path: &Path,
     options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
@@ -241,14 +239,15 @@ pub(crate) fn prepare_file_from_tokens(
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     // Preflight the public preparation boundary: every PathId this function dereferences through
-    // the supplied fork must have been issued by it (or its inherited base). A stream carrying a
-    // foreign file-owned path table would otherwise reach unchecked depth/parent/component reads
-    // and panic on out-of-domain indices instead of reporting infrastructure failure.
-    if path_fork.try_depth(file_tokens.src_path).is_none() {
+    // the supplied fork must have been issued by it (or its inherited base). A canonical owner
+    // carrying a foreign file-owned path identity would otherwise reach unchecked
+    // depth/parent/component reads and panic on out-of-domain indices.
+    let source_file = owner.logical_path();
+    if path_fork.try_depth(source_file).is_none() {
         return Err(FileFrontendPrepareFailure::Infrastructure(
             CompilerError::compiler_error(format!(
                 "token stream for {entry_file_path:?} carries source path {src:?} that was not issued by the supplied path table",
-                src = file_tokens.src_path,
+                src = source_file,
             )),
         ));
     }
@@ -258,7 +257,8 @@ pub(crate) fn prepare_file_from_tokens(
     let mut local_path_fork = path_fork_source.fork_for_module();
 
     let file_output = parse_file_headers_with_table(
-        &mut file_tokens,
+        owner,
+        path_syntax,
         entry_file_path,
         options,
         &mut local_string_table,
@@ -279,7 +279,6 @@ pub(crate) fn prepare_file_from_tokens(
 
     match file_output {
         Ok(mut output) => {
-            drop(file_tokens);
             output
                 .remap_string_ids(&remap)
                 .map_err(FileFrontendPrepareFailure::Infrastructure)?;

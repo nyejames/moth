@@ -18,6 +18,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     LocalDeclarationOrderingHint, bind_module_headers, prepare_file_from_tokens,
     prepare_header_syntax,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
@@ -69,7 +70,7 @@ fn parse_module_headers(
             .try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
+        let handoff = tokenize(
             source,
             interned_path,
             TokenizerEntryMode::SourceFile,
@@ -79,10 +80,19 @@ fn parse_module_headers(
             file_id_for(path),
             &mut span_builder,
         )
-        .expect("tokenization should succeed");
+        .expect("tokenization should succeed")
+        .into_canonical_lexer_handoff()
+        .expect("tokenization should produce a canonical lexer handoff");
+        let owner = SourceTokenOwner::new(
+            handoff.tokens,
+            handoff.logical_path,
+            handoff.canonical_os_path,
+        );
+        let path_syntax = handoff.path_syntax;
 
         let output = prepare_file_from_tokens(
-            file_tokens,
+            owner,
+            path_syntax,
             &entry_path_buf,
             &options,
             &mut string_table,
@@ -448,7 +458,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let handoff = tokenize(
         "make |items ~{capacity Int}| -> Int:\n    return 1\n;\ncapacity #Int = 64\n",
         interned_path,
         TokenizerEntryMode::SourceFile,
@@ -458,10 +468,19 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         file_id,
         &mut span_builder,
     )
-    .expect("tokenization should succeed");
+    .expect("tokenization should succeed")
+    .into_canonical_lexer_handoff()
+    .expect("tokenization should produce a canonical lexer handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
+    let path_syntax = handoff.path_syntax;
 
     let output = prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         &entry_path,
         &options,
         &mut string_table,
@@ -1140,7 +1159,7 @@ fn parse_module_headers_with_content_sources(
             .try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
+        let handoff = tokenize(
             source,
             interned_path,
             TokenizerEntryMode::SourceFile,
@@ -1150,9 +1169,18 @@ fn parse_module_headers_with_content_sources(
             file_id_for(path),
             &mut span_builder,
         )
-        .expect("tokenization should succeed");
+        .expect("tokenization should succeed")
+        .into_canonical_lexer_handoff()
+        .expect("tokenization should produce a canonical lexer handoff");
+        let owner = SourceTokenOwner::new(
+            handoff.tokens,
+            handoff.logical_path,
+            handoff.canonical_os_path,
+        );
+        let path_syntax = handoff.path_syntax;
         let output = prepare_file_from_tokens(
-            file_tokens,
+            owner,
+            path_syntax,
             &entry_path_buf,
             &options,
             &mut string_table,
@@ -1176,7 +1204,7 @@ fn parse_module_headers_with_content_sources(
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
+        let handoff = tokenize(
             source,
             interned_path,
             entry_mode,
@@ -1186,11 +1214,20 @@ fn parse_module_headers_with_content_sources(
             file_id_for(path),
             &mut span_builder,
         )
-        .expect("template tokenization should succeed");
+        .expect("template tokenization should succeed")
+        .into_canonical_lexer_handoff()
+        .expect("template tokenization should produce a canonical lexer handoff");
+        let owner = SourceTokenOwner::new(
+            handoff.tokens,
+            handoff.logical_path,
+            handoff.canonical_os_path,
+        );
+        let path_syntax = handoff.path_syntax;
         // The template's retained tokens index the builder's table; prepare while the builder
         // remains available, then retain it for the remainder of this fixture.
         let output = prepare_moth_template_file(
-            file_tokens,
+            owner,
+            path_syntax,
             &mut string_table,
             &mut path_fork,
             &mut span_builder,
@@ -1502,7 +1539,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     let mut retained_span_builders = Vec::new();
 
     let mut root_span_builder = ExtendedSpanBuilder::new();
-    let root_tokens = tokenize(
+    let root_handoff = tokenize(
         "icon #= @icon.mtf\n",
         root_logical,
         TokenizerEntryMode::SourceFile,
@@ -1512,9 +1549,18 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         root_file_id,
         &mut root_span_builder,
     )
-    .expect("root file should tokenize");
+    .expect("root file should tokenize")
+    .into_canonical_lexer_handoff()
+    .expect("root tokenization should produce a canonical lexer handoff");
+    let root_owner = SourceTokenOwner::new(
+        root_handoff.tokens,
+        root_handoff.logical_path,
+        root_handoff.canonical_os_path,
+    );
+    let root_path_syntax = root_handoff.path_syntax;
     let root_output = prepare_file_from_tokens(
-        root_tokens,
+        root_owner,
+        root_path_syntax,
         &entry_path_buf,
         &options,
         &mut string_table,
@@ -1531,7 +1577,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     prepared_outputs.push(root_output);
 
     let mut icon_span_builder = ExtendedSpanBuilder::new();
-    let icon_tokens = tokenize(
+    let icon_handoff = tokenize(
         "[: icon body]",
         icon_logical,
         TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
@@ -1542,9 +1588,18 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         icon_file_id,
         &mut icon_span_builder,
     )
-    .expect("icon template should tokenize");
+    .expect("icon template should tokenize")
+    .into_canonical_lexer_handoff()
+    .expect("icon tokenization should produce a canonical lexer handoff");
+    let icon_owner = SourceTokenOwner::new(
+        icon_handoff.tokens,
+        icon_handoff.logical_path,
+        icon_handoff.canonical_os_path,
+    );
+    let icon_path_syntax = icon_handoff.path_syntax;
     let icon_output = prepare_moth_template_file(
-        icon_tokens,
+        icon_owner,
+        icon_path_syntax,
         &mut string_table,
         &mut path_fork,
         &mut icon_span_builder,

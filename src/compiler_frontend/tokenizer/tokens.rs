@@ -2218,6 +2218,7 @@ impl FileTokenOwner {
         }
     }
 
+    #[cfg(test)]
     fn canonical_arc(&self) -> Result<Arc<SourceTokens>, CompilerError> {
         match self {
             Self::Canonical(owner) => Ok(Arc::clone(owner)),
@@ -2227,6 +2228,7 @@ impl FileTokenOwner {
         }
     }
 
+    #[cfg(test)]
     fn as_canonical_mut(&mut self) -> Result<&mut SourceTokens, CompilerError> {
         match self {
             Self::Canonical(owner) => Arc::get_mut(owner).ok_or_else(|| {
@@ -2291,6 +2293,22 @@ pub struct FileTokens {
     pub(crate) token_stats: TokenStats,
     pub index: usize,
     pub length: usize,
+}
+/// Consuming lexer handoff for the canonical source owner and its preparing path table.
+///
+/// WHAT: bundles the sole canonical `SourceTokens` allocation for a `SourceId` with the logical
+///       `PathId`, source identity, canonical OS path, and the still-mutable preparing
+///       `PathSyntaxTable` allocation from one lexer-produced `FileTokens` stream.
+/// WHY: the preparation boundary needs every canonical identity in one move so it can construct
+///      a `SourceTokenOwner` without cloning the canonical `Arc` or retaining a `FileTokens`
+///      shell. The path table stays a separate allocation until the prepared-output freeze.
+#[derive(Debug)]
+pub(crate) struct CanonicalLexerHandoff {
+    pub(crate) tokens: Arc<SourceTokens>,
+    pub(crate) logical_path: PathId,
+    pub(crate) file_id: SourceId,
+    pub(crate) canonical_os_path: Option<PathBuf>,
+    pub(crate) path_syntax: Arc<PathSyntaxTable>,
 }
 
 impl FileTokens {
@@ -2555,6 +2573,7 @@ impl FileTokens {
         std::mem::replace(self, replacement)
     }
 
+    #[cfg(test)]
     pub(crate) fn try_register_token_sequence(
         &mut self,
         ranges: &[TokenRange],
@@ -2565,6 +2584,7 @@ impl FileTokens {
             .try_register_token_sequence(ranges)
     }
 
+    #[cfg(test)]
     pub(crate) fn register_token_sequence(
         &mut self,
         ranges: &[TokenRange],
@@ -2583,12 +2603,52 @@ impl FileTokens {
     pub fn source_tokens(&self) -> Result<&SourceTokens, CompilerError> {
         self.token_owner.as_canonical()
     }
-    /// Clone the canonical source owner retained by this stream.
-    ///
-    /// AST cursors keep this handle when they are created from a `FileTokens` stream so a later
-    /// bounded parser handoff can share the same source allocation without rebuilding it.
+    #[cfg(test)]
     pub(crate) fn canonical_source_tokens_arc(&self) -> Result<Arc<SourceTokens>, CompilerError> {
         self.token_owner.canonical_arc()
+    }
+    /// Move the sole canonical owner and its preparing path table out of a lexer stream.
+    ///
+    /// WHAT: destructures this `FileTokens` so no shell remains, moving the canonical
+    ///       `Arc<SourceTokens>` allocation, logical `PathId`, `SourceId`, canonical OS path,
+    ///       and the preparing `Arc<PathSyntaxTable>` into one handoff value. No token, span,
+    ///       or numeric array is cloned and no second store is allocated.
+    /// WHY: the preparation boundary constructs a `SourceTokenOwner` from lexer output without
+    ///      cloning the canonical `Arc` or retaining a `FileTokens` shell, while the path table
+    ///      stays a separate allocation until the prepared-output freeze. Adapter streams and
+    ///      already-shared or deferred path state are rejected with `CompilerError` to preserve
+    ///      the one-canonical-owner lifecycle invariant.
+    pub(crate) fn into_canonical_lexer_handoff(self) -> Result<CanonicalLexerHandoff, CompilerError> {
+        let FileTokens {
+            token_owner,
+            path_syntax,
+            src_path,
+            file_id,
+            canonical_os_path,
+            ..
+        } = self;
+        let FileTokenOwner::Canonical(tokens) = token_owner else {
+            return Err(CompilerError::compiler_error(
+                "token adapter has no canonical source-token provenance",
+            ));
+        };
+        let FilePathSyntax::Preparing(path_syntax) = path_syntax else {
+            return Err(CompilerError::compiler_error(
+                "canonical lexer handoff requires a preparing path table before the prepared-output freeze",
+            ));
+        };
+        if tokens.source() != file_id {
+            return Err(CompilerError::compiler_error(
+                "canonical source token owner does not match its file stream identity",
+            ));
+        }
+        Ok(CanonicalLexerHandoff {
+            tokens,
+            logical_path: src_path,
+            file_id,
+            canonical_os_path,
+            path_syntax,
+        })
     }
     /// Create a checked canonical cursor at this stream's compatibility-vector position.
     ///
@@ -2754,7 +2814,7 @@ impl FileTokens {
         self.numeric_literal_ids.get(token_index).copied().flatten()
     }
 
-    /// Move the sole mutable path-table owner into a prepared-file output.
+    #[cfg(test)]
     pub(crate) fn take_preparing_path_syntax(
         &mut self,
     ) -> Result<Arc<PathSyntaxTable>, CompilerError> {
@@ -2910,6 +2970,7 @@ impl FileTokens {
     ///
     /// Source-local token spans remain unchanged. Only the owning `SourceId` and path-table rows
     /// are restamped, so every global path span continues to name the same byte range.
+    #[cfg(test)]
     pub fn rebind_source_identity(
         &mut self,
         logical_path: PathId,
@@ -2925,12 +2986,7 @@ impl FileTokens {
         Ok(())
     }
 
-    /// Rebind file-owned identity while preserving this stream's semantic path.
-    ///
-    /// Token spans are source-local and therefore remain unchanged. The owner identity is stored
-    /// once on `FileTokens`; path rows are restamped by `rebind_source_identity` before publication.
-    /// The numeric cold store keeps source-local rows and only its owner is restamped, mirroring
-    /// the path table.
+    #[cfg(test)]
     pub fn rebind_file_identity(
         &mut self,
         _logical_path: PathId,

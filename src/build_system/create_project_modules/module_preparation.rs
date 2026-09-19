@@ -975,23 +975,16 @@ impl ModulePreparationContext<'_> {
         let mut span_builders = Vec::with_capacity(plan.file_range.len());
 
         for (file_index, (file, span_builder)) in module {
-            let PreparedSourceInput {
-                source_id,
-                source,
-                compatibility_tokens,
-            } = file;
+            let PreparedSourceInput { source_id, source } = file;
             let (string_domain, delta) = match source {
-                PreparedSourceKind::MothPrepared { output } => {
-                    drop(compatibility_tokens);
-                    (
-                        PreparedFileStringDomain::AlreadyGlobal,
-                        SourcePreparationDelta {
-                            file_id: source_id,
-                            span_builder,
-                            result: Ok(*output),
-                        },
-                    )
-                }
+                PreparedSourceKind::MothPrepared { output } => (
+                    PreparedFileStringDomain::AlreadyGlobal,
+                    SourcePreparationDelta {
+                        file_id: source_id,
+                        span_builder,
+                        result: Ok(*output),
+                    },
+                ),
                 source => {
                     let delta = match frontend_source(
                         source,
@@ -1007,7 +1000,6 @@ impl ModulePreparationContext<'_> {
                                 span_builder,
                                 const_template_offset,
                                 runtime_fragment_offset,
-                                compatibility_tokens,
                             },
                             &mut local_string_table,
                             &mut local_path_fork,
@@ -1114,11 +1106,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             .into());
         }
 
-        let PreparedSourceInput {
-            source_id,
-            source,
-            compatibility_tokens,
-        } = source;
+        let PreparedSourceInput { source_id, source } = source;
         let source_byte_len = source_byte_len(
             self.context.source_files,
             source_id,
@@ -1152,7 +1140,6 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             span_builder: source_spans.take_span_builder(source_id),
             const_template_offset: 0,
             runtime_fragment_offset: 0,
-            compatibility_tokens,
         };
 
         let SourcePreparationDelta {
@@ -1303,7 +1290,9 @@ fn frontend_source<'a>(
     selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
 ) -> Result<FrontendFilePrepareSource<'a>, CompilerError> {
     Ok(match source {
-        PreparedSourceKind::Moth { owner } => FrontendFilePrepareSource::Moth { owner },
+        PreparedSourceKind::Moth { owner, path_syntax } => {
+            FrontendFilePrepareSource::Moth { owner, path_syntax }
+        }
         PreparedSourceKind::Deferred => {
             let source_path = source_path_for_id(sources, source_id)?;
             let source_code = retained_source_text(sources, source_id, selected_source_texts)?;

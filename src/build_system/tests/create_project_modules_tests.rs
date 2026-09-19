@@ -325,11 +325,7 @@ fn load_missing_source_paths_with_registered_paths_for_test(
                 ));
             }
         };
-        input_files.push(PreparedSourceInput {
-            source_id,
-            source,
-            compatibility_tokens: None,
-        });
+        input_files.push(PreparedSourceInput { source_id, source });
     }
 
     Ok((source_files, input_files))

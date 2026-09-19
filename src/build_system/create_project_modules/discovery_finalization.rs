@@ -516,7 +516,6 @@ pub(super) fn finalize_reachable_files(
             input_files.push(PreparedSourceInput {
                 source_id: final_source_id,
                 source,
-                compatibility_tokens: None,
             });
         }
         if !source_cache.is_empty() {

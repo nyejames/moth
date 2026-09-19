@@ -47,6 +47,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderKind, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
     prepare_file_from_tokens, prepare_header_syntax,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
@@ -638,8 +639,7 @@ fn prepare_config_file(
 ) -> Result<FileFrontendPrepareOutput, ConfigPreparationFailure> {
     let mut diagnostics = Vec::new();
 
-    // The caller registers this source before invoking the service.
-    let mut file_tokens = match tokenize(
+    let file_tokens = match tokenize(
         request.source_code,
         authored_scope,
         TokenizerEntryMode::SourceFile,
@@ -658,12 +658,20 @@ fn prepare_config_file(
             return Err(ConfigPreparationFailure::Infrastructure(error));
         }
     };
+    let mut file_tokens = file_tokens;
     file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
+    let handoff = file_tokens
+        .into_canonical_lexer_handoff()
+        .map_err(ConfigPreparationFailure::Infrastructure)?;
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
+    let path_syntax = handoff.path_syntax;
 
     let marker_span = {
-        let canonical = file_tokens
-            .source_tokens()
-            .map_err(ConfigPreparationFailure::Infrastructure)?;
+        let canonical = owner.tokens_ref();
         let full_range = canonical.full_range().map_err(|error| {
             ConfigPreparationFailure::Infrastructure(CompilerError::compiler_error(format!(
                 "config qualifier scan range is invalid: {error:?}"
@@ -689,7 +697,8 @@ fn prepare_config_file(
     }
 
     let output = match prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        path_syntax,
         request.authored_path,
         &HeaderParseOptions::default(),
         string_table,

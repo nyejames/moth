@@ -32,6 +32,7 @@ use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_templ
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
@@ -382,7 +383,7 @@ fn compile_fixture(
             .try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
+        let handoff = tokenize(
             source,
             interned_path,
             TokenizerEntryMode::SourceFile,
@@ -392,9 +393,18 @@ fn compile_fixture(
             file_id_for(path),
             &mut span_builder,
         )
-        .expect("Moth tokenization should succeed");
+        .expect("Moth tokenization should succeed")
+        .into_canonical_lexer_handoff()
+        .expect("Moth tokenization should produce a canonical lexer handoff");
+        let owner = SourceTokenOwner::new(
+            handoff.tokens,
+            handoff.logical_path,
+            handoff.canonical_os_path,
+        );
+        let path_syntax = handoff.path_syntax;
         let output = prepare_file_from_tokens(
-            file_tokens,
+            owner,
+            path_syntax,
             &entry_path,
             &options,
             &mut string_table,
@@ -416,7 +426,7 @@ fn compile_fixture(
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
+        let handoff = tokenize(
             source,
             interned_path,
             entry_mode,
@@ -426,10 +436,19 @@ fn compile_fixture(
             file_id_for(path),
             &mut span_builder,
         )
-        .expect("Moth template tokenization should succeed");
+        .expect("Moth template tokenization should succeed")
+        .into_canonical_lexer_handoff()
+        .expect("Moth template tokenization should produce a canonical lexer handoff");
+        let owner = SourceTokenOwner::new(
+            handoff.tokens,
+            handoff.logical_path,
+            handoff.canonical_os_path,
+        );
+        let path_syntax = handoff.path_syntax;
 
         let mut output = prepare_moth_template_file(
-            file_tokens,
+            owner,
+            path_syntax,
             &mut string_table,
             &mut path_fork,
             &mut span_builder,
@@ -650,7 +669,7 @@ fn resolve_file_value_fixture(
         .expect("fixture source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = tokenize(
+    let handoff = tokenize(
         source,
         source_path,
         TokenizerEntryMode::SourceFile,
@@ -660,28 +679,49 @@ fn resolve_file_value_fixture(
         source_file,
         &mut span_builder,
     )
-    .expect("file-value fixture should tokenize");
-    token_stream.freeze_path_syntax_for_test();
-    let canonical_owner = token_stream
-        .canonical_source_tokens_arc()
-        .expect("file-value fixture should expose canonical source tokens");
+    .expect("file-value fixture should tokenize")
+    .into_canonical_lexer_handoff()
+    .expect("file-value tokenization should produce a canonical lexer handoff");
+    let owner = SourceTokenOwner::new(
+        handoff.tokens,
+        handoff.logical_path,
+        handoff.canonical_os_path,
+    );
+    let mut prepared_output = prepare_file_from_tokens(
+        owner,
+        handoff.path_syntax,
+        &source_path_buf,
+        &HeaderParseOptions::default(),
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("file-value fixture should prepare");
+    prepared_output
+        .freeze_path_syntax(&string_table, &mut path_fork)
+        .expect("file-value fixture should freeze its path syntax");
+    let source_path = prepared_output.source_file;
+    let canonical_owner = prepared_output
+        .source_token_stream
+        .as_ref()
+        .expect("file-value fixture should retain canonical source tokens");
     let path_token_index = canonical_owner
         .shapes()
         .iter()
         .position(|shape| shape.tag() == TokenTag::PATH)
         .expect("file-value fixture should contain a path token");
-    token_stream.index = path_token_index;
-    let path_syntax = canonical_owner
+    let path_syntax_id = canonical_owner
         .shapes()
         .get(path_token_index)
         .and_then(|shape| shape.path_syntax_id())
         .expect("file-value fixture path token should carry a syntax handle");
-
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
         .push(ResolvedFileReference {
             source_file,
-            path_syntax,
+            path_syntax: path_syntax_id,
             class,
             outcome,
         })
@@ -718,16 +758,16 @@ fn resolve_file_value_fixture(
         .full_range()
         .expect("file-value fixture should expose canonical source range");
     let mut cursor = AstCursor::from_source_tokens(
-        &canonical_owner,
-        token_stream.canonical_os_path.clone(),
+        canonical_owner,
+        prepared_output.canonical_os_path.clone(),
         canonical_range,
     )
     .expect("file-value fixture should expose an AST cursor");
     cursor
-        .set_position(token_stream.index)
+        .set_position(path_token_index)
         .expect("file-value fixture path position must remain in canonical range");
     let expression = resolve_file_value(
-        path_syntax,
+        path_syntax_id,
         &cursor,
         &context,
         &type_interner,

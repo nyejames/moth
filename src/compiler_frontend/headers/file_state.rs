@@ -10,13 +10,15 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::types::{
     DependencySelection, FileFrontendPrepareError, FileFrontendPrepareOutput, FileRole, Header,
     HeaderExportMode, HeaderKind, PreparedFilePathSyntax, RetainedDependencyClause,
-    TopLevelConstFragment,
+    SourceTokenOwner, TopLevelConstFragment,
 };
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
+    SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
+use std::sync::Arc;
 use crate::projects::settings::{
     MINIMUM_LIKELY_DECLARATIONS, TOKEN_TO_DECLARATION_RATIO, TOKEN_TO_HEADER_RATIO,
 };
@@ -172,27 +174,31 @@ impl HeaderFileParseState {
 
     pub(super) fn into_non_entry_output(
         self,
-        token_stream: &mut FileTokens,
+        owner: SourceTokenOwner,
+        path_syntax: Arc<PathSyntaxTable>,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
-        let file_id = token_stream.file_id;
+        let file_id = owner.source_id();
+        let source_file = owner.logical_path();
+        let canonical_os_path = owner.os_path_cloned();
         let has_non_trivial_root_body =
             file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
-        let path_syntax = PreparedFilePathSyntax::from_file_tokens(token_stream)?;
+        let token_stats = owner.token_stats();
+        let source_token_stream = owner.into_tokens();
         Ok(FileFrontendPrepareOutput {
-            source_file: token_stream.src_path.to_owned(),
+            source_file,
             file_id,
-            path_syntax,
+            path_syntax: PreparedFilePathSyntax::Preparing(path_syntax),
             token_count: self.token_count,
-            token_stats: token_stream.token_stats,
+            token_stats,
             file_role,
             file_dependency_clauses: self.file_dependency_clauses,
             structural_file_references: Default::default(),
             dependency_selections: self.dependency_selections,
-            canonical_os_path: token_stream.canonical_os_path.clone(),
+            canonical_os_path,
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
-            source_token_stream: None,
+            source_token_stream: Some(source_token_stream),
             const_template_count: self.const_template_count,
             runtime_fragment_count: self.runtime_fragment_count,
             has_non_trivial_root_body,
@@ -202,17 +208,20 @@ impl HeaderFileParseState {
 
     pub(super) fn into_entry_output(
         mut self,
-        token_stream: &mut FileTokens,
+        mut owner: SourceTokenOwner,
+        path_syntax: Arc<PathSyntaxTable>,
         end_index: TokenIndex,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
-        let file_id = token_stream.file_id;
+        let file_id = owner.source_id();
+        let source_file = owner.logical_path();
+        let canonical_os_path = owner.os_path_cloned();
         let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
         // Active module root: publish the source-owned start sequence for later AST body parsing.
         // `start` is never a dependency-graph participant, so this header keeps no graph edges.
-        let token_sequence = token_stream.register_token_sequence(&self.start_body_ranges)?;
+        let token_sequence = owner.register_token_sequence(&self.start_body_ranges)?;
         let start_range = TokenRange::new(file_id, end_index, end_index)
             .expect("equal token indexes always form a valid empty range");
 
@@ -224,25 +233,25 @@ impl HeaderFileParseState {
             name_span: None,
             synthetic_content_payload: None,
             tokens: start_range,
-            declaration_path: token_stream.src_path,
+            declaration_path: source_file,
             token_sequence: Some(token_sequence),
             capacity_references: Vec::new(),
         });
 
-        let path_syntax = PreparedFilePathSyntax::from_file_tokens(token_stream)?;
-
+        let token_stats = owner.token_stats();
+        let source_token_stream = owner.into_tokens();
         Ok(FileFrontendPrepareOutput {
-            source_file: token_stream.src_path.to_owned(),
+            source_file,
             file_id,
-            path_syntax,
+            path_syntax: PreparedFilePathSyntax::Preparing(path_syntax),
             token_count: self.token_count,
-            source_token_stream: None,
-            token_stats: token_stream.token_stats,
+            source_token_stream: Some(source_token_stream),
+            token_stats,
             file_role,
             file_dependency_clauses: self.file_dependency_clauses,
             structural_file_references: Default::default(),
             dependency_selections: self.dependency_selections,
-            canonical_os_path: token_stream.canonical_os_path.clone(),
+            canonical_os_path,
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
             const_template_count: self.const_template_count,

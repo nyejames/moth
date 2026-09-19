@@ -21,6 +21,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
     prepare_header_syntax,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -38,9 +39,8 @@ use crate::compiler_frontend::style_directives::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
-use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TemplateBodyMode, TokenizerEntryMode,
-};
+use crate::compiler_frontend::tokenizer::tokens::{TemplateBodyMode, TokenizerEntryMode};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
 use std::fs;
@@ -154,7 +154,9 @@ impl FrontendProject {
         }
     }
 
-    fn tokenize_all(&mut self) -> Vec<(FileTokens, ExtendedSpanBuilder)> {
+    fn tokenize_all(
+        &mut self,
+    ) -> Vec<((SourceTokenOwner, Arc<PathSyntaxTable>), ExtendedSpanBuilder)> {
         let mut tokenized_files = Vec::with_capacity(self.files.len());
         self.frontend.with_compiler(|frontend| {
             for file in &self.files {
@@ -194,9 +196,10 @@ impl FrontendProject {
         let mut prepared_outputs = Vec::with_capacity(tokenized_files.len());
         let mut const_template_offset = 0usize;
         let mut runtime_fragment_offset = 0usize;
-        for (file_tokens, mut span_builder) in tokenized_files {
+        for ((owner, path_syntax), mut span_builder) in tokenized_files {
             let output = prepare_file_from_tokens(
-                file_tokens,
+                owner,
+                path_syntax,
                 &self.entry_file,
                 &options,
                 &mut self.frontend.string_table,
