@@ -34,7 +34,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::{ExpressionBoundaryDepth, NestingDepth};
@@ -158,7 +158,7 @@ pub(crate) fn parse_loop_header_cursor(
     // treats it as a non-newline header token.
     while token_stream.position() < limit
         && !token_stream.is_at_end()
-        && *token_stream.current_token_kind() == TokenKind::Newline
+        && token_stream.current_tag() == TokenTag::NEWLINE
     {
         token_stream.advance();
     }
@@ -169,11 +169,11 @@ pub(crate) fn parse_loop_header_cursor(
     let mut header_end = header_start;
     while token_stream.position() < limit && !token_stream.is_at_end() {
         let position = token_stream.position();
-        let kind = token_stream.current_token_kind();
-        if *kind != TokenKind::Newline {
+        let tag = token_stream.current_tag();
+        if tag != TokenTag::NEWLINE {
             header_end = position + 1;
         }
-        if *kind == TokenKind::Eof {
+        if tag == TokenTag::EOF {
             break;
         }
         token_stream.advance();
@@ -347,9 +347,12 @@ fn reject_removed_in_loop_syntax_cursor(
         return Ok(());
     }
 
-    let Some(TokenKind::Symbol(_)) = token_stream.token_kind_at(header_start) else {
+    if !token_stream
+        .token_kind_at(header_start)
+        .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL)
+    {
         return Ok(());
-    };
+    }
     let Some(TokenKind::Symbol(second_symbol)) = token_stream.token_kind_at(header_start + 1)
     else {
         return Ok(());
@@ -371,8 +374,8 @@ fn parse_pipe_binding_suffix_cursor(
     header_end: usize,
 ) -> LoopHeaderResult<Option<CursorBindingSuffixSplit>> {
     let pipe_indices =
-        collect_top_level_cursor_indexes(token_stream, header_start, header_end, |kind| {
-            matches!(kind, TokenKind::TypeParameterBracket)
+        collect_top_level_cursor_indexes(token_stream, header_start, header_end, |tag| {
+            tag == TokenTag::TYPE_PARAMETER_BRACKET
         });
     if pipe_indices.is_empty() {
         return Ok(None);
@@ -380,8 +383,12 @@ fn parse_pipe_binding_suffix_cursor(
 
     let last_index = header_end.checked_sub(1);
     if last_index
-        .and_then(|index| token_stream.token_kind_at(index))
-        .is_none_or(|kind| !matches!(kind, TokenKind::TypeParameterBracket))
+        .and_then(|index| {
+            token_stream
+                .token_kind_at(index)
+                .map(|kind| kind.token_tag())
+        })
+        .is_none_or(|tag| tag != TokenTag::TYPE_PARAMETER_BRACKET)
     {
         return loop_header_error(
             InvalidLoopHeaderReason::MissingClosingPipe,
@@ -429,7 +436,7 @@ fn parse_binding_cursor(
         .filter(|index| {
             token_stream
                 .token_kind_at(*index)
-                .is_some_and(|kind| kind != TokenKind::Newline)
+                .is_some_and(|kind| kind.token_tag() != TokenTag::NEWLINE)
         })
         .collect::<Vec<_>>();
     if binding_indices.is_empty() {
@@ -446,7 +453,7 @@ fn parse_binding_cursor(
         let token_kind = token_stream
             .token_kind_at(token_index)
             .expect("binding index was collected from a readable cursor token");
-        if token_kind == TokenKind::This {
+        if token_kind.token_tag() == TokenTag::THIS {
             return loop_header_error(
                 InvalidLoopHeaderReason::ThisBinding,
                 token_stream.span_at(token_index),
@@ -469,7 +476,11 @@ fn parse_binding_cursor(
             break;
         }
         let separator_index = binding_indices[position];
-        if token_stream.token_kind_at(separator_index) != Some(TokenKind::Comma) {
+        if token_stream
+            .token_kind_at(separator_index)
+            .map(|kind| kind.token_tag())
+            != Some(TokenTag::COMMA)
+        {
             return loop_header_error(
                 InvalidLoopHeaderReason::MissingBindingComma,
                 token_stream.span_at(separator_index),
@@ -493,8 +504,8 @@ fn detect_bare_loop_binding_suffix_cursor(
     header_end: usize,
 ) -> Option<CursorBareLoopBindingSuffix> {
     let non_newline_indices =
-        collect_top_level_cursor_indexes(token_stream, header_start, header_end, |kind| {
-            !matches!(kind, TokenKind::Newline)
+        collect_top_level_cursor_indexes(token_stream, header_start, header_end, |tag| {
+            tag != TokenTag::NEWLINE
         });
     if non_newline_indices.len() < 2 {
         return None;
@@ -504,15 +515,20 @@ fn detect_bare_loop_binding_suffix_cursor(
         let first_index = non_newline_indices[non_newline_indices.len() - 3];
         let separator_index = non_newline_indices[non_newline_indices.len() - 2];
         let second_index = non_newline_indices[non_newline_indices.len() - 1];
-        let first_kind = token_stream.token_kind_at(first_index);
-        let separator_kind = token_stream.token_kind_at(separator_index);
-        let second_kind = token_stream.token_kind_at(second_index);
+        let first_is_symbol = token_stream
+            .token_kind_at(first_index)
+            .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL);
+        let separator_is_comma = token_stream
+            .token_kind_at(separator_index)
+            .is_some_and(|kind| kind.token_tag() == TokenTag::COMMA);
+        let separator_is_symbol = token_stream
+            .token_kind_at(separator_index)
+            .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL);
+        let second_is_symbol = token_stream
+            .token_kind_at(second_index)
+            .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL);
 
-        if matches!(first_kind, Some(TokenKind::Symbol(_)))
-            && separator_kind == Some(TokenKind::Comma)
-            && matches!(second_kind, Some(TokenKind::Symbol(_)))
-            && first_index > header_start
-        {
+        if first_is_symbol && separator_is_comma && second_is_symbol && first_index > header_start {
             return Some(CursorBareLoopBindingSuffix {
                 core_end: first_index,
                 span: token_stream.span_at(first_index),
@@ -520,9 +536,9 @@ fn detect_bare_loop_binding_suffix_cursor(
             });
         }
 
-        if matches!(first_kind, Some(TokenKind::Symbol(_)))
-            && matches!(separator_kind, Some(TokenKind::Symbol(_)))
-            && matches!(second_kind, Some(TokenKind::Symbol(_)))
+        if first_is_symbol
+            && separator_is_symbol
+            && second_is_symbol
             && separator_index > header_start
         {
             return Some(CursorBareLoopBindingSuffix {
@@ -535,10 +551,13 @@ fn detect_bare_loop_binding_suffix_cursor(
 
     let binding_index = *non_newline_indices.last()?;
     let core_tail_index = non_newline_indices[non_newline_indices.len() - 2];
-    if matches!(
-        token_stream.token_kind_at(binding_index),
-        Some(TokenKind::Symbol(_))
-    ) && token_stream.token_kind_at(core_tail_index) != Some(TokenKind::Comma)
+    if token_stream
+        .token_kind_at(binding_index)
+        .is_some_and(|kind| kind.token_tag() == TokenTag::SYMBOL)
+        && token_stream
+            .token_kind_at(core_tail_index)
+            .map(|kind| kind.token_tag())
+            != Some(TokenTag::COMMA)
     {
         return Some(CursorBareLoopBindingSuffix {
             core_end: binding_index,
@@ -583,7 +602,7 @@ fn parse_range_loop_spec_cursor(
             .set_position(range_start)
             .map_err(ExpressionParseError::from)?;
 
-        let start = if token_stream.current_token_kind() == &TokenKind::ExclusiveRange {
+        let start = if token_stream.current_tag() == TokenTag::EXCLUSIVE_RANGE {
             let span = Some(token_stream.current_span());
             Expression::new(
                 ExpressionKind::Int(0),
@@ -606,17 +625,17 @@ fn parse_range_loop_spec_cursor(
             })?
         };
 
-        let end_kind = match token_stream.current_token_kind() {
-            TokenKind::ExclusiveRange => {
+        let end_kind = match token_stream.current_tag() {
+            TokenTag::EXCLUSIVE_RANGE => {
                 token_stream.advance();
-                if token_stream.current_token_kind() == &TokenKind::Ampersand {
+                if token_stream.current_tag() == TokenTag::AMPERSAND {
                     token_stream.advance();
                     RangeEndKind::Inclusive
                 } else {
                     RangeEndKind::Exclusive
                 }
             }
-            TokenKind::Eof if token_stream.position() >= range_end => {
+            TokenTag::EOF if token_stream.position() >= range_end => {
                 return loop_header_error(
                     InvalidLoopHeaderReason::MissingRangeSeparator,
                     start.span,
@@ -630,9 +649,7 @@ fn parse_range_loop_spec_cursor(
             }
         };
 
-        if token_stream.position() >= range_end
-            || token_stream.current_token_kind() == &TokenKind::Eof
-        {
+        if token_stream.position() >= range_end || token_stream.current_tag() == TokenTag::EOF {
             return loop_header_error(InvalidLoopHeaderReason::MissingRangeEndBound, start.span);
         }
 
@@ -667,9 +684,7 @@ fn parse_range_loop_spec_cursor(
         let step = if by_index.is_some() {
             let by_span = Some(token_stream.current_span());
             token_stream.advance();
-            if token_stream.position() >= range_end
-                || token_stream.current_token_kind() == &TokenKind::Eof
-            {
+            if token_stream.position() >= range_end || token_stream.current_tag() == TokenTag::EOF {
                 return loop_header_error(InvalidLoopHeaderReason::MissingRangeStep, by_span);
             }
             let step_start = token_stream.position();
@@ -927,7 +942,7 @@ fn has_top_level_range_marker_cursor(
         token_stream,
         header_start,
         header_end,
-        TokenKind::ExclusiveRange,
+        TokenTag::EXCLUSIVE_RANGE,
     )
     .is_some()
 }
@@ -948,7 +963,7 @@ fn collect_top_level_cursor_indexes(
     token_stream: &AstCursor,
     start: usize,
     end: usize,
-    predicate: impl Fn(&TokenKind) -> bool,
+    predicate: impl Fn(TokenTag) -> bool,
 ) -> Vec<usize> {
     let mut walk = header_probe_walk(token_stream, start, end);
     let mut nesting_depth = NestingDepth::default();
@@ -962,12 +977,12 @@ fn collect_top_level_cursor_indexes(
             walk.advance();
             continue;
         }
-        let kind = walk.current_token_kind();
-        if nesting_depth.is_top_level() && predicate(kind) {
+        let tag = walk.current_tag();
+        if nesting_depth.is_top_level() && predicate(tag) {
             indexes.push(walk.position());
         }
-        let is_eof = matches!(kind, TokenKind::Eof);
-        nesting_depth.step(kind);
+        let is_eof = tag == TokenTag::EOF;
+        nesting_depth.step(walk.current_token_kind());
         if is_eof {
             break;
         }
@@ -980,7 +995,7 @@ fn find_top_level_cursor_token(
     token_stream: &AstCursor,
     start: usize,
     end: usize,
-    target: TokenKind,
+    target: TokenTag,
 ) -> Option<usize> {
     let mut walk = header_probe_walk(token_stream, start, end);
     let mut nesting_depth = NestingDepth::default();
@@ -993,12 +1008,12 @@ fn find_top_level_cursor_token(
             walk.advance();
             continue;
         }
-        let kind = walk.current_token_kind();
-        if nesting_depth.is_top_level() && *kind == target {
+        let tag = walk.current_tag();
+        if nesting_depth.is_top_level() && tag == target {
             return Some(walk.position());
         }
-        let is_eof = matches!(kind, TokenKind::Eof);
-        nesting_depth.step(kind);
+        let is_eof = tag == TokenTag::EOF;
+        nesting_depth.step(walk.current_token_kind());
         if is_eof {
             break;
         }
@@ -1029,12 +1044,12 @@ fn find_top_level_expression_boundary_cursor_token(
         {
             return None;
         }
-        let kind = walk.current_token_kind();
-        if depth.is_top_level() && *kind == TokenKind::By {
+        let tag = walk.current_tag();
+        if depth.is_top_level() && tag == TokenTag::BY {
             return Some(walk.position());
         }
-        let is_eof = matches!(kind, TokenKind::Eof);
-        depth.step(kind);
+        let is_eof = tag == TokenTag::EOF;
+        depth.step(walk.current_token_kind());
         if is_eof {
             break;
         }

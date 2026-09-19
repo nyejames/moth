@@ -19,7 +19,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
 /// Stage-local result for loop statement AST construction.
@@ -115,16 +115,16 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
         {
             break;
         }
-        let kind = token_stream.current_token_kind().clone();
+        let tag = token_stream.current_tag();
         let token_span = token_stream.current_span();
         let is_top_level = nesting_depth.is_top_level();
 
-        if is_top_level && matches!(kind, TokenKind::Colon) {
+        if is_top_level && tag == TokenTag::COLON {
             outcome = Some(Ok(token_stream.position()));
             break;
         }
 
-        if is_top_level && matches!(kind, TokenKind::End | TokenKind::Eof) {
+        if is_top_level && matches!(tag, TokenTag::END | TokenTag::EOF) {
             outcome = Some(Err(CompilerDiagnostic::invalid_loop_header(
                 InvalidLoopHeaderReason::MissingColon,
                 Some(token_span),
@@ -133,7 +133,7 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
             break;
         }
 
-        nesting_depth.step(&kind);
+        nesting_depth.step(token_stream.current_token_kind());
         let before = token_stream.position();
         token_stream.advance();
         // Eof never advances, so a stalled step ends the search.
@@ -170,7 +170,7 @@ fn is_empty_header_window(window: &mut AstCursor) -> bool {
         {
             break;
         }
-        if *window.current_token_kind() != TokenKind::Newline {
+        if window.current_tag() != TokenTag::NEWLINE {
             empty = false;
             break;
         }

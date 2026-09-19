@@ -32,7 +32,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedCurlyLiteralContext, ExpectedMapContext,
@@ -143,17 +143,17 @@ fn parse_collection_literal(
     //  Parse collection items
     // ------------------------
     while token_stream.position() < token_stream.length() {
-        match token_stream.current_token_kind() {
-            TokenKind::CloseCurly => {
+        match token_stream.current_tag() {
+            TokenTag::CLOSE_CURLY => {
                 consumed_close_curly = true;
                 break;
             }
 
-            TokenKind::Newline => {
+            TokenTag::NEWLINE => {
                 token_stream.advance();
             }
 
-            TokenKind::Comma => {
+            TokenTag::COMMA => {
                 if awaiting_item {
                     return Err(CompilerDiagnostic::missing_collection_item(Some(
                         token_stream.current_span(),
@@ -414,20 +414,12 @@ fn parse_expression_until_curly_entry_delimiter(
     )
 }
 
-/// Read the next token kind through the cursor lookahead.
-///
-/// WHAT: pure read-only lookahead for the `==` common-mistake checks.
-/// WHY: the cursor already tracks the next token kind, so no direct vector read is needed.
-fn peek_next_kind(token_stream: &AstCursor) -> Option<TokenKind> {
-    token_stream.peek_next_token().cloned()
-}
-
 fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<CompilerDiagnostic> {
-    if token_stream.current_token_kind() != &TokenKind::Assign {
+    if token_stream.current_tag() != TokenTag::ASSIGN {
         return None;
     }
 
-    if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::Assign) {
+    if token_stream.peek_next_tag() == Some(TokenTag::ASSIGN) {
         return check_expression_common_mistake(token_stream, false);
     }
 
@@ -438,7 +430,7 @@ fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<CompilerDiag
 }
 
 fn consume_map_entry_separator(token_stream: &mut AstCursor) -> CollectionParseResult<()> {
-    if token_stream.current_token_kind() != &TokenKind::Assign {
+    if token_stream.current_tag() != TokenTag::ASSIGN {
         return Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MixedCollectionMapEntries,
             Some(token_stream.current_span()),
@@ -446,7 +438,7 @@ fn consume_map_entry_separator(token_stream: &mut AstCursor) -> CollectionParseR
         .into());
     }
 
-    if peek_next_kind(token_stream).as_ref() == Some(&TokenKind::Assign)
+    if token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
         && let Some(error) = check_expression_common_mistake(token_stream, false)
     {
         return Err(error.into());
@@ -457,7 +449,7 @@ fn consume_map_entry_separator(token_stream: &mut AstCursor) -> CollectionParseR
 }
 
 fn reject_missing_map_key_expression(token_stream: &AstCursor) -> CollectionParseResult<()> {
-    if token_stream.current_token_kind() == &TokenKind::Assign {
+    if token_stream.current_tag() == TokenTag::ASSIGN {
         return Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MissingKeyExpression,
             Some(token_stream.current_span()),
@@ -469,12 +461,12 @@ fn reject_missing_map_key_expression(token_stream: &AstCursor) -> CollectionPars
 }
 
 fn reject_missing_map_value_expression(token_stream: &mut AstCursor) -> CollectionParseResult<()> {
-    while token_stream.current_token_kind() == &TokenKind::Newline {
+    while token_stream.current_tag() == TokenTag::NEWLINE {
         token_stream.advance();
     }
 
-    match token_stream.current_token_kind() {
-        TokenKind::CloseCurly | TokenKind::Comma => Err(CompilerDiagnostic::invalid_map_literal(
+    match token_stream.current_tag() {
+        TokenTag::CLOSE_CURLY | TokenTag::COMMA => Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MissingValueExpression,
             Some(token_stream.current_span()),
         )
@@ -513,17 +505,17 @@ fn parse_map_literal(
     //  Parse map entries
     // ------------------------
     while token_stream.position() < token_stream.length() {
-        match token_stream.current_token_kind() {
-            TokenKind::CloseCurly => {
+        match token_stream.current_tag() {
+            TokenTag::CLOSE_CURLY => {
                 consumed_close_curly = true;
                 break;
             }
 
-            TokenKind::Newline => {
+            TokenTag::NEWLINE => {
                 token_stream.advance();
             }
 
-            TokenKind::Comma => {
+            TokenTag::COMMA => {
                 if awaiting_entry {
                     return Err(CompilerDiagnostic::missing_collection_item(Some(
                         token_stream.current_span(),
@@ -680,7 +672,7 @@ fn parse_inferred_curly_literal(
     token_stream.skip_newlines();
 
     // Empty inferred `{}` keeps existing collection ambiguity behavior.
-    if token_stream.current_token_kind() == &TokenKind::CloseCurly {
+    if token_stream.current_tag() == TokenTag::CLOSE_CURLY {
         token_stream.advance();
         return Err(CompilerDiagnostic::empty_collection_type_ambiguity(literal_span).into());
     }
@@ -702,9 +694,9 @@ fn parse_inferred_curly_literal(
         path_fork,
     )?;
 
-    match token_stream.current_token_kind() {
+    match token_stream.current_tag() {
         // First entry has `=`  =>  this is a map literal.
-        TokenKind::Assign => {
+        TokenTag::ASSIGN => {
             consume_map_entry_separator(token_stream)?;
             reject_missing_map_value_expression(token_stream)?;
 
@@ -758,14 +750,14 @@ fn parse_inferred_curly_literal(
             // Parse remaining map entries.
             let mut awaiting_entry = false;
             while token_stream.position() < token_stream.length() {
-                match token_stream.current_token_kind() {
-                    TokenKind::CloseCurly => {
+                match token_stream.current_tag() {
+                    TokenTag::CLOSE_CURLY => {
                         break;
                     }
-                    TokenKind::Newline => {
+                    TokenTag::NEWLINE => {
                         token_stream.advance();
                     }
-                    TokenKind::Comma => {
+                    TokenTag::COMMA => {
                         if awaiting_entry {
                             return Err(CompilerDiagnostic::missing_collection_item(Some(
                                 token_stream.current_span(),
@@ -897,7 +889,7 @@ fn parse_inferred_curly_literal(
             ))
         }
         // First expression is followed by `,` or `}`  =>  collection literal.
-        TokenKind::Comma | TokenKind::CloseCurly => {
+        TokenTag::COMMA | TokenTag::CLOSE_CURLY => {
             // Infer element type from the first expression and treat the rest as collection items.
             let element_type_id = first_expr.type_id;
             let coerced_first = coerce_expression_to_explicit_type_boundary(
@@ -913,14 +905,14 @@ fn parse_inferred_curly_literal(
             let mut awaiting_item = false;
 
             while token_stream.position() < token_stream.length() {
-                match token_stream.current_token_kind() {
-                    TokenKind::CloseCurly => {
+                match token_stream.current_tag() {
+                    TokenTag::CLOSE_CURLY => {
                         break;
                     }
-                    TokenKind::Newline => {
+                    TokenTag::NEWLINE => {
                         token_stream.advance();
                     }
-                    TokenKind::Comma => {
+                    TokenTag::COMMA => {
                         if awaiting_item {
                             return Err(CompilerDiagnostic::missing_collection_item(Some(
                                 token_stream.current_span(),

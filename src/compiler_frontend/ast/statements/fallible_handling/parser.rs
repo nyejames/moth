@@ -37,7 +37,7 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 use super::catch_handler::{
     CatchFallibleHandler, CatchFallibleHandlerSite, parse_catch_fallible_handler_typed,
@@ -219,7 +219,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
     let success_type_diagnostic_spelling =
         diagnostic_type_spelling(handled_type_id, type_interner.environment());
 
-    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+    let propagation_span = (token_stream.current_tag() == TokenTag::BANG)
         .then(|| token_stream.current_postfix_operator_span());
 
     if let Some(handling) = parse_fallible_handling_suffix(
@@ -294,12 +294,12 @@ fn parse_fallible_handling_suffix(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Option<FallibleHandling>, ExpressionParseError> {
-    match token_stream.current_token_kind() {
-        TokenKind::Bang => {
+    match token_stream.current_tag() {
+        TokenTag::BANG => {
             parse_postfix_propagation(token_stream, context, site, type_interner.environment())
                 .map(Some)
         }
-        TokenKind::Catch => parse_catch_handling_suffix(
+        TokenTag::CATCH => parse_catch_handling_suffix(
             token_stream,
             context,
             type_interner,
@@ -399,9 +399,9 @@ fn parse_catch_handling_suffix(
     token_stream.advance();
     let catch_context = context.activate_pending_catch_assignment_targets();
 
-    match token_stream.current_token_kind() {
+    match token_stream.current_tag() {
         // `catch then ...` — inline value-producing fallback with no error binding.
-        TokenKind::Then => parse_inline_catch_without_error_binding(
+        TokenTag::THEN => parse_inline_catch_without_error_binding(
             token_stream,
             &catch_context,
             type_interner,
@@ -411,7 +411,7 @@ fn parse_catch_handling_suffix(
         ),
 
         // `catch:` — no error binding, just a fallback body.
-        TokenKind::Colon => parse_catch_without_error_binding(
+        TokenTag::COLON => parse_catch_without_error_binding(
             token_stream,
             &catch_context,
             type_interner,
@@ -422,7 +422,7 @@ fn parse_catch_handling_suffix(
         ),
 
         // `catch |err|:` or `catch |err| then ...` — bind the error value before recovery.
-        TokenKind::TypeParameterBracket => parse_catch_handler(
+        TokenTag::TYPE_PARAMETER_BRACKET => parse_catch_handler(
             token_stream,
             &catch_context,
             type_interner,
@@ -543,23 +543,23 @@ fn next_catch_binding_is_inline(token_stream: &AstCursor) -> bool {
         let mut index = cursor.position().checked_add(1);
 
         while let Some(probe) = index {
-            let Some(kind) = cursor.token_kind_at(probe) else {
+            let Some(tag) = cursor.token_kind_at(probe).map(|kind| kind.token_tag()) else {
                 return false;
             };
-            match kind {
-                TokenKind::TypeParameterBracket => {
+            match tag {
+                TokenTag::TYPE_PARAMETER_BRACKET => {
                     let mut lookahead = probe.checked_add(1);
                     while let Some(next) = lookahead {
-                        match cursor.token_kind_at(next) {
-                            Some(TokenKind::Newline) => lookahead = next.checked_add(1),
-                            Some(kind) => return kind == TokenKind::Then,
+                        match cursor.token_kind_at(next).map(|kind| kind.token_tag()) {
+                            Some(TokenTag::NEWLINE) => lookahead = next.checked_add(1),
+                            Some(tag) => return tag == TokenTag::THEN,
                             None => return false,
                         }
                     }
                     return false;
                 }
 
-                TokenKind::Newline | TokenKind::End | TokenKind::Eof => return false,
+                TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => return false,
 
                 _ => index = probe.checked_add(1),
             }
@@ -570,18 +570,24 @@ fn next_catch_binding_is_inline(token_stream: &AstCursor) -> bool {
 
     let mut index = token_stream.position().saturating_add(1);
     while index < token_stream.length() {
-        match token_stream.token_kind_at(index) {
-            Some(TokenKind::TypeParameterBracket) => {
+        match token_stream
+            .token_kind_at(index)
+            .map(|kind| kind.token_tag())
+        {
+            Some(TokenTag::TYPE_PARAMETER_BRACKET) => {
                 let mut lookahead = index.saturating_add(1);
                 loop {
-                    match token_stream.token_kind_at(lookahead) {
-                        Some(TokenKind::Newline) => lookahead = lookahead.saturating_add(1),
-                        Some(kind) => return kind == TokenKind::Then,
+                    match token_stream
+                        .token_kind_at(lookahead)
+                        .map(|kind| kind.token_tag())
+                    {
+                        Some(TokenTag::NEWLINE) => lookahead = lookahead.saturating_add(1),
+                        Some(tag) => return tag == TokenTag::THEN,
                         None => return false,
                     }
                 }
             }
-            Some(TokenKind::Newline) | Some(TokenKind::End) | Some(TokenKind::Eof) => return false,
+            Some(TokenTag::NEWLINE) | Some(TokenTag::END) | Some(TokenTag::EOF) => return false,
             Some(_) => index = index.saturating_add(1),
             None => return false,
         }
@@ -609,7 +615,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
         allow_boundary_catch,
     } = handler_call;
 
-    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+    let propagation_span = (token_stream.current_tag() == TokenTag::BANG)
         .then(|| token_stream.current_postfix_operator_span());
 
     let handling = parse_fallible_handling_suffix(
@@ -659,7 +665,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
         allow_boundary_catch,
     } = handler_call;
 
-    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+    let propagation_span = (token_stream.current_tag() == TokenTag::BANG)
         .then(|| token_stream.current_postfix_operator_span());
 
     let handling = parse_fallible_handling_suffix(

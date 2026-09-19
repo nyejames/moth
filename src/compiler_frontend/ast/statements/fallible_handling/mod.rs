@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 
 // --------------------------
 //  Re-exports
@@ -39,10 +39,10 @@ const EXPRESSION_STAGE: &str = "Expression Parsing";
 /// WHY: these entrypoints construct fallible carriers in different parser modules, but the
 ///      syntax that consumes those carriers must stay identical.
 pub(crate) fn token_stream_starts_fallible_handling_suffix(token_stream: &AstCursor) -> bool {
-    token_stream.current_token_kind() == &TokenKind::Bang
-        || token_stream.current_token_kind() == &TokenKind::Catch
-        || (matches!(token_stream.current_token_kind(), TokenKind::Symbol(_))
-            && token_stream.peek_next_token() == Some(&TokenKind::Bang))
+    token_stream.current_tag() == TokenTag::BANG
+        || token_stream.current_tag() == TokenTag::CATCH
+        || (token_stream.current_tag() == TokenTag::SYMBOL
+            && token_stream.peek_next_tag() == Some(TokenTag::BANG))
 }
 /// Selects the precise reason for applying `!` or `catch` to a non-fallible operand.
 ///

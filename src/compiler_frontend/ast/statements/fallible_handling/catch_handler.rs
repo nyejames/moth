@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::validation::{
@@ -133,7 +133,7 @@ fn parse_catch_error_binding(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchErrorBinding, ExpressionParseError> {
-    if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerOpeningPipe,
             Some(token_stream.current_span()),
@@ -143,7 +143,7 @@ fn parse_catch_error_binding(
 
     token_stream.advance();
 
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::EmptyCatchHandlerBinding,
             Some(token_stream.current_span()),
@@ -172,7 +172,7 @@ fn parse_catch_error_binding(
 
     token_stream.advance();
 
-    if token_stream.current_token_kind() == &TokenKind::Comma {
+    if token_stream.current_tag() == TokenTag::COMMA {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::MultipleCatchHandlerBindings,
             Some(token_stream.current_span()),
@@ -180,7 +180,7 @@ fn parse_catch_error_binding(
         .into());
     }
 
-    if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerClosingPipe,
             Some(token_stream.current_span()),
@@ -219,7 +219,7 @@ fn parse_catch_fallible_handler_body(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerColon,
             Some(token_stream.current_span()),
@@ -352,7 +352,7 @@ fn parse_inline_catch_handler_body(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
-    if token_stream.current_token_kind() == &TokenKind::Newline {
+    if token_stream.current_tag() == TokenTag::NEWLINE {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
             Some(token_stream.current_span()),
@@ -360,7 +360,7 @@ fn parse_inline_catch_handler_body(
         .into());
     }
 
-    if token_stream.current_token_kind() != &TokenKind::Then {
+    if token_stream.current_tag() != TokenTag::THEN {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
@@ -379,7 +379,7 @@ fn parse_inline_catch_handler_body(
     let then_span = Some(token_stream.current_span());
     token_stream.advance();
 
-    if token_stream.current_token_kind() == &TokenKind::Newline {
+    if token_stream.current_tag() == TokenTag::NEWLINE {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
             Some(token_stream.current_span()),
@@ -434,7 +434,7 @@ fn parse_inline_catch_handler_body(
         path_fork,
     })?;
 
-    if token_stream.current_token_kind() == &TokenKind::Catch {
+    if token_stream.current_tag() == TokenTag::CATCH {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
