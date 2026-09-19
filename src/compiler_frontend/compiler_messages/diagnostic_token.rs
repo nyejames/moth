@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{
-    TokenDescriptorPayload, TokenKind, TokenRef, TokenTag, TokenViewError, numeric_kind_flags,
+    TokenDescriptorPayload, TokenRef, TokenTag, TokenViewError, numeric_kind_flags,
 };
 
 const TAG_MASK: u32 = u16::MAX as u32;
@@ -69,7 +69,7 @@ impl DiagnosticToken {
     /// WHAT: copies only the stable tag plus the one immediate payload the
     ///       renderer needs, borrowing cold numeric rows instead of cloning them.
     /// WHY: diagnostics must outlive the source token buffer without retaining
-    ///      its lifetime, cloning `TokenKind`, or materializing path tables.
+    ///      its lifetime, cloning the live token view, or materializing path tables.
     ///      `Path` keeps only its stable tag; the dense path handle is dropped.
     pub(crate) fn try_from_token_ref(token: TokenRef<'_>) -> Result<Self, TokenViewError> {
         let tag = token.tag();
@@ -123,7 +123,7 @@ impl DiagnosticToken {
 
     /// Infallible projection over validated source token stores.
     ///
-    /// WHAT: copies the compact tag/payload pair without cloning `TokenKind`.
+    /// WHAT: copies the compact tag/payload pair from the validated view.
     /// WHY: `SourceTokens` validates every shape and cold-store handle at
     ///      construction/publication, so the checked views above hold. Callers
     ///      with unvalidated views must use `try_from_token_ref` and map the
@@ -170,63 +170,13 @@ impl DiagnosticToken {
     }
 
     pub(crate) fn char_value(self) -> char {
-        // A DiagnosticToken created from TokenKind always carries a valid scalar value. The
-        // replacement fallback keeps a corrupt retained record renderable without panicking.
+        // A projected token always carries a valid scalar value when built through the
+        // checked projection. The fallback below keeps a corrupt retained record
+        // renderable without panicking.
         char::from_u32(self.data).unwrap_or('\u{FFFD}')
     }
 
     pub(crate) fn bool_value(self) -> bool {
         self.data != 0
-    }
-}
-impl From<TokenKind> for DiagnosticToken {
-    fn from(token_kind: TokenKind) -> Self {
-        let tag = token_kind.token_tag();
-
-        // The tag and payload kind come from the shared tokenizer schema. This match is retained
-        // only at the projection boundary because dynamic values need typed extraction before
-        match tag.descriptor().payload() {
-            TokenDescriptorPayload::Static | TokenDescriptorPayload::Path => {
-                Self::static_token(tag)
-            }
-            TokenDescriptorPayload::Symbol => match token_kind {
-                TokenKind::Symbol(value) => Self::string_token(tag, value),
-                _ => unreachable!("token schema symbol payload does not match TokenKind"),
-            },
-            TokenDescriptorPayload::StyleDirective => match token_kind {
-                TokenKind::StyleDirective(value) => Self::string_token(tag, value),
-                _ => unreachable!("token schema style payload does not match TokenKind"),
-            },
-            TokenDescriptorPayload::StringLiteral => match token_kind {
-                TokenKind::StringSliceLiteral(value) => Self::string_token(tag, value),
-                _ => unreachable!("token schema string payload does not match TokenKind"),
-            },
-            TokenDescriptorPayload::NumericLiteral => match token_kind {
-                TokenKind::NumericLiteral(value) => Self::new(
-                    tag,
-                    numeric_kind_flags(value.kind),
-                    value.source_text.index(),
-                ),
-                _ => unreachable!("token schema numeric payload does not match TokenKind"),
-            },
-            TokenDescriptorPayload::CharLiteral => match token_kind {
-                TokenKind::CharLiteral(value) => Self::new(tag, 0, value as u32),
-                _ => unreachable!("token schema character payload does not match TokenKind"),
-            },
-            TokenDescriptorPayload::RawStringLiteral => match token_kind {
-                TokenKind::RawStringLiteral(value) => Self::string_token(tag, value),
-                _ => unreachable!("token schema raw-string payload does not match TokenKind"),
-            },
-            TokenDescriptorPayload::BoolLiteral => match token_kind {
-                TokenKind::BoolLiteral(value) => Self::new(tag, 0, value as u32),
-                _ => unreachable!("token schema bool payload does not match TokenKind"),
-            },
-        }
-    }
-}
-
-impl From<&TokenKind> for DiagnosticToken {
-    fn from(token_kind: &TokenKind) -> Self {
-        Self::from(token_kind.clone())
     }
 }

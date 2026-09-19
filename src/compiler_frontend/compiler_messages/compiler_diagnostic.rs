@@ -118,7 +118,7 @@ impl CompilerDiagnostic {
 
     /// Projection-based `ExpectedToken` for dynamic expected spellings.
     ///
-    /// WHAT: retains caller-projected expected/found tokens without cloning `TokenKind`.
+    /// WHAT: retains caller-projected expected/found tokens from the compact projection.
     /// WHY: the `#Config` qualifier names a dynamic `Symbol(Config)` expected token;
     ///      static delimiters keep using `expected_token_from_tags`.
     pub(crate) fn expected_token_from_projections(
@@ -135,10 +135,11 @@ impl CompilerDiagnostic {
     /// Tag-based `ExpectedToken` for static/path expected spellings.
     ///
     /// WHAT: retains the expected static/path descriptor plus the caller-projected
-    ///       found token without cloning `TokenKind`.
-    /// WHY: the found side arrives as a compact projection: `expected_token_from_ref`
-    ///      over a canonical `TokenRef` when available, otherwise a
-    ///      `DiagnosticToken::from(TokenKind)` compatibility fallback.
+    ///       found token from the compact projection.
+    /// WHY: the found side arrives as a `DiagnosticToken` built with
+    ///      `from_string_tag`, `from_static_tag`, `try_from_token_ref`, or
+    ///      the infallible `from_token_ref` over a validated view; malformed
+    ///      views stay on the invariant-error lane via `token_view_invariant_error`.
     pub(crate) fn expected_token_from_tags(
         expected: TokenTag,
         found: Option<DiagnosticToken>,
