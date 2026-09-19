@@ -320,7 +320,7 @@ impl CompilerFrontend<'static> {
     ) -> Result<(SourceTokenOwner, Arc<PathSyntaxTable>), FileFrontendPrepareFailure> {
         let (logical_path, source_id, canonical_os_path) =
             source_identity_facts(source_files, module_path, path_fork)?;
-        let mut tokens = tokenize(
+        let tokenized = tokenize(
             source_code,
             logical_path,
             tokenizer_entry_mode,
@@ -331,11 +331,7 @@ impl CompilerFrontend<'static> {
             span_builder,
         )
         .map_err(FileFrontendPrepareFailure::from_tokenization)?;
-        tokens.canonical_os_path = canonical_os_path;
-        let handoff = tokens
-            .into_canonical_lexer_handoff()
-            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-        if handoff.logical_path != logical_path || handoff.file_id != source_id {
+        if tokenized.logical_path != logical_path || tokenized.file_id != source_id {
             return Err(FileFrontendPrepareFailure::Infrastructure(
                 CompilerError::compiler_error(
                     "lexer source identity does not match its registered preparation identity",
@@ -343,11 +339,11 @@ impl CompilerFrontend<'static> {
             ));
         }
         let owner = SourceTokenOwner::new(
-            handoff.tokens,
-            handoff.logical_path,
-            handoff.canonical_os_path,
+            tokenized.tokens,
+            logical_path,
+            canonical_os_path,
         );
-        Ok((owner, handoff.path_syntax))
+        Ok((owner, tokenized.path_syntax))
     }
 
     /// Prepare one source file against a caller-provided local string table.

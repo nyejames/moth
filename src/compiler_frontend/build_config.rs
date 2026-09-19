@@ -36,7 +36,7 @@ use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_unde
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
 use std::cell::RefCell;
@@ -466,7 +466,7 @@ fn parse_ordinary_quoted_literal(
             }))
         })?;
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         value,
         path,
         TokenizerEntryMode::SourceFile,
@@ -485,18 +485,27 @@ fn parse_ordinary_quoted_literal(
         }
     })?;
 
-    let [module_start, literal, eof] = file_tokens.tokens.as_slice() else {
+    let source_tokens = lexed.tokens;
+    if source_tokens.len() != 3 {
         return Err(malformed_quoted_literal_error(
             value,
             QUOTED_LITERAL_TRAILING_TEXT,
         ));
+    }
+    let token_at = |position: usize| {
+        source_tokens
+            .token(TokenIndex::try_from_index(position).expect("three-token literal fits"))
+            .expect("validated lexer output has three token rows")
     };
+    let module_start = token_at(0);
+    let literal = token_at(1);
+    let eof = token_at(2);
 
     let resolver = span_builder.resolver();
-    let literal_range = literal.span.resolve_with(resolver);
-    let eof_range = eof.span.resolve_with(resolver);
-    if !matches!(module_start.kind, TokenKind::ModuleStart)
-        || !matches!(eof.kind, TokenKind::Eof)
+    let literal_range = literal.span().resolve_with(resolver);
+    let eof_range = eof.span().resolve_with(resolver);
+    if module_start.tag() != TokenTag::MODULE_START
+        || eof.tag() != TokenTag::EOF
         || literal_range.start() != 0
         || literal_range.end() != eof_range.end()
     {
@@ -506,11 +515,25 @@ fn parse_ordinary_quoted_literal(
         ));
     }
 
-    match &literal.kind {
-        TokenKind::StringSliceLiteral(id) => Ok(OrdinaryCommandLiteral::String(
-            string_table.resolve(*id).to_owned(),
-        )),
-        TokenKind::CharLiteral(character) => Ok(OrdinaryCommandLiteral::Char(*character)),
+    match literal.tag() {
+        TokenTag::STRING_SLICE_LITERAL => {
+            let id = literal.string_id().ok_or_else(|| {
+                BuildInputValueError::Infrastructure(Box::new(CompilerError::compiler_error(
+                    "quoted command literal has a malformed string payload",
+                )))
+            })?;
+            Ok(OrdinaryCommandLiteral::String(
+                string_table.resolve(id).to_owned(),
+            ))
+        }
+        TokenTag::CHAR_LITERAL => {
+            let character = literal.char_value().ok_or_else(|| {
+                BuildInputValueError::Infrastructure(Box::new(CompilerError::compiler_error(
+                    "quoted command literal has a malformed character payload",
+                )))
+            })?;
+            Ok(OrdinaryCommandLiteral::Char(character))
+        }
         _ => Err(malformed_quoted_literal_error(
             value,
             QUOTED_LITERAL_TRAILING_TEXT,

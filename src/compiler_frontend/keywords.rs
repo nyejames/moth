@@ -6,7 +6,9 @@
 //! WHY: keyword policy is user-visible and must not drift between the tokenizer,
 //! dependency alias validation, reserved-name diagnostics and code highlighting.
 
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenTag};
+#[cfg(test)]
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Keywords that may not be shadowed by identifiers after case folding and
 /// stripping leading underscores.
@@ -31,142 +33,155 @@ pub(crate) enum SourceWordClass {
 }
 
 /// Exact source-word classification result.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ClassifiedSourceWord {
-    pub(crate) token_kind: TokenKind,
+    pub(crate) token_tag: TokenTag,
+    pub(crate) bool_value: Option<bool>,
     pub(crate) class: SourceWordClass,
 }
 
 impl ClassifiedSourceWord {
-    fn keyword(token_kind: TokenKind) -> Self {
+    fn keyword(token_tag: TokenTag) -> Self {
         Self {
-            token_kind,
+            token_tag,
+            bool_value: None,
             class: SourceWordClass::Keyword,
         }
     }
 
-    fn word_operator(token_kind: TokenKind) -> Self {
+    fn word_operator(token_tag: TokenTag) -> Self {
         Self {
-            token_kind,
+            token_tag,
+            bool_value: None,
             class: SourceWordClass::WordOperator,
         }
     }
 
-    fn literal(token_kind: TokenKind) -> Self {
+    fn literal(token_tag: TokenTag, bool_value: Option<bool>) -> Self {
         Self {
-            token_kind,
+            token_tag,
+            bool_value,
             class: SourceWordClass::Literal,
         }
     }
 
-    fn builtin_type(token_kind: TokenKind) -> Self {
+    fn builtin_type(token_tag: TokenTag) -> Self {
         Self {
-            token_kind,
+            token_tag,
+            bool_value: None,
             class: SourceWordClass::BuiltinType,
         }
     }
 }
 
-/// Returns the tokenizer token kind and neutral presentation class for an exact
-/// source keyword spelling, or `None` for ordinary identifiers.
+/// Returns the stable taxonomy tag and any typed literal payload for an exact source word.
 pub(crate) fn classify_source_word(text: &str) -> Option<ClassifiedSourceWord> {
     match text {
-        // Module and declaration keywords.
-        "export" => Some(ClassifiedSourceWord::keyword(TokenKind::Export)),
-        "type" => Some(ClassifiedSourceWord::keyword(TokenKind::Type)),
-        "of" => Some(ClassifiedSourceWord::keyword(TokenKind::Of)),
-        "as" => Some(ClassifiedSourceWord::keyword(TokenKind::As)),
-        "copy" => Some(ClassifiedSourceWord::keyword(TokenKind::Copy)),
-
-        // Control flow, blocks and casts.
-        "if" => Some(ClassifiedSourceWord::keyword(TokenKind::If)),
-        "return" => Some(ClassifiedSourceWord::keyword(TokenKind::Return)),
-        "catch" => Some(ClassifiedSourceWord::keyword(TokenKind::Catch)),
-        "then" => Some(ClassifiedSourceWord::keyword(TokenKind::Then)),
-        "else" => Some(ClassifiedSourceWord::keyword(TokenKind::Else)),
-        "checked" => Some(ClassifiedSourceWord::keyword(TokenKind::Checked)),
-        "cast" => Some(ClassifiedSourceWord::keyword(TokenKind::Cast)),
-        "break" => Some(ClassifiedSourceWord::keyword(TokenKind::Break)),
-        "continue" => Some(ClassifiedSourceWord::keyword(TokenKind::Continue)),
-
-        // Reserved receiver, trait and assertion syntax.
-        "must" => Some(ClassifiedSourceWord::keyword(TokenKind::Must)),
-        "this" => Some(ClassifiedSourceWord::keyword(TokenKind::This)),
-        "This" => Some(ClassifiedSourceWord::keyword(TokenKind::TraitThis)),
-        "assert" => Some(ClassifiedSourceWord::keyword(TokenKind::Assert)),
-
-        // Deferred async syntax uses the ordinary keyword class.
-        "async" => Some(ClassifiedSourceWord::keyword(TokenKind::Async)),
-        "yield" => Some(ClassifiedSourceWord::keyword(TokenKind::Yield)),
-
-        // Loops.
-        "loop" => Some(ClassifiedSourceWord::keyword(TokenKind::Loop)),
-        "to" => Some(ClassifiedSourceWord::keyword(TokenKind::ExclusiveRange)),
-        "by" => Some(ClassifiedSourceWord::keyword(TokenKind::By)),
-
-        // Word operators.
-        "is" => Some(ClassifiedSourceWord::word_operator(TokenKind::Is)),
-        "not" => Some(ClassifiedSourceWord::word_operator(TokenKind::Not)),
-        "and" => Some(ClassifiedSourceWord::word_operator(TokenKind::And)),
-        "or" => Some(ClassifiedSourceWord::word_operator(TokenKind::Or)),
-
-        // Value literals.
-        "true" => Some(ClassifiedSourceWord::literal(TokenKind::BoolLiteral(true))),
-        "false" => Some(ClassifiedSourceWord::literal(TokenKind::BoolLiteral(false))),
-        "none" => Some(ClassifiedSourceWord::literal(TokenKind::NoneLiteral)),
-
-        // Builtin and singleton type spellings.
-        "Int" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeInt)),
-        "Float" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeFloat)),
-        "Bool" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeBool)),
-        "String" => Some(ClassifiedSourceWord::builtin_type(
-            TokenKind::DatatypeString,
-        )),
-        "Char" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeChar)),
-        "None" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeNone)),
-        "True" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeTrue)),
-        "False" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeFalse)),
-
+        "export" => Some(ClassifiedSourceWord::keyword(TokenTag::EXPORT)),
+        "type" => Some(ClassifiedSourceWord::keyword(TokenTag::TYPE)),
+        "of" => Some(ClassifiedSourceWord::keyword(TokenTag::OF)),
+        "as" => Some(ClassifiedSourceWord::keyword(TokenTag::AS)),
+        "copy" => Some(ClassifiedSourceWord::keyword(TokenTag::COPY)),
+        "if" => Some(ClassifiedSourceWord::keyword(TokenTag::IF)),
+        "return" => Some(ClassifiedSourceWord::keyword(TokenTag::RETURN)),
+        "catch" => Some(ClassifiedSourceWord::keyword(TokenTag::CATCH)),
+        "then" => Some(ClassifiedSourceWord::keyword(TokenTag::THEN)),
+        "else" => Some(ClassifiedSourceWord::keyword(TokenTag::ELSE)),
+        "checked" => Some(ClassifiedSourceWord::keyword(TokenTag::CHECKED)),
+        "cast" => Some(ClassifiedSourceWord::keyword(TokenTag::CAST)),
+        "break" => Some(ClassifiedSourceWord::keyword(TokenTag::BREAK)),
+        "continue" => Some(ClassifiedSourceWord::keyword(TokenTag::CONTINUE)),
+        "must" => Some(ClassifiedSourceWord::keyword(TokenTag::MUST)),
+        "this" => Some(ClassifiedSourceWord::keyword(TokenTag::THIS)),
+        "This" => Some(ClassifiedSourceWord::keyword(TokenTag::TRAIT_THIS)),
+        "assert" => Some(ClassifiedSourceWord::keyword(TokenTag::ASSERT)),
+        "async" => Some(ClassifiedSourceWord::keyword(TokenTag::ASYNC)),
+        "yield" => Some(ClassifiedSourceWord::keyword(TokenTag::YIELD)),
+        "loop" => Some(ClassifiedSourceWord::keyword(TokenTag::LOOP)),
+        "to" => Some(ClassifiedSourceWord::keyword(TokenTag::EXCLUSIVE_RANGE)),
+        "by" => Some(ClassifiedSourceWord::keyword(TokenTag::BY)),
+        "is" => Some(ClassifiedSourceWord::word_operator(TokenTag::IS)),
+        "not" => Some(ClassifiedSourceWord::word_operator(TokenTag::NOT)),
+        "and" => Some(ClassifiedSourceWord::word_operator(TokenTag::AND)),
+        "or" => Some(ClassifiedSourceWord::word_operator(TokenTag::OR)),
+        "true" => Some(ClassifiedSourceWord::literal(TokenTag::BOOL_LITERAL, Some(true))),
+        "false" => Some(ClassifiedSourceWord::literal(TokenTag::BOOL_LITERAL, Some(false))),
+        "none" => Some(ClassifiedSourceWord::literal(TokenTag::NONE_LITERAL, None)),
+        "Int" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_INT)),
+        "Float" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_FLOAT)),
+        "Bool" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_BOOL)),
+        "String" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_STRING)),
+        "Char" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_CHAR)),
+        "None" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_NONE)),
+        "True" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_TRUE)),
+        "False" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_FALSE)),
         _ => None,
     }
 }
 
 /// Returns the stable taxonomy tag for an exact source keyword spelling.
-///
-/// WHAT: classifies through the same direct spelling match as [`classify_source_word`]
-///       and then reads the canonical schema tag, keeping schema-classification
-///       callers off the transient `TokenKind` compatibility enum.
-/// WHY: presentation-only consumers (highlighting, scanning) need only class/tag
-///      facts; lexer construction still needs `TokenKind` payloads until its
-///      consumers migrate, so both spellings share this one match.
 #[cfg(test)]
 pub(crate) fn keyword_token_tag(text: &str) -> Option<TokenTag> {
-    classify_source_word(text).map(|classified| classified.token_kind.token_tag())
+    classify_source_word(text).map(|classified| classified.token_tag)
 }
 
-/// Returns the tokenizer token kind for an exact source keyword spelling.
+/// Legacy token-kind projection retained only for keyword fixtures during migration.
+#[cfg(test)]
 pub(crate) fn keyword_token_kind(text: &str) -> Option<TokenKind> {
-    classify_source_word(text).map(|classified| classified.token_kind)
+    match text {
+        "export" => Some(TokenKind::Export),
+        "type" => Some(TokenKind::Type),
+        "of" => Some(TokenKind::Of),
+        "as" => Some(TokenKind::As),
+        "copy" => Some(TokenKind::Copy),
+        "if" => Some(TokenKind::If),
+        "return" => Some(TokenKind::Return),
+        "catch" => Some(TokenKind::Catch),
+        "then" => Some(TokenKind::Then),
+        "else" => Some(TokenKind::Else),
+        "checked" => Some(TokenKind::Checked),
+        "cast" => Some(TokenKind::Cast),
+        "break" => Some(TokenKind::Break),
+        "continue" => Some(TokenKind::Continue),
+        "must" => Some(TokenKind::Must),
+        "this" => Some(TokenKind::This),
+        "This" => Some(TokenKind::TraitThis),
+        "assert" => Some(TokenKind::Assert),
+        "async" => Some(TokenKind::Async),
+        "yield" => Some(TokenKind::Yield),
+        "loop" => Some(TokenKind::Loop),
+        "to" => Some(TokenKind::ExclusiveRange),
+        "by" => Some(TokenKind::By),
+        "is" => Some(TokenKind::Is),
+        "not" => Some(TokenKind::Not),
+        "and" => Some(TokenKind::And),
+        "or" => Some(TokenKind::Or),
+        "true" => Some(TokenKind::BoolLiteral(true)),
+        "false" => Some(TokenKind::BoolLiteral(false)),
+        "none" => Some(TokenKind::NoneLiteral),
+        "Int" => Some(TokenKind::DatatypeInt),
+        "Float" => Some(TokenKind::DatatypeFloat),
+        "Bool" => Some(TokenKind::DatatypeBool),
+        "String" => Some(TokenKind::DatatypeString),
+        "Char" => Some(TokenKind::DatatypeChar),
+        "None" => Some(TokenKind::DatatypeNone),
+        "True" => Some(TokenKind::DatatypeTrue),
+        "False" => Some(TokenKind::DatatypeFalse),
+        _ => None,
+    }
 }
 
 /// Returns the stable taxonomy tag for a keyword form requiring an attached `!`.
-///
-/// WHAT: tag projection of [`attached_bang_keyword_token_kind`] for presentation
-///       consumers that classify `return!`/`cast!` spans without constructing
-///       the transient `TokenKind` compatibility enum.
-/// WHY: highlighting must share keyword policy without growing a second word
-///      list; lexer construction keeps the `TokenKind` lane until its consumers
-///      migrate.
 pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
-    attached_bang_keyword_token_kind(text).map(|kind| kind.token_tag())
+    match text {
+        "return" => Some(TokenTag::RETURN_BANG),
+        "cast" => Some(TokenTag::CAST_BANG),
+        _ => None,
+    }
 }
 
-/// Returns the compound token for keyword forms that require an attached `!`.
-///
-/// WHAT: `return!` and `cast!` are lexical forms, not a keyword followed by a
-///       whitespace-sensitive postfix operator.
-/// WHY: keeping attachment in tokenization prevents AST parsing from having to
-///      reconstruct source adjacency from locations.
+/// Legacy compound-token projection retained only for keyword fixtures.
+#[cfg(test)]
 pub(crate) fn attached_bang_keyword_token_kind(text: &str) -> Option<TokenKind> {
     match text {
         "return" => Some(TokenKind::ReturnBang),

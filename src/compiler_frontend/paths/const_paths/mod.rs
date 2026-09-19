@@ -9,14 +9,13 @@
 //! never part of a path row.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PathKind, SourceSpanCapacityResource,
-};
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span, mint_token};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
+use crate::compiler_frontend::tokenizer::lexer::{
+    TokenizeResult, current_source_span, map_token_emit_error,
+};
+use crate::compiler_frontend::tokenizer::tokens::{TokenStream, TokenTag};
 
 mod components;
 type PathComponents = Vec<StringId>;
@@ -36,7 +35,7 @@ pub fn parse_file_path(
     stream: &mut TokenStream,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     // Path syntax accepted by the tokenizer.
     //
     // Canonical examples:
@@ -51,10 +50,10 @@ pub fn parse_file_path(
         stream.next();
 
         match stream.peek().copied() {
-            None => return mint_path_token(stream, PathId::ROOT, path_fork),
+            None => return mint_path_token(stream, PathId::ROOT),
             Some(next) => {
                 if next.is_whitespace() || matches!(next, ':' | ']' | ')' | '}' | ',' | ';') {
-                    return mint_path_token(stream, PathId::ROOT, path_fork);
+                    return mint_path_token(stream, PathId::ROOT);
                 }
 
                 return Err(CompilerDiagnostic::invalid_path(
@@ -91,38 +90,15 @@ pub fn parse_file_path(
                 "path table exhausted while interning an authored path row",
             )
         })?;
-    mint_path_token(stream, root, path_fork)
+    mint_path_token(stream, root)
 }
 
-/// Mint one span and share it between the path token and its source-owned syntax row.
-fn mint_path_token(
-    stream: &mut TokenStream<'_>,
-    root: PathId,
-    _path_fork: &mut PathInternerFork,
-) -> TokenizeResult<Token> {
-    let mut token = mint_token(stream, TokenKind::Path(PathSyntaxId::NONE))?;
-    let push_error = match stream
-        .path_syntax
-        .try_push_for_source(root, stream.file_id, token.span)
-    {
-        Ok(id) => {
-            token.kind = TokenKind::Path(id);
-            return Ok(token);
-        }
-        Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Capacity(_)) => {
-            CompilerDiagnostic::source_table_capacity(SourceSpanCapacityResource::PathSyntax).into()
-        }
-        Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Frozen) => {
-            CompilerError::compiler_error("path syntax table was frozen during tokenization").into()
-        }
-        Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::ForeignSource {
-            ..
-        }) => CompilerError::compiler_error(
-            "path syntax table received a path row from another source",
-        )
-        .into(),
-    };
-    Err(push_error)
+/// Emit one canonical path shape and its source-owned syntax row from the same packed span.
+fn mint_path_token(stream: &mut TokenStream<'_>, root: PathId) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_path(root)
+        .map_err(|error| map_token_emit_error(error, source))
 }
 
 /// WHAT: Parses the path components of one path token.

@@ -5,17 +5,16 @@
 //! WHY: keeping the grammar in one place makes separator, exponent, and sign rules
 //!      consistent between source literals and future string casts.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, NumberLiteralErrorReason, SourceSpanCapacityResource,
+    CompilerDiagnostic, NumberLiteralErrorReason,
 };
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
-use crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
-use crate::return_token;
+use crate::compiler_frontend::tokenizer::lexer::{
+    TokenizeResult, current_source_span, map_token_emit_error,
+};
+use crate::compiler_frontend::tokenizer::tokens::{TokenStream, TokenTag};
 
 /// Tokenize an integer or float literal starting with `first_digit`.
 ///
@@ -28,7 +27,7 @@ pub(super) fn tokenize_numeric_literal(
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
     sign: NumericLiteralSign,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     let mut literal_text = String::new();
     literal_text.push(first_digit);
     // ------------------------
@@ -100,40 +99,10 @@ pub(super) fn tokenize_numeric_literal(
                 parsed.exponent_digit_count,
                 parsed.exponent_sign,
             );
-            let push_error = match stream
-                .numeric_literals
-                .try_push_for_source(stream.file_id, token.clone())
-            {
-                Ok(id) => {
-                    debug_assert_eq!(
-                        id.index(),
-                        stream.numeric_literals.len().checked_sub(1),
-                        "numeric store must assign handles positionally in lexer order"
-                    );
-                    None
-                }
-                Err(NumericLiteralStoreError::Capacity(_)) => Some(
-                    CompilerDiagnostic::source_table_capacity(
-                        SourceSpanCapacityResource::NumericLiteral,
-                    )
-                    .into(),
-                ),
-                Err(
-                    NumericLiteralStoreError::Frozen
-                    | NumericLiteralStoreError::Absent
-                    | NumericLiteralStoreError::OutOfRange { .. }
-                    | NumericLiteralStoreError::ForeignSource { .. },
-                ) => Some(
-                    CompilerError::compiler_error(
-                        "numeric literal store rejected a lexer-owned record",
-                    )
-                    .into(),
-                ),
-            };
-            if let Some(failure) = push_error {
-                return Err(failure);
-            }
-            return_token!(TokenKind::NumericLiteral(token), stream);
+            let source = stream.file_id;
+            return stream
+                .emit_numeric(token)
+                .map_err(|error| map_token_emit_error(error, source));
         }
         Err(reason) => {
             // Report the authored source text so diagnostics preserve underscores and sign.

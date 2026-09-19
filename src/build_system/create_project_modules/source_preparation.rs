@@ -99,7 +99,7 @@ pub(super) fn prepare_discovery_source_text(
     // Stage 0 classification pass so provider-free discovery does not re-read the same Moth
     // file before assembling `PreparedSourceInput` values.
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokenized = match tokenize(
+    let tokenized = match tokenize(
         &source,
         logical_path,
         TokenizerEntryMode::SourceFile,
@@ -125,24 +125,25 @@ pub(super) fn prepare_discovery_source_text(
     let identity = source_files
         .get(source_id)
         .expect("discovery source identity must be registered");
-    tokenized.canonical_os_path = identity
-        .canonical_os_path
-        .as_ref()
-        .map(|path| path.to_path_buf());
-    let handoff = tokenized
-        .into_canonical_lexer_handoff()
-        .map_err(SourceDiscoveryError::from)?;
-    let crate::compiler_frontend::tokenizer::tokens::CanonicalLexerHandoff {
-        tokens,
-        logical_path,
-        canonical_os_path,
-        path_syntax,
-        ..
-    } = handoff;
-    let owner = SourceTokenOwner::new(tokens, logical_path, canonical_os_path);
+    if tokenized.logical_path != logical_path || tokenized.file_id != source_id {
+        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+            "lexer source identity does not match its registered discovery identity",
+        )));
+    }
+    let owner = SourceTokenOwner::new(
+        tokenized.tokens,
+        tokenized.logical_path,
+        identity
+            .canonical_os_path
+            .as_ref()
+            .map(|path| path.to_path_buf()),
+    );
     let prepared_output = prepare_discovery_output(
         FrontendFilePrepareInput {
-            source: FrontendFilePrepareSource::Moth { owner, path_syntax },
+            source: FrontendFilePrepareSource::Moth {
+                owner,
+                path_syntax: tokenized.path_syntax,
+            },
             source_id,
             span_builder,
             const_template_offset: 0,

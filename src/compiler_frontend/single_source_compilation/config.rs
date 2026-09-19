@@ -639,7 +639,7 @@ fn prepare_config_file(
 ) -> Result<FileFrontendPrepareOutput, ConfigPreparationFailure> {
     let mut diagnostics = Vec::new();
 
-    let file_tokens = match tokenize(
+    let lexed = match tokenize(
         request.source_code,
         authored_scope,
         TokenizerEntryMode::SourceFile,
@@ -658,17 +658,19 @@ fn prepare_config_file(
             return Err(ConfigPreparationFailure::Infrastructure(error));
         }
     };
-    let mut file_tokens = file_tokens;
-    file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
-    let handoff = file_tokens
-        .into_canonical_lexer_handoff()
-        .map_err(ConfigPreparationFailure::Infrastructure)?;
+    if lexed.logical_path != authored_scope || lexed.file_id != request.file_id {
+        return Err(ConfigPreparationFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "lexer source identity does not match its config preparation identity",
+            ),
+        ));
+    }
     let owner = SourceTokenOwner::new(
-        handoff.tokens,
-        handoff.logical_path,
-        handoff.canonical_os_path,
+        lexed.tokens,
+        lexed.logical_path,
+        Some(request.canonical_path.to_path_buf()),
     );
-    let path_syntax = handoff.path_syntax;
+    let path_syntax = lexed.path_syntax;
 
     let marker_span = {
         let canonical = owner.tokens_ref();

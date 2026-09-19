@@ -6,9 +6,15 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::numeric_text::store::{NumericLiteralId, NumericLiteralStore};
-use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralToken};
-use crate::compiler_frontend::paths::path_syntax::{PathSyntax, PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::numeric_text::store::{
+    NumericLiteralId, NumericLiteralStore, NumericLiteralStoreError,
+};
+use crate::compiler_frontend::numeric_text::token::{
+    NumericLiteralKind, NumericLiteralToken,
+};
+use crate::compiler_frontend::paths::path_syntax::{
+    PathSyntax, PathSyntaxError, PathSyntaxId, PathSyntaxTable,
+};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
 };
@@ -589,14 +595,21 @@ pub(crate) enum SourceTokenBuildError {
     Invariant(CompilerError),
 }
 
+/// Failures while emitting one canonical source token.
+#[derive(Debug)]
+pub(crate) enum TokenEmitError {
+    Span(SpanCapacityError),
+    Build(SourceTokenBuildError),
+    Path(PathSyntaxError),
+    Numeric(NumericLiteralStoreError),
+}
+
 
 /// Canonical construction owner for one source's token arrays.
 ///
 /// WHAT: packs compact shapes, spans, stats and the positional numeric handle lane in one
 /// monotone forward pass while lexing. The numeric side-store rows themselves stay staged in
-/// the lexer's `TokenStream`; this builder only consumes their positional handles.
-/// WHY: deriving the canonical owner from a token vector needed a second positional numeric
-/// pass and a shape-packing pass over `&[Token]`; emitting directly keeps one pass.
+/// the lexer's `TokenStream`; this builder consumes only their checked handles.
 pub(crate) struct SourceTokensBuilder {
     source: SourceId,
     shapes: Vec<TokenShape>,
@@ -619,7 +632,9 @@ impl SourceTokensBuilder {
             numeric_literal_ids: Vec::with_capacity(capacity),
         }
     }
-    fn ensure_next_token_capacity(&self) -> Result<(), SourceTokenBuildError> {
+
+    /// Preflight the half-open token-store endpoint before any canonical mutation.
+    pub(crate) fn preflight_next_token(&self) -> Result<(), SourceTokenBuildError> {
         if token_store_append_fits(self.shapes.len()) {
             Ok(())
         } else {
@@ -627,34 +642,53 @@ impl SourceTokensBuilder {
         }
     }
 
-    pub(crate) fn push(
+    /// Preflight both the token endpoint and the next positional numeric handle.
+    pub(crate) fn preflight_numeric(
+        &self,
+    ) -> Result<NumericLiteralId, SourceTokenBuildError> {
+        self.preflight_next_token()?;
+        self.next_numeric_id()
+    }
+
+    fn next_numeric_id(&self) -> Result<NumericLiteralId, SourceTokenBuildError> {
+        NumericLiteralId::try_from_index(self.staged_numeric)
+            .ok_or(SourceTokenBuildError::Capacity)
+    }
+
+    /// Push a validated raw shape after its caller has completed any side-store preflight.
+    pub(crate) fn push_payload(
         &mut self,
-        kind: &TokenKind,
+        tag: TokenTag,
+        flags: u16,
+        data: u32,
         span: LocalSpan,
     ) -> Result<(), SourceTokenBuildError> {
         let next_index = self.shapes.len();
-        let numeric_id = if matches!(kind, TokenKind::NumericLiteral(_)) {
-            self.next_numeric_id()?
-        } else {
-            NumericLiteralId::NONE
-        };
-        let shape =
-            TokenShape::from_token_kind_with_numeric_id(kind, numeric_id).ok_or_else(|| {
-                SourceTokenBuildError::Invariant(CompilerError::compiler_error(format!(
-                    "trusted token at index {next_index} has a malformed compact shape"
-                )))
-            })?;
-        let has_numeric_id = numeric_id != NumericLiteralId::NONE;
-        self.push_packed(shape, span)?;
-        if has_numeric_id {
-            self.staged_numeric += 1;
-        }
-        Ok(())
+        let shape = TokenShape::from_raw_parts(tag.raw(), flags, data).ok_or_else(|| {
+            SourceTokenBuildError::Invariant(CompilerError::compiler_error(format!(
+                "trusted token at index {next_index} has a malformed compact shape"
+            )))
+        })?;
+        self.push_packed(shape, span)
     }
 
-
-    fn next_numeric_id(&self) -> Result<NumericLiteralId, SourceTokenBuildError> {
-        NumericLiteralId::try_from_index(self.staged_numeric).ok_or(SourceTokenBuildError::Capacity)
+    /// Push a numeric shape with the handle preflighted before the cold-store row was appended.
+    pub(crate) fn push_numeric(
+        &mut self,
+        tag: TokenTag,
+        flags: u16,
+        numeric_id: NumericLiteralId,
+        span: LocalSpan,
+    ) -> Result<(), SourceTokenBuildError> {
+        let expected = self.preflight_numeric()?;
+        if expected != numeric_id {
+            return Err(SourceTokenBuildError::Invariant(CompilerError::compiler_error(
+                "numeric literal handle did not match the staged canonical position",
+            )));
+        }
+        self.push_payload(tag, flags, numeric_id.raw(), span)?;
+        self.staged_numeric += 1;
+        Ok(())
     }
 
     fn push_packed(
@@ -662,9 +696,10 @@ impl SourceTokensBuilder {
         shape: TokenShape,
         span: LocalSpan,
     ) -> Result<(), SourceTokenBuildError> {
-        self.ensure_next_token_capacity()?;
+        // Keep this check immediately before every array/statistics mutation. The caller-facing
+        // preflight methods additionally protect side-store mutation in typed emitters.
+        self.preflight_next_token()?;
         self.token_stats.accumulate_shape(shape);
-
         self.shapes.push(shape);
         self.spans.push(span);
         #[cfg(test)]
@@ -672,6 +707,30 @@ impl SourceTokensBuilder {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn push(
+        &mut self,
+        kind: &TokenKind,
+        span: LocalSpan,
+    ) -> Result<(), SourceTokenBuildError> {
+        let numeric_id = if matches!(kind, TokenKind::NumericLiteral(_)) {
+            self.preflight_numeric()?
+        } else {
+            NumericLiteralId::NONE
+        };
+        let shape =
+            TokenShape::from_token_kind_with_numeric_id(kind, numeric_id).ok_or_else(|| {
+                SourceTokenBuildError::Invariant(CompilerError::compiler_error(format!(
+                    "trusted token at index {} has a malformed compact shape",
+                    self.shapes.len()
+                )))
+            })?;
+        self.push_packed(shape, span)?;
+        if numeric_id != NumericLiteralId::NONE {
+            self.staged_numeric += 1;
+        }
+        Ok(())
+    }
     #[cfg(test)]
     pub(crate) fn take_numeric_literal_ids(&mut self) -> Vec<Option<NumericLiteralId>> {
         std::mem::take(&mut self.numeric_literal_ids)
@@ -2302,6 +2361,7 @@ pub struct FileTokens {
 /// WHY: the preparation boundary needs every canonical identity in one move so it can construct
 ///      a `SourceTokenOwner` without cloning the canonical `Arc` or retaining a `FileTokens`
 ///      shell. The path table stays a separate allocation until the prepared-output freeze.
+#[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct CanonicalLexerHandoff {
     pub(crate) tokens: Arc<SourceTokens>,
@@ -2341,6 +2401,7 @@ impl FileTokens {
     /// preparing path table stays on the lifecycle shell until `freeze_path_syntax` attaches the
     /// frozen allocation to the canonical owner. The test-only numeric lane is the builder's
     /// positional lane taken before `finish`, never a re-derived second pass.
+    #[cfg(test)]
     pub(crate) fn from_lexed_source(
         src_path: PathId,
         file_id: SourceId,
@@ -2618,6 +2679,7 @@ impl FileTokens {
     ///      stays a separate allocation until the prepared-output freeze. Adapter streams and
     ///      already-shared or deferred path state are rejected with `CompilerError` to preserve
     ///      the one-canonical-owner lifecycle invariant.
+    #[cfg(test)]
     pub(crate) fn into_canonical_lexer_handoff(self) -> Result<CanonicalLexerHandoff, CompilerError> {
         let FileTokens {
             token_owner,
@@ -3068,22 +3130,17 @@ pub struct TokenStream<'a> {
     /// start of that character is the only correct byte start.
     pub last_char_start: u32,
     pub mode: TokenizeMode,
-    // nested template heads can appear while parsing another template head/body,
-    // and parent/child templates can have different style directives. We therefore
-    // keep code-specific state on the current template frame and pop it naturally
-    // when that template closes.
+    // Nested template heads can appear while parsing another template head/body, and parent/child
+    // templates can have different style directives.
     pub template_mode_stack: Vec<TemplateModeFrame>,
-    /// Path syntax rows built while lexing; moved into `FileTokens` when tokenization
-    /// completes.
+    /// Path syntax rows built while lexing.
     pub path_syntax: PathSyntaxTable,
-    /// Numeric literal records staged during lexing and moved into `FileTokens` at completion.
+    /// Numeric literal records staged during lexing.
     pub numeric_literals: NumericLiteralStore,
+    /// Canonical source-token arrays packed in the same forward pass as lexical recognition.
+    pub source_tokens_builder: SourceTokensBuilder,
     /// One mutable extended-span builder borrowed from the caller for every token encoded by
     /// this source stream.
-    ///
-    /// The caller keeps ownership across tokenization, so rows appended by one pass remain
-    /// visible to the next and survive both success and diagnostic exits. The builder stays
-    /// outside [`FileTokens`] because parser substreams clone that value.
     pub extended_span_builder: &'a mut ExtendedSpanBuilder,
 }
 
@@ -3129,6 +3186,22 @@ impl<'a> TokenStream<'a> {
         entry_mode: TokenizerEntryMode,
         extended_span_builder: &'a mut ExtendedSpanBuilder,
     ) -> Self {
+        Self::with_capacity(
+            source_code,
+            file_id,
+            entry_mode,
+            extended_span_builder,
+            0,
+        )
+    }
+
+    pub fn with_capacity(
+        source_code: &'a str,
+        file_id: SourceId,
+        entry_mode: TokenizerEntryMode,
+        extended_span_builder: &'a mut ExtendedSpanBuilder,
+        capacity: usize,
+    ) -> Self {
         let mode = entry_mode.initial_tokenize_mode();
         let initial_close_policy = match entry_mode {
             TokenizerEntryMode::SourceFile => InitialTemplateClosePolicy::Allow,
@@ -3147,10 +3220,10 @@ impl<'a> TokenStream<'a> {
             template_mode_stack: vec![TemplateModeFrame::initial(mode, initial_close_policy)],
             path_syntax: PathSyntaxTable::with_source(file_id),
             numeric_literals: NumericLiteralStore::with_source(file_id),
+            source_tokens_builder: SourceTokensBuilder::with_capacity(file_id, capacity),
             extended_span_builder,
         }
     }
-
     /// Consume the next character and advance the exact UTF-8 byte cursor.
     pub fn next(&mut self) -> Option<char> {
         let consumed = self.chars.next()?;
@@ -3204,7 +3277,120 @@ impl<'a> TokenStream<'a> {
         LocalSpan::exact(start, length, &mut *self.extended_span_builder)
     }
 
-    /// Mint one authored token and encode its exact byte interval.
+    fn emit_payload(
+        &mut self,
+        tag: TokenTag,
+        flags: u16,
+        data: u32,
+    ) -> Result<TokenTag, TokenEmitError> {
+        let span = self
+            .current_local_span()
+            .map_err(TokenEmitError::Span)?;
+        self.source_tokens_builder
+            .push_payload(tag, flags, data, span)
+            .map_err(TokenEmitError::Build)?;
+        self.start_byte_offset = self.byte_offset;
+        Ok(tag)
+    }
+
+    pub(crate) fn emit_static(&mut self, tag: TokenTag) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(tag, 0, 0)
+    }
+
+    pub(crate) fn emit_symbol(&mut self, value: StringId) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(TokenTag::SYMBOL, 0, value.index())
+    }
+
+    pub(crate) fn emit_style_directive(
+        &mut self,
+        value: StringId,
+    ) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(TokenTag::STYLE_DIRECTIVE, 0, value.index())
+    }
+
+    pub(crate) fn emit_string_literal(
+        &mut self,
+        value: StringId,
+    ) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(TokenTag::STRING_SLICE_LITERAL, 0, value.index())
+    }
+
+    pub(crate) fn emit_raw_string(
+        &mut self,
+        value: StringId,
+    ) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(TokenTag::RAW_STRING_LITERAL, 0, value.index())
+    }
+
+    pub(crate) fn emit_char(&mut self, value: char) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(TokenTag::CHAR_LITERAL, 0, value as u32)
+    }
+
+    pub(crate) fn emit_bool(&mut self, value: bool) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(TokenTag::BOOL_LITERAL, 0, u32::from(value))
+    }
+
+    pub(crate) fn emit_path(&mut self, root: PathId) -> Result<TokenTag, TokenEmitError> {
+        let span = self
+            .current_local_span()
+            .map_err(TokenEmitError::Span)?;
+        // The token endpoint must be checked before the path row can mutate its dense store.
+        self.source_tokens_builder
+            .preflight_next_token()
+            .map_err(TokenEmitError::Build)?;
+        let path_id = self
+            .path_syntax
+            .try_push_for_source(root, self.file_id, span)
+            .map_err(TokenEmitError::Path)?;
+        self.source_tokens_builder
+            .push_payload(TokenTag::PATH, 0, path_id.raw(), span)
+            .map_err(TokenEmitError::Build)?;
+        self.start_byte_offset = self.byte_offset;
+        Ok(TokenTag::PATH)
+    }
+
+    pub(crate) fn emit_numeric(
+        &mut self,
+        literal: NumericLiteralToken,
+    ) -> Result<TokenTag, TokenEmitError> {
+        let span = self
+            .current_local_span()
+            .map_err(TokenEmitError::Span)?;
+        let numeric_id = self
+            .source_tokens_builder
+            .preflight_numeric()
+            .map_err(TokenEmitError::Build)?;
+        let actual_id = self
+            .numeric_literals
+            .try_push_for_source(self.file_id, literal)
+            .map_err(TokenEmitError::Numeric)?;
+        debug_assert_eq!(actual_id, numeric_id);
+        self.source_tokens_builder
+            .push_numeric(
+                TokenTag::NUMERIC_LITERAL,
+                numeric_kind_flags(
+                    self.numeric_literals
+                        .try_get_for_source(actual_id, self.file_id)
+                        .map_err(TokenEmitError::Numeric)?
+                        .kind,
+                ),
+                actual_id,
+                span,
+            )
+            .map_err(TokenEmitError::Build)?;
+        self.start_byte_offset = self.byte_offset;
+        Ok(TokenTag::NUMERIC_LITERAL)
+    }
+
+    pub(crate) fn take_source_tokens_builder(&mut self) -> SourceTokensBuilder {
+        std::mem::replace(
+            &mut self.source_tokens_builder,
+            SourceTokensBuilder::with_capacity(self.file_id, 0),
+        )
+    }
+
+    /// Legacy token construction retained only for tokenizer fixtures until their migration.
+    #[cfg(test)]
     pub fn new_token(&mut self, kind: TokenKind) -> Result<Token, SpanCapacityError> {
         let span = self.current_local_span()?;
         self.start_byte_offset = self.byte_offset;
@@ -4518,6 +4704,7 @@ impl TokenShape {
     ///
     /// Absent path and numeric handles are malformed payloads and return `None`, so
     /// round-trip validation holds through `from_raw_parts` and the typed accessors.
+    #[cfg(test)]
     pub(crate) fn from_token_kind_with_numeric_id(
         kind: &TokenKind,
         numeric_id: NumericLiteralId,

@@ -487,7 +487,7 @@ pub(super) fn tokenize_source(
         .try_intern_portable_path(relative, &mut string_table)
         .map_err(|error| format!("synthetic census path should intern: {error:?}"))?;
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         entry_mode,
@@ -506,19 +506,19 @@ pub(super) fn tokenize_source(
         }
     })?;
 
-    let mut spans = Vec::with_capacity(file_tokens.tokens.len());
-    let source_tokens = file_tokens.source_tokens().ok();
-
-    for (position, token) in file_tokens.tokens.iter().enumerate() {
-        let resolved = token.span.resolve_with(span_builder.resolver());
+    let source_tokens = lexed.tokens;
+    let resolver = span_builder.resolver();
+    let mut spans = Vec::with_capacity(source_tokens.len());
+    for position in 0..source_tokens.len() {
+        let index =
+            TokenIndex::try_from_index(position).expect("lexer output length fits token indexes");
+        let token = source_tokens
+            .token(index)
+            .expect("lexer output token index must remain in bounds");
+        let resolved = token.span().resolve_with(resolver);
         let start = resolved.start();
         let end = resolved.end();
-        let tag = source_tokens
-            .as_ref()
-            .and_then(|_| TokenIndex::try_from_index(position))
-            .and_then(|index| source_tokens.as_ref()?.token(index).ok())
-            .map(|token_ref| token_ref.tag())
-            .unwrap_or_else(|| token.kind.token_tag());
+        let tag = token.tag();
 
         if end < start {
             return Err(format!(

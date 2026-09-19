@@ -9,24 +9,43 @@
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidStringEscapeReason};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{
-    TokenizeResult, current_source_span, source_span_for_bytes,
+    TokenizeResult, current_source_span, map_token_emit_error, source_span_for_bytes,
 };
 use crate::compiler_frontend::tokenizer::newline_handling::{
     consume_pending_carriage_return_newline, normalize_consumed_carriage_return_newline,
 };
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
-use crate::return_token;
+use crate::compiler_frontend::tokenizer::tokens::{TokenStream, TokenTag};
+fn emit_static(stream: &mut TokenStream<'_>, tag: TokenTag) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_static(tag)
+        .map_err(|error| map_token_emit_error(error, source))
+}
+
+fn emit_string(stream: &mut TokenStream<'_>, value: crate::compiler_frontend::symbols::string_interning::StringId) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_string_literal(value)
+        .map_err(|error| map_token_emit_error(error, source))
+}
+
+fn emit_raw(stream: &mut TokenStream<'_>, value: crate::compiler_frontend::symbols::string_interning::StringId) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_raw_string(value)
+        .map_err(|error| map_token_emit_error(error, source))
+}
 
 pub(super) fn tokenize_raw_string(
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     let mut token_value = String::new();
 
     while let Some(ch) = stream.next() {
         if ch == '`' {
             let interned_string = string_table.intern(&token_value);
-            return_token!(TokenKind::RawStringLiteral(interned_string), stream);
+            return emit_raw(stream, interned_string);
         }
 
         if ch == '\r' {
@@ -48,7 +67,7 @@ pub(super) fn tokenize_raw_string(
 pub(super) fn tokenize_string(
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     let mut token_value = String::new();
     loop {
         // Capture the byte offset of the next source character before consuming it so escape
@@ -112,7 +131,7 @@ pub(super) fn tokenize_string(
 
         if ch == '"' {
             let interned_string = string_table.intern(&token_value);
-            return_token!(TokenKind::StringSliceLiteral(interned_string), stream);
+            return emit_string(stream, interned_string);
         }
 
         if ch == '\r' {
@@ -138,7 +157,7 @@ pub(super) fn tokenize_template_body(
     current_char: char,
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     let mut token_value = String::new();
     append_template_body_char(current_char, &mut token_value, stream);
 
@@ -146,7 +165,7 @@ pub(super) fn tokenize_template_body(
         match ch {
             '[' | ']' => {
                 let interned_string = string_table.intern(&token_value);
-                return_token!(TokenKind::StringSliceLiteral(interned_string), stream);
+                return emit_string(stream, interned_string);
             }
 
             '\r' => {
@@ -164,7 +183,7 @@ pub(super) fn tokenize_template_body(
     }
 
     let interned_string = string_table.intern(&token_value);
-    return_token!(TokenKind::StringSliceLiteral(interned_string), stream);
+    return emit_string(stream, interned_string);
 }
 
 fn append_template_body_char(
@@ -182,13 +201,13 @@ pub(super) fn tokenize_code_template_body(
     current_char: char,
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     // `$code` template bodies treat square brackets as literal code characters.
     // The template only closes when the running bracket counts become balanced.
     if current_char == ']' && stream.template_body_next_close_balances_brackets() {
         stream.register_template_body_close_square_bracket();
         stream.pop_template_mode();
-        return_token!(TokenKind::TemplateClose, stream);
+        return emit_static(stream, TokenTag::TEMPLATE_CLOSE);
     }
 
     let mut token_value = String::new();
@@ -207,7 +226,7 @@ pub(super) fn tokenize_code_template_body(
     }
 
     let interned_string = string_table.intern(&token_value);
-    return_token!(TokenKind::StringSliceLiteral(interned_string), stream);
+    return emit_string(stream, interned_string);
 }
 
 /// Consume a discarded template body, emitting only its closing bracket.
@@ -218,14 +237,14 @@ pub(super) fn tokenize_code_template_body(
 pub(super) fn tokenize_discard_template_body(
     current_char: char,
     stream: &mut TokenStream<'_>,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     match current_char {
         '[' => stream.register_template_body_open_square_bracket(),
         ']' => {
             if stream.template_body_next_close_balances_brackets() {
                 stream.register_template_body_close_square_bracket();
                 stream.pop_template_mode();
-                return_token!(TokenKind::TemplateClose, stream);
+                return emit_static(stream, TokenTag::TEMPLATE_CLOSE);
             }
             stream.register_template_body_close_square_bracket();
         }
@@ -244,7 +263,7 @@ pub(super) fn tokenize_discard_template_body(
                     stream.begin_token_bytes_at_consumed_char();
                     stream.register_template_body_close_square_bracket();
                     stream.pop_template_mode();
-                    return_token!(TokenKind::TemplateClose, stream);
+                    return emit_static(stream, TokenTag::TEMPLATE_CLOSE);
                 }
                 stream.next();
                 stream.register_template_body_close_square_bracket();
@@ -256,7 +275,7 @@ pub(super) fn tokenize_discard_template_body(
     }
 
     stream.begin_token_bytes_at_cursor();
-    return_token!(TokenKind::Eof, stream)
+    return emit_static(stream, TokenTag::EOF);
 }
 
 fn append_code_template_body_char(
