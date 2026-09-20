@@ -68,8 +68,7 @@ fn qualified_match_arm_is_not_a_choice_declaration() {
     assert_eq!(classification, SymbolStatementStart::Other);
     assert!(!classification.starts_header_declaration());
 
-    let current_index =
-        TokenIndex::try_from_index(0).expect("test cursor index should fit");
+    let current_index = TokenIndex::try_from_index(0).expect("test cursor index should fit");
     assert!(
         !starts_duplicate_top_level_header_declaration_at_source(&owner, current_index),
         "qualified match arms in the start body are not choice declarations"

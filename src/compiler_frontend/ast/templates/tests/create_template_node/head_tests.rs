@@ -79,7 +79,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let scope = file_tokens.source_path;
     let stale_name = string_table.intern("stale_template");
@@ -279,7 +279,7 @@ fn parse_template_error(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
@@ -312,7 +312,7 @@ fn parse_runtime_template(source: &str) -> (Template, ScopeContext, StringTable)
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
@@ -346,7 +346,7 @@ fn parse_control_flow_template_after_body_parse(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
@@ -430,7 +430,7 @@ fn parse_control_flow_template_after_composition(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
@@ -472,7 +472,7 @@ fn parse_control_flow_template_after_composition_error(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
@@ -513,7 +513,7 @@ fn parse_runtime_template_without_validation(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
@@ -626,7 +626,7 @@ fn const_required_construction(source: &str) -> PreparedTemplateConstruction {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
@@ -656,7 +656,7 @@ fn parse_const_required_template(source: &str) -> (Template, ScopeContext, Strin
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
@@ -691,7 +691,7 @@ fn parse_const_required_template_error(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);

@@ -17,6 +17,8 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeDiagnosticBatch};
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -25,8 +27,6 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabaseRetentionMetrics};
-#[cfg(feature = "data_layout_memory_probe")]
-use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1290,8 +1290,7 @@ impl ProjectFrontendCompilation {
             }
         }
         #[cfg(feature = "data_layout_memory_probe")]
-        let ledger_snapshot =
-            crate::compiler_frontend::instrumentation::snapshot_memory_ledger();
+        let ledger_snapshot = crate::compiler_frontend::instrumentation::snapshot_memory_ledger();
         let project_diagnosed = std::mem::take(&mut project.diagnosed);
         let package_diagnosed = source_packages
             .iter_mut()

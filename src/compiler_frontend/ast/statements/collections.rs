@@ -410,11 +410,7 @@ fn parse_expression_until_curly_entry_delimiter(
     );
     create_expression_until(
         input,
-        &[
-            TokenTag::ASSIGN,
-            TokenTag::COMMA,
-            TokenTag::CLOSE_CURLY,
-        ],
+        &[TokenTag::ASSIGN, TokenTag::COMMA, TokenTag::CLOSE_CURLY],
     )
 }
 

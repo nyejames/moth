@@ -93,7 +93,6 @@ fn clause_diagnostic(source: &str) -> CompilerDiagnostic {
     }
 }
 
-
 fn clause_error(source: &str) -> InvalidDependencyClauseReason {
     let error = clause_diagnostic(source);
     let DiagnosticPayload::InvalidDependencyClause { reason, .. } = error.payload else {
@@ -177,9 +176,7 @@ fn reports_missing_comma_at_the_unexpected_selection_after_continuation() {
     let tan_index = canonical
         .shapes()
         .iter()
-        .position(|shape| {
-            shape.tag() == TokenTag::SYMBOL && shape.string_id() == Some(tan_id)
-        })
+        .position(|shape| shape.tag() == TokenTag::SYMBOL && shape.string_id() == Some(tan_id))
         .expect("expected the unexpected adjacent selection");
     let tan_span = canonical.spans()[tan_index];
     assert_eq!(
@@ -291,7 +288,12 @@ fn corrupted_path_lookup_is_infrastructure_error() {
         .expect("mismatch source token fixture should finish");
 
     let cases: [(&str, &SourceTokens, &PathSyntaxTable, usize); 5] = [
-        ("none_handle", &none_owner, tokens.path_syntax.as_ref(), path_index),
+        (
+            "none_handle",
+            &none_owner,
+            tokens.path_syntax.as_ref(),
+            path_index,
+        ),
         (
             "out_of_range_non_none",
             two_path_canonical,
@@ -450,12 +452,14 @@ fn canonical_view_agrees_with_bounded_range_scan() {
     let table = tokens.path_syntax.as_ref();
     let source = tokens.file_id;
     let canonical = tokens.tokens.as_ref();
-    let full_range = canonical.full_range().expect("test source range should fit");
-    let bounded = crate::compiler_frontend::utilities::token_scan::TokenFactView::from_source_range(
-        canonical,
-        full_range,
-    )
-    .expect("bounded canonical source range should fit");
+    let full_range = canonical
+        .full_range()
+        .expect("test source range should fit");
+    let bounded =
+        crate::compiler_frontend::utilities::token_scan::TokenFactView::from_source_range(
+            canonical, full_range,
+        )
+        .expect("bounded canonical source range should fit");
     let from_range = parse_dependency_clause_scanned(bounded, path_index, table, source)
         .expect("bounded range scan should parse");
     let from_source = parse_dependency_clause_at_source(canonical, path_index, table, source)

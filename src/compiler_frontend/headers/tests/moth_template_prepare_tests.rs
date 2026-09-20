@@ -929,6 +929,9 @@ fn first_body_token_with_tag<'a>(
         if token.tag() == tag {
             return Some(token);
         }
+        if token.is_eof() {
+            break;
+        }
     }
     None
 }
@@ -950,6 +953,9 @@ fn body_has_string(
                 .is_some_and(|id| string_table.resolve(id) == expected)
         {
             return true;
+        }
+        if token.is_eof() {
+            break;
         }
     }
     false
@@ -1086,6 +1092,9 @@ fn nested_templates_remain_structural_inside_retained_body_range() {
                     .span()
                     .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT)),
             );
+        }
+        if token.is_eof() {
+            break;
         }
     }
     assert_eq!(template_head_count, 1);

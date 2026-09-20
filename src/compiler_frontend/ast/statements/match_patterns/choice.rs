@@ -286,9 +286,9 @@ fn parse_choice_pattern_captures(
                     _ => {
                         let found = match token_stream.current() {
                             Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-                            None => Some(DiagnosticToken::from_static_tag(
-                                token_stream.current_tag(),
-                            )),
+                            None => {
+                                Some(DiagnosticToken::from_static_tag(token_stream.current_tag()))
+                            }
                         };
                         return Err(CompilerDiagnostic::expected_token_from_tags(
                             TokenTag::COMMA,

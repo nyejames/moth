@@ -15,7 +15,7 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut wrapper_file_tokens = template_tokens_from_source(
+    let wrapper_file_tokens = template_tokens_from_source(
         "[: inherited]",
         &mut string_table,
         &mut span_builder,
@@ -48,7 +48,7 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
         TemplateWrapperReference::new(reference.root, reference.phase, reference.context)
     };
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$fresh, $md:\n# Hello\n]",
         &mut string_table,
         &mut span_builder,
@@ -94,7 +94,7 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$children([:prefix]): [: child]]",
         &mut string_table,
         &mut span_builder,
@@ -164,7 +164,7 @@ fn children_directive_accepts_const_string_reference() {
         config_qualifier: None,
     }];
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$children(prefix): [: child]]",
         &mut string_table,
         &mut span_builder,
@@ -247,7 +247,7 @@ fn children_directive_rejects_runtime_values() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$children(value): [: child]]",
         &mut string_table,
         &mut span_builder,
@@ -369,7 +369,7 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$children(]",
         &mut string_table,
         &mut span_builder,

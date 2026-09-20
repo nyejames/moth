@@ -205,10 +205,7 @@ fn finish_function_call_expression(
     } = finish;
 
     let Some(error_return_type_id) = error_return_type_id else {
-        if matches!(
-            token_stream.current_tag(),
-            TokenTag::BANG | TokenTag::CATCH
-        ) {
+        if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
             let operand_is_optional = call_success_is_optional(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
@@ -480,10 +477,7 @@ fn finish_external_function_call_expression(
         .into());
     }
 
-    if matches!(
-        token_stream.current_tag(),
-        TokenTag::BANG | TokenTag::CATCH
-    ) {
+    if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
         let operand_is_optional =
             call_success_is_optional(result_type_ids.as_slice(), type_interner.environment());
         return Err(CompilerDiagnostic::invalid_fallible_handling(

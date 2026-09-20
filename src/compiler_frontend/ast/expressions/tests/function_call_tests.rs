@@ -47,7 +47,7 @@ fn parse_args(
     let file_path = path_fork
         .try_intern_portable_path("@page.moth", &mut string_table)
         .expect("test path fits");
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         source,
         file_path,
         TokenizerEntryMode::SourceFile,
@@ -101,7 +101,7 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         .try_intern_portable_path("@page.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         source,
         file_path,
         TokenizerEntryMode::SourceFile,
@@ -193,7 +193,7 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
         .try_intern_portable_path("@page.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         source,
         file_path,
         TokenizerEntryMode::SourceFile,
@@ -339,7 +339,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         .try_intern_portable_path("@page.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         "call(1, third = 3)",
         file_path,
         TokenizerEntryMode::SourceFile,

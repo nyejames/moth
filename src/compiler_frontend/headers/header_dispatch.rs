@@ -64,6 +64,13 @@ use std::collections::HashSet;
 ///      across each delegation step without converting either lane.
 type HeaderDispatchResult<T> = Result<T, HeaderParseFailure>;
 
+/// Source position and visibility metadata for one declaration header.
+pub(super) struct HeaderDeclarationMetadata {
+    pub(super) declaration_span: SourceSpan,
+    pub(super) declaration_order: usize,
+    pub(super) export_mode: HeaderExportMode,
+}
+
 fn source_token_at_index<'a>(
     canonical: &'a SourceTokens,
     file_id: SourceId,
@@ -105,7 +112,10 @@ fn source_tag_at_cursor(
     Ok(current.tag())
 }
 
-fn source_next_tag(cursor: &TokenCursor<'_>, file_id: SourceId) -> HeaderDispatchResult<Option<TokenTag>> {
+fn source_next_tag(
+    cursor: &TokenCursor<'_>,
+    file_id: SourceId,
+) -> HeaderDispatchResult<Option<TokenTag>> {
     let canonical = cursor.source_tokens();
     if canonical.source() != file_id {
         return Err(internal_header_dispatch_error(
@@ -173,7 +183,9 @@ fn set_cursor_position(
 }
 
 fn cursor_span(cursor: &TokenCursor<'_>, fallback: SourceSpan) -> SourceSpan {
-    cursor.current().map_or(fallback, |token| token.source_span())
+    cursor
+        .current()
+        .map_or(fallback, |token| token.source_span())
 }
 // token pattern. This function dispatches on that token and delegates to kind-specific helpers
 // where they exist, or captures body source ranges directly for simpler cases.
@@ -188,12 +200,15 @@ pub(super) fn create_header(
     full_name: PathId,
     cursor: &mut TokenCursor<'_>,
     file_id: SourceId,
-    declaration_span: SourceSpan,
-    declaration_order: usize,
-    export_mode: HeaderExportMode,
+    metadata: HeaderDeclarationMetadata,
     context: &mut HeaderBuildContext<'_>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> HeaderDispatchResult<Header> {
+    let HeaderDeclarationMetadata {
+        declaration_span,
+        declaration_order,
+        export_mode,
+    } = metadata;
     let name_span = declaration_span;
     let Some(declaration_name) = context.path_fork.component(full_name) else {
         return Err(internal_header_dispatch_error(
@@ -223,16 +238,12 @@ pub(super) fn create_header(
         }
 
         let mut trait_cursor = *cursor;
-        let target = parse_specialized_conformance_target(
-            &mut trait_cursor,
-            declaration_name,
-            name_span,
-        )?;
+        let target =
+            parse_specialized_conformance_target(&mut trait_cursor, declaration_name, name_span)?;
         let _ = trait_cursor.advance(); // past must
 
         let conformance = parse_trait_conformance(&mut trait_cursor, target, context)?;
         let cursor_position = trait_cursor.position();
-        drop(trait_cursor);
         set_cursor_position(
             cursor,
             cursor_position,
@@ -288,10 +299,13 @@ pub(super) fn create_header(
                 name: declaration_name,
                 span: name_span,
             };
-            let incompatibility =
-                parse_trait_incompatibility(&mut trait_cursor, subject, declaration_order, context)?;
+            let incompatibility = parse_trait_incompatibility(
+                &mut trait_cursor,
+                subject,
+                declaration_order,
+                context,
+            )?;
             let cursor_position = trait_cursor.position();
-            drop(trait_cursor);
             set_cursor_position(
                 cursor,
                 cursor_position,
@@ -315,7 +329,6 @@ pub(super) fn create_header(
                 span_builder,
             )?;
             let cursor_position = trait_cursor.position();
-            drop(trait_cursor);
             set_cursor_position(
                 cursor,
                 cursor_position,
@@ -362,7 +375,6 @@ pub(super) fn create_header(
                 context,
             )?;
             let cursor_position = trait_cursor.position();
-            drop(trait_cursor);
             set_cursor_position(
                 cursor,
                 cursor_position,
@@ -416,17 +428,19 @@ pub(super) fn create_header(
                 IdentifierNamingKind::ValueLike,
                 context.string_table,
             );
-            let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
-            let signature = parse_function_signature_syntax(
-                &mut declaration_cursor,
-                context.warnings,
-                context.string_table,
-                full_name,
-                context.path_fork,
-                span_builder,
-            )?;
-            let cursor_position = declaration_cursor.canonical_cursor().position();
-            drop(declaration_cursor);
+            let (signature, cursor_position) = {
+                let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+                let signature = parse_function_signature_syntax(
+                    &mut declaration_cursor,
+                    context.warnings,
+                    context.string_table,
+                    full_name,
+                    context.path_fork,
+                    span_builder,
+                )?;
+                let cursor_position = declaration_cursor.canonical_cursor().position();
+                (signature, cursor_position)
+            };
             set_cursor_position(
                 cursor,
                 cursor_position,
@@ -456,11 +470,8 @@ pub(super) fn create_header(
                 )?;
             }
 
-            body_range = capture_function_body_range_from_cursor(
-                cursor,
-                file_id,
-                context.string_table,
-            )?;
+            body_range =
+                capture_function_body_range_from_cursor(cursor, file_id, context.string_table)?;
 
             kind = HeaderKind::Function {
                 generic_parameters,
@@ -494,17 +505,19 @@ pub(super) fn create_header(
                     context.string_table,
                 );
                 cursor.advance();
-                let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
-                let fields = parse_struct_shell(
-                    &mut declaration_cursor,
-                    context.string_table,
-                    context.warnings,
-                    full_name,
-                    context.path_fork,
-                    span_builder,
-                )?;
-                let cursor_position = declaration_cursor.canonical_cursor().position();
-                drop(declaration_cursor);
+                let (fields, cursor_position) = {
+                    let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+                    let fields = parse_struct_shell(
+                        &mut declaration_cursor,
+                        context.string_table,
+                        context.warnings,
+                        full_name,
+                        context.path_fork,
+                        span_builder,
+                    )?;
+                    let cursor_position = declaration_cursor.canonical_cursor().position();
+                    (fields, cursor_position)
+                };
                 set_cursor_position(
                     cursor,
                     cursor_position,
@@ -583,17 +596,19 @@ pub(super) fn create_header(
                 context.string_table,
             );
 
-            let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
-            let choice_header = parse_choice_header_payload(
-                &mut declaration_cursor,
-                full_name,
-                context.path_fork,
-                context.string_table,
-                context.warnings,
-                span_builder,
-            )?;
-            let cursor_position = declaration_cursor.canonical_cursor().position();
-            drop(declaration_cursor);
+            let (choice_header, cursor_position) = {
+                let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+                let choice_header = parse_choice_header_payload(
+                    &mut declaration_cursor,
+                    full_name,
+                    context.path_fork,
+                    context.string_table,
+                    context.warnings,
+                    span_builder,
+                )?;
+                let cursor_position = declaration_cursor.canonical_cursor().position();
+                (choice_header, cursor_position)
+            };
             set_cursor_position(
                 cursor,
                 cursor_position,
@@ -651,14 +666,16 @@ pub(super) fn create_header(
             );
 
             cursor.advance();
-            let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
-            let target = parse_type_annotation_cursor(
-                &mut declaration_cursor,
-                TypeAnnotationContext::TypeAliasTarget,
-                context.string_table,
-            )?;
-            let cursor_position = declaration_cursor.canonical_cursor().position();
-            drop(declaration_cursor);
+            let (target, cursor_position) = {
+                let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+                let target = parse_type_annotation_cursor(
+                    &mut declaration_cursor,
+                    TypeAnnotationContext::TypeAliasTarget,
+                    context.string_table,
+                )?;
+                let cursor_position = declaration_cursor.canonical_cursor().position();
+                (target, cursor_position)
+            };
             set_cursor_position(
                 cursor,
                 cursor_position,
@@ -733,14 +750,16 @@ fn parse_optional_generic_parameters(
     // until the header parser has finished walking this file. File-level preparation validates
     // dependency-name collisions after all clauses and declaration shells are retained.
     let forbidden_names = FxHashSet::default();
-    let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
-    let result = parse_generic_parameter_list_after_type_keyword(
-        &mut declaration_cursor,
-        &forbidden_names,
-        context.string_table,
-    )?;
-    let cursor_position = declaration_cursor.canonical_cursor().position();
-    drop(declaration_cursor);
+    let (result, cursor_position) = {
+        let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+        let result = parse_generic_parameter_list_after_type_keyword(
+            &mut declaration_cursor,
+            &forbidden_names,
+            context.string_table,
+        )?;
+        let cursor_position = declaration_cursor.canonical_cursor().position();
+        (result, cursor_position)
+    };
     set_cursor_position(
         cursor,
         cursor_position,
@@ -914,15 +933,17 @@ fn create_constant_header_payload(
         )
         .into());
     };
-    let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
-    let declaration_syntax = parse_declaration_syntax(
-        &mut declaration_cursor,
-        declaration_name,
-        context.string_table,
-        span_builder,
-    )?;
-    let cursor_position = declaration_cursor.canonical_cursor().position();
-    drop(declaration_cursor);
+    let (declaration_syntax, cursor_position) = {
+        let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+        let declaration_syntax = parse_declaration_syntax(
+            &mut declaration_cursor,
+            declaration_name,
+            context.string_table,
+            span_builder,
+        )?;
+        let cursor_position = declaration_cursor.canonical_cursor().position();
+        (declaration_syntax, cursor_position)
+    };
     set_cursor_position(
         cursor,
         cursor_position,

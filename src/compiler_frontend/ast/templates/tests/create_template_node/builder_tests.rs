@@ -54,7 +54,7 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(
+    let file_tokens = template_tokens_from_source_with_style_directives(
         "[$brand: body]",
         &tokenization_registry,
         &mut string_table,
@@ -111,7 +111,7 @@ fn builder_registered_style_directive_parses_as_noop_scaffold() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut file_tokens = template_tokens_from_source_with_directives(
+    let file_tokens = template_tokens_from_source_with_directives(
         "[$brand: body]",
         &directives,
         &mut string_table,
@@ -169,7 +169,7 @@ fn builder_effects_only_handler_updates_style_without_formatter() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut file_tokens = template_tokens_from_source_with_directives(
+    let file_tokens = template_tokens_from_source_with_directives(
         "[$brand: body]",
         &directives,
         &mut string_table,
@@ -216,7 +216,7 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut file_tokens = template_tokens_from_source_with_directives(
+    let file_tokens = template_tokens_from_source_with_directives(
         "[$brand(\"tone\"): body]",
         &directives,
         &mut string_table,
@@ -274,7 +274,7 @@ fn builder_registered_handler_directive_accepts_declared_optional_argument_type(
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut file_tokens = template_tokens_from_source_with_directives(
+    let file_tokens = template_tokens_from_source_with_directives(
         "[$brand(\"theme\"): body]",
         &directives,
         &mut string_table,
@@ -328,7 +328,7 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut file_tokens = template_tokens_from_source_with_directives(
+    let file_tokens = template_tokens_from_source_with_directives(
         "[$brand(\"theme\", \"extra\"): body]",
         &directives,
         &mut string_table,
@@ -383,7 +383,7 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut file_tokens = template_tokens_from_source_with_directives(
+    let file_tokens = template_tokens_from_source_with_directives(
         "[$brand(value): body]",
         &directives,
         &mut string_table,
@@ -439,7 +439,7 @@ fn builder_registered_style_directive_preserves_raw_body_whitespace() {
     )];
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
-    let mut file_tokens = template_tokens_from_source_with_directives(
+    let file_tokens = template_tokens_from_source_with_directives(
         "[$brand:\n    Hello\n    World\n]",
         &directives,
         &mut string_table,

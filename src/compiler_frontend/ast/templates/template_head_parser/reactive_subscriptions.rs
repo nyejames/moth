@@ -12,12 +12,12 @@
 use super::head_expressions::{
     TemplateHeadExpressionContext, push_template_head_reactive_subscription,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticToken, InvalidTemplateStructureReason,
 };

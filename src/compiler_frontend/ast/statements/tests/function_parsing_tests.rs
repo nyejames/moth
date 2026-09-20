@@ -13,8 +13,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::ValueBlo
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidCallShapeReason, InvalidFunctionSignatureReason,
     InvalidGenericInstantiationReason, InvalidMatchPatternReason, InvalidReceiverCallReason,
-    InvalidReceiverDeclarationReason,
-    InvalidThisUsageReason, NameNamespace, TypeMismatchContext,
+    InvalidReceiverDeclarationReason, InvalidThisUsageReason, NameNamespace, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -890,7 +889,6 @@ fn rejects_literal_inline_option_present_capture_binding() {
         }
     ));
 }
-
 
 #[test]
 fn newline_between_is_and_option_capture_is_not_committed_at_inline_receiver() {

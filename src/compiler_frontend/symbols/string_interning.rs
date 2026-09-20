@@ -240,7 +240,12 @@ impl FrozenStringTable {
         self.strings
             .len()
             .saturating_mul(std::mem::size_of::<Box<str>>())
-            .saturating_add(self.strings.iter().map(|string| string.len()).sum::<usize>())
+            .saturating_add(
+                self.strings
+                    .iter()
+                    .map(|string| string.len())
+                    .sum::<usize>(),
+            )
     }
     /// Resolve an interned string ID back to its string content.
     ///

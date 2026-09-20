@@ -61,7 +61,7 @@ fn escape_html_preserves_runtime_head_references() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(
+    let file_tokens = template_tokens_from_source_with_style_directives(
         "[value, $escape_html:\n    <b>body</b>\n]",
         &style_directives,
         &mut string_table,

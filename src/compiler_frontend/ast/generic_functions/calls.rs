@@ -311,10 +311,7 @@ fn finish_generic_function_call(
     } = input;
 
     let Some(error_return_type_id) = error_return_type_id else {
-        if matches!(
-            token_stream.current_tag(),
-            TokenTag::BANG | TokenTag::CATCH
-        ) {
+        if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
             let operand_is_optional = call_success_is_optional(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),

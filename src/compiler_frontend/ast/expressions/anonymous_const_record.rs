@@ -44,10 +44,7 @@ fn looks_like_nested_record_literal_at_cursor(
     pipe_index: usize,
 ) -> bool {
     let skip_newlines = |mut probe: usize| {
-        while matches!(
-            cursor.token_tag_at(probe),
-            Some(TokenTag::NEWLINE)
-        ) {
+        while matches!(cursor.token_tag_at(probe), Some(TokenTag::NEWLINE)) {
             probe += 1;
         }
         probe
@@ -68,10 +65,7 @@ fn looks_like_nested_record_literal_at_cursor(
     ) {
         return false;
     }
-    if !matches!(
-        cursor.token_tag_at(probe),
-        Some(TokenTag::SYMBOL)
-    ) {
+    if !matches!(cursor.token_tag_at(probe), Some(TokenTag::SYMBOL)) {
         return false;
     }
     probe = skip_newlines(probe + 1);
@@ -274,10 +268,7 @@ fn parse_record_field(
         token_stream.advance(); // past `=`
         token_stream.skip_newlines();
 
-        if matches!(
-            token_stream.current_tag(),
-            TokenTag::COMMA | TokenTag::EOF
-        ) {
+        if matches!(token_stream.current_tag(), TokenTag::COMMA | TokenTag::EOF) {
             return Err(CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::AnonymousRecordFieldNotNamed,
                 current_span(token_stream),

@@ -111,7 +111,7 @@ fn create_expression_until_for_test(
 fn bounded_expression_empty_at_delimiter_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     static_token(&mut builder, TokenTag::COMMA);
@@ -154,7 +154,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
 fn bounded_expression_parses_simple_literal() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     numeric_token(&mut builder, "42", &mut string_table);
@@ -190,7 +190,7 @@ fn bounded_expression_parses_simple_literal() {
 fn bounded_expression_nested_parentheses() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     numeric_token(&mut builder, "1", &mut string_table);
@@ -233,7 +233,7 @@ fn bounded_expression_nested_parentheses() {
 fn bounded_expression_nested_curly_braces() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     // A collection literal `{2, 3}` followed by a comma.
     // The comma inside the collection must not terminate the bounded expression.
@@ -274,7 +274,7 @@ fn bounded_expression_nested_curly_braces() {
 fn bounded_expression_missing_delimiter_reaches_eof() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     numeric_token(&mut builder, "1", &mut string_table);

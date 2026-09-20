@@ -84,7 +84,7 @@ fn static_token(builder: &mut TestSourceTokensBuilder, tag: TokenTag) {
 #[test]
 fn hash_in_expression_position_rejected() {
     let mut string_table = StringTable::default();
-    let (scope, context, mut path_fork) = test_scope(&mut string_table);
+    let (_scope, context, mut path_fork) = test_scope(&mut string_table);
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     numeric_token(&mut builder, "1", &mut string_table);
     static_token(&mut builder, TokenTag::HASH);
@@ -147,7 +147,7 @@ fn hash_in_expression_position_rejected() {
 #[test]
 fn hash_before_template_head_allowed() {
     let mut string_table = StringTable::default();
-    let (scope, context, mut path_fork) = test_scope(&mut string_table);
+    let (_scope, context, mut path_fork) = test_scope(&mut string_table);
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     static_token(&mut builder, TokenTag::HASH);
     static_token(&mut builder, TokenTag::TEMPLATE_HEAD);
@@ -195,7 +195,7 @@ fn hash_before_template_head_allowed() {
 #[test]
 fn negative_token_before_identifier_pushes_unary_negation_operator() {
     let mut string_table = StringTable::default();
-    let (scope, context, mut path_fork) = test_scope(&mut string_table);
+    let (_scope, context, mut path_fork) = test_scope(&mut string_table);
     let name = string_table.intern("count");
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     static_token(&mut builder, TokenTag::NEGATIVE);

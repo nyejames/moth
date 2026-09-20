@@ -49,7 +49,7 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[: before [$slot] after]",
         &mut string_table,
         &mut span_builder,
@@ -110,7 +110,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source(
+    let wrapper_file_tokens = template_tokens_from_source(
         "[:<link rel=\"icon\" href=\"[$slot(\"favicon\")]\"><style>[$slot(\"css\")]</style>]",
         &mut string_table,
         &mut span_builder,
@@ -148,7 +148,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
         config_qualifier: None,
     }];
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[header]",
         &mut string_table,
         &mut span_builder,
@@ -192,7 +192,7 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[value: before [$slot] after]",
         &mut string_table,
         &mut span_builder,
@@ -296,7 +296,7 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
         &scope,
         &style_directives,
     );
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[const_before, const_after]",
         &mut string_table,
         &mut span_builder,
@@ -338,7 +338,7 @@ fn non_constant_context_template_head_keeps_runtime_template() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[value]",
         &mut string_table,
         &mut span_builder,
@@ -384,7 +384,7 @@ fn assert_slot_is_tir_only_and_const(source: &str, slot_name: &str) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);

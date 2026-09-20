@@ -124,7 +124,6 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
         .expect("test token stream must expose a checked full range");
     let stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
-    let mut string_table = string_table;
     let error = super::parse_member_name_typed(&stream, &mut string_table)
         .expect_err("a non-name token after '.' must be rejected as a missing member name");
     let crate::compiler_frontend::ast::expressions::error::ExpressionParseError::Diagnostic(

@@ -39,7 +39,7 @@ INFERRED #= 1\n"
         .try_intern_filesystem_path(&canonical, &mut strings)
         .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         &source,
         scope,
         TokenizerEntryMode::SourceFile,
@@ -235,7 +235,7 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         .try_intern_filesystem_path(&canonical, &mut strings)
         .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         &source,
         scope,
         TokenizerEntryMode::SourceFile,

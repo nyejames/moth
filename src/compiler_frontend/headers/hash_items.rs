@@ -31,14 +31,11 @@ fn source_tag_at_cursor(
             ),
         ));
     }
-    cursor
-        .current()
-        .map(|token| token.tag())
-        .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "hash item cursor exceeded its source token owner",
-            ))
-        })
+    cursor.current().map(|token| token.tag()).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "hash item cursor exceeded its source token owner",
+        ))
+    })
 }
 
 fn record_start_body_token_from_source(
@@ -65,6 +62,11 @@ fn record_start_body_token_from_source(
         .map_err(HeaderParseFailure::Infrastructure)
 }
 
+pub(super) struct HashItemRequest {
+    pub(super) current_index: TokenIndex,
+    pub(super) current_span: SourceSpan,
+    pub(super) at_statement_boundary: bool,
+}
 
 pub(super) fn handle_hash_item(
     cursor: &mut TokenCursor<'_>,
@@ -72,10 +74,13 @@ pub(super) fn handle_hash_item(
     source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    current_index: TokenIndex,
-    current_span: SourceSpan,
-    at_statement_boundary: bool,
+    request: HashItemRequest,
 ) -> Result<(), HeaderParseFailure> {
+    let HashItemRequest {
+        current_index,
+        current_span,
+        at_statement_boundary,
+    } = request;
     if !at_statement_boundary {
         record_start_body_token_from_source(state, cursor, file_id, current_index)?;
         return Ok(());

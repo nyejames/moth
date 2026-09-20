@@ -195,10 +195,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
     else {
         let operand_is_optional = type_environment.is_option(expression_type_id);
         return Err(CompilerDiagnostic::invalid_fallible_handling(
-            super::non_fallible_handler_reason(
-                token_stream.current_tag(),
-                operand_is_optional,
-            ),
+            super::non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
             Some(token_stream.current_span()),
         )
         .into());

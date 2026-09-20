@@ -274,13 +274,13 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                             construction_context,
                             input.build_state.style.suppress_child_templates,
                         );
-                        return Ok(handle_direct_else_marker(
+                        return handle_direct_else_marker(
                             self.token_stream,
                             else_marker,
                             input.control_context.else_policy,
                             sentinel_target,
                             self.string_table,
-                        )?);
+                        );
                     }
 
                     if let Some(loop_marker) =
@@ -334,14 +334,14 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
 
                 _ => {
                     let found_token = match self.token_stream.current() {
-                        Some(found) => DiagnosticToken::try_from_token_ref(found).map_err(
-                            |error| {
+                        Some(found) => {
+                            DiagnosticToken::try_from_token_ref(found).map_err(|error| {
                                 CompilerDiagnostic::token_view_invariant_error(
                                     error,
                                     "template-body unexpected-token diagnostic",
                                 )
-                            },
-                        )?,
+                            })?
+                        }
                         None => DiagnosticToken::from_static_tag(self.token_stream.current_tag()),
                     };
                     let mut diagnostic =
@@ -354,10 +354,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             self.token_stream.advance();
         }
 
-        if matches!(
-            end_policy,
-            TemplateBodyEndPolicy::DonorExhaustionIsClose
-        ) {
+        if matches!(end_policy, TemplateBodyEndPolicy::DonorExhaustionIsClose) {
             Ok(TemplateBodyBoundary::TemplateClose)
         } else {
             Err(CompilerDiagnostic::unexpected_end_of_file(
@@ -567,7 +564,9 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
         self.token_stream.advance();
         ensure_else_boundary_after_sentinel(self.token_stream, marker_span, self.string_table)
             .map_err(|error| {
-                error.map_diagnostic(|diagnostic| adjust_else_if_inline_diagnostic(diagnostic, marker_span))
+                error.map_diagnostic(|diagnostic| {
+                    adjust_else_if_inline_diagnostic(diagnostic, marker_span)
+                })
             })?;
 
         let (mut selector, branch_context) =
@@ -1066,7 +1065,11 @@ fn consume_balanced_brackets_as_literal_text(
                             "literal template body symbol token had no string payload",
                         )
                     })?;
-                let prefix = (tag == TokenTag::STYLE_DIRECTIVE).then_some("$").unwrap_or("");
+                let prefix = if tag == TokenTag::STYLE_DIRECTIVE {
+                    "$"
+                } else {
+                    ""
+                };
                 let name = string_table.resolve(id);
                 let literal = format!("{prefix}{name}");
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, literal.len());

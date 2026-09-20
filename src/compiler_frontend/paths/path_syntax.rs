@@ -14,10 +14,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
-#[cfg(test)]
-use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, TokenCursor, TokenRange, TokenRef, TokenTag,
-};
 
 /// Dense file-local handle into a [`PathSyntaxTable`].
 ///
@@ -28,6 +24,7 @@ pub struct PathSyntaxId(u32);
 
 impl PathSyntaxId {
     /// Absent marker: no path row. Not a valid identity.
+    #[cfg(test)]
     pub const NONE: Self = Self(0);
 
     /// Checked construction from the packed representation.
@@ -144,16 +141,17 @@ impl PathSyntaxTable {
 
     /// Construct the table with its source identity already attached.
     pub fn with_source(source: SourceId) -> Self {
-        let mut table = Self::default();
-        table.owner_source = Some(source);
-        table
+        Self {
+            paths: Vec::new(),
+            owner_source: Some(source),
+            frozen: false,
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn paths(&self) -> &[PathSyntax] {
         &self.paths
     }
-
 
     /// Bytes occupied by authored path rows currently used by this source.
     #[cfg(feature = "data_layout_memory_probe")]
@@ -343,95 +341,6 @@ impl PathSyntaxTable {
             ));
         }
         Ok(())
-    }
-
-    /// Validate every path handle carried by one canonical source-token range.
-    #[cfg(test)]
-    pub(crate) fn validate_token_handles(
-        &self,
-        tokens: &SourceTokens,
-        range: TokenRange,
-    ) -> Result<(), CompilerError> {
-        self.validate_structure()?;
-        let mut cursor = Self::token_cursor(tokens, range)?;
-        while let Some(token) = cursor.advance() {
-            if let Some(path_id) = Self::path_id_for_token(token)? {
-                let row = self.try_path(path_id)?;
-                if row.span != token.span() {
-                    return Err(CompilerError::compiler_error(
-                        "path syntax row does not belong to the consumed path token",
-                    ));
-                }
-            }
-            if token.is_eof() {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    /// Validate one canonical source-token range against its owning source identity.
-    #[cfg(test)]
-    pub(crate) fn validate_file_tokens(
-        &self,
-        tokens: &SourceTokens,
-        range: TokenRange,
-        expected_source: SourceId,
-        role: &str,
-    ) -> Result<(), CompilerError> {
-        if tokens.source() != expected_source {
-            return Err(CompilerError::compiler_error(format!(
-                "{role} path row does not use the prepared file's source identity"
-            )));
-        }
-        if self
-            .owner_source
-            .is_some_and(|owner| owner != expected_source)
-        {
-            return Err(CompilerError::compiler_error(format!(
-                "{role} path row does not use the prepared file's source identity"
-            )));
-        }
-        self.validate_token_handles(tokens, range)?;
-        let mut cursor = Self::token_cursor(tokens, range)?;
-        while let Some(token) = cursor.advance() {
-            if let Some(path_id) = Self::path_id_for_token(token)? {
-                let row = self.try_path_for_token(path_id, token.source_span())?;
-                if row.span != token.span() {
-                    return Err(CompilerError::compiler_error(
-                        "path syntax row does not belong to the consumed path token",
-                    ));
-                }
-            }
-            if token.is_eof() {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn token_cursor<'a>(
-        tokens: &'a SourceTokens,
-        range: TokenRange,
-    ) -> Result<TokenCursor<'a>, CompilerError> {
-        tokens.cursor(range).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "path syntax token range validation failed: {error:?}"
-            ))
-        })
-    }
-
-    #[cfg(test)]
-    fn path_id_for_token(token: TokenRef<'_>) -> Result<Option<PathSyntaxId>, CompilerError> {
-        if token.tag() != TokenTag::PATH {
-            return Ok(None);
-        }
-        token.path_syntax_id().map(Some).ok_or_else(|| {
-            CompilerError::compiler_error(
-                "path token does not carry a valid path syntax handle",
-            )
-        })
     }
 }
 #[cfg(feature = "data_layout_memory_probe")]

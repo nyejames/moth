@@ -6,7 +6,7 @@
 //!      tokenizer own source-shape facts while AST/config consumers decide how to
 //!      interpret them.
 
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// Lexical classification of a numeric literal token.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -106,18 +106,6 @@ impl NumericLiteralToken {
             exponent_digit_count,
             exponent_sign,
         }
-    }
-
-    /// Remap the interned source and normalized text after a string-table merge.
-    ///
-    /// WHAT: updates both `source_text` and `normalized_text` so diagnostic
-    ///       reporting and materialization remain valid after per-file tables
-    ///       merge into the module table.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.try_remap_string_ids(&mut |id| {
-            Ok::<StringId, std::convert::Infallible>(remap.get(id))
-        })
-        .expect("string-ID remapping is infallible");
     }
 
     /// Remap both interned text payloads through one in-place, fallible string-ID walker.

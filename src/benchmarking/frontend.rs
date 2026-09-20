@@ -136,7 +136,6 @@ pub struct FrontendBenchmarkRetention {
     pub requester_remap_capacity_bytes: usize,
     /// True when bounded probe bookkeeping could not observe every distinct owner.
     pub memory_ledger_incomplete: bool,
-
 }
 #[cfg(feature = "data_layout_memory_probe")]
 impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
@@ -235,7 +234,7 @@ pub struct FrontendBenchmarkError {
     /// Terse pre-rendered message for direct display by xtask or tooling.
     pub message: String,
     /// Command-scoped ownership observations captured before this error escaped.
-    pub retention: FrontendBenchmarkRetention,
+    pub retention: Box<FrontendBenchmarkRetention>,
 }
 
 /// Identifies the boundary that rejected a frontend benchmark.
@@ -283,7 +282,7 @@ fn frontend_benchmark_error_with_retention(
         kind,
         diagnostic_codes,
         message,
-        retention,
+        retention: Box::new(retention),
     }
 }
 
@@ -300,6 +299,7 @@ fn frontend_benchmark_error(
     )
 }
 
+#[cfg(feature = "timers")]
 fn frontend_benchmark_error_without_ledger(
     kind: FrontendBenchmarkFailureKind,
     diagnostic_codes: Vec<String>,
@@ -436,19 +436,16 @@ fn run_frontend_benchmark_with_owner_internal(
     crate::compiler_frontend::instrumentation::reset_memory_ledger();
     let requested_inputs = build_config_inputs_from_options(&options.build_config_inputs)?;
 
-    let path = options
-        .entry_path
-        .to_str()
-        .ok_or_else(|| {
-            frontend_benchmark_error(
-                FrontendBenchmarkFailureKind::InvalidUtf8Path,
-                Vec::new(),
-                format!(
-                    "Frontend benchmark path is not valid UTF-8: {}",
-                    options.entry_path.display()
-                ),
-            )
-        })?;
+    let path = options.entry_path.to_str().ok_or_else(|| {
+        frontend_benchmark_error(
+            FrontendBenchmarkFailureKind::InvalidUtf8Path,
+            Vec::new(),
+            format!(
+                "Frontend benchmark path is not valid UTF-8: {}",
+                options.entry_path.display()
+            ),
+        )
+    })?;
     let normalized = if path.trim().is_empty() { "." } else { path };
 
     let valid_path = match check_if_valid_path(normalized) {

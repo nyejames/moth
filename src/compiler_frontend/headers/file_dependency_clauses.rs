@@ -29,6 +29,12 @@ use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenIndex};
 
 type FileDependencyClauseResult<T> = Result<T, HeaderParseFailure>;
 
+struct DependencyClauseRequest {
+    clause_span: SourceSpan,
+    clause_token_index: TokenIndex,
+    require_selection_clause: bool,
+}
+
 fn dependency_clause_token_index(
     cursor: &TokenCursor<'_>,
 ) -> FileDependencyClauseResult<TokenIndex> {
@@ -65,9 +71,11 @@ pub(super) fn parse_and_record_private_dependency(
         state,
         context,
         HeaderExportMode::Private,
-        clause_span,
-        dependency_clause_token_index(cursor)?,
-        false,
+        DependencyClauseRequest {
+            clause_span,
+            clause_token_index: dependency_clause_token_index(cursor)?,
+            require_selection_clause: false,
+        },
     )
 }
 
@@ -84,9 +92,11 @@ pub(super) fn parse_and_record_public_dependency(
         state,
         context,
         HeaderExportMode::Public,
-        clause_span,
-        dependency_clause_token_index(cursor)?,
-        true,
+        DependencyClauseRequest {
+            clause_span,
+            clause_token_index: dependency_clause_token_index(cursor)?,
+            require_selection_clause: true,
+        },
     )
 }
 
@@ -96,15 +106,20 @@ fn parse_and_record_dependency_clause(
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     export_mode: HeaderExportMode,
-    clause_span: SourceSpan,
-    clause_token_index: TokenIndex,
-    require_selection_clause: bool,
+    request: DependencyClauseRequest,
 ) -> FileDependencyClauseResult<()> {
+    let DependencyClauseRequest {
+        clause_span,
+        clause_token_index,
+        require_selection_clause,
+    } = request;
     let source_tokens = cursor.source_tokens();
     if source_tokens.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "dependency clause source token owner does not match its file identity",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "dependency clause source token owner does not match its file identity",
+            ),
+        ));
     }
     let path_syntax = &context.path_syntax;
     let (parsed, next_index) = parse_dependency_clause_at_source(
@@ -195,13 +210,11 @@ fn parse_and_record_dependency_clause(
             "dependency clause follower exceeded its checked index domain",
         ))
     })?;
-    cursor
-        .set_position(next_position)
-        .map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "dependency clause follower exceeded its source token cursor: {error:?}",
-            )))
-        })?;
+    cursor.set_position(next_position).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "dependency clause follower exceeded its source token cursor: {error:?}",
+        )))
+    })?;
     Ok(())
 }
 

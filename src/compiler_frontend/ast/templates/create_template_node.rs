@@ -112,6 +112,16 @@ pub(crate) struct TemplatePathTables<'a> {
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
+/// Complete input for one nested template construction pass.
+///
+/// The parser cursor and scope services stay as direct parameters, while these values travel
+/// together from the ordinary and Moth-content entry points into the shared constructor.
+struct NestedTemplateConstruction<'a> {
+    direct_child_wrappers: Vec<TemplateWrapperReference>,
+    parse_options: NestedTemplateParseOptions,
+    tables: TemplatePathTables<'a>,
+    entry: Option<MothContentTemplateEntry>,
+}
 
 // -------------------------
 //  Template Construction
@@ -232,6 +242,10 @@ impl Template {
     }
 
     /// Construct a const-required template whose body is borrowed from a Moth source header.
+    ///
+    /// This crate boundary mirrors the independent source, scope, type, wrapper, table and
+    /// provenance inputs used by the retained-header caller.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_moth_content_constant_with_type_interner(
         token_stream: &mut AstCursor<'_>,
         source_path: PathId,
@@ -247,13 +261,15 @@ impl Template {
             source_path,
             context,
             type_interner,
-            direct_child_wrappers,
-            NestedTemplateParseOptions::const_required(),
-            TemplatePathTables {
-                string_table,
-                path_fork,
+            NestedTemplateConstruction {
+                direct_child_wrappers,
+                parse_options: NestedTemplateParseOptions::const_required(),
+                tables: TemplatePathTables {
+                    string_table,
+                    path_fork,
+                },
+                entry: Some(MothContentTemplateEntry::markdown(outer_span)),
             },
-            Some(MothContentTemplateEntry::markdown(outer_span)),
         )
     }
 
@@ -273,10 +289,12 @@ impl Template {
             source_path,
             context,
             type_interner,
-            direct_child_wrappers,
-            parse_options,
-            tables,
-            None,
+            NestedTemplateConstruction {
+                direct_child_wrappers,
+                parse_options,
+                tables,
+                entry: None,
+            },
         )
     }
 
@@ -285,11 +303,14 @@ impl Template {
         source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
-        direct_child_wrappers: Vec<TemplateWrapperReference>,
-        parse_options: NestedTemplateParseOptions,
-        tables: TemplatePathTables<'_>,
-        entry: Option<MothContentTemplateEntry>,
+        construction: NestedTemplateConstruction<'_>,
     ) -> PreparedTemplateConstructionResult {
+        let NestedTemplateConstruction {
+            direct_child_wrappers,
+            parse_options,
+            tables,
+            entry,
+        } = construction;
         let TemplatePathTables {
             string_table,
             path_fork,

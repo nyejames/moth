@@ -191,7 +191,6 @@ pub(super) enum SymbolStatementStart {
     Other,
 }
 
-
 /// Classify a follower token in canonical source storage.
 ///
 /// WHAT: reads shapes/spans on demand for canonical source callers.

@@ -78,10 +78,7 @@ pub(super) fn receiver_result_type_ids_for_call(
         ));
     }
 
-    if matches!(
-        token_stream.current_tag(),
-        TokenTag::BANG | TokenTag::CATCH
-    ) {
+    if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
         let operand_is_optional = call_success_is_optional(
             success_return_type_ids.as_slice(),
             type_interner.environment(),

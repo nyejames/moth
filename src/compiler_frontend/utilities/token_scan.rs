@@ -371,7 +371,6 @@ enum PipeMemberShape {
     Other,
 }
 impl PipeMemberShape {
-
     fn of_tag(tag: TokenTag) -> Self {
         match tag {
             TokenTag::SYMBOL | TokenTag::THIS => Self::Name,
@@ -520,7 +519,7 @@ impl TemplateBalance {
 ///
 /// Structured unexpected-EOF diagnostics stay in the diagnostic lane while impossible scanner
 /// states remain typed infrastructure failures for the declaration-shell boundary.
-
+///
 /// Scan one declaration initializer directly through a canonical cursor.
 ///
 /// The scan keeps only short-lived tag facts for delimiter decisions. The returned shell retains
@@ -883,7 +882,6 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
 
     false
 }
-
 
 /// Consume a header-owned balanced template through the canonical source owner.
 ///

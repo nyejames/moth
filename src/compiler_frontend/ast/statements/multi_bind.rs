@@ -277,10 +277,7 @@ fn parse_target_list(
 
                 if matches!(
                     token_stream.current_tag(),
-                    TokenTag::COMMA
-                        | TokenTag::ASSIGN
-                        | TokenTag::END
-                        | TokenTag::EOF
+                    TokenTag::COMMA | TokenTag::ASSIGN | TokenTag::END | TokenTag::EOF
                 ) {
                     return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                         InvalidMultiBindReason::MissingTargetAfterComma,

@@ -668,29 +668,14 @@ fn resolve_file_value_fixture(
         &mut span_builder,
     )
     .expect("file-value fixture should tokenize");
-    let path_syntax = lexed.path_syntax;
-    let owner = SourceTokenOwner::new(lexed.tokens);
-    let mut prepared_output = prepare_file_from_tokens(
-        owner,
-        source_path,
-        path_syntax,
-        &source_path_buf,
-        &HeaderParseOptions::default(),
-        &mut string_table,
-        0,
-        0,
-        &mut span_builder,
-        &mut path_fork,
-    )
-    .expect("file-value fixture should prepare");
-    prepared_output
-        .freeze_path_syntax(&string_table, &mut path_fork)
-        .expect("file-value fixture should freeze its path syntax");
-    let source_path = prepared_output.source_file;
-    let canonical_owner = prepared_output
-        .source_token_stream
-        .as_ref()
-        .expect("file-value fixture should retain canonical source tokens");
+    let mut canonical_owner = lexed.tokens;
+    let mut path_syntax = lexed.path_syntax;
+    Arc::get_mut(&mut path_syntax)
+        .expect("file-value fixture path syntax must be uniquely owned")
+        .freeze();
+    Arc::get_mut(&mut canonical_owner)
+        .expect("file-value fixture tokens must be uniquely owned")
+        .attach_shared_path_syntax(path_syntax);
     let path_token_index = canonical_owner
         .shapes()
         .iter()
@@ -741,7 +726,7 @@ fn resolve_file_value_fixture(
     let canonical_range = canonical_owner
         .full_range()
         .expect("file-value fixture should expose canonical source range");
-    let mut cursor = AstCursor::from_source_tokens(canonical_owner, canonical_range)
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
         .expect("file-value fixture should expose an AST cursor");
     cursor
         .set_position(path_token_index)

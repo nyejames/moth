@@ -23,7 +23,7 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let canonical_owner = file_tokens
@@ -107,7 +107,7 @@ fn parse_template_diagnostic_with_span_builder(
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let canonical_owner = file_tokens

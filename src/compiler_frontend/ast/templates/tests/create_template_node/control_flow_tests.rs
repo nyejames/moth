@@ -7,7 +7,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if maybe_name is |name|:
         [name]
     [else]
@@ -179,7 +179,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if false:
         hidden
     [else if maybe_name is |name|]
@@ -647,7 +647,7 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
 
-    let mut card_file_tokens = template_tokens_from_source(
+    let card_file_tokens = template_tokens_from_source(
         "[: <card>[$slot]</card>]",
         &mut string_table,
         &mut span_builder,
@@ -686,7 +686,7 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         config_qualifier: None,
     }];
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[card, if true:
         Visible
     [else]

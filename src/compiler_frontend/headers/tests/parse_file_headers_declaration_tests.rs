@@ -7,6 +7,9 @@ fn cursor_has_tag(mut cursor: TokenCursor<'_>, expected: TokenTag) -> bool {
         if token.tag() == expected {
             return true;
         }
+        if token.is_eof() {
+            break;
+        }
     }
     false
 }
@@ -19,6 +22,9 @@ fn cursor_last_tag(mut cursor: TokenCursor<'_>) -> Option<TokenTag> {
     let mut last = None;
     while let Some(token) = cursor.advance() {
         last = Some(token.tag());
+        if token.is_eof() {
+            break;
+        }
     }
     last
 }
@@ -37,6 +43,9 @@ fn cursor_has_string(
         {
             return true;
         }
+        if token.is_eof() {
+            break;
+        }
     }
     false
 }
@@ -45,6 +54,9 @@ fn cursor_find_path(mut cursor: TokenCursor<'_>) -> Option<PathSyntaxId> {
     while let Some(token) = cursor.advance() {
         if token.tag() == TokenTag::PATH {
             return token.path_syntax_id();
+        }
+        if token.is_eof() {
+            break;
         }
     }
     None
@@ -421,7 +433,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     let mut source_context = TestSourceContext::new("src/@page.moth");
     let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut token_stream = source_context
+    let token_stream = source_context
         .tokenize(
             source,
             &mut path_fork,

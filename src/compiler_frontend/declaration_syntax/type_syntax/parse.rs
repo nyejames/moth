@@ -15,8 +15,8 @@ use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericL
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, TokenCursor, TokenIndex, TokenPayloadOrigin, TokenRange, TokenRangeError, TokenRef,
-    TokenTag,
+    SourceTokens, TokenCursor, TokenIndex, TokenPayloadOrigin, TokenRange, TokenRangeError,
+    TokenRef, TokenTag,
 };
 
 /// Two-lane result for type-annotation parsing.
@@ -121,7 +121,6 @@ impl<'a> TypeTokenWindow<'a> {
         self.range.source()
     }
 }
-
 
 // -------------------------
 //  Type annotation parsing
@@ -354,12 +353,10 @@ fn parse_type_atom(
                 ));
             };
             let found = DiagnosticToken::try_from_token_ref(token).map_err(|error| {
-                HeaderParseFailure::Infrastructure(
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "type annotation diagnostic projection",
-                    ),
-                )
+                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "type annotation diagnostic projection",
+                ))
             })?;
             Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::invalid_type_annotation(
@@ -408,14 +405,12 @@ fn parse_collection_type(
     token_stream.advance(); // consume '{'
     let inner_range = collect_collection_inner_range(token_stream)?;
     let source_tokens = token_stream.canonical_cursor().source_tokens();
-    let inner =
-        TypeTokenWindow::new(source_tokens, inner_range, token_stream.payload_origin()).map_err(
-            |error| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                    "collection type inner range was invalid: {error:?}",
-                )))
-            },
-        )?;
+    let inner = TypeTokenWindow::new(source_tokens, inner_range, token_stream.payload_origin())
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "collection type inner range was invalid: {error:?}",
+            )))
+        })?;
     token_stream.advance(); // consume the outer '}'
 
     if inner.is_empty() {
@@ -597,9 +592,7 @@ fn parsed_capacity(
                 })?;
                 let numeric = match tokens.payload_origin {
                     Some(origin) => token.numeric_literal_in(origin.strings, string_table),
-                    None => token
-                        .numeric_literal()
-                        .map(|literal| literal.cloned()),
+                    None => token.numeric_literal().map(|literal| literal.cloned()),
                 }
                 .map_err(|error| {
                     HeaderParseFailure::Infrastructure(
@@ -1210,14 +1203,11 @@ fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpa
 fn current_diagnostic_token(
     token_stream: &DeclarationCursor<'_>,
 ) -> TypeParseResult<DiagnosticToken> {
-    let token = token_stream
-        .canonical_cursor()
-        .current()
-        .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "diagnostic projection requested without a current token",
-            ))
-        })?;
+    let token = token_stream.canonical_cursor().current().ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "diagnostic projection requested without a current token",
+        ))
+    })?;
     DiagnosticToken::try_from_token_ref(token).map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
             error,

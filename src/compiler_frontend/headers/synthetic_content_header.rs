@@ -16,9 +16,9 @@ use crate::compiler_frontend::headers::types::{
     FileRole, Header, HeaderExportMode, HeaderKind, SyntheticContentPayload,
 };
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::tokenizer::tokens::TokenRange;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenRange;
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use std::collections::HashSet;
 

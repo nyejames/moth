@@ -48,6 +48,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
 
+type TokenizedFile = (
+    (SourceTokenOwner, PathId, Arc<PathSyntaxTable>),
+    ExtendedSpanBuilder,
+);
+
 struct FrontendServices {
     options: crate::compiler_frontend::module_compilation::FrontendOptions,
     external_package_registry:
@@ -154,12 +159,7 @@ impl FrontendProject {
         }
     }
 
-    fn tokenize_all(
-        &mut self,
-    ) -> Vec<(
-        (SourceTokenOwner, PathId, Arc<PathSyntaxTable>),
-        ExtendedSpanBuilder,
-    )> {
+    fn tokenize_all(&mut self) -> Vec<TokenizedFile> {
         let mut tokenized_files = Vec::with_capacity(self.files.len());
         self.frontend.with_compiler(|frontend| {
             for file in &self.files {

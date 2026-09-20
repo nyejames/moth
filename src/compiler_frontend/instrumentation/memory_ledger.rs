@@ -7,9 +7,9 @@
 //! boundary and consumed once at the render boundary.
 
 #[cfg(feature = "data_layout_memory_probe")]
-use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
-#[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::symbols::string_interning::FrozenStringTable;
 #[cfg(feature = "data_layout_memory_probe")]
@@ -162,9 +162,7 @@ mod enabled {
     /// ordinary fixtures do not add ledger allocations to live/peak/after-report measurements.
     pub(crate) fn prepare() {
         with_ledger(|ledger| {
-            ledger
-                .source_tokens
-                .reserve(SOURCE_TOKEN_OWNER_CAPACITY);
+            ledger.source_tokens.reserve(SOURCE_TOKEN_OWNER_CAPACITY);
             ledger
                 .source_path_tables
                 .reserve(SOURCE_PATH_TABLE_CAPACITY);
@@ -312,13 +310,15 @@ mod enabled {
                 ledger.observation_incomplete = true;
                 return;
             }
-            let path_table = metrics.path_table.map(|(path_address, bytes, capacity_bytes)| {
-                let store = StoreBytes {
-                    bytes,
-                    capacity_bytes,
-                };
-                (path_address, store)
-            });
+            let path_table = metrics
+                .path_table
+                .map(|(path_address, bytes, capacity_bytes)| {
+                    let store = StoreBytes {
+                        bytes,
+                        capacity_bytes,
+                    };
+                    (path_address, store)
+                });
             if let Some((path_address, store)) = path_table {
                 register_source_path_table(ledger, path_address, store);
             }
@@ -437,12 +437,10 @@ mod enabled {
                         live_references: usize::from(add_live_reference),
                     },
                 );
-                ledger.generic_source_tokens_owners = ledger
-                    .generic_source_tokens_owners
-                    .saturating_add(1);
-                ledger.generic_source_tokens_bytes = ledger
-                    .generic_source_tokens_bytes
-                    .saturating_add(bytes);
+                ledger.generic_source_tokens_owners =
+                    ledger.generic_source_tokens_owners.saturating_add(1);
+                ledger.generic_source_tokens_bytes =
+                    ledger.generic_source_tokens_bytes.saturating_add(bytes);
             }
             ledger.generic_source_tokens_peak_bytes = ledger
                 .generic_source_tokens_peak_bytes
@@ -475,9 +473,8 @@ mod enabled {
             ledger.transient_construction_buffer_bytes = ledger
                 .transient_construction_buffer_bytes
                 .saturating_add(bytes);
-            ledger.transient_construction_peak_bytes = ledger
-                .transient_construction_peak_bytes
-                .max(bytes);
+            ledger.transient_construction_peak_bytes =
+                ledger.transient_construction_peak_bytes.max(bytes);
         });
     }
 
@@ -510,10 +507,11 @@ mod enabled {
                     if ledger.donor_identity_paths.len() >= ledger.donor_identity_paths.capacity() {
                         ledger.observation_incomplete = true;
                     } else {
-                        ledger.donor_identity_paths.insert(address, path_table.storage_bytes());
-                        ledger.donor_identity_path_tables = ledger
-                            .donor_identity_path_tables
-                            .saturating_add(1);
+                        ledger
+                            .donor_identity_paths
+                            .insert(address, path_table.storage_bytes());
+                        ledger.donor_identity_path_tables =
+                            ledger.donor_identity_path_tables.saturating_add(1);
                         ledger.donor_identity_path_storage_bytes = ledger
                             .donor_identity_path_storage_bytes
                             .saturating_add(path_table.storage_bytes());
@@ -523,15 +521,16 @@ mod enabled {
             if let Some(string_table) = string_table {
                 let address = string_table as *const FrozenStringTable as usize;
                 if !ledger.donor_identity_strings.contains_key(&address) {
-                    if ledger.donor_identity_strings.len() >= ledger.donor_identity_strings.capacity() {
+                    if ledger.donor_identity_strings.len()
+                        >= ledger.donor_identity_strings.capacity()
+                    {
                         ledger.observation_incomplete = true;
                     } else {
                         ledger
                             .donor_identity_strings
                             .insert(address, string_table.storage_bytes());
-                        ledger.donor_identity_string_tables = ledger
-                            .donor_identity_string_tables
-                            .saturating_add(1);
+                        ledger.donor_identity_string_tables =
+                            ledger.donor_identity_string_tables.saturating_add(1);
                         ledger.donor_identity_string_storage_bytes = ledger
                             .donor_identity_string_storage_bytes
                             .saturating_add(string_table.storage_bytes());
@@ -608,6 +607,8 @@ mod enabled {
     pub(crate) fn reset() {}
 }
 
+#[cfg(not(feature = "data_layout_memory_probe"))]
+pub(crate) use enabled::reset as reset_memory_ledger;
 #[cfg(feature = "data_layout_memory_probe")]
 pub(crate) use enabled::{
     observe_generic_source_tokens, prepare, record_donor_identity_tables,
@@ -617,5 +618,3 @@ pub(crate) use enabled::{
     release_source_path_table, release_source_tokens, reset as reset_memory_ledger,
     snapshot as snapshot_memory_ledger,
 };
-#[cfg(not(feature = "data_layout_memory_probe"))]
-pub(crate) use enabled::reset as reset_memory_ledger;

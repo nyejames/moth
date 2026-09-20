@@ -72,7 +72,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[html_defaults.color]",
         &mut string_table,
         &mut span_builder,
@@ -234,7 +234,7 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut shell_file_tokens = template_tokens_from_source(
+    let shell_file_tokens = template_tokens_from_source(
         "[:<ul>[$slot]</ul>]",
         &mut string_table,
         &mut span_builder,
@@ -263,7 +263,7 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     )
     .expect("slot shell should parse");
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[:
         before
         [list_shell, loop keep_going:
@@ -432,7 +432,7 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if show_banner:
         Visible
     [else]
@@ -487,7 +487,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if show_banner:
         Visible
     [else]
@@ -551,7 +551,7 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
 
-    let mut card_file_tokens = template_tokens_from_source(
+    let card_file_tokens = template_tokens_from_source(
         "[:<card>[$slot]</card>]",
         &mut string_table,
         &mut span_builder,
@@ -590,7 +590,7 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
         config_qualifier: None,
     }];
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[card, if false:
         Visible
     ]",
@@ -745,7 +745,7 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[loop 0 to 2 |i|:
         [if show_item:
             [i]
@@ -815,7 +815,7 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
 
-    let mut card_file_tokens = template_tokens_from_source(
+    let card_file_tokens = template_tokens_from_source(
         "[:<card>[$slot]</card>]",
         &mut string_table,
         &mut span_builder,
@@ -854,7 +854,7 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
         config_qualifier: None,
     }];
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[card, loop 0 to 0 |i|:
         [i]
     ]",
@@ -901,7 +901,7 @@ fn const_required_template_loop_wraps_aggregate_once() {
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
 
-    let mut card_file_tokens = template_tokens_from_source(
+    let card_file_tokens = template_tokens_from_source(
         "[:<card>[$slot]</card>]",
         &mut string_table,
         &mut span_builder,
@@ -939,7 +939,7 @@ fn const_required_template_loop_wraps_aggregate_once() {
         config_qualifier: None,
     }];
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[card, loop 0 to 2 |i|:
         [i]
     ]",
@@ -1009,7 +1009,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[loop keep_going:
         Never
     ]",
@@ -1077,7 +1077,7 @@ fn const_required_template_loop_reports_non_const_collection_source() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[loop items |item|:
         [item]
     ]",
@@ -1147,7 +1147,7 @@ fn const_required_template_loop_reports_non_const_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[loop 0 to 1 |i|:
         [value]
     ]",
@@ -1256,7 +1256,7 @@ fn const_required_construction_preparation_is_reused_by_folding() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if true:
         Visible
     ]",
@@ -1459,7 +1459,7 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if maybe_name is |name|:Hello [name]]",
         &mut string_table,
         &mut span_builder,
@@ -1520,7 +1520,7 @@ fn const_required_template_option_capture_inlines_absent_source_const() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if maybe_name is |name|:
         Hello [name]
     [else]
@@ -1585,7 +1585,7 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if maybe_name is |name|: [name]]",
         &mut string_table,
         &mut span_builder,
@@ -1649,7 +1649,7 @@ fn const_required_template_if_rejects_runtime_local_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[if show_banner: Visible]",
         &mut string_table,
         &mut span_builder,

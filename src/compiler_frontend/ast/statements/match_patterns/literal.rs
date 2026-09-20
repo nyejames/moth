@@ -12,8 +12,8 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidMatchPatternReason, TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
 use crate::compiler_frontend::numeric_text::token::{
     NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
@@ -140,7 +140,10 @@ fn current_char_literal(token_stream: &AstCursor) -> Option<char> {
 fn current_string_literal(
     token_stream: &AstCursor,
     string_table: &mut StringTable,
-) -> Result<Option<crate::compiler_frontend::symbols::string_interning::StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+) -> Result<
+    Option<crate::compiler_frontend::symbols::string_interning::StringId>,
+    crate::compiler_frontend::compiler_errors::CompilerError,
+> {
     if token_stream.current().is_none() {
         return Ok(None);
     }

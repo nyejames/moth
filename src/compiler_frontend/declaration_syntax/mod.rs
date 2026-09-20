@@ -64,10 +64,7 @@ impl<'a> DeclarationCursor<'a> {
         })
     }
 
-    pub(crate) fn with_payload_origin(
-        mut self,
-        origin: Option<TokenPayloadOrigin<'a>>,
-    ) -> Self {
+    pub(crate) fn with_payload_origin(mut self, origin: Option<TokenPayloadOrigin<'a>>) -> Self {
         self.payload_origin = origin;
         self
     }
@@ -89,6 +86,23 @@ impl<'a> DeclarationCursor<'a> {
             return None;
         }
         self.cursor.parser_token_at(index).map(TokenRef::tag)
+    }
+    /// Read a test-only indexed symbol payload through the requester string-table domain.
+    #[cfg(test)]
+    pub(crate) fn token_string_id_at_in(
+        &self,
+        index: usize,
+        destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+        if index < self.cursor.parser_window_start() || index >= self.length {
+            return Ok(None);
+        }
+        let token = self.cursor.parser_token_at(index).ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "indexed symbol token is missing its canonical source view",
+            )
+        })?;
+        self.string_id_in(token, destination)
     }
 
     pub(crate) fn position(&self) -> usize {
@@ -186,30 +200,6 @@ impl<'a> DeclarationCursor<'a> {
             return Err(
                 crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
                     "canonical next symbol token is missing its payload",
-                ),
-            );
-        }
-        self.string_id_in(token, destination)
-    }
-
-    /// Read a token-at symbol payload in the requester's string-table domain.
-    pub(crate) fn token_string_id_at_in(
-        &self,
-        index: usize,
-        destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
-        if self.token_tag_at(index) != Some(TokenTag::SYMBOL) {
-            return Ok(None);
-        }
-        let token = self.cursor.parser_token_at(index).ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                "symbol token-at is missing its canonical source view",
-            )
-        })?;
-        if token.string_id().is_none() {
-            return Err(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                    "canonical token-at symbol is missing its payload",
                 ),
             );
         }

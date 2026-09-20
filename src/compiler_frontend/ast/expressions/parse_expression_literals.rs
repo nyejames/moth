@@ -267,7 +267,6 @@ fn none_literal_has_option_equality_context(token_stream: &AstCursor) -> bool {
     follows_equality_operator || leads_equality_operator
 }
 
-
 #[cfg(test)]
 #[path = "tests/parse_expression_literals_tests.rs"]
 mod tests;

@@ -124,10 +124,9 @@ pub(crate) fn token_index_starts_match_arm_header(
         return None;
     }
 
-    let Some(start_tag) = token_stream.token_ref_at(start_index).map(|token| token.tag()) else {
-        return None;
-    };
-
+    let start_tag = token_stream
+        .token_ref_at(start_index)
+        .map(|token| token.tag())?;
     // `else` is handled separately by the match parser.
     if matches!(
         start_tag,

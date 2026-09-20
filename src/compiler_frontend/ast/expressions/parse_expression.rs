@@ -124,12 +124,14 @@ fn create_multiple_expressions_inner(
     if consume_closing_parenthesis {
         if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
             let found = match token_stream.current() {
-                Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "expression closing-delimiter diagnostic",
-                    )
-                })?),
+                Some(found) => {
+                    Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "expression closing-delimiter diagnostic",
+                        )
+                    })?)
+                }
                 None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
             };
             return Err(CompilerDiagnostic::expected_token_from_tags(
@@ -326,8 +328,8 @@ fn create_expression_until_with_policy(
         input.token_stream.advance();
     }
     let end_index = input.token_stream.position();
-    let end_tag = (end_index < input.token_stream.length())
-        .then(|| input.token_stream.current_tag());
+    let end_tag =
+        (end_index < input.token_stream.length()).then(|| input.token_stream.current_tag());
     let end_span = input.token_stream.span_at(end_index);
     input
         .token_stream
@@ -382,7 +384,6 @@ fn create_expression_until_with_policy(
         )
         .into());
     }
-
 
     // ------------------------
     //  Parse within window

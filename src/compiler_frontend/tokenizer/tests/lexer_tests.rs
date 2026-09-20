@@ -299,30 +299,29 @@ fn assert_symbolic_spacing(
 
 fn numeric_literal_signs(lexed: &LexedSource) -> Vec<NumericLiteralSign> {
     token_refs(lexed.tokens.as_ref())
-        .filter_map(|token| {
-            (token.tag() == TokenTag::NUMERIC_LITERAL).then(|| {
-                token
-                    .numeric_literal()
-                    .expect("numeric token payload must resolve")
-                    .expect("numeric token must carry a literal")
-                    .sign
-            })
+        .filter(|&token| token.tag() == TokenTag::NUMERIC_LITERAL)
+        .map(|token| {
+            token
+                .numeric_literal()
+                .expect("numeric token payload must resolve")
+                .expect("numeric token must carry a literal")
+                .sign
         })
         .collect()
 }
 
 fn collect_literal_texts(lexed: &LexedSource, string_table: &StringTable) -> Vec<String> {
     token_refs(lexed.tokens.as_ref())
-        .filter_map(|token| {
+        .filter(|&token| {
             matches!(
                 token.tag(),
                 TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL
             )
-            .then(|| {
-                string_table
-                    .resolve(token.string_id().expect("string token must carry a handle"))
-                    .to_owned()
-            })
+        })
+        .map(|token| {
+            string_table
+                .resolve(token.string_id().expect("string token must carry a handle"))
+                .to_owned()
         })
         .collect()
 }
@@ -1797,10 +1796,8 @@ fn code_template_body_keeps_nested_square_brackets_as_literal_text() {
     assert_eq!(template_closes, 1);
 
     let body_literal = token_refs(tokens)
-        .filter_map(|token| {
-            (token.tag() == TokenTag::STRING_SLICE_LITERAL)
-                .then(|| string_table.resolve(token.string_id().expect("literal string handle")))
-        })
+        .filter(|&token| token.tag() == TokenTag::STRING_SLICE_LITERAL)
+        .map(|token| string_table.resolve(token.string_id().expect("literal string handle")))
         .find(|value| value.contains("[string_slice, a_mutable_string]"))
         .expect("expected code template body text to include literal square brackets");
 

@@ -18,8 +18,10 @@ use crate::compiler_frontend::headers::file_dependency_clauses::{
     parse_and_record_private_dependency, parse_and_record_public_dependency,
 };
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
-use crate::compiler_frontend::headers::hash_items::handle_hash_item;
-use crate::compiler_frontend::headers::header_dispatch::create_header;
+use crate::compiler_frontend::headers::hash_items::{HashItemRequest, handle_hash_item};
+use crate::compiler_frontend::headers::header_dispatch::{
+    HeaderDeclarationMetadata, create_header,
+};
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::parse_file_headers::find_config_qualifier_marker_in_declaration_defaults;
 use crate::compiler_frontend::headers::start_capture::capture_runtime_template_range_from_cursor;
@@ -155,9 +157,11 @@ fn parse_headers_in_file_inner(
                     source_file,
                     state,
                     context,
-                    name_id,
-                    current_span,
-                    current_index,
+                    SymbolItemRequest {
+                        name_id,
+                        current_span,
+                        current_index,
+                    },
                 )?;
             }
 
@@ -169,9 +173,11 @@ fn parse_headers_in_file_inner(
                     source_file,
                     state,
                     context,
-                    name_id,
-                    current_span,
-                    current_index,
+                    SymbolItemRequest {
+                        name_id,
+                        current_span,
+                        current_index,
+                    },
                 )?;
             }
 
@@ -196,9 +202,11 @@ fn parse_headers_in_file_inner(
                     source_file,
                     state,
                     context,
-                    current_index,
-                    current_span,
-                    at_statement_boundary,
+                    HashItemRequest {
+                        current_index,
+                        current_span,
+                        at_statement_boundary,
+                    },
                 )?;
             }
 
@@ -339,10 +347,12 @@ fn handle_export_block(
             source_file,
             state,
             context,
-            item,
-            current_tag,
-            current_span,
-            current_index,
+            ExportBlockItemRequest {
+                item,
+                current_tag,
+                current_span,
+                current_index,
+            },
         )?;
         state.export_block_item_count =
             state
@@ -390,17 +400,27 @@ fn handle_export_block(
     Ok(())
 }
 
+struct ExportBlockItemRequest {
+    item: HeaderFileItem,
+    current_tag: TokenTag,
+    current_span: SourceSpan,
+    current_index: TokenIndex,
+}
+
 fn parse_export_block_item(
     cursor: &mut TokenCursor<'_>,
     file_id: SourceId,
     source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    item: HeaderFileItem,
-    current_tag: TokenTag,
-    current_span: SourceSpan,
-    current_index: TokenIndex,
+    request: ExportBlockItemRequest,
 ) -> FileParserResult<()> {
+    let ExportBlockItemRequest {
+        item,
+        current_tag,
+        current_span,
+        current_index,
+    } = request;
     match item {
         HeaderFileItem::Symbol(name_id) => handle_symbol_item(
             cursor,
@@ -408,9 +428,11 @@ fn parse_export_block_item(
             source_file,
             state,
             context,
-            name_id,
-            current_span,
-            current_index,
+            SymbolItemRequest {
+                name_id,
+                current_span,
+                current_index,
+            },
         ),
 
         HeaderFileItem::BuiltinTypeConformanceTarget(type_name) => {
@@ -421,9 +443,11 @@ fn parse_export_block_item(
                 source_file,
                 state,
                 context,
-                name_id,
-                current_span,
-                current_index,
+                SymbolItemRequest {
+                    name_id,
+                    current_span,
+                    current_index,
+                },
             )
         }
 
@@ -443,9 +467,11 @@ fn parse_export_block_item(
             source_file,
             state,
             context,
-            current_index,
-            current_span,
-            at_statement_boundary,
+            HashItemRequest {
+                current_index,
+                current_span,
+                at_statement_boundary,
+            },
         ),
 
         HeaderFileItem::RuntimeTemplate | HeaderFileItem::StartBodyToken => {
@@ -546,10 +572,13 @@ fn handle_symbol_item(
     source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    name_id: StringId,
-    current_span: SourceSpan,
-    current_index: TokenIndex,
+    symbol: SymbolItemRequest,
 ) -> FileParserResult<()> {
+    let SymbolItemRequest {
+        name_id,
+        current_span,
+        current_index,
+    } = symbol;
     let canonical = cursor.source_tokens();
     if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
@@ -901,9 +930,11 @@ fn handle_symbol_item_with_export_mode(
         declaration_path,
         cursor,
         file_id,
-        current_span,
-        current_index.index(),
-        export_mode,
+        HeaderDeclarationMetadata {
+            declaration_span: current_span,
+            declaration_order: current_index.index(),
+            export_mode,
+        },
         &mut build_context,
         context.span_builder,
     )?;

@@ -46,12 +46,9 @@ pub(crate) fn check_expression_common_mistake(
         )),
 
         // `||`  →  `or`
-        TokenTag::TYPE_PARAMETER_BRACKET if next == Some(TokenTag::TYPE_PARAMETER_BRACKET) => {
-            Some(common_syntax_mistake(
-                CommonSyntaxMistakeReason::LogicalOrOperator,
-                location,
-            ))
-        }
+        TokenTag::TYPE_PARAMETER_BRACKET if next == Some(TokenTag::TYPE_PARAMETER_BRACKET) => Some(
+            common_syntax_mistake(CommonSyntaxMistakeReason::LogicalOrOperator, location),
+        ),
 
         // `!` used as boolean negation (not fallible handling)
         // Fallible handling `!` is parsed as a postfix suffix after the primary expression,

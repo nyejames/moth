@@ -7,6 +7,7 @@
 //! and marker diagnostics together.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
@@ -14,7 +15,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use crate::compiler_frontend::ast::templates::error::TemplateError;
 
 /// Selects how a direct `[else]` marker is interpreted in the current body.
 #[derive(Clone, Copy)]
@@ -322,7 +322,8 @@ pub(super) fn handle_direct_else_if_marker(
                 InvalidTemplateStructureReason::InlineTemplateElse,
             )
             .map_err(|error| {
-                error.map_diagnostic(|diagnostic| adjust_else_if_inline_diagnostic(diagnostic, span))
+                error
+                    .map_diagnostic(|diagnostic| adjust_else_if_inline_diagnostic(diagnostic, span))
             })?;
             target.trim_trailing_whitespace(string_table);
 
@@ -482,9 +483,11 @@ fn token_string_id_at(
         return Ok(None);
     }
     if token.string_id().is_none() {
-        return Err(crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-            "canonical string-shaped token is missing its payload",
-        ));
+        return Err(
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "canonical string-shaped token is missing its payload",
+            ),
+        );
     }
     token_stream.token_string_id_at_in(index, string_table)
 }
@@ -517,9 +520,7 @@ pub(super) fn ensure_loop_control_boundary_after_sentinel(
     };
     match next_tag {
         TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL => {
-            let Some(text_id) =
-                token_string_id_at(token_stream, next_index, string_table)?
-            else {
+            let Some(text_id) = token_string_id_at(token_stream, next_index, string_table)? else {
                 return Ok(());
             };
             if first_line_has_meaningful_text(string_table.resolve(text_id)) {
@@ -566,9 +567,7 @@ pub(super) fn ensure_else_boundary_after_sentinel(
     };
     match next_tag {
         TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL => {
-            let Some(text_id) =
-                token_string_id_at(token_stream, next_index, string_table)?
-            else {
+            let Some(text_id) = token_string_id_at(token_stream, next_index, string_table)? else {
                 return Ok(());
             };
             if first_line_has_meaningful_text(string_table.resolve(text_id)) {
@@ -605,8 +604,7 @@ fn ensure_body_boundary_before_sentinel(
     match previous_tag {
         TokenTag::NEWLINE => Ok(()),
         TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL => {
-            let Some(text_id) =
-                token_string_id_at(token_stream, previous_index, string_table)?
+            let Some(text_id) = token_string_id_at(token_stream, previous_index, string_table)?
             else {
                 return Ok(());
             };

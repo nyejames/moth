@@ -21,7 +21,7 @@ fn html_directive_sets_formatter_via_handler_behavior() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(
+    let file_tokens = template_tokens_from_source_with_style_directives(
         "[$html:\n<div class=\"card\">x</div>\n]",
         &style_directives,
         &mut string_table,
@@ -64,7 +64,7 @@ fn css_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(
+    let file_tokens = template_tokens_from_source_with_style_directives(
         "[$css:\n.button { color: red; }\n]",
         &style_directives,
         &mut string_table,
@@ -105,7 +105,7 @@ fn markdown_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$md:\n# Hello\n]",
         &mut string_table,
         &mut span_builder,
@@ -145,7 +145,7 @@ fn code_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$code:\nloop x\n]",
         &mut string_table,
         &mut span_builder,
@@ -186,7 +186,7 @@ fn escape_html_directive_sets_style_and_formatter_identity() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(
+    let file_tokens = template_tokens_from_source_with_style_directives(
         "[$escape_html:\n<b>Hello</b>\n]",
         &style_directives,
         &mut string_table,
@@ -291,7 +291,7 @@ fn runtime_templates_format_static_body_strings_only() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[value, $md:\n# Hello\n]",
         &mut string_table,
         &mut span_builder,

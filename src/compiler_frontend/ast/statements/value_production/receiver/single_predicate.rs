@@ -19,9 +19,9 @@ use crate::compiler_frontend::ast::statements::match_headers::{
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -162,24 +162,37 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupport
         return Ok(None);
     }
 
-    let Some(scrutinee_type_id) = context.get_reference(&scrutinee_name).map(|reference| reference.value.type_id) else {
+    let Some(scrutinee_type_id) = context
+        .get_reference(&scrutinee_name)
+        .map(|reference| reference.value.type_id)
+    else {
         return Ok(None);
     };
-    if type_environment.option_inner_type(scrutinee_type_id).is_none() {
+    if type_environment
+        .option_inner_type(scrutinee_type_id)
+        .is_none()
+    {
         return Ok(None);
     }
 
-    let Some(pattern_tag) = token_stream.token_ref_at(pattern_index).map(|token| token.tag()) else {
+    let Some(pattern_tag) = token_stream
+        .token_ref_at(pattern_index)
+        .map(|token| token.tag())
+    else {
         return Ok(None);
     };
     if pattern_tag == TokenTag::NONE_LITERAL {
-        return Ok(Some(InvalidControlFlowStatementReason::ValueIfOptionNonePredicate));
+        return Ok(Some(
+            InvalidControlFlowStatementReason::ValueIfOptionNonePredicate,
+        ));
     }
 
     if token_is_literal_pattern(pattern_tag)
         && classification.inline_then_is_on_same_line_as(token_stream, pattern_index)
     {
-        return Ok(Some(InvalidControlFlowStatementReason::ValueIfOptionLiteralPredicate));
+        return Ok(Some(
+            InvalidControlFlowStatementReason::ValueIfOptionLiteralPredicate,
+        ));
     }
 
     Ok(None)

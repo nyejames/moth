@@ -38,8 +38,7 @@ fn parse_template(
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let mut file_tokens =
-        template_tokens_from_source(source, string_table, span_builder, path_fork);
+    let file_tokens = template_tokens_from_source(source, string_table, span_builder, path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, path_fork);
     let template_ir_store = context.template_ir_store();
@@ -74,8 +73,7 @@ fn parse_const_required_template(
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let mut file_tokens =
-        template_tokens_from_source(source, string_table, span_builder, path_fork);
+    let file_tokens = template_tokens_from_source(source, string_table, span_builder, path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, path_fork);
     let template_ir_store = context.template_ir_store();
@@ -972,7 +970,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
         config_qualifier: None,
     };
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$(source): body]",
         &mut string_table,
         &mut span_builder,
@@ -1118,7 +1116,7 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
         config_qualifier: None,
     }];
 
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[$md: `before [value] after`]",
         &mut string_table,
         &mut span_builder,
@@ -1941,7 +1939,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
         .try_intern_child(wrapper_scope, wrapper_name)
         .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source(
+    let wrapper_file_tokens = template_tokens_from_source(
         "[:<article>[$slot]</article>]",
         &mut string_table,
         &mut span_builder,
@@ -1978,7 +1976,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
         config_qualifier: None,
     };
 
-    let mut parent_file_tokens = template_tokens_from_source(
+    let parent_file_tokens = template_tokens_from_source(
         "[wrapper, $md: body]",
         &mut string_table,
         &mut span_builder,
@@ -2039,7 +2037,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
         .try_intern_child(wrapper_scope, wrapper_name)
         .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source(
+    let wrapper_file_tokens = template_tokens_from_source(
         "[:\n    [$children([:H: [$slot]]):[$slot(1)]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
         &mut string_table,
         &mut span_builder,
@@ -2076,7 +2074,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
         config_qualifier: None,
     };
 
-    let mut parent_file_tokens = template_tokens_from_source(
+    let parent_file_tokens = template_tokens_from_source(
         "[wrapper:\n    [: First]\n    [: Second]\n    [: Third]\n]",
         &mut string_table,
         &mut span_builder,
@@ -2155,7 +2153,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source(
+    let wrapper_file_tokens = template_tokens_from_source(
         "[$md:title[$slot(\"title\")]body[$slot]]",
         &mut string_table,
         &mut span_builder,
@@ -2192,7 +2190,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         "explicit formatter named-slot receivers can install formatted TIR"
     );
 
-    let mut insert_file_tokens = template_tokens_from_source(
+    let insert_file_tokens = template_tokens_from_source(
         "[$md, $insert(\"title\"):Heading]",
         &mut string_table,
         &mut span_builder,
@@ -2248,7 +2246,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         },
     ];
 
-    let mut parent_file_tokens = template_tokens_from_source(
+    let parent_file_tokens = template_tokens_from_source(
         "[wrapper, heading:Body]",
         &mut string_table,
         &mut span_builder,
@@ -2709,7 +2707,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         .try_intern_child(wrapper_scope, wrapper_name)
         .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source(
+    let wrapper_file_tokens = template_tokens_from_source(
         "[:head]",
         &mut string_table,
         &mut span_builder,
@@ -2745,7 +2743,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         binding_span: None,
         config_qualifier: None,
     };
-    let mut parent_file_tokens = template_tokens_from_source(
+    let parent_file_tokens = template_tokens_from_source(
         "[wrapper: body]",
         &mut string_table,
         &mut span_builder,
@@ -2828,7 +2826,7 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         .try_intern_child(wrapper_scope, wrapper_name)
         .expect("test path fits");
 
-    let mut wrapper_file_tokens = template_tokens_from_source(
+    let wrapper_file_tokens = template_tokens_from_source(
         "[:head]",
         &mut string_table,
         &mut span_builder,
@@ -2865,7 +2863,7 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         config_qualifier: None,
     };
 
-    let mut parent_file_tokens = template_tokens_from_source(
+    let parent_file_tokens = template_tokens_from_source(
         "[wrapper: body]",
         &mut string_table,
         &mut span_builder,

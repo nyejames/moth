@@ -312,8 +312,7 @@ fn parse_call_arguments_inner(
 
         let parameter_slot = slot_router.route(named_target.as_ref(), argument_span)?;
 
-        let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE
-        {
+        let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE {
             let marker_span = current_span(token_stream);
             token_stream.advance();
             (CallAccessMode::Mutable, marker_span)

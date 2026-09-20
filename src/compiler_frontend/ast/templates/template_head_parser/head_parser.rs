@@ -324,14 +324,14 @@ pub fn parse_template_head(
 
             if token != TokenTag::COMMA {
                 let found = match token_stream.current() {
-                    Some(found) => Some(
-                        DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                    Some(found) => {
+                        Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
                             CompilerDiagnostic::token_view_invariant_error(
                                 error,
                                 "template-head separator diagnostic",
                             )
-                        })?,
-                    ),
+                        })?)
+                    }
                     None => Some(DiagnosticToken::from_static_tag(token)),
                 };
                 return Err(with_current_token_span(
@@ -914,9 +914,7 @@ fn find_unseparated_control_flow_suffix(token_stream: &mut AstCursor) -> Option<
         }
         if nesting_depth.is_top_level() {
             match tag {
-                TokenTag::COMMA
-                | TokenTag::START_TEMPLATE_BODY
-                | TokenTag::TEMPLATE_CLOSE => break,
+                TokenTag::COMMA | TokenTag::START_TEMPLATE_BODY | TokenTag::TEMPLATE_CLOSE => break,
                 TokenTag::IF | TokenTag::LOOP => {
                     suffix_span = Some(token_stream.current_span());
                     break;

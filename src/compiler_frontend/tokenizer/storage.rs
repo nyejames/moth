@@ -849,7 +849,6 @@ pub struct SourceTokens {
     pub(super) token_stats: TokenStats,
 }
 
-
 impl SourceTokens {
     /// Return the probe-only backing storage breakdown for this canonical owner.
     #[cfg(feature = "data_layout_memory_probe")]
@@ -937,6 +936,7 @@ impl SourceTokens {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn path_syntax_arc(&self) -> Result<Arc<PathSyntaxTable>, CompilerError> {
         self.path_syntax.clone().ok_or_else(|| {
             CompilerError::compiler_error(

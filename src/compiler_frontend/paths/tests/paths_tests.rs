@@ -9,7 +9,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, TokenRef, TokenRange, TokenTag, TokenizerEntryMode,
+    SourceTokens, TokenRange, TokenRef, TokenTag, TokenizerEntryMode,
 };
 
 fn token_refs(tokens: &SourceTokens) -> impl Iterator<Item = TokenRef<'_>> {
@@ -141,31 +141,20 @@ fn path_table_freeze_rejects_checked_push_and_rejects_foreign_source() {
     assert_eq!(table.owner_source(), Some(SourceId::COMPILATION_ROOT));
     assert!(!table.is_frozen());
     let id = table
-        .try_push_for_source(
-            root,
-            SourceId::COMPILATION_ROOT,
-            LocalSpan::source_start(),
-        )
+        .try_push_for_source(root, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
         .expect("owner push should succeed");
     assert_eq!(id.index(), Some(0));
     assert!(!id.is_none());
     let foreign = SourceId::from_index(7);
     assert!(matches!(
-        table.try_push_for_source(
-            root,
-            foreign,
-            LocalSpan::source_start()
-        ),
+        table.try_push_for_source(root, foreign, LocalSpan::source_start()),
         Err(PathSyntaxError::ForeignSource { .. })
     ));
     table.freeze();
     assert!(table.is_frozen());
     assert!(
         matches!(
-            table.try_push_local(
-                root,
-                LocalSpan::source_start()
-            ),
+            table.try_push_local(root, LocalSpan::source_start()),
             Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Frozen)
         ),
         "a frozen source-owned table must reject another authored row on its frozen lane"

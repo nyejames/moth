@@ -101,7 +101,6 @@ fn symbol_token(value: StringId) -> FixturePart {
     FixturePart::Symbol(value)
 }
 
-
 fn assert_diagnostic_payload(
     diagnostic: impl std::borrow::Borrow<CompilerDiagnostic>,
     expected: impl FnOnce(&DiagnosticPayload) -> bool,
@@ -171,7 +170,7 @@ fn resolve_type_annotation_error(
 fn declaration_context_allows_inferred_annotations() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![token(TokenTag::ASSIGN), token(TokenTag::EOF)],
         &mut string_table,
     );
@@ -241,7 +240,7 @@ fn declaration_context_parses_named_optional_type() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let point = string_table.intern("Point");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             symbol_token(point),
             token(TokenTag::QUESTION_MARK),
@@ -277,7 +276,7 @@ fn declaration_context_parses_named_optional_type() {
 fn signature_parameter_rejects_none_type() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![token(TokenTag::DATATYPE_NONE), token(TokenTag::EOF)],
         &mut string_table,
     );
@@ -304,7 +303,7 @@ fn signature_parameter_rejects_none_type() {
 fn signature_parameter_rejects_reserved_trait_this_type() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![token(TokenTag::TRAIT_THIS), token(TokenTag::EOF)],
         &mut string_table,
     );
@@ -331,7 +330,7 @@ fn signature_parameter_rejects_reserved_trait_this_type() {
 fn declaration_target_rejects_type_keyword_inside_type_annotation() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![token(TokenTag::TYPE), token(TokenTag::EOF)],
         &mut string_table,
     );
@@ -358,7 +357,7 @@ fn declaration_target_rejects_type_keyword_inside_type_annotation() {
 fn signature_return_rejects_bare_of_keyword_with_structured_syntax_error() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![token(TokenTag::OF), token(TokenTag::EOF)],
         &mut string_table,
     );
@@ -384,7 +383,7 @@ fn parses_generic_type_application() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             symbol_token(box_name),
             token(TokenTag::OF),
@@ -426,7 +425,7 @@ fn public_option_type_syntax_is_deferred() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let option_name = string_table.intern("Option");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             symbol_token(option_name),
             token(TokenTag::OF),
@@ -470,7 +469,7 @@ fn public_result_type_syntax_is_deferred() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let result_name = string_table.intern("Result");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             symbol_token(result_name),
             token(TokenTag::OF),
@@ -516,7 +515,7 @@ fn parses_collection_of_generic_type_application() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             symbol_token(box_name),
@@ -568,7 +567,7 @@ fn rejects_nested_generic_type_application() {
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
     let map_name = string_table.intern("Map");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             symbol_token(box_name),
             token(TokenTag::OF),
@@ -610,7 +609,7 @@ fn rejects_nested_generic_type_application() {
 fn duplicate_optional_marker_is_rejected() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::QUESTION_MARK),
@@ -1068,7 +1067,7 @@ fn parses_collection_with_capacity() {
     // New pre-element syntax: {64 Int}
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             numeric_token("64", &mut string_table),
@@ -1104,7 +1103,7 @@ fn parses_collection_with_capacity() {
 fn parses_collection_without_capacity() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_INT),
@@ -1138,7 +1137,7 @@ fn parses_collection_without_capacity() {
 fn rejects_old_post_element_collection_capacity_syntax() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_INT),
@@ -1180,7 +1179,7 @@ fn parses_collection_with_generic_element_and_capacity() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             numeric_token("16", &mut string_table),
@@ -1217,7 +1216,7 @@ fn rejects_collection_capacity_arithmetic_before_optional_element() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let capacity_name = string_table.intern("capacity");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             symbol_token(capacity_name),
@@ -1261,7 +1260,7 @@ fn parses_nested_fixed_collection_bare_capacity_constants() {
     let _path_fork = PathInternerFork::empty();
     let rows_name = string_table.intern("rows");
     let cols_name = string_table.intern("cols");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             symbol_token(rows_name),
@@ -1317,7 +1316,7 @@ fn parses_namespaced_type_using_member_name_case() {
     let _path_fork = PathInternerFork::empty();
     let namespace_name = string_table.intern("canvas");
     let type_name = string_table.intern("Canvas2d");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             symbol_token(namespace_name),
@@ -1350,7 +1349,7 @@ fn rejects_capacity_only_shorthand_in_signature_context() {
     // Capacity-only shorthand {64} is not allowed in signature/alias/field/return contexts.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             numeric_token("64", &mut string_table),
@@ -1388,7 +1387,7 @@ fn rejects_lower_snake_capacity_only_shorthand_in_signature_context() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let capacity_name = string_table.intern("capacity");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             symbol_token(capacity_name),
@@ -1426,7 +1425,7 @@ fn parses_capacity_only_shorthand_in_declaration_target() {
     // Capacity-only shorthand {64} in declaration target — element type is inferred.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             numeric_token("64", &mut string_table),
@@ -1459,7 +1458,7 @@ fn parses_capacity_only_shorthand_in_declaration_target() {
 fn rejects_collection_type_missing_close_curly_with_expected_token() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_INT),
@@ -1501,7 +1500,7 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
 fn parses_simple_map_type() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1533,7 +1532,7 @@ fn parses_simple_map_type() {
 fn parses_map_type_with_collection_value() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1569,7 +1568,7 @@ fn parses_map_type_with_collection_value() {
 fn parses_map_type_with_nested_map_value() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1605,7 +1604,7 @@ fn parses_map_type_with_nested_map_value() {
 fn parses_map_type_in_parameter_context() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_BOOL),
@@ -1631,7 +1630,7 @@ fn parses_map_type_in_parameter_context() {
 fn rejects_map_type_with_empty_key() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::ASSIGN),
@@ -1669,7 +1668,7 @@ fn rejects_map_type_with_empty_key() {
 fn rejects_map_type_with_empty_value() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1707,7 +1706,7 @@ fn rejects_map_type_with_empty_value() {
 fn rejects_map_type_with_multiple_separators() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1748,7 +1747,7 @@ fn rejects_map_type_with_multiple_separators() {
 fn rejects_fixed_capacity_map_syntax_on_key_side() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             numeric_token("4", &mut string_table),
@@ -1788,7 +1787,7 @@ fn rejects_fixed_capacity_map_syntax_on_key_side() {
 fn rejects_fixed_capacity_map_syntax_on_value_side() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1829,7 +1828,7 @@ fn rejects_named_capacity_map_syntax() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let capacity_name = string_table.intern("capacity");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             symbol_token(capacity_name),
@@ -1869,7 +1868,7 @@ fn rejects_named_capacity_map_syntax() {
 fn rejects_postfix_capacity_map_syntax_with_colon() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1910,7 +1909,7 @@ fn rejects_postfix_capacity_map_syntax_with_colon() {
 fn rejects_postfix_capacity_map_syntax_with_number() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1950,7 +1949,7 @@ fn rejects_postfix_capacity_map_syntax_with_number() {
 fn rejects_postfix_capacity_map_syntax_on_key_side() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
@@ -1991,7 +1990,7 @@ fn rejects_postfix_capacity_map_syntax_on_key_side() {
 fn map_separator_inside_nested_braces_is_ignored() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::OPEN_CURLY),
@@ -2087,7 +2086,7 @@ fn parses_qualified_type_with_three_segments() {
     let root_name = string_table.intern("io");
     let child_name = string_table.intern("input");
     let type_name = string_table.intern("Input");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             symbol_token(root_name),
             token(TokenTag::DOT),
@@ -2118,7 +2117,7 @@ fn rejects_generic_application_on_qualified_base() {
     let root_name = string_table.intern("io");
     let child_name = string_table.intern("input");
     let type_name = string_table.intern("Input");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
             symbol_token(root_name),
             token(TokenTag::DOT),

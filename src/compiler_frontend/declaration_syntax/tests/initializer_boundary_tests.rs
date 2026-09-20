@@ -89,6 +89,9 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
     let mut labels = Vec::new();
     while let Some(token) = initializer_cursor.advance() {
         labels.push(label(token.tag()));
+        if token.is_eof() {
+            break;
+        }
     }
     labels
 }
@@ -309,7 +312,7 @@ fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
         .set_position(TokenIndex::try_from_raw(2).expect("fixture index should fit"))
         .expect("tokenized test stream must seek to the declaration initializer");
     let mut declaration_cursor = DeclarationCursor::new(canonical_cursor)
-    .expect("tokenized test stream must expose canonical tokens");
+        .expect("tokenized test stream must expose canonical tokens");
     let failure = parse_declaration_syntax(
         &mut declaration_cursor,
         name,

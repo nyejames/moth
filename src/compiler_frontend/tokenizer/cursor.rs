@@ -96,14 +96,12 @@ impl<'a> TokenRef<'a> {
             return Ok(None);
         };
         let mut literal = literal.clone();
-        literal
-            .try_remap_string_ids(&mut |id| {
-                let spelling = source_strings
-                    .try_resolve(id)
-                    .ok_or(TokenViewError::MalformedStringHandle)?;
-                Ok(destination_strings.intern(spelling))
-            })
-            .map_err(|error| error)?;
+        literal.try_remap_string_ids(&mut |id| {
+            let spelling = source_strings
+                .try_resolve(id)
+                .ok_or(TokenViewError::MalformedStringHandle)?;
+            Ok(destination_strings.intern(spelling))
+        })?;
         Ok(Some(literal))
     }
 

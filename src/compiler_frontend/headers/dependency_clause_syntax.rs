@@ -143,7 +143,6 @@ pub struct ScannedDependencyClause {
     pub binding: ScannedDependencyBinding,
 }
 
-
 /// Canonical-source dependency-clause scan.
 ///
 /// WHAT: parses one clause from source-owned shapes/spans on demand for header preparation.
@@ -205,6 +204,12 @@ pub(crate) fn parse_dependency_clause_scanned(
         .path_syntax_id
         .filter(|_| path_token.tag == TokenTag::PATH)
     else {
+        if path_token.tag == TokenTag::PATH {
+            return Err(CompilerError::compiler_error(
+                "dependency path token has a malformed path payload",
+            )
+            .into());
+        }
         return Err(CompilerDiagnostic::invalid_dependency_clause(
             DependencyClauseKind::Namespace,
             InvalidDependencyClauseReason::ExpectedPath,

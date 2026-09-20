@@ -55,7 +55,9 @@ fn remapped_numeric(token: TokenRef<'_>, remap: &StringIdRemap) -> NumericLitera
         .expect("numeric token payload must resolve")
         .expect("numeric token must carry a literal")
         .clone();
-    literal.remap_string_ids(remap);
+    literal
+        .try_remap_string_ids(&mut |id| Ok::<_, std::convert::Infallible>(remap.get(id)))
+        .expect("numeric literal remap should be infallible");
     literal
 }
 

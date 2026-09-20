@@ -90,11 +90,13 @@ pub(super) fn create_top_level_const_template(
         HeaderParseFailure::Infrastructure,
     )?;
     let opening_index = opening.index();
-    let template_range = canonical.range(opening_index, post_close).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "const-template retained range exceeded its source owner: {error:?}",
-        )))
-    })?;
+    let template_range = canonical
+        .range(opening_index, post_close)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "const-template retained range exceeded its source owner: {error:?}",
+            )))
+        })?;
     let template_facts =
         TokenFactView::from_source_range(canonical, template_range).map_err(|error| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
@@ -177,8 +179,13 @@ pub(super) fn create_top_level_const_template(
                 "const-template newline follower exceeded the source token index space",
             ))
         })?;
-        if canonical_token_at(canonical, file_id, next_index, "const-template EOF follower")?
-            .tag()
+        if canonical_token_at(
+            canonical,
+            file_id,
+            next_index,
+            "const-template EOF follower",
+        )?
+        .tag()
             == TokenTag::EOF
         {
             body_end = body_end.checked_add(2).ok_or_else(|| {
@@ -198,11 +205,13 @@ pub(super) fn create_top_level_const_template(
             "const-template body range was reversed",
         ))
     })?;
-    canonical.range(retained_range.start(), retained_range.end()).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "const-template body range exceeded its source owner: {error:?}",
-        )))
-    })?;
+    canonical
+        .range(retained_range.start(), retained_range.end())
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "const-template body range exceeded its source owner: {error:?}",
+            )))
+        })?;
 
     Ok(Header {
         kind: HeaderKind::ConstTemplate {

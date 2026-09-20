@@ -491,14 +491,18 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
                     .expect("the declaration position must fit the canonical index domain"),
             )
             .expect("the canonical cursor must seek to the declaration position");
-        let mut declaration_cursor =
-            crate::compiler_frontend::declaration_syntax::DeclarationCursor::new(canonical_cursor)
+        let (declaration, declaration_position) = {
+            let mut declaration_cursor =
+                crate::compiler_frontend::declaration_syntax::DeclarationCursor::new(
+                    canonical_cursor,
+                )
                 .expect("the tokenized source must expose canonical tokens");
-        let declaration =
-            parse_declaration_syntax(&mut declaration_cursor, name, &mut strings, &mut builder)
-                .expect("the authored declaration must produce its shell");
-        let declaration_position = declaration_cursor.position();
-        drop(declaration_cursor);
+            let declaration =
+                parse_declaration_syntax(&mut declaration_cursor, name, &mut strings, &mut builder)
+                    .expect("the authored declaration must produce its shell");
+            let declaration_position = declaration_cursor.position();
+            (declaration, declaration_position)
+        };
         let expected_start = source.rfind("value ").unwrap() as u32 + "value ".len() as u32;
         let expected_range = (
             expected_start,

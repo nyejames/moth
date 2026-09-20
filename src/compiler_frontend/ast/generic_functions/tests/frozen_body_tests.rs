@@ -1254,7 +1254,7 @@ fn a_segmented_donor_body_borrows_its_source_sequence() {
 
     // The requester names different text behind the donor's payload StringIds.
     let mut requester_strings = StringTable::new();
-    let mut requester_fork = PathInternerFork::empty();
+    let _requester_fork = PathInternerFork::empty();
     requester_strings.intern("requester alpha");
     requester_strings.intern("requester beta");
     let parse_owner = body
@@ -1310,7 +1310,7 @@ fn a_segmented_donor_body_borrows_its_source_sequence() {
         "the borrowed sequence preserves donor spans for diagnostics",
     );
 
-    let donor_strings = parse_owner
+    let _donor_strings = parse_owner
         .payload_origin
         .expect("materialised bodies retain donor string identity")
         .strings;

@@ -22,14 +22,20 @@ fn emit_static(stream: &mut TokenStream<'_>, tag: TokenTag) -> TokenizeResult<To
         .map_err(|error| map_token_emit_error(error, source))
 }
 
-fn emit_string(stream: &mut TokenStream<'_>, value: crate::compiler_frontend::symbols::string_interning::StringId) -> TokenizeResult<TokenTag> {
+fn emit_string(
+    stream: &mut TokenStream<'_>,
+    value: crate::compiler_frontend::symbols::string_interning::StringId,
+) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
         .emit_string_literal(value)
         .map_err(|error| map_token_emit_error(error, source))
 }
 
-fn emit_raw(stream: &mut TokenStream<'_>, value: crate::compiler_frontend::symbols::string_interning::StringId) -> TokenizeResult<TokenTag> {
+fn emit_raw(
+    stream: &mut TokenStream<'_>,
+    value: crate::compiler_frontend::symbols::string_interning::StringId,
+) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
         .emit_raw_string(value)
@@ -183,7 +189,7 @@ pub(super) fn tokenize_template_body(
     }
 
     let interned_string = string_table.intern(&token_value);
-    return emit_string(stream, interned_string);
+    emit_string(stream, interned_string)
 }
 
 fn append_template_body_char(
@@ -226,7 +232,7 @@ pub(super) fn tokenize_code_template_body(
     }
 
     let interned_string = string_table.intern(&token_value);
-    return emit_string(stream, interned_string);
+    emit_string(stream, interned_string)
 }
 
 /// Consume a discarded template body, emitting only its closing bracket.
@@ -275,7 +281,7 @@ pub(super) fn tokenize_discard_template_body(
     }
 
     stream.begin_token_bytes_at_cursor();
-    return emit_static(stream, TokenTag::EOF);
+    emit_static(stream, TokenTag::EOF)
 }
 
 fn append_code_template_body_char(

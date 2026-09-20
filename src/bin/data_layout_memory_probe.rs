@@ -122,7 +122,10 @@ unsafe impl GlobalAlloc for CountingAllocator {
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 fn print_retention(retention: &moth::benchmarking::FrontendBenchmarkRetention) {
-    println!("retained.source_tokens_owners={}", retention.source_tokens_owners);
+    println!(
+        "retained.source_tokens_owners={}",
+        retention.source_tokens_owners
+    );
     println!(
         "retained.source_tokens_shape_bytes={}",
         retention.source_tokens_shape_bytes

@@ -43,12 +43,18 @@ fn projection_fixture() -> (Arc<SourceTokens>, StringTable) {
     builder.push_numeric(integer, span).unwrap();
     builder.push_numeric(decimal, span).unwrap();
     builder.push_numeric(exponent, span).unwrap();
-    builder.push_char(TokenTag::CHAR_LITERAL, 'λ', span).unwrap();
+    builder
+        .push_char(TokenTag::CHAR_LITERAL, 'λ', span)
+        .unwrap();
     builder
         .push_symbol(TokenTag::RAW_STRING_LITERAL, raw_string, span)
         .unwrap();
-    builder.push_bool(TokenTag::BOOL_LITERAL, true, span).unwrap();
-    builder.push_bool(TokenTag::BOOL_LITERAL, false, span).unwrap();
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, span)
+        .unwrap();
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, false, span)
+        .unwrap();
     (
         builder.finish().expect("projection fixture should build"),
         string_table,
@@ -58,7 +64,6 @@ fn projection_fixture() -> (Arc<SourceTokens>, StringTable) {
 fn render_payload_message(payload: &DiagnosticPayload, string_table: &StringTable) -> String {
     render_payload(payload, DiagnosticRenderContext::new(string_table)).message
 }
-
 
 #[test]
 fn diagnostic_token_has_the_locked_eight_byte_layout() {
@@ -102,9 +107,7 @@ fn every_token_payload_render_survives_store_drop() {
                 DiagnosticPayload::UnexpectedToken { found: projected },
                 DiagnosticPayload::InvalidTypeAnnotation {
                     context: TypeAnnotationContext::DeclarationTarget,
-                    reason: InvalidTypeAnnotationReason::InvalidTokenAfterName {
-                        token: projected,
-                    },
+                    reason: InvalidTypeAnnotationReason::InvalidTokenAfterName { token: projected },
                 },
                 DiagnosticPayload::InvalidTypeAnnotation {
                     context: TypeAnnotationContext::DeclarationTarget,

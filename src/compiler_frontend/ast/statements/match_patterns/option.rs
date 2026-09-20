@@ -21,7 +21,8 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 ///
 /// Option parsing returns plain `CompilerDiagnostic` values on the diagnosed
 /// lane; the surrounding parser boundary owns any infrastructure failure.
-type OptionPatternResult<T> = Result<T, crate::compiler_frontend::ast::expressions::error::ExpressionParseError>;
+type OptionPatternResult<T> =
+    Result<T, crate::compiler_frontend::ast::expressions::error::ExpressionParseError>;
 
 /// Parse a pattern for an optional scrutinee.
 ///
@@ -105,11 +106,13 @@ fn parse_option_present_capture(
             )
             .into());
         }
-        TokenTag::SYMBOL => token_stream.current_string_id_in(string_table)?.ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                "option capture symbol is missing its payload",
-            )
-        })?,
+        TokenTag::SYMBOL => token_stream
+            .current_string_id_in(string_table)?
+            .ok_or_else(|| {
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "option capture symbol is missing its payload",
+                )
+            })?,
         _ => {
             return Err(CompilerDiagnostic::invalid_match_pattern(
                 InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,

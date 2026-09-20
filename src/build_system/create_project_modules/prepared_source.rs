@@ -23,8 +23,8 @@
 //! kind, paths and retained snapshots are resolved from the shared source database.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareOutput;
 use crate::compiler_frontend::headers::SourceTokenOwner;
+use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareOutput;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::SourceId;
 
@@ -65,8 +65,6 @@ impl PreparedSourceInput {
         self.source_id
     }
 }
-
-
 
 /// One move-owned preparation result for a selected source identity.
 ///

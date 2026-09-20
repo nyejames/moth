@@ -23,7 +23,6 @@ pub(crate) enum FrontendCounter {
     PathSyntaxRowCount,
     DependencyClauseCount,
     DependencySelectionCount,
-    RetainedShellCount,
     ResolvedSourcePackageClauseCount,
     ResolvedProviderClauseCount,
     BoundNamespaceClauseCount,
@@ -259,7 +258,6 @@ mod detailed {
     static PATH_SYNTAX_ROW_COUNT: AtomicUsize = AtomicUsize::new(0);
     static DEPENDENCY_CLAUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
     static DEPENDENCY_SELECTION_COUNT: AtomicUsize = AtomicUsize::new(0);
-    static RETAINED_SHELL_COUNT: AtomicUsize = AtomicUsize::new(0);
     static RESOLVED_SOURCE_PACKAGE_CLAUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
     static RESOLVED_PROVIDER_CLAUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BOUND_NAMESPACE_CLAUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -475,7 +473,6 @@ mod detailed {
             FrontendCounter::PathSyntaxRowCount,
             FrontendCounter::DependencyClauseCount,
             FrontendCounter::DependencySelectionCount,
-            FrontendCounter::RetainedShellCount,
             FrontendCounter::ResolvedSourcePackageClauseCount,
             FrontendCounter::ResolvedProviderClauseCount,
             FrontendCounter::BoundNamespaceClauseCount,
@@ -633,8 +630,6 @@ mod detailed {
             FrontendCounter::DependencyClauseCount => &DEPENDENCY_CLAUSE_COUNT,
 
             FrontendCounter::DependencySelectionCount => &DEPENDENCY_SELECTION_COUNT,
-
-            FrontendCounter::RetainedShellCount => &RETAINED_SHELL_COUNT,
 
             FrontendCounter::ResolvedSourcePackageClauseCount => {
                 &RESOLVED_SOURCE_PACKAGE_CLAUSE_COUNT
@@ -981,8 +976,6 @@ mod detailed {
             FrontendCounter::DependencyClauseCount => "dependency_clause_count",
 
             FrontendCounter::DependencySelectionCount => "dependency_selection_count",
-
-            FrontendCounter::RetainedShellCount => "retained_shell_count",
 
             FrontendCounter::ResolvedSourcePackageClauseCount => {
                 "resolved_source_package_clause_count"

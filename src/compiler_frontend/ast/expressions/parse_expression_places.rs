@@ -183,14 +183,14 @@ fn parse_copy_place_payload(
 
             if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
                 let found = match token_stream.current() {
-                    Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(
-                        |error| {
+                    Some(found) => {
+                        Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
                             CompilerDiagnostic::token_view_invariant_error(
                                 error,
                                 "copy-place closing-delimiter diagnostic",
                             )
-                        },
-                    )?),
+                        })?)
+                    }
                     None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
                 };
                 return Err(CompilerDiagnostic::expected_token_from_tags(

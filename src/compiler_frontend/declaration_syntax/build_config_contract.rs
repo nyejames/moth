@@ -6,10 +6,10 @@
 //! its parser here lets source contracts and anonymous const-record fields use one grammar owner.
 
 use super::{DeclarationCursor, cursor_current_span};
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuildInputType, PrimitiveBuildInputType, PrimitiveBuildValue,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidConfigReason,
     NumberLiteralErrorReason,
@@ -148,13 +148,15 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
             match token.tag() {
                 TokenTag::NONE_LITERAL => {
                     if !value_type.is_optional() {
-                        return Err(HeaderParseFailure::Diagnostic(source_default_type_mismatch(
-                            name,
-                            value_type,
-                            "None",
-                            span,
-                            string_table,
-                        )));
+                        return Err(HeaderParseFailure::Diagnostic(
+                            source_default_type_mismatch(
+                                name,
+                                value_type,
+                                "None",
+                                span,
+                                string_table,
+                            ),
+                        ));
                     }
                     (false, None)
                 }
@@ -258,13 +260,15 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                     .map_err(HeaderParseFailure::Diagnostic)?
                 }
                 _ => {
-                    return Err(HeaderParseFailure::Diagnostic(source_default_type_mismatch(
-                        name,
-                        value_type,
-                        "non-primitive",
-                        span,
-                        string_table,
-                    )));
+                    return Err(HeaderParseFailure::Diagnostic(
+                        source_default_type_mismatch(
+                            name,
+                            value_type,
+                            "non-primitive",
+                            span,
+                            string_table,
+                        ),
+                    ));
                 }
             }
         }
@@ -305,13 +309,9 @@ pub(crate) fn normalize_source_build_config_contract_non_primitive(
             parsed_type_span(&qualifier.type_annotation),
         ))
     })?;
-    Err(HeaderParseFailure::Diagnostic(source_default_type_mismatch(
-        name,
-        value_type,
-        "non-primitive",
-        Some(span),
-        string_table,
-    )))
+    Err(HeaderParseFailure::Diagnostic(
+        source_default_type_mismatch(name, value_type, "non-primitive", Some(span), string_table),
+    ))
 }
 
 fn validate_source_default_primitive(
@@ -491,21 +491,15 @@ pub(crate) fn parse_build_config_qualifier(
     if is_config_symbol {
         token_stream.advance();
     } else {
-        let expected = DiagnosticToken::from_string_tag(
-            TokenTag::SYMBOL,
-            string_table.intern("Config"),
-        );
+        let expected =
+            DiagnosticToken::from_string_tag(TokenTag::SYMBOL, string_table.intern("Config"));
         let found = match token_stream.canonical_cursor().current() {
-            Some(found) => Some(
-                DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                    HeaderParseFailure::Infrastructure(
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "config qualifier diagnostic projection",
-                        ),
-                    )
-                })?,
-            ),
+            Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "config qualifier diagnostic projection",
+                ))
+            })?),
             None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
         };
         return Err(HeaderParseFailure::Diagnostic(
@@ -519,16 +513,12 @@ pub(crate) fn parse_build_config_qualifier(
     if token_stream.current_tag() != TokenTag::OF {
         let span = token_stream.current_span();
         let found = match token_stream.canonical_cursor().current() {
-            Some(found) => Some(
-                DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                    HeaderParseFailure::Infrastructure(
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "config qualifier diagnostic projection",
-                        ),
-                    )
-                })?,
-            ),
+            Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "config qualifier diagnostic projection",
+                ))
+            })?),
             None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
         };
         return Err(HeaderParseFailure::Diagnostic(

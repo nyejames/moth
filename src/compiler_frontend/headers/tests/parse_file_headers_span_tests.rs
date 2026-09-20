@@ -24,7 +24,7 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         .try_intern_filesystem_path(&canonical, &mut strings)
         .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         &source,
         scope,
         TokenizerEntryMode::SourceFile,
@@ -173,7 +173,7 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .try_intern_filesystem_path(&canonical, &mut strings)
         .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         &source,
         scope,
         TokenizerEntryMode::SourceFile,
@@ -399,7 +399,7 @@ Generic of A must {trait_name}\n"
         .try_intern_filesystem_path(&canonical, &mut strings)
         .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(
+    let tokens = tokenize(
         &source,
         scope,
         TokenizerEntryMode::SourceFile,

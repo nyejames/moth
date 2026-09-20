@@ -1,7 +1,6 @@
 use crate::compiler_frontend::keywords::{
-    ClassifiedSourceWord, SourceWordClass, attached_bang_keyword_token_tag,
-    classify_source_word, is_identifier_continue, is_keyword, is_valid_identifier,
-    keyword_token_tag,
+    ClassifiedSourceWord, SourceWordClass, attached_bang_keyword_token_tag, classify_source_word,
+    is_identifier_continue, is_keyword, is_valid_identifier, keyword_token_tag,
 };
 use crate::compiler_frontend::symbols::identifier_policy::keyword_shadow_match;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -193,6 +192,7 @@ fn source_word_classifier_maps_builtin_type_words() {
     }
 }
 
+#[test]
 fn source_word_classifier_is_case_sensitive() {
     assert_eq!(classify_source_word("Import"), None);
     assert_eq!(classify_source_word("RETURN"), None);

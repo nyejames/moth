@@ -102,13 +102,21 @@ pub(crate) fn classify_source_word(text: &str) -> Option<ClassifiedSourceWord> {
         "not" => Some(ClassifiedSourceWord::word_operator(TokenTag::NOT)),
         "and" => Some(ClassifiedSourceWord::word_operator(TokenTag::AND)),
         "or" => Some(ClassifiedSourceWord::word_operator(TokenTag::OR)),
-        "true" => Some(ClassifiedSourceWord::literal(TokenTag::BOOL_LITERAL, Some(true))),
-        "false" => Some(ClassifiedSourceWord::literal(TokenTag::BOOL_LITERAL, Some(false))),
+        "true" => Some(ClassifiedSourceWord::literal(
+            TokenTag::BOOL_LITERAL,
+            Some(true),
+        )),
+        "false" => Some(ClassifiedSourceWord::literal(
+            TokenTag::BOOL_LITERAL,
+            Some(false),
+        )),
         "none" => Some(ClassifiedSourceWord::literal(TokenTag::NONE_LITERAL, None)),
         "Int" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_INT)),
         "Float" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_FLOAT)),
         "Bool" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_BOOL)),
-        "String" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_STRING)),
+        "String" => Some(ClassifiedSourceWord::builtin_type(
+            TokenTag::DATATYPE_STRING,
+        )),
         "Char" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_CHAR)),
         "None" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_NONE)),
         "True" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_TRUE)),
@@ -123,7 +131,6 @@ pub(crate) fn keyword_token_tag(text: &str) -> Option<TokenTag> {
     classify_source_word(text).map(|classified| classified.token_tag)
 }
 
-
 /// Returns the stable taxonomy tag for a keyword form requiring an attached `!`.
 pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
     match text {
@@ -132,7 +139,6 @@ pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
         _ => None,
     }
 }
-
 
 /// True when `text` is an exact source word with a dedicated tokenizer tag.
 #[cfg(test)]

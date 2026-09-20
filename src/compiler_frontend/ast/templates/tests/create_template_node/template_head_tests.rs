@@ -14,7 +14,7 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
@@ -81,7 +81,7 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source_with_style_directives(
+    let file_tokens = template_tokens_from_source_with_style_directives(
         &source,
         &style_directives,
         &mut string_table,
@@ -146,7 +146,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[stale_template]",
         &mut string_table,
         &mut span_builder,
@@ -311,7 +311,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[@docs/intro.mtf]",
         &mut string_table,
         &mut span_builder,
@@ -424,7 +424,7 @@ fn template_head_extensionless_path_retains_exact_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let path_syntax = file_tokens
         .canonical_owner()
@@ -596,7 +596,7 @@ fn parsed_template_tir_reference_carries_empty_view_context() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[: body]",
         &mut string_table,
         &mut span_builder,
@@ -635,7 +635,7 @@ fn template_control_flow_suffix_requires_comma_after_head_items() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[value if true: Visible]",
         &mut string_table,
         &mut span_builder,
@@ -716,7 +716,7 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);

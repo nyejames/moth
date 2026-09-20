@@ -253,6 +253,9 @@ fn find_symbol_id(
         {
             return token.string_id();
         }
+        if token.is_eof() {
+            break;
+        }
     }
     None
 }
@@ -269,6 +272,9 @@ fn find_symbol_span(
                 .is_some_and(|id| string_table.resolve(id) == expected)
         {
             return Some(token.source_span());
+        }
+        if token.is_eof() {
+            break;
         }
     }
     None

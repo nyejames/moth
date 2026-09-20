@@ -689,6 +689,9 @@ fn symbol_tokens_in_header_body(
         {
             symbols.push(string_table.resolve(symbol).to_owned());
         }
+        if token.is_eof() {
+            break;
+        }
     }
     symbols
 }

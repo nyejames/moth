@@ -6,7 +6,6 @@
 //! and type-validation rules, while each caller owns its own body parsing. Headers
 //! parse from the canonical cursor window only.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
@@ -22,6 +21,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 };
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_loop_condition;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidLoopHeaderReason, RangeOperandKind,
 };
@@ -220,9 +220,12 @@ fn parse_range_loop_header_cursor(
     header_end: usize,
     parser: &mut LoopHeaderParser<'_, '_>,
 ) -> LoopHeaderResult<ParsedLoopHeader> {
-    if let Some(pipe_binding_split) =
-        parse_pipe_binding_suffix_cursor(token_stream, header_start, header_end, parser.string_table)?
-    {
+    if let Some(pipe_binding_split) = parse_pipe_binding_suffix_cursor(
+        token_stream,
+        header_start,
+        header_end,
+        parser.string_table,
+    )? {
         let range = parse_range_loop_spec_cursor(RangeLoopSpecInput {
             token_stream,
             range_start: header_start,
@@ -275,9 +278,12 @@ fn parse_non_range_loop_header_cursor(
     header_end: usize,
     parser: &mut LoopHeaderParser<'_, '_>,
 ) -> LoopHeaderResult<ParsedLoopHeader> {
-    if let Some(pipe_binding_split) =
-        parse_pipe_binding_suffix_cursor(token_stream, header_start, header_end, parser.string_table)?
-    {
+    if let Some(pipe_binding_split) = parse_pipe_binding_suffix_cursor(
+        token_stream,
+        header_start,
+        header_end,
+        parser.string_table,
+    )? {
         let (iterable, item_type) = parse_collection_iterable_cursor(CursorExpressionInput {
             token_stream,
             expression_start: header_start,
@@ -354,8 +360,7 @@ fn reject_removed_in_loop_syntax_cursor(
     {
         return Ok(());
     }
-    let Some(second_symbol) =
-        token_string_id_at(token_stream, header_start + 1, string_table)?
+    let Some(second_symbol) = token_string_id_at(token_stream, header_start + 1, string_table)?
     else {
         return Ok(());
     };
@@ -417,8 +422,12 @@ fn parse_pipe_binding_suffix_cursor(
             token_stream.span_at(open_pipe_index),
         );
     }
-    let bindings =
-        parse_binding_cursor(token_stream, open_pipe_index + 1, close_pipe_index, string_table)?;
+    let bindings = parse_binding_cursor(
+        token_stream,
+        open_pipe_index + 1,
+        close_pipe_index,
+        string_table,
+    )?;
 
     Ok(Some(CursorBindingSuffixSplit {
         core_end: open_pipe_index,
@@ -511,14 +520,12 @@ fn detect_bare_loop_binding_suffix_cursor(
         let first_index = non_newline_indices[non_newline_indices.len() - 3];
         let separator_index = non_newline_indices[non_newline_indices.len() - 2];
         let second_index = non_newline_indices[non_newline_indices.len() - 1];
-        let first_is_symbol =
-            token_tag_at(token_stream, first_index) == Some(TokenTag::SYMBOL);
+        let first_is_symbol = token_tag_at(token_stream, first_index) == Some(TokenTag::SYMBOL);
         let separator_is_comma =
             token_tag_at(token_stream, separator_index) == Some(TokenTag::COMMA);
         let separator_is_symbol =
             token_tag_at(token_stream, separator_index) == Some(TokenTag::SYMBOL);
-        let second_is_symbol =
-            token_tag_at(token_stream, second_index) == Some(TokenTag::SYMBOL);
+        let second_is_symbol = token_tag_at(token_stream, second_index) == Some(TokenTag::SYMBOL);
 
         if first_is_symbol && separator_is_comma && second_is_symbol && first_index > header_start {
             return Ok(Some(CursorBareLoopBindingSuffix {

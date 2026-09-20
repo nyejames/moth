@@ -103,7 +103,10 @@ fn pipe_opens_value_record_at_cursor(
         return false;
     }
     probe = skip_newlines(probe + 1);
-    matches!(tag_at(probe), Some(TokenTag::ASSIGN) | Some(TokenTag::COMMA))
+    matches!(
+        tag_at(probe),
+        Some(TokenTag::ASSIGN) | Some(TokenTag::COMMA)
+    )
 }
 
 /// Returns `Some(capacity)` when the parsed type is a capacity-only shorthand `{N}`.

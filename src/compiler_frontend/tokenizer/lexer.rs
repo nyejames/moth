@@ -96,10 +96,7 @@ pub(crate) fn source_span_for_bytes(
 }
 
 /// Map one direct canonical token-emission failure into the tokenizer's typed lanes.
-pub(crate) fn map_token_emit_error(
-    error: TokenEmitError,
-    source: SourceId,
-) -> TokenizeFailure {
+pub(crate) fn map_token_emit_error(error: TokenEmitError, source: SourceId) -> TokenizeFailure {
     match error {
         TokenEmitError::Span(error) => map_span_capacity_error(source, error),
         TokenEmitError::Build(error) => map_source_token_build_error(error),
@@ -146,7 +143,10 @@ fn emit_static(stream: &mut TokenStream<'_>, tag: TokenTag) -> TokenizeResult<To
         .emit_static(tag)
         .map_err(|error| map_token_emit_error(error, source))
 }
-fn emit_symbol(stream: &mut TokenStream<'_>, value: crate::compiler_frontend::symbols::string_interning::StringId) -> TokenizeResult<TokenTag> {
+fn emit_symbol(
+    stream: &mut TokenStream<'_>,
+    value: crate::compiler_frontend::symbols::string_interning::StringId,
+) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
         .emit_symbol(value)
@@ -163,7 +163,6 @@ fn emit_style_directive(
         .map_err(|error| map_token_emit_error(error, source))
 }
 
-
 fn emit_char(stream: &mut TokenStream<'_>, value: char) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
@@ -177,7 +176,6 @@ fn emit_bool(stream: &mut TokenStream<'_>, value: bool) -> TokenizeResult<TokenT
         .emit_bool(value)
         .map_err(|error| map_token_emit_error(error, source))
 }
-
 
 fn emit_keyword(
     stream: &mut TokenStream<'_>,

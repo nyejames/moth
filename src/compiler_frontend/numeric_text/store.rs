@@ -15,7 +15,7 @@ use rustc_hash::FxHashMap;
 pub struct NumericLiteralId(u32);
 
 impl NumericLiteralId {
-    /// Absent marker. It is never a valid store row.
+    #[cfg(test)]
     pub const NONE: Self = Self(0);
 
     pub const fn try_from_raw(raw: u32) -> Option<Self> {

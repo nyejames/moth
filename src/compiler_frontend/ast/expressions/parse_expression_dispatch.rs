@@ -100,10 +100,7 @@ fn reject_adjacent_operand(
     Ok(())
 }
 
-fn unexpected_token_at_current(
-    token_stream: &AstCursor,
-    fallback: TokenTag,
-) -> CompilerDiagnostic {
+fn unexpected_token_at_current(token_stream: &AstCursor, fallback: TokenTag) -> CompilerDiagnostic {
     let span = Some(token_stream.current_span());
     if let Some(found) = token_stream.current() {
         CompilerDiagnostic::unexpected_token_from_ref(found, span)

@@ -5,9 +5,7 @@
 //! WHY: keeping the grammar in one place makes separator, exponent, and sign rules
 //!      consistent between source literals and future string casts.
 
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, NumberLiteralErrorReason,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NumberLiteralErrorReason};
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -100,9 +98,9 @@ pub(super) fn tokenize_numeric_literal(
                 parsed.exponent_sign,
             );
             let source = stream.file_id;
-            return stream
+            stream
                 .emit_numeric(token)
-                .map_err(|error| map_token_emit_error(error, source));
+                .map_err(|error| map_token_emit_error(error, source))
         }
         Err(reason) => {
             // Report the authored source text so diagnostics preserve underscores and sign.

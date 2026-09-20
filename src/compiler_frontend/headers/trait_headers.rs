@@ -39,7 +39,10 @@ fn cursor_span(cursor: &TokenCursor<'_>) -> Option<SourceSpan> {
 }
 
 fn skip_cursor_newlines(cursor: &mut TokenCursor<'_>) {
-    while cursor.current().is_some_and(|token| token.tag() == TokenTag::NEWLINE) {
+    while cursor
+        .current()
+        .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
+    {
         let _ = cursor.advance();
     }
 }
@@ -49,9 +52,9 @@ fn checked_symbol_id(
     string_table: &StringTable,
 ) -> TraitHeaderResult<StringId> {
     let Some(name) = token.string_id() else {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "canonical symbol token is missing its string payload",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error("canonical symbol token is missing its string payload"),
+        ));
     };
     token
         .string_spelling(string_table)
@@ -150,7 +153,10 @@ fn parse_trait_requirement(
     let method_name = checked_symbol_id(first, context.string_table)?;
     let _ = cursor.advance();
 
-    if cursor.current().is_none_or(|token| token.tag() != TokenTag::TYPE_PARAMETER_BRACKET) {
+    if cursor
+        .current()
+        .is_none_or(|token| token.tag() != TokenTag::TYPE_PARAMETER_BRACKET)
+    {
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
         ));
@@ -263,9 +269,10 @@ pub(super) fn parse_trait_conformance(
                 skip_cursor_newlines(cursor);
 
                 // A comma may continue across newlines, but it must still be followed by a trait.
-                if cursor.current().is_none_or(|token| {
-                    matches!(token.tag(), TokenTag::END | TokenTag::EOF)
-                }) {
+                if cursor
+                    .current()
+                    .is_none_or(|token| matches!(token.tag(), TokenTag::END | TokenTag::EOF))
+                {
                     return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::unexpected_trailing_comma(comma_span),
                     ));
@@ -373,9 +380,10 @@ pub(super) fn parse_trait_incompatibility(
                 let _ = cursor.advance();
                 skip_cursor_newlines(cursor);
 
-                if cursor.current().is_none_or(|token| {
-                    matches!(token.tag(), TokenTag::END | TokenTag::EOF)
-                }) {
+                if cursor
+                    .current()
+                    .is_none_or(|token| matches!(token.tag(), TokenTag::END | TokenTag::EOF))
+                {
                     return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::unexpected_trailing_comma(comma_span),
                     ));
@@ -408,7 +416,6 @@ pub(super) fn parse_trait_incompatibility(
         incompatible_traits,
     })
 }
-
 
 pub(super) fn conformance_header_path(
     target_path: PathId,

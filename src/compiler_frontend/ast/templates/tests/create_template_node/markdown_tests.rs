@@ -8,7 +8,7 @@ fn markdown_formats_only_template_body_content() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut file_tokens = template_tokens_from_source(
+    let file_tokens = template_tokens_from_source(
         "[\"prefix\", $md:\n# Hello\n]",
         &mut string_table,
         &mut span_builder,

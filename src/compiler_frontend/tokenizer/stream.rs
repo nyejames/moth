@@ -151,6 +151,7 @@ impl TemplateModeFrame {
 }
 
 impl<'a> TokenStream<'a> {
+    #[cfg(test)]
     pub fn new(
         source_code: &'a str,
         file_id: SourceId,

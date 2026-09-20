@@ -448,14 +448,14 @@ pub(super) fn parse_member_name_typed(
             if token.kind == NumericLiteralKind::WholeNumber {
                 Ok(token.normalized_text)
             } else {
-                return Err(CompilerDiagnostic::invalid_field_access(
+                Err(CompilerDiagnostic::invalid_field_access(
                     InvalidFieldAccessReason::ExpectedNameAfterDot,
                     None,
                     None,
                     Vec::new(),
                     Some(token_stream.current_span()),
                 )
-                .into());
+                .into())
             }
         }
         TokenTag::MUST | TokenTag::TRAIT_THIS => {
@@ -466,21 +466,17 @@ pub(super) fn parse_member_name_typed(
                 "postfix/member parsing",
             )?;
 
-            return Err(
-                reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into(),
-            );
+            Err(reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into())
         }
 
-        _ => {
-            return Err(CompilerDiagnostic::invalid_field_access(
-                InvalidFieldAccessReason::ExpectedNameAfterDot,
-                None,
-                None,
-                Vec::new(),
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
+        _ => Err(CompilerDiagnostic::invalid_field_access(
+            InvalidFieldAccessReason::ExpectedNameAfterDot,
+            None,
+            None,
+            Vec::new(),
+            Some(token_stream.current_span()),
+        )
+        .into()),
     }
 }
 
