@@ -20,9 +20,7 @@ use crate::compiler_frontend::ast::const_values::resolver::{
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
-};
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -469,15 +467,6 @@ impl<'a> ConstFactCollector<'a> {
     ///       and fallible handling structures.
     /// WHY: expressions may contain compiler-generated lexical scopes or call arguments that
     ///      reference or declare const-foldable values.
-    fn walk_place_expression_for_body_local(place: &PlaceExpression) {
-        match &place.kind {
-            PlaceExpressionKind::Local(_) => {}
-            PlaceExpressionKind::Field { base, .. } => {
-                Self::walk_place_expression_for_body_local(base)
-            }
-        }
-    }
-
     fn walk_expression_for_body_local(
         &mut self,
         expression: &Expression,
@@ -495,9 +484,7 @@ impl<'a> ConstFactCollector<'a> {
                 }
             }
 
-            ExpressionKind::Copy(place) => {
-                Self::walk_place_expression_for_body_local(place);
-            }
+            ExpressionKind::Copy(_) => {}
 
             ExpressionKind::FieldAccess { base, .. } => {
                 self.walk_expression_for_body_local(base, env)?;

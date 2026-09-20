@@ -82,13 +82,9 @@ impl ModuleMaterialisationPreparation {
             module_resources: Rc::clone(&module_resources),
             path_fork,
         };
-        for path in self.const_values.module_constant_paths() {
-            let value_id = self.const_values.value_for_path(path).ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "Generated materialisation module-constant path has no store value.",
-                )
-            })?;
-            let Some(declaration_id) = declaration_table.declaration_id_by_path(path) else {
+        for row in self.const_values.iter_module_constant_views() {
+            let value_id = row.id;
+            let Some(declaration_id) = declaration_table.declaration_id_by_path(row.path) else {
                 return Err(CompilerError::compiler_error(
                     "Generated materialisation store row has no declaration-table entry",
                 ));

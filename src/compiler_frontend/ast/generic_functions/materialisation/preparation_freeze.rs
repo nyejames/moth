@@ -155,18 +155,9 @@ fn declaration_table_without_module_values(
     const_values: &ConstValueStore,
 ) -> Result<Rc<TopLevelDeclarationTable>, CompilerError> {
     let mut generated = TopLevelDeclarationTable::fork_for_generated(Rc::clone(declaration_table));
-    for path in const_values.module_constant_paths() {
-        let value_id = const_values.value_for_path(path).ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Module materialisation constant path has no store value for its declaration placeholder.",
-            )
-        })?;
-        let metadata = const_values.metadata(value_id).ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Module materialisation constant has no store metadata for its declaration placeholder.",
-            )
-        })?;
-        let declaration_id = generated.declaration_id_by_path(path).ok_or_else(|| {
+    for row in const_values.iter_module_constant_views() {
+        let metadata = row.metadata;
+        let declaration_id = generated.declaration_id_by_path(row.path).ok_or_else(|| {
             CompilerError::compiler_error(
                 "Module materialisation constant has no declaration-table entry.",
             )
@@ -174,7 +165,7 @@ fn declaration_table_without_module_values(
         if !generated.replace_by_id(
             declaration_id,
             Declaration {
-                id: *path,
+                id: *row.path,
                 value: Expression::no_value_with_type_id(
                     metadata.span,
                     metadata.diagnostic_type.clone(),

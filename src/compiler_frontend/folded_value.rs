@@ -122,22 +122,36 @@ pub(crate) fn owned_folded_string_from_const_string(
             string_table.resolve(*text).to_owned(),
         )),
         ConstStringValue::Pieces(pieces) => {
-            let mut public_pieces = Vec::with_capacity(pieces.len());
-            for piece in pieces {
-                let public_piece = match piece {
-                    ConstStringPiece::Text(text) => {
-                        OwnedFoldedStringPiece::Text(string_table.resolve(*text).to_owned())
-                    }
-                    ConstStringPiece::Resource(resource) => OwnedFoldedStringPiece::Resource(
-                        resources.try_origin(*resource)?.origin.clone(),
-                    ),
-                    ConstStringPiece::SiteRoot => OwnedFoldedStringPiece::SiteRoot,
-                };
-                public_pieces.push(public_piece);
-            }
-            Ok(OwnedFoldedString::Pieces(public_pieces))
+            owned_folded_string_from_pieces(pieces, resources, string_table)
         }
     }
+}
+
+/// Project borrowed folded string pieces to the owned boundary representation.
+///
+/// WHAT: resolves text IDs through the donor string table and resource IDs through the donor's
+/// resource table, preserving each resource's portable stable origin and the authored piece order.
+/// WHY: both the module-store wrapper and direct expression projection share this one borrowed
+/// projection so neither constructs a temporary owned `ConstStringValue`.
+fn owned_folded_string_from_pieces(
+    pieces: &[ConstStringPiece],
+    resources: &ModuleResourceTable,
+    string_table: &StringTable,
+) -> Result<OwnedFoldedString, CompilerError> {
+    let mut public_pieces = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        let public_piece = match piece {
+            ConstStringPiece::Text(text) => {
+                OwnedFoldedStringPiece::Text(string_table.resolve(*text).to_owned())
+            }
+            ConstStringPiece::Resource(resource) => {
+                OwnedFoldedStringPiece::Resource(resources.try_origin(*resource)?.origin.clone())
+            }
+            ConstStringPiece::SiteRoot => OwnedFoldedStringPiece::SiteRoot,
+        };
+        public_pieces.push(public_piece);
+    }
+    Ok(OwnedFoldedString::Pieces(public_pieces))
 }
 
 /// A finite `f64` folded value with an equivalence relation consistent with Moth
@@ -415,10 +429,11 @@ pub(crate) fn convert_expression_to_folded_value(
                      a projection context without its module resource table",
                 )
             })?;
-            let value = ConstStringValue::Pieces(pieces.clone());
-            Ok(PublicFoldedValue::String(
-                owned_folded_string_from_const_string(&value, resources, string_table)?,
-            ))
+            Ok(PublicFoldedValue::String(owned_folded_string_from_pieces(
+                pieces,
+                resources,
+                string_table,
+            )?))
         }
 
         ExpressionKind::Collection(items) => {

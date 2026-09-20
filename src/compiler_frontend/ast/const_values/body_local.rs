@@ -10,9 +10,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
-};
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -238,13 +236,6 @@ fn insert_from_match_pattern(
     }
 }
 
-fn insert_from_place(place: &PlaceExpression) {
-    match &place.kind {
-        PlaceExpressionKind::Local(_) => {}
-        PlaceExpressionKind::Field { base, .. } => insert_from_place(base),
-    }
-}
-
 fn insert_from_fallible_handling(
     store: &mut ConstValueStore,
     handling: &FallibleHandling,
@@ -279,10 +270,7 @@ fn insert_from_expression(
             Ok(())
         }
 
-        ExpressionKind::Copy(place) => {
-            insert_from_place(place);
-            Ok(())
-        }
+        ExpressionKind::Copy(_) => Ok(()),
 
         ExpressionKind::FieldAccess { base, .. } => {
             insert_from_expression(store, base, type_environment, template_builder)
