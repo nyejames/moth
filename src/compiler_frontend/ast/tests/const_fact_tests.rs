@@ -68,6 +68,7 @@ fn explicit_module_constant_is_collected_as_fact() {
     let fact = fact_for(&ast, &path_fork, &string_table, "site_name");
     assert_eq!(fact.scope, ConstBindingScope::ExplicitTopLevel);
     assert_eq!(fact.source, ConstBindingSource::ExplicitHash);
+    assert_eq!(fact.span, None);
 }
 
 // ------------------------------
@@ -82,6 +83,7 @@ fn private_top_level_literal_is_collected_as_fact() {
     let fact = fact_for(&ast, &path_fork, &string_table, "entry_root");
     assert_eq!(fact.scope, ConstBindingScope::PrivateTopLevel);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+    assert!(fact.span.is_some());
 }
 
 // ------------------------------
@@ -95,11 +97,11 @@ output_folder = "release"
 dev_folder = output_folder
 "#;
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
-
     assert_has_fact(&ast, &path_fork, &string_table, "output_folder");
     let fact = fact_for(&ast, &path_fork, &string_table, "dev_folder");
     assert_eq!(fact.scope, ConstBindingScope::PrivateTopLevel);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+    assert!(fact.span.is_some());
 }
 
 // ------------------------------
@@ -129,6 +131,7 @@ greet || -> String:
     let fact = fact_for(&ast, &path_fork, &string_table, "message");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+    assert!(fact.span.is_some());
 }
 
 // ------------------------------
@@ -150,6 +153,7 @@ greet || -> String:
     let fact = fact_for(&ast, &path_fork, &string_table, "message");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+    assert!(fact.span.is_some());
 }
 
 // -------------------------------------------
@@ -174,6 +178,7 @@ greet || -> String:
     let fact = fact_for(&ast, &path_fork, &string_table, "message");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+    assert!(fact.span.is_some());
 }
 
 #[test]
@@ -195,6 +200,7 @@ layout || -> Int:
     let fact = fact_for(&ast, &path_fork, &string_table, "padded");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+    assert!(fact.span.is_some());
 }
 
 #[test]
@@ -217,6 +223,7 @@ recover || -> String:
     let fact = fact_for(&ast, &path_fork, &string_table, "fallback");
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+    assert!(fact.span.is_some());
 }
 
 // ------------------------------

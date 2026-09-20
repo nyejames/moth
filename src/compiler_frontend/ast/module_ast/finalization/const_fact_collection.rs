@@ -11,8 +11,8 @@ use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::const_values::facts::{
-    AstConstDeclarationFact, AstConstFactValue, AstConstFacts, ConstBindingScope,
-    ConstBindingSource, ConstFactValueKind,
+    AstConstDeclarationFact, AstConstFacts, ConstBindingScope, ConstBindingSource,
+    ConstFactValueKind,
 };
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
@@ -115,7 +115,9 @@ impl<'a> ConstFactCollector<'a> {
                     scope: ConstBindingScope::ExplicitTopLevel,
                     source: ConstBindingSource::ExplicitHash,
                     value_kind: ConstFactValueKind::from_const_value_kind(metadata.value_kind),
-                    value: AstConstFactValue::Stored(value_id),
+                    // Explicit module values stay owned by the store; the fact is
+                    // metadata only and carries no authored initializer span.
+                    span: None,
                 },
             );
         }
@@ -181,8 +183,9 @@ impl<'a> ConstFactCollector<'a> {
 
     /// Attempt to resolve a start-body declaration as a private top-level const fact.
     ///
-    /// WHAT: on success, inserts the fact into both the local environment
-    ///       and the output fact table.
+    /// WHAT: on success, captures the resolved span, moves the expression once
+    ///       into the lexical environment, and records only metadata in the fact
+    ///       table.
     fn try_add_private_top_level_fact(
         &mut self,
         declaration: &Declaration,
@@ -192,11 +195,19 @@ impl<'a> ConstFactCollector<'a> {
             .resolver
             .resolve_private_top_level_declaration(declaration, env)
         {
-            Ok(fact) => {
-                if let AstConstFactValue::Expression(expression) = &fact.value {
-                    env.insert(declaration.id, expression.as_ref().clone());
-                }
-                self.facts.declarations.insert(declaration.id, fact);
+            Ok(resolved) => {
+                let span = resolved.expression.span;
+                env.insert(declaration.id, resolved.expression);
+                self.facts.declarations.insert(
+                    declaration.id,
+                    AstConstDeclarationFact {
+                        declaration_path: declaration.id,
+                        scope: ConstBindingScope::PrivateTopLevel,
+                        source: ConstBindingSource::InferredImmutable,
+                        value_kind: resolved.value_kind,
+                        span,
+                    },
+                );
             }
 
             Err(error) if error.is_expected_non_const_resolution() => {
@@ -361,8 +372,9 @@ impl<'a> ConstFactCollector<'a> {
 
     /// Attempt to resolve a body-local declaration as a const fact.
     ///
-    /// WHAT: on success, inserts the fact into both the local environment
-    ///       and the output fact table.
+    /// WHAT: on success, captures the resolved span, moves the expression once
+    ///       into the lexical environment, and records only metadata in the fact
+    ///       table.
     fn try_add_body_local_fact(
         &mut self,
         declaration: &Declaration,
@@ -372,11 +384,19 @@ impl<'a> ConstFactCollector<'a> {
             .resolver
             .resolve_body_local_declaration(declaration, env)
         {
-            Ok(fact) => {
-                if let AstConstFactValue::Expression(expression) = &fact.value {
-                    env.insert(declaration.id, expression.as_ref().clone());
-                }
-                self.facts.declarations.insert(declaration.id, fact);
+            Ok(resolved) => {
+                let span = resolved.expression.span;
+                env.insert(declaration.id, resolved.expression);
+                self.facts.declarations.insert(
+                    declaration.id,
+                    AstConstDeclarationFact {
+                        declaration_path: declaration.id,
+                        scope: ConstBindingScope::BodyLocal,
+                        source: ConstBindingSource::InferredImmutable,
+                        value_kind: resolved.value_kind,
+                        span,
+                    },
+                );
             }
 
             Err(error) if error.is_expected_non_const_resolution() => {

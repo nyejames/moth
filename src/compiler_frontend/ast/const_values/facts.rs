@@ -1,17 +1,15 @@
-//! AST const fact payloads.
+//! AST const fact metadata.
 //!
-//! WHAT: defines the shape of const facts recorded for declarations during
+//! WHAT: defines the advisory metadata recorded for const declarations during
 //!       AST finalization and consumed by later stages such as HIR const facts.
-//! WHY: one typed fact shape lets later stages share the same resolution
-//!      result without each stage inventing its own representation.
+//! WHY: one typed fact shape lets later stages share the same classification
+//!      result without each stage retaining its own resolved value copy.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use rustc_hash::FxHashMap;
-
-use super::store::ConstValueId;
 
 /// Collection of all const facts discovered in one AST module.
 ///
@@ -22,34 +20,22 @@ pub struct AstConstFacts {
     pub declarations: FxHashMap<PathId, AstConstDeclarationFact>,
 }
 
-/// A single resolved const fact for one declaration.
+/// A single advisory const fact for one declaration.
 ///
-/// WHAT: records the scope, source, value classification, and fully resolved
-///       value for a compile-time declaration.
-/// WHY: authored module constants reuse the module-owned [`ConstValueStore`] identity while
-///      body-local and inferred facts retain their resolver-owned expression only as advisory
-///      metadata.
+/// WHAT: records the scope, source, value classification, and exact authored
+///       span for a compile-time declaration without retaining the resolved value.
+/// WHY: resolved values stay owned by the const value store for explicit module
+///      constants and by the lexical const environment for inferred declarations;
+///      facts are metadata for later advisory consumers only.
 #[derive(Clone, Debug)]
 pub struct AstConstDeclarationFact {
     pub declaration_path: PathId,
     pub scope: ConstBindingScope,
     pub source: ConstBindingSource,
     pub value_kind: ConstFactValueKind,
-    pub value: AstConstFactValue,
-}
-
-/// Value retained by one advisory const fact.
-#[derive(Clone, Debug)]
-pub enum AstConstFactValue {
-    /// The authored module constant's folded value is owned by the module store.
-    ///
-    /// The store identity remains on the fact so HIR can join store-backed rows. Config
-    /// validation no longer reads it; it consumes owned folded declarations instead.
-    #[allow(dead_code)]
-    Stored(ConstValueId),
-
-    /// A body-local or inferred declaration keeps its resolver result as advisory metadata.
-    Expression(Box<Expression>),
+    /// Span carried by the resolved expression; explicit facts and spanless
+    /// expressions use `None`.
+    pub span: Option<SourceSpan>,
 }
 
 /// Where a const binding is visible in the source program.

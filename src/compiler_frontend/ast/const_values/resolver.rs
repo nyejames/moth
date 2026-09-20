@@ -10,10 +10,7 @@ use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
-use crate::compiler_frontend::ast::const_values::facts::{
-    AstConstDeclarationFact, AstConstFactValue, ConstBindingScope, ConstBindingSource,
-    ConstFactValueKind,
-};
+use crate::compiler_frontend::ast::const_values::facts::ConstFactValueKind;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
@@ -142,6 +139,19 @@ impl PartialEq for ConstResolutionError {
 
 impl Eq for ConstResolutionError {}
 
+/// Transient resolved const declaration.
+///
+/// WHAT: carries the owned resolved expression plus its advisory classification
+///       from declaration resolution to fact collection without storing it.
+/// WHY: the collector moves the expression once into the lexical environment
+///      and records only metadata in the fact table; this result itself is
+///      never retained in facts or projected into HIR.
+#[derive(Debug)]
+pub(crate) struct ResolvedConstDeclaration {
+    pub(crate) expression: Expression,
+    pub(crate) value_kind: ConstFactValueKind,
+}
+
 /// Resolves AST expressions against a [`ConstValueEnvironment`] to determine
 /// whether they are compile-time constants.
 pub struct ConstValueResolver<'a> {
@@ -176,13 +186,14 @@ impl<'a> ConstValueResolver<'a> {
 
     /// Resolve a private inferred top-level declaration (`=` in start body).
     ///
-    /// WHAT: mutable declarations are rejected; immutable declarations are const
-    ///       only when their initializer fully resolves.
+    /// WHAT: mutable declarations are rejected; immutable declarations return the
+    ///       owned resolved initializer plus its classification for the caller to
+    ///       move into the lexical environment and record as metadata-only fact.
     pub fn resolve_private_top_level_declaration(
         &mut self,
         declaration: &Declaration,
         environment: &ConstValueEnvironment,
-    ) -> Result<AstConstDeclarationFact, ConstResolutionError> {
+    ) -> Result<ResolvedConstDeclaration, ConstResolutionError> {
         if declaration.value.value_mode.is_mutable() {
             return Err(ConstResolutionError::MutableDeclaration);
         }
@@ -190,24 +201,21 @@ impl<'a> ConstValueResolver<'a> {
         let resolved = self.resolve_expression(&declaration.value, environment)?;
         let value_kind = self.fact_value_kind(&resolved)?;
 
-        Ok(AstConstDeclarationFact {
-            declaration_path: declaration.id,
-            scope: ConstBindingScope::PrivateTopLevel,
-            source: ConstBindingSource::InferredImmutable,
+        Ok(ResolvedConstDeclaration {
+            expression: resolved,
             value_kind,
-            value: AstConstFactValue::Expression(Box::new(resolved)),
         })
     }
 
     /// Resolve a body-local private inferred declaration.
     ///
     /// WHAT: same rules as [`Self::resolve_private_top_level_declaration`] but
-    ///       tagged with [`ConstBindingScope::BodyLocal`].
+    ///       tagged with `ConstBindingScope::BodyLocal`.
     pub fn resolve_body_local_declaration(
         &mut self,
         declaration: &Declaration,
         environment: &ConstValueEnvironment,
-    ) -> Result<AstConstDeclarationFact, ConstResolutionError> {
+    ) -> Result<ResolvedConstDeclaration, ConstResolutionError> {
         if declaration.value.value_mode.is_mutable() {
             return Err(ConstResolutionError::MutableDeclaration);
         }
@@ -215,12 +223,9 @@ impl<'a> ConstValueResolver<'a> {
         let resolved = self.resolve_expression(&declaration.value, environment)?;
         let value_kind = self.fact_value_kind(&resolved)?;
 
-        Ok(AstConstDeclarationFact {
-            declaration_path: declaration.id,
-            scope: ConstBindingScope::BodyLocal,
-            source: ConstBindingSource::InferredImmutable,
+        Ok(ResolvedConstDeclaration {
+            expression: resolved,
             value_kind,
-            value: AstConstFactValue::Expression(Box::new(resolved)),
         })
     }
 

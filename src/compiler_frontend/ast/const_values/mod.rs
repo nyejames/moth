@@ -1,10 +1,12 @@
 //! Shared AST const value resolver and fact types.
 //!
-//! WHAT: owns declaration const facts and the resolution logic that determines
+//! WHAT: owns declaration const metadata and the resolution logic that determines
 //!       whether an AST expression is a compile-time constant.
 //! WHY: config validation, AST finalization, and HIR metadata all need one
 //!      shared source of truth for const-ness instead of duplicating evaluation
-//!      logic or adding config-specific scanners.
+//!      logic or adding config-specific scanners. Resolved expressions remain
+//!      transient in the lexical environment or authoritative value store; facts
+//!      retain advisory metadata only.
 //!
 //! ## Design invariants
 //!

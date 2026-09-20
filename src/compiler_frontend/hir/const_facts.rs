@@ -46,7 +46,8 @@ pub struct HirConstDeclarationFact {
     #[allow(dead_code)]
     pub value_kind: ConstFactValueKind,
 
-    /// Exact authored declaration span; synthetic declarations are span-free.
+    /// Span carried by the resolved expression; explicit facts and spanless
+    /// expressions use `None`.
     pub span: Option<SourceSpan>,
 }
 
@@ -76,20 +77,12 @@ impl From<&AstConstFacts> for HirConstFacts {
         let mut declarations = FxHashMap::default();
 
         for (path, fact) in &ast_facts.declarations {
-            let span = match &fact.value {
-                crate::compiler_frontend::ast::const_values::facts::AstConstFactValue::Stored(_) => {
-                    None
-                }
-                crate::compiler_frontend::ast::const_values::facts::AstConstFactValue::Expression(
-                    expression,
-                ) => expression.span,
-            };
             let hir_fact = HirConstDeclarationFact {
                 declaration_path: fact.declaration_path,
                 scope: fact.scope,
                 source: fact.source,
                 value_kind: fact.value_kind,
-                span,
+                span: fact.span,
             };
             declarations.insert(*path, hir_fact);
         }

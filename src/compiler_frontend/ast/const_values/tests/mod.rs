@@ -4,9 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_values::facts::{
-    AstConstFactValue, ConstBindingScope, ConstBindingSource, ConstFactValueKind,
-};
+use crate::compiler_frontend::ast::const_values::facts::ConstFactValueKind;
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
@@ -445,17 +443,13 @@ fn body_local_immutable_literal_resolves() {
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
-    let fact = resolver
+    let resolved = resolver
         .resolve_body_local_declaration(&declaration, &env)
         .expect("body-local immutable literal should resolve");
 
-    assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
-    assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
-    assert!(matches!(
-        fact.value,
-        AstConstFactValue::Expression(expression)
-            if matches!(expression.kind, ExpressionKind::Int(99))
-    ));
+    assert_eq!(resolved.value_kind, ConstFactValueKind::Literal);
+    assert_eq!(resolved.expression.span, None);
+    assert!(matches!(resolved.expression.kind, ExpressionKind::Int(99)));
 }
 
 #[test]

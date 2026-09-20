@@ -5,19 +5,17 @@
 //! WHY: the facts are advisory; their only requirement is faithful copy/projection.
 
 use crate::compiler_frontend::ast::const_values::facts::{
-    AstConstDeclarationFact, AstConstFactValue, AstConstFacts, ConstBindingScope,
-    ConstBindingSource, ConstFactValueKind,
+    AstConstDeclarationFact, AstConstFacts, ConstBindingScope, ConstBindingSource,
+    ConstFactValueKind,
 };
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::function_node;
-
-use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
 fn projects_ast_const_facts_into_hir_metadata() {
@@ -40,6 +38,11 @@ fn projects_ast_const_facts_into_hir_metadata() {
 
     let explicit_path = super::symbol("site_name", &mut path_fork, &mut string_table);
     let private_path = super::symbol("page_title", &mut path_fork, &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let private_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(4, 5, &mut span_builder).expect("fixture span should fit"),
+    );
 
     ast.const_facts.declarations.insert(
         explicit_path,
@@ -48,11 +51,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
             scope: ConstBindingScope::ExplicitTopLevel,
             source: ConstBindingSource::ExplicitHash,
             value_kind: ConstFactValueKind::Literal,
-            value: AstConstFactValue::Expression(Box::new(Expression::string_slice(
-                string_table.intern("Moth"),
-                None,
-                ValueMode::ImmutableOwned,
-            ))),
+            span: None,
         },
     );
 
@@ -63,11 +62,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
             scope: ConstBindingScope::PrivateTopLevel,
             source: ConstBindingSource::InferredImmutable,
             value_kind: ConstFactValueKind::Literal,
-            value: AstConstFactValue::Expression(Box::new(Expression::int(
-                42,
-                None,
-                ValueMode::ImmutableOwned,
-            ))),
+            span: Some(private_span),
         },
     );
 
@@ -96,7 +91,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
     assert_eq!(private.scope, ConstBindingScope::PrivateTopLevel);
     assert_eq!(private.source, ConstBindingSource::InferredImmutable);
     assert_eq!(private.value_kind, ConstFactValueKind::Literal);
-    assert_eq!(private.span, None);
+    assert_eq!(private.span, Some(private_span));
 }
 
 #[test]
@@ -140,11 +135,7 @@ fn remaps_const_fact_keys_and_payload_paths() {
             scope: ConstBindingScope::ExplicitTopLevel,
             source: ConstBindingSource::ExplicitHash,
             value_kind: ConstFactValueKind::Literal,
-            value: AstConstFactValue::Expression(Box::new(Expression::int(
-                1,
-                None,
-                ValueMode::ImmutableOwned,
-            ))),
+            span: None,
         },
     );
 
