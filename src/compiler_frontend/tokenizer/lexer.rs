@@ -654,8 +654,14 @@ pub(crate) fn tokenize(
     let source_tokens = builder
         .finish(numeric_literals)
         .map_err(TokenizeFailure::Infrastructure)?;
+    let tokens = std::sync::Arc::new(source_tokens);
+    #[cfg(feature = "data_layout_memory_probe")]
+    crate::compiler_frontend::instrumentation::record_source_tokens_path_table(
+        &tokens,
+        &path_syntax,
+    );
     Ok(LexedSource {
-        tokens: std::sync::Arc::new(source_tokens),
+        tokens,
         path_syntax,
         logical_path: src_path,
         file_id,

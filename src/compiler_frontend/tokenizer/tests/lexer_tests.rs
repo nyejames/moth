@@ -1797,11 +1797,11 @@ fn code_template_body_keeps_nested_square_brackets_as_literal_text() {
     assert_eq!(template_closes, 1);
 
     let body_literal = token_refs(tokens)
-        .find_map(|token| {
+        .filter_map(|token| {
             (token.tag() == TokenTag::STRING_SLICE_LITERAL)
                 .then(|| string_table.resolve(token.string_id().expect("literal string handle")))
         })
-        .filter(|value| value.contains("[string_slice, a_mutable_string]"))
+        .find(|value| value.contains("[string_slice, a_mutable_string]"))
         .expect("expected code template body text to include literal square brackets");
 
     assert!(body_literal.contains("concatenated"));

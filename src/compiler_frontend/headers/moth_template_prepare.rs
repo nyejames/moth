@@ -42,6 +42,11 @@ pub(crate) fn prepare_moth_template_file(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
     let file_id = owner.source_id();
+    #[cfg(feature = "data_layout_memory_probe")]
+    crate::compiler_frontend::instrumentation::record_source_tokens_path_table(
+        owner.tokens_ref(),
+        &path_syntax,
+    );
     let canonical = owner.tokens_ref();
     if canonical.source() != file_id {
         return Err(CompilerError::compiler_error(

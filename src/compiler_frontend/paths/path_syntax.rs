@@ -144,10 +144,9 @@ impl PathSyntaxTable {
 
     /// Construct the table with its source identity already attached.
     pub fn with_source(source: SourceId) -> Self {
-        Self {
-            owner_source: Some(source),
-            ..Self::default()
-        }
+        let mut table = Self::default();
+        table.owner_source = Some(source);
+        table
     }
 
     #[cfg(test)]
@@ -155,6 +154,22 @@ impl PathSyntaxTable {
         &self.paths
     }
 
+
+    /// Bytes occupied by authored path rows currently used by this source.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn used_bytes(&self) -> usize {
+        self.paths
+            .len()
+            .saturating_mul(std::mem::size_of::<PathSyntax>())
+    }
+
+    /// Bytes reserved by the backing authored-path row vector.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.paths
+            .capacity()
+            .saturating_mul(std::mem::size_of::<PathSyntax>())
+    }
     /// The source identity owned by this table, when rows have been attached to one.
     #[cfg(test)]
     pub fn owner_source(&self) -> Option<SourceId> {
@@ -417,5 +432,11 @@ impl PathSyntaxTable {
                 "path token does not carry a valid path syntax handle",
             )
         })
+    }
+}
+#[cfg(feature = "data_layout_memory_probe")]
+impl Drop for PathSyntaxTable {
+    fn drop(&mut self) {
+        crate::compiler_frontend::instrumentation::release_source_path_table(self);
     }
 }

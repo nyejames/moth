@@ -191,6 +191,28 @@ impl ModuleMaterialisationContext {
         }
     }
 
+    /// Record the probe-only ownership that this retained context will carry to the render tail.
+    ///
+    /// The scan is pointer keyed in the ledger, so cloning context or owner `Arc`s does not
+    /// present as another allocation. Body-owned donor identity pairs are included because a
+    /// same-boundary context may intentionally have no context-level identity pair.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn record_memory_ledger(&self) {
+        crate::compiler_frontend::instrumentation::record_donor_identity_tables(
+            self.path_table.as_deref(),
+            self.source_string_table.as_deref(),
+        );
+        for artefact in &self.artefacts {
+            crate::compiler_frontend::instrumentation::record_donor_identity_tables(
+                artefact.body.source_path_table.as_deref(),
+                artefact.body.source_string_table.as_deref(),
+            );
+            crate::compiler_frontend::instrumentation::observe_generic_source_tokens(
+                &artefact.body.source_owner.source_tokens,
+            );
+        }
+    }
+
     /// Rebase a published provider context into the requester's path/string identity domain using
     /// the tables that issued the retained provider paths.
     pub(crate) fn rebased_for_requester(
@@ -225,6 +247,8 @@ impl ModuleMaterialisationContext {
                     "published materialisation context path table could not be re-interned",
                 )
             })?;
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_requester_remap(&path_remap);
         let mut rebased = self.clone();
         rebased.remap_path_ids(&path_remap);
         Ok(rebased)

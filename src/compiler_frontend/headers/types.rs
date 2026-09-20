@@ -55,6 +55,8 @@ pub(crate) struct SourceTokenOwner {
 
 impl SourceTokenOwner {
     pub(crate) fn new(tokens: Arc<SourceTokens>) -> Self {
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_source_tokens(&tokens);
         Self { tokens }
     }
 
@@ -103,11 +105,16 @@ impl SourceTokenOwner {
         ranges: &[TokenRange],
     ) -> Result<TokenSequenceId, crate::compiler_frontend::tokenizer::tokens::TokenSequenceError>
     {
-        Arc::get_mut(&mut self.tokens)
+        let result = Arc::get_mut(&mut self.tokens)
             .ok_or(
                 crate::compiler_frontend::tokenizer::tokens::TokenSequenceError::NoCanonicalOwner,
             )?
-            .try_register_token_sequence(ranges)
+            .try_register_token_sequence(ranges);
+        #[cfg(feature = "data_layout_memory_probe")]
+        if result.is_ok() {
+            crate::compiler_frontend::instrumentation::record_source_tokens(&self.tokens);
+        }
+        result
     }
 
     pub(crate) fn register_token_sequence(
@@ -1825,6 +1832,8 @@ impl FileFrontendPrepareOutput {
             let canonical = Arc::get_mut(source)
                 .expect("prepared source token stream gained a shared view before freeze");
             canonical.attach_shared_path_syntax(Arc::clone(&path_syntax));
+            #[cfg(feature = "data_layout_memory_probe")]
+            crate::compiler_frontend::instrumentation::record_source_tokens(canonical);
             canonical.freeze_numeric_literals();
         }
         Ok(())

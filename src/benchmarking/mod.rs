@@ -70,7 +70,10 @@ pub use frontend::{
     FrontendBenchmarkRetention, FrontendBenchmarkStage, run_frontend_benchmark,
 };
 #[cfg(feature = "data_layout_memory_probe")]
-pub use frontend::{FrontendBenchmarkReportWithOwner, run_frontend_benchmark_with_report_owner};
+pub use frontend::{
+    FrontendBenchmarkReportWithOwner, prepare_frontend_memory_ledger,
+    run_frontend_benchmark_with_report_owner,
+};
 
 pub use span_census::{
     CandidateSpanStats, ExcludedJsSources, LengthDistribution, LongSpan, SpanCensus,

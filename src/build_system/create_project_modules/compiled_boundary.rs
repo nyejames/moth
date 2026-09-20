@@ -25,6 +25,8 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabaseRetentionMetrics};
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -971,8 +973,9 @@ impl TransientPremergeBatch {
 /// `RenderPathContext` tables, and any transitional source-context table still present after
 /// freezing. Successful-module executable views are deliberately not counted; a table only
 /// reachable from executable rows without a diagnostic owner is not report-retained storage.
-/// A clean result returns zeroes because the render boundary intentionally skips freezing when
-/// there is nothing to render.
+/// The `source_tokens_*`, construction, donor-snapshot and generic-owner fields are command-scoped
+/// ledger observations and can remain nonzero for clean results even though report-retention
+/// fields stay zero.
 #[cfg(feature = "data_layout_memory_probe")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FrozenRenderRetentionMetrics {
@@ -988,10 +991,74 @@ pub(crate) struct FrozenRenderRetentionMetrics {
     pub(crate) path_table_node_rows: usize,
     /// Backing vector capacity bytes for those deduplicated path tables.
     pub(crate) path_table_storage_bytes: usize,
+    /// Distinct canonical SourceTokens owners observed during this command.
+    pub(crate) source_tokens_owners: usize,
+    pub(crate) source_tokens_shape_bytes: usize,
+    pub(crate) source_tokens_shape_capacity_bytes: usize,
+    pub(crate) source_tokens_span_bytes: usize,
+    pub(crate) source_tokens_span_capacity_bytes: usize,
+    pub(crate) source_tokens_numeric_store_bytes: usize,
+    pub(crate) source_tokens_numeric_store_capacity_bytes: usize,
+    pub(crate) source_tokens_path_store_bytes: usize,
+    pub(crate) source_tokens_path_store_capacity_bytes: usize,
+    pub(crate) source_tokens_sequence_store_bytes: usize,
+    pub(crate) source_tokens_sequence_store_capacity_bytes: usize,
+    /// Cumulative builder shape/span capacities sampled at finish; not simultaneous live storage.
+    pub(crate) transient_construction_buffer_bytes: usize,
+    /// Largest individual builder buffer sample; a high-water observation, not an aggregate live
+    /// allocation claim.
+    pub(crate) transient_construction_peak_bytes: usize,
+    pub(crate) cutover_adapter_bytes: usize,
+    pub(crate) donor_identity_string_tables: usize,
+    pub(crate) donor_identity_string_storage_bytes: usize,
+    pub(crate) donor_identity_path_tables: usize,
+    pub(crate) donor_identity_path_storage_bytes: usize,
+    pub(crate) generic_source_tokens_owners: usize,
+    pub(crate) generic_source_tokens_bytes: usize,
+    pub(crate) generic_source_tokens_live_bytes: usize,
+    pub(crate) generic_source_tokens_peak_bytes: usize,
+    pub(crate) requester_remap_count: usize,
+    pub(crate) requester_remap_used_bytes: usize,
+    pub(crate) requester_remap_capacity_bytes: usize,
+    pub(crate) observation_incomplete: bool,
 }
-
 #[cfg(feature = "data_layout_memory_probe")]
 impl FrozenRenderRetentionMetrics {
+    pub(crate) fn from_ledger(snapshot: MemoryLedgerSnapshot) -> Self {
+        Self {
+            source_tokens_owners: snapshot.source_tokens_owners,
+            source_tokens_shape_bytes: snapshot.source_tokens_shape_bytes,
+            source_tokens_shape_capacity_bytes: snapshot.source_tokens_shape_capacity_bytes,
+            source_tokens_span_bytes: snapshot.source_tokens_span_bytes,
+            source_tokens_span_capacity_bytes: snapshot.source_tokens_span_capacity_bytes,
+            source_tokens_numeric_store_bytes: snapshot.source_tokens_numeric_store_bytes,
+            source_tokens_numeric_store_capacity_bytes: snapshot
+                .source_tokens_numeric_store_capacity_bytes,
+            source_tokens_path_store_bytes: snapshot.source_tokens_path_store_bytes,
+            source_tokens_path_store_capacity_bytes: snapshot
+                .source_tokens_path_store_capacity_bytes,
+            source_tokens_sequence_store_bytes: snapshot.source_tokens_sequence_store_bytes,
+            source_tokens_sequence_store_capacity_bytes: snapshot
+                .source_tokens_sequence_store_capacity_bytes,
+            transient_construction_buffer_bytes: snapshot.transient_construction_buffer_bytes,
+            transient_construction_peak_bytes: snapshot.transient_construction_peak_bytes,
+            cutover_adapter_bytes: snapshot.cutover_adapter_bytes,
+            donor_identity_string_tables: snapshot.donor_identity_string_tables,
+            donor_identity_string_storage_bytes: snapshot.donor_identity_string_storage_bytes,
+            donor_identity_path_tables: snapshot.donor_identity_path_tables,
+            donor_identity_path_storage_bytes: snapshot.donor_identity_path_storage_bytes,
+            generic_source_tokens_owners: snapshot.generic_source_tokens_owners,
+            generic_source_tokens_bytes: snapshot.generic_source_tokens_bytes,
+            generic_source_tokens_live_bytes: snapshot.generic_source_tokens_live_bytes,
+            generic_source_tokens_peak_bytes: snapshot.generic_source_tokens_peak_bytes,
+            requester_remap_count: snapshot.requester_remap_count,
+            requester_remap_used_bytes: snapshot.requester_remap_used_bytes,
+            requester_remap_capacity_bytes: snapshot.requester_remap_capacity_bytes,
+            observation_incomplete: snapshot.observation_incomplete,
+            ..Self::default()
+        }
+    }
+
     fn add_source(&mut self, metrics: SourceDatabaseRetentionMetrics) {
         self.source_snapshot_bytes += metrics.source_snapshot_bytes;
         self.extended_span_rows += metrics.extended_span_rows;
@@ -1215,6 +1282,16 @@ impl ProjectFrontendCompilation {
         let project_warnings = project.take_successful_warnings();
         let (mut source_packages, package_source_arcs) =
             source_packages.into_packages_with_source_databases();
+        #[cfg(feature = "data_layout_memory_probe")]
+        {
+            project.modules.record_memory_ledger();
+            for package in &source_packages {
+                package.boundary.modules.record_memory_ledger();
+            }
+        }
+        #[cfg(feature = "data_layout_memory_probe")]
+        let ledger_snapshot =
+            crate::compiler_frontend::instrumentation::snapshot_memory_ledger();
         let project_diagnosed = std::mem::take(&mut project.diagnosed);
         let package_diagnosed = source_packages
             .iter_mut()
@@ -1291,18 +1368,29 @@ impl ProjectFrontendCompilation {
         // an empty message vessel.
         if messages.diagnostic_slice().is_empty() && !messages.has_infrastructure_error() {
             let _ = std::mem::take(&mut messages.string_table);
-            return Ok((messages, FrozenRenderRetentionMetrics::default()));
+            #[cfg(feature = "data_layout_memory_probe")]
+            {
+                return Ok((
+                    messages,
+                    FrozenRenderRetentionMetrics::from_ledger(ledger_snapshot),
+                ));
+            }
+            #[cfg(not(feature = "data_layout_memory_probe"))]
+            {
+                return Ok((messages, ()));
+            }
         }
 
         #[cfg(feature = "data_layout_memory_probe")]
-        let mut retention = FrozenRenderRetentionMetrics {
-            diagnostic_records: messages.diagnostic_slice().len(),
-            diagnostic_label_slots: messages
+        let mut retention = {
+            let mut retention = FrozenRenderRetentionMetrics::from_ledger(ledger_snapshot);
+            retention.diagnostic_records = messages.diagnostic_slice().len();
+            retention.diagnostic_label_slots = messages
                 .diagnostic_slice()
                 .iter()
                 .map(|diagnostic| diagnostic.labels.len())
-                .sum(),
-            ..FrozenRenderRetentionMetrics::default()
+                .sum();
+            retention
         };
         #[cfg(not(feature = "data_layout_memory_probe"))]
         let retention = ();

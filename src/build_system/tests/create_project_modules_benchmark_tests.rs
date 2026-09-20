@@ -168,7 +168,8 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
                 &mut counter_span_builder,
             )
             .expect("counter fixture source should tokenize")
-            .length
+            .tokens
+            .len()
         })
         .sum::<usize>() as f64;
 

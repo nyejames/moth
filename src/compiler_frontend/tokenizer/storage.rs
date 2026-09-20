@@ -287,6 +287,32 @@ impl TokenSequenceStore {
         self.sequence_offsets.len().saturating_sub(1)
     }
 
+    /// Bytes occupied by registered sequence rows and offset entries.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn used_bytes(&self) -> usize {
+        self.ranges
+            .len()
+            .saturating_mul(std::mem::size_of::<TokenSequenceRange>())
+            .saturating_add(
+                self.sequence_offsets
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+    }
+
+    /// Bytes reserved by sequence-row and offset backing vectors.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.ranges
+            .capacity()
+            .saturating_mul(std::mem::size_of::<TokenSequenceRange>())
+            .saturating_add(
+                self.sequence_offsets
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+    }
+
     pub fn ranges(&self, id: TokenSequenceId) -> Result<&[TokenSequenceRange], TokenSequenceError> {
         let index = id.index().ok_or(TokenSequenceError::Absent)?;
         let Some(&start) = self.sequence_offsets.get(index) else {
@@ -600,6 +626,17 @@ impl SourceTokensBuilder {
         self,
         numeric_literals: NumericLiteralStore,
     ) -> Result<SourceTokens, CompilerError> {
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_transient_construction_buffer_bytes(
+            self.shapes
+                .capacity()
+                .saturating_mul(std::mem::size_of::<TokenShape>())
+                .saturating_add(
+                    self.spans
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<LocalSpan>()),
+                ),
+        );
         if numeric_literals.owner_source().is_none() && !numeric_literals.is_empty() {
             return Err(CompilerError::compiler_error(
                 "source token numeric store has records but no source identity",
@@ -761,7 +798,10 @@ impl TestSourceTokensBuilder {
         let mut path_syntax = self.path_syntax;
         path_syntax.freeze();
         source_tokens.attach_shared_path_syntax(Arc::new(path_syntax));
-        Ok(Arc::new(source_tokens))
+        let source_tokens = Arc::new(source_tokens);
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_source_tokens(&source_tokens);
+        Ok(source_tokens)
     }
 }
 
@@ -773,6 +813,20 @@ fn test_shape_error(error: SourceTokenBuildError) -> CompilerError {
         }
         SourceTokenBuildError::Invariant(error) => error,
     }
+}
+
+/// Probe-only storage breakdown for one canonical source-token owner.
+#[cfg(feature = "data_layout_memory_probe")]
+pub(crate) struct SourceTokensMemoryLedgerMetrics {
+    pub(crate) shape_bytes: usize,
+    pub(crate) shape_capacity_bytes: usize,
+    pub(crate) span_bytes: usize,
+    pub(crate) span_capacity_bytes: usize,
+    pub(crate) numeric_store_bytes: usize,
+    pub(crate) numeric_store_capacity_bytes: usize,
+    pub(crate) path_table: Option<(usize, usize, usize)>,
+    pub(crate) sequence_store_bytes: usize,
+    pub(crate) sequence_store_capacity_bytes: usize,
 }
 
 /// The immutable source-owned shape/span arrays and their typed cold stores.
@@ -795,7 +849,55 @@ pub struct SourceTokens {
     pub(super) token_stats: TokenStats,
 }
 
+
 impl SourceTokens {
+    /// Return the probe-only backing storage breakdown for this canonical owner.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn memory_ledger_metrics(&self) -> SourceTokensMemoryLedgerMetrics {
+        let shape_bytes = self
+            .shapes
+            .len()
+            .saturating_mul(std::mem::size_of::<TokenShape>());
+        let span_bytes = self
+            .spans
+            .len()
+            .saturating_mul(std::mem::size_of::<LocalSpan>());
+        let path_table = self.path_syntax.as_deref().map(|table| {
+            (
+                table as *const PathSyntaxTable as usize,
+                table.used_bytes(),
+                table.storage_bytes(),
+            )
+        });
+        SourceTokensMemoryLedgerMetrics {
+            shape_bytes,
+            shape_capacity_bytes: shape_bytes,
+            span_bytes,
+            span_capacity_bytes: span_bytes,
+            numeric_store_bytes: self.numeric_literals.used_bytes(),
+            numeric_store_capacity_bytes: self.numeric_literals.storage_bytes(),
+            path_table,
+            sequence_store_bytes: self.sequence_store.used_bytes(),
+            sequence_store_capacity_bytes: self.sequence_store.storage_bytes(),
+        }
+    }
+
+    /// Return all source-token storage bytes, counting a path table for this owner.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn memory_ledger_total_bytes(&self) -> usize {
+        let metrics = self.memory_ledger_metrics();
+        metrics
+            .shape_bytes
+            .saturating_add(metrics.span_bytes)
+            .saturating_add(metrics.numeric_store_bytes)
+            .saturating_add(
+                metrics
+                    .path_table
+                    .map(|(_, bytes, _)| bytes)
+                    .unwrap_or_default(),
+            )
+            .saturating_add(metrics.sequence_store_bytes)
+    }
     /// Return this store's source identity.
     pub const fn source(&self) -> SourceId {
         self.source
@@ -956,5 +1058,11 @@ impl SourceTokens {
         for shape in &mut self.shapes {
             shape.remap_string_ids(remap);
         }
+    }
+}
+#[cfg(feature = "data_layout_memory_probe")]
+impl Drop for SourceTokens {
+    fn drop(&mut self) {
+        crate::compiler_frontend::instrumentation::release_source_tokens(self);
     }
 }

@@ -49,7 +49,6 @@ impl SharedDonorIdentity {
 /// created once per `freeze()` or request capture; donor bodies retain the exact identity tables
 /// that issued their payloads. File-reference rows remain stable semantic facts for generated
 /// value resolution.
-#[derive(Clone)]
 pub(super) struct StableBodySyntax {
     pub(super) declaration_path: PathId,
     pub(super) donor_file_id: SourceId,
@@ -62,6 +61,35 @@ pub(super) struct StableBodySyntax {
     /// strings for a donor body. `(Some, None)` is rejected at the materialisation boundary.
     pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
     pub(super) resolved_file_references: Box<[StableResolvedFileReference]>,
+}
+impl Clone for StableBodySyntax {
+    fn clone(&self) -> Self {
+        let source_owner = self.source_owner.clone();
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_generic_source_tokens(
+            &source_owner.source_tokens,
+        );
+        Self {
+            declaration_path: self.declaration_path,
+            donor_file_id: self.donor_file_id,
+            frozen_identity_handle: self.frozen_identity_handle.clone(),
+            source_owner,
+            token_range: self.token_range,
+            token_sequence: self.token_sequence,
+            source_path_table: self.source_path_table.clone(),
+            source_string_table: self.source_string_table.clone(),
+            resolved_file_references: self.resolved_file_references.clone(),
+        }
+    }
+}
+
+impl Drop for StableBodySyntax {
+    fn drop(&mut self) {
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::release_generic_source_tokens(
+            &self.source_owner.source_tokens,
+        );
+    }
 }
 
 /// Canonical owner retained by durable generic body syntax.
@@ -223,6 +251,16 @@ impl StableBodySyntax {
             }
         }
 
+        #[cfg(feature = "data_layout_memory_probe")]
+        {
+            crate::compiler_frontend::instrumentation::record_generic_source_tokens(
+                &source_owner.source_tokens,
+            );
+            crate::compiler_frontend::instrumentation::record_donor_identity_tables(
+                source_path_table.as_deref(),
+                source_string_table.as_deref(),
+            );
+        }
         Ok(Self {
             declaration_path: body.declaration_path(),
             donor_file_id,

@@ -121,6 +121,110 @@ unsafe impl GlobalAlloc for CountingAllocator {
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
+fn print_retention(retention: &moth::benchmarking::FrontendBenchmarkRetention) {
+    println!("retained.source_tokens_owners={}", retention.source_tokens_owners);
+    println!(
+        "retained.source_tokens_shape_bytes={}",
+        retention.source_tokens_shape_bytes
+    );
+    println!(
+        "retained.source_tokens_shape_capacity_bytes={}",
+        retention.source_tokens_shape_capacity_bytes
+    );
+    println!(
+        "retained.source_tokens_span_bytes={}",
+        retention.source_tokens_span_bytes
+    );
+    println!(
+        "retained.source_tokens_span_capacity_bytes={}",
+        retention.source_tokens_span_capacity_bytes
+    );
+    println!(
+        "retained.source_tokens_numeric_store_bytes={}",
+        retention.source_tokens_numeric_store_bytes
+    );
+    println!(
+        "retained.source_tokens_numeric_store_capacity_bytes={}",
+        retention.source_tokens_numeric_store_capacity_bytes
+    );
+    println!(
+        "retained.source_tokens_path_store_bytes={}",
+        retention.source_tokens_path_store_bytes
+    );
+    println!(
+        "retained.source_tokens_path_store_capacity_bytes={}",
+        retention.source_tokens_path_store_capacity_bytes
+    );
+    println!(
+        "retained.source_tokens_sequence_store_bytes={}",
+        retention.source_tokens_sequence_store_bytes
+    );
+    println!(
+        "retained.source_tokens_sequence_store_capacity_bytes={}",
+        retention.source_tokens_sequence_store_capacity_bytes
+    );
+    println!(
+        "retained.transient_construction_buffer_bytes={}",
+        retention.transient_construction_buffer_bytes
+    );
+    println!(
+        "retained.transient_construction_peak_bytes={}",
+        retention.transient_construction_peak_bytes
+    );
+    println!(
+        "retained.cutover_adapter_bytes={}",
+        retention.cutover_adapter_bytes
+    );
+    println!(
+        "retained.donor_identity_string_tables={}",
+        retention.donor_identity_string_tables
+    );
+    println!(
+        "retained.donor_identity_string_storage_bytes={}",
+        retention.donor_identity_string_storage_bytes
+    );
+    println!(
+        "retained.donor_identity_path_tables={}",
+        retention.donor_identity_path_tables
+    );
+    println!(
+        "retained.donor_identity_path_storage_bytes={}",
+        retention.donor_identity_path_storage_bytes
+    );
+    println!(
+        "retained.generic_source_tokens_owners={}",
+        retention.generic_source_tokens_owners
+    );
+    println!(
+        "retained.generic_source_tokens_bytes={}",
+        retention.generic_source_tokens_bytes
+    );
+    println!(
+        "retained.generic_source_tokens_live_bytes={}",
+        retention.generic_source_tokens_live_bytes
+    );
+    println!(
+        "retained.generic_source_tokens_peak_bytes={}",
+        retention.generic_source_tokens_peak_bytes
+    );
+    println!(
+        "retained.requester_remap_count={}",
+        retention.requester_remap_count
+    );
+    println!(
+        "retained.requester_remap_used_bytes={}",
+        retention.requester_remap_used_bytes
+    );
+    println!(
+        "retained.requester_remap_capacity_bytes={}",
+        retention.requester_remap_capacity_bytes
+    );
+    println!(
+        "retained.memory_ledger_incomplete={}",
+        retention.memory_ledger_incomplete
+    );
+}
+
 fn print_report(
     report: &moth::benchmarking::FrontendBenchmarkReport,
     live_report_bytes_delta: usize,
@@ -168,6 +272,7 @@ fn print_report(
         "retained.path_table_storage_bytes={}",
         report.retention.path_table_storage_bytes
     );
+    print_retention(&report.retention);
     for stage in &report.stages {
         println!("stage.{}={:.6}", stage.name, stage.duration_ms);
     }
@@ -181,6 +286,7 @@ fn print_error_metrics(
     live_report_bytes_delta: usize,
     peak_allocation_bytes_delta: usize,
     after_report_drop_bytes_delta: usize,
+    retention: &moth::benchmarking::FrontendBenchmarkRetention,
 ) {
     println!("outcome=Error");
     println!("errors=1");
@@ -189,8 +295,8 @@ fn print_error_metrics(
     println!("live_report_bytes_delta={live_report_bytes_delta}");
     println!("peak_allocation_bytes_delta={peak_allocation_bytes_delta}");
     println!("after_report_drop_bytes_delta={after_report_drop_bytes_delta}");
+    print_retention(retention);
 }
-
 fn main() {
     let mut arguments = std::env::args_os();
     let _program = arguments.next();
@@ -203,6 +309,7 @@ fn main() {
         std::process::exit(2);
     }
 
+    moth::benchmarking::prepare_frontend_memory_ledger();
     let baseline = CountingAllocator::reset_measurement();
     let started = Instant::now();
     let result = moth::benchmarking::run_frontend_benchmark_with_report_owner(
@@ -246,6 +353,7 @@ fn main() {
                 live_report_bytes_delta,
                 peak_allocation_bytes_delta,
                 after_report_drop_bytes_delta,
+                &error.retention,
             );
             eprintln!("frontend benchmark failed: {error}");
             std::process::exit(1);

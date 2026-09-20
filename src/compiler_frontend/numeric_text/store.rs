@@ -114,6 +114,22 @@ impl NumericLiteralStore {
         self.literals.is_empty()
     }
 
+    /// Bytes occupied by rows currently used by this source-owned numeric store.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn used_bytes(&self) -> usize {
+        self.literals
+            .len()
+            .saturating_mul(std::mem::size_of::<NumericLiteralToken>())
+    }
+
+    /// Bytes reserved by the backing row vector, including unused capacity.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.literals
+            .capacity()
+            .saturating_mul(std::mem::size_of::<NumericLiteralToken>())
+    }
+
     pub fn is_frozen(&self) -> bool {
         self.frozen
     }

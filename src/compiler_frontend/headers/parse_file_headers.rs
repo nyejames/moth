@@ -86,6 +86,11 @@ pub fn parse_file_headers_with_table(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let file_id = owner.source_id();
+    #[cfg(feature = "data_layout_memory_probe")]
+    crate::compiler_frontend::instrumentation::record_source_tokens_path_table(
+        owner.tokens_ref(),
+        &path_syntax,
+    );
     let HeaderParseOptions { entry_file_id, .. } = options;
 
     let is_entry_file = entry_file_id.map_or_else(

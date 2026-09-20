@@ -326,3 +326,9 @@ impl PathTable {
         )
     }
 }
+#[cfg(feature = "data_layout_memory_probe")]
+impl Drop for PathTable {
+    fn drop(&mut self) {
+        crate::compiler_frontend::instrumentation::release_donor_identity_path(self);
+    }
+}
