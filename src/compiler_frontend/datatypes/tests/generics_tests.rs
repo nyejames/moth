@@ -228,7 +228,6 @@ fn type_bindings_collect_arguments_in_parameter_order() {
         .insert_consistent(first, TypeId(1))
         .expect("first parameter should bind");
 
-    assert!(bindings.is_complete_for(list, &type_environment));
     assert_eq!(
         bindings.concrete_arguments_for(list, &type_environment),
         Some(vec![TypeId(1), TypeId(2)].into_boxed_slice())

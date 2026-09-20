@@ -66,15 +66,6 @@ impl GenericTypeBindings {
         self.replacements.get(&parameter_id).copied()
     }
 
-    pub(crate) fn is_complete_for(
-        &self,
-        parameter_list_id: GenericParameterListId,
-        type_environment: &TypeEnvironment,
-    ) -> bool {
-        self.concrete_arguments_for(parameter_list_id, type_environment)
-            .is_some()
-    }
-
     pub(crate) fn concrete_arguments_for(
         &self,
         parameter_list_id: GenericParameterListId,

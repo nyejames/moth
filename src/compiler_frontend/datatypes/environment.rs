@@ -692,13 +692,22 @@ impl TypeEnvironment {
             return type_id;
         }
 
-        if let Some(TypeDefinition::GenericParameter(param)) = self.get(type_id) {
+        let Some(definition) = self.get(type_id) else {
+            return type_id;
+        };
+
+        if let TypeDefinition::GenericParameter(param) = definition {
             return mapping.get(&param.id).copied().unwrap_or(type_id);
         }
 
-        let Some(source) = self.substitution_source_for(type_id) else {
+        if !matches!(
+            definition,
+            TypeDefinition::Constructed(..)
+                | TypeDefinition::Function(..)
+                | TypeDefinition::GenericInstance(..)
+        ) {
             return type_id;
-        };
+        }
 
         let cache_key = TypeSubstitutionKey::new(type_id, mapping);
         increment_frontend_counter(FrontendCounter::TypeEnvironmentSubstitutionCacheLookups);
@@ -708,6 +717,41 @@ impl TypeEnvironment {
         }
 
         increment_frontend_counter(FrontendCounter::TypeEnvironmentSubstitutionCacheMisses);
+        let source = match definition {
+            TypeDefinition::Constructed(constructed) => TypeSubstitutionSource::Constructed {
+                constructor: constructed.constructor.clone(),
+                arguments: constructed.arguments.clone(),
+            },
+
+            TypeDefinition::Function(function) => {
+                let parameters: Box<[TypeId]> = function
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.type_id)
+                    .collect();
+
+                TypeSubstitutionSource::Function {
+                    parameters,
+                    returns: function.returns.clone(),
+                    error_return: function.error_return,
+                }
+            }
+
+            TypeDefinition::GenericInstance(instance) => TypeSubstitutionSource::GenericInstance {
+                base: instance.base,
+                arguments: instance.arguments.clone(),
+            },
+
+            TypeDefinition::Builtin(..)
+            | TypeDefinition::Struct(..)
+            | TypeDefinition::Choice(..)
+            | TypeDefinition::External(..)
+            | TypeDefinition::GenericParameter(..)
+            | TypeDefinition::AnonymousConstRecordMarker => unreachable!(
+                "non-substitutable type definitions return before building a substitution source"
+            ),
+        };
+
         let substituted_type_id = match source {
             TypeSubstitutionSource::Constructed {
                 constructor,
@@ -729,43 +773,6 @@ impl TypeEnvironment {
             .insert(cache_key, substituted_type_id);
 
         substituted_type_id
-    }
-
-    fn substitution_source_for(&self, type_id: TypeId) -> Option<TypeSubstitutionSource> {
-        match self.get(type_id)? {
-            TypeDefinition::Constructed(constructed) => Some(TypeSubstitutionSource::Constructed {
-                constructor: constructed.constructor.clone(),
-                arguments: constructed.arguments.clone(),
-            }),
-
-            TypeDefinition::Function(function) => {
-                let parameters: Box<[TypeId]> = function
-                    .parameters
-                    .iter()
-                    .map(|parameter| parameter.type_id)
-                    .collect();
-
-                Some(TypeSubstitutionSource::Function {
-                    parameters,
-                    returns: function.returns.clone(),
-                    error_return: function.error_return,
-                })
-            }
-
-            TypeDefinition::GenericInstance(instance) => {
-                Some(TypeSubstitutionSource::GenericInstance {
-                    base: instance.base,
-                    arguments: instance.arguments.clone(),
-                })
-            }
-
-            TypeDefinition::Builtin(..)
-            | TypeDefinition::Struct(..)
-            | TypeDefinition::Choice(..)
-            | TypeDefinition::External(..)
-            | TypeDefinition::GenericParameter(..)
-            | TypeDefinition::AnonymousConstRecordMarker => None,
-        }
     }
 
     fn substitute_constructed_type(

@@ -451,7 +451,9 @@ pub(crate) fn infer_generic_function_call(
         path_fork,
     )?;
 
-    if !bindings.is_complete_for(template.generic_parameter_list_id, type_environment)
+    let mut type_arguments =
+        bindings.concrete_arguments_for(template.generic_parameter_list_id, type_environment);
+    if type_arguments.is_none()
         && let Some(expected_result_type_ids) = expected_context
             .matching_success_results(template.signature.success_return_type_ids().len())
     {
@@ -465,11 +467,11 @@ pub(crate) fn infer_generic_function_call(
             path_fork,
             call_span,
         )?;
+        type_arguments =
+            bindings.concrete_arguments_for(template.generic_parameter_list_id, type_environment);
     }
 
-    let Some(type_arguments) =
-        bindings.concrete_arguments_for(template.generic_parameter_list_id, type_environment)
-    else {
+    let Some(type_arguments) = type_arguments else {
         let missing_parameters =
             missing_generic_parameter_names(template, &bindings, type_environment);
         return Err(cannot_infer_generic_function_arguments(
