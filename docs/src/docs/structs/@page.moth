@@ -6,6 +6,10 @@
 
 @construction-and-fields-basic content as construction_and_fields_basic
 
+@anonymous-records content as anonymous_records
+
+@anonymous-records-basic content as anonymous_records_basic
+
 @receiver-methods content as receiver_methods
 
 @receiver-methods-basic content as receiver_methods_basic
@@ -21,7 +25,7 @@
     doc_pager
 
 page_title #= "Structs"
-page_description #= "Nominal structs, construction, fields and receiver methods in Moth."
+page_description #= "Nominal structs, construction, fields, deferred anonymous records and receiver methods in Moth."
 page_head #= language_theme_head
 
 #[navbar]
@@ -37,6 +41,9 @@ page_head #= language_theme_head
 
     Receiver methods use ordinary top-level function declarations in the same
     file as the type. Their first parameter shows shared or mutable access.
+
+    Runtime anonymous records are accepted deferred design. Their local hidden
+    types keep nominal identity and use the shared MON construction notation.
 ]
 
 #[section:
@@ -56,6 +63,16 @@ page_head #= language_theme_head
         [$insert("advanced"):[construction_and_fields]]
 
         [construction_and_fields_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):anonymous-records]
+        [$insert("title"):Runtime anonymous records]
+        [$insert("advanced"):[anonymous_records]]
+
+        [anonymous_records_basic]
     ]
 ]
 

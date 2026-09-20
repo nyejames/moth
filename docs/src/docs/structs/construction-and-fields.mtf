@@ -1,4 +1,5 @@
-A struct constructor uses the struct name and supplies its fields.
+A struct constructor uses the struct name and supplies its fields through
+@../language-overview/#mon-syntax (MON syntax).
 
 [codeblock, $code("moth"):
     Point = |
@@ -22,6 +23,21 @@ A struct constructor uses the struct name and supplies its fields.
 - Values are checked and contextually coerced against field types.
 
 A constructor creates a fresh value.
+
+### Explicit nested construction
+
+Construct a named child at its field's receiving boundary:
+
+[codeblock, $code("moth"):
+    Size = | width Int, height Int |
+    Window = | size Size |
+
+    window = Window(size = Size(width = 1280, height = 720))
+]
+
+An anonymous `(width = 1280, height = 720)` does not become a `Size` because the
+fields match. MON syntax adds no implicit nominal construction or structural
+conversion. Named type declarations remain separate, flat declarations.
 
 ### Field reads
 
@@ -50,3 +66,5 @@ not a separate field type.
 
 Const records use struct-shaped compile-time data but have additional
 restrictions owned by Constants and compile-time behaviour.
+@#anonymous-records (Runtime anonymous records) describes the separate deferred
+local hidden-struct feature.
